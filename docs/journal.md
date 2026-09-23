@@ -211,3 +211,22 @@ Tests :
 - `policy.check` reçoit la configuration via `partial`, sous le nom `decision_config` (nom `config` réservé).
 - La spec valide la réponse par `HumanDecision.model_validate` directement : une réponse mal formée ferait échouer le nœud. Ici, elle est redemandée avec le détail de l'erreur.
 - **Critère n° 12 inatteignable par le graphe** : `decision_gate` envoie tout blocage dur vers `explain`, jamais vers `human_review`. La règle de levée n'est donc testée qu'en fonction pure. À trancher dans la spec.
+
+### J2 tâche 1 : interrupt() rétabli dans human_review, réponse mal formée redemandée
+
+**Fait.**
+- `human_review` retrouve `interrupt()` et `policy.review`, retirés par `43f7d6b`. La logique est identique à `1329f6e`, qui était vert ; le formatage à 79 colonnes et les docstrings sont conservés.
+- La branche redevient verte (172 tests).
+- Spec mise à jour : code indicatif de l'adaptateur, appariement des `interrupt()` vérifié, traitement d'une réponse mal formée.
+
+**Décision** (point laissé à mon jugement). Une réponse humaine que `HumanDecision` ne valide pas est **redemandée**, comme une réponse refusée par la politique. Le nœud n'échoue pas, contrairement à la première version de la spec. Raisons :
+- Faire échouer le nœud sur une faute de frappe du relecteur transformerait une erreur de saisie en panne du graphe, sans `failure_report` structuré.
+- Redemander en exposant l'erreur n'est pas un repli silencieux : l'erreur est montrée, et aucune décision par défaut n'est appliquée.
+- Le thread reste suspendu, en échec fermé : si personne ne répond correctement, `expire` rend un `NO_GO` système.
+
+**Pièges.**
+- **Commit rouge assumé.** `43f7d6b` avait retiré `interrupt()` en laissant 5 tests rouges, contre la règle « un commit par tâche verte ». Un revert doit défaire aussi les tests, ou ne pas être commité.
+- **Commits mélangés.** Ce même revert mêlait style et fonctionnel dans un seul commit. `git revert` aurait donc aussi défait les docstrings. D'où une restauration à la main, dont la logique a été comparée ligne à ligne avec `1329f6e`.
+- **Rebase de `phase1-j1` sur `main`.** Seul conflit, dans ce journal : « Fin du J1 » (côté `main`) et la section J2 (côté Cursor) ont été gardées dans l'ordre chronologique. La branche est renommée `phase1-j2`, et l'état d'avant le rebase est sauvegardé dans `phase1-j1-sauvegarde`.
+
+**Reste ouvert.** Le critère d'acceptation n° 12 ne peut pas être atteint dans le graphe, puisqu'un blocage dur va directement à `explain`. Décision d'architecture en attente.

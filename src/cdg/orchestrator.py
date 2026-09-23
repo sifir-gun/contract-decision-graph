@@ -4,8 +4,9 @@ câblage du graphe."""
 from functools import partial
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 
+from cdg import policy
 from cdg.config import DecisionConfig
 from cdg.deps import Deps
 from cdg.nodes.analyst import analyst
@@ -33,11 +34,22 @@ def route_after_verify(state: ContractState) -> str | list[Send]:
     return state["route"]
 
 
-def human_review(state: ContractState) -> dict:
-    """Adaptateur de l'arbitrage humain ; passe-plat pour l'instant."""
-    # TODO J2 : interrupt() puis contrôle par policy.py ;
-    # écrit human et final_decision.
-    return {}
+def human_review(state: ContractState,
+                 decision_config: DecisionConfig) -> dict:
+    """Adaptateur de l'arbitrage humain : interrupt() puis policy.review.
+
+    Réexécuté depuis le début à chaque reprise : aucun effet de bord avant
+    interrupt(). Une réponse mal formée ou refusée par la politique est
+    redemandée, avec le motif dans la charge utile.
+    """
+    request = policy.build_request(state, decision_config)
+    while True:
+        human, error = policy.review(interrupt(request),
+                                     state.get("verdicts", []),
+                                     decision_config)
+        if error is None:
+            return {"human": human, "final_decision": human.decision}
+        request = {**request, "error": error}
 
 
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
@@ -54,7 +66,8 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
                      input_schema=AnalystInput)
     builder.add_node("decision_gate", partial(
         decision_gate, decision_config=config))
-    builder.add_node("human_review", human_review)
+    builder.add_node("human_review", partial(
+        human_review, decision_config=config))
     builder.add_node("explain", explain)
     builder.add_node("audit_seal", audit_seal)
     builder.add_node("reject", reject)

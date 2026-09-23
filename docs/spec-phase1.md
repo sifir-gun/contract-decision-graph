@@ -212,15 +212,16 @@ def route_after_verify(state: ContractState):
         return [Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS]
     return state["route"]
 
-def human_review(state: ContractState) -> dict:                # adaptateur : interrupt() + policy.py
-    request = policy.build_request(state)
+def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
+    # adaptateur : interrupt() + policy.py ; aucun effet de bord avant interrupt()
+    request = policy.build_request(state, decision_config)
     while True:
-        human = HumanDecision.model_validate(interrupt(request))
-        error = policy.check(human, state.get("verdicts", []), config)   # config versionnée
+        # review : validation Pydantic de la réponse brute, puis politique versionnée
+        human, error = policy.review(interrupt(request), state.get("verdicts", []),
+                                     decision_config)
         if error is None:
-            break
-        request = {**request, "error": error}
-    return {"human": human, "final_decision": human.decision}
+            return {"human": human, "final_decision": human.decision}
+        request = {**request, "error": error}   # mal formée ou refusée : redemandée
 
 def build_graph(config: DecisionConfig, deps: Deps):          # les tests injectent des doublures
     builder = StateGraph(ContractState)
@@ -261,7 +262,8 @@ with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
 
 Points à maîtriser :
 
-- **Reprise après interrupt** : le nœud `human_review` est réexécuté depuis son début. Aucun effet de bord avant `interrupt()`. Plusieurs `interrupt()` dans un même nœud sont appariés par ordre d'appel : vérifier ce comportement dans la version installée avant de garder la boucle de politique.
+- **Reprise après interrupt** : le nœud `human_review` est réexécuté depuis son début. Aucun effet de bord avant `interrupt()`. Plusieurs `interrupt()` dans un même nœud sont appariés par ordre d'appel, ce qui a été vérifié dans langgraph 1.2.12 : la boucle de politique est donc conservée.
+- **Réponse humaine mal formée** : une réponse que `HumanDecision` ne valide pas est traitée comme une réponse refusée. Elle est redemandée avec le détail de l'erreur dans la charge utile, sans faire échouer le nœud et sans jamais appliquer de décision par défaut. Le thread reste suspendu. Si personne ne répond correctement, le délai d'`expire` s'applique et produit un `NO_GO` système, en échec fermé.
 - **Route écrite dans l'état** : `validate_input`, `verify_extraction` et `decision_gate` écrivent `route`, les arêtes ne font que la lire. Le choix de chemin est checkpointé, rejouable et auditable.
 - **Fan-out par l'arête** : l'arête qui suit `verify_extraction` renvoie une liste de `Send` quand `route = "analysts"`, chacun portant un état privé `AnalystInput`. Vérifier dans la version installée ce retour de `Send` depuis une arête conditionnelle et la déclaration du schéma d'entrée de `analyst`.
 - **Fan-out et échecs** : les 4 analystes tournent dans le même superstep. Si un seul échoue, les écritures des autres sont conservées par le checkpointer et seul le fautif est rejoué. `RetryPolicy` sur `analyst` pour les erreurs d'API.
@@ -500,3 +502,6 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
   - CRAG : fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py` (J3) ;
   - étude de `error_handler` au J2 pour les `failure_report` d'échec de nœud ;
   - `LANGSMITH_TRACING=false` explicite dans `.env.example`.
+- **23 septembre 2026, J2** :
+  - une réponse humaine mal formée est redemandée, comme une réponse refusée par la politique, au lieu de faire échouer le nœud ;
+  - l'appariement de plusieurs `interrupt()` par ordre d'appel est vérifié.
