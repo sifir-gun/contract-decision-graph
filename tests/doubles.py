@@ -1,5 +1,6 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
+from cdg.deps import ExtractionResult, RetrievalResult
 from cdg.state import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
 
 # Contrat synthétique favorable : aucune règle déclenchée.
@@ -50,3 +51,31 @@ def verdicts(**by_domain) -> list[AgentVerdict]:
 def usage(tokens_in=0, tokens_out=0, node="double") -> Usage:
     return Usage(node=node, model="double", tokens_in=tokens_in, tokens_out=tokens_out,
                  latency_ms=0)
+
+
+class FixedExtractor:
+    """Doublure de l'extracteur LLM : rend toujours les mêmes clauses."""
+
+    def __init__(self, clauses: list[Clause], tokens_in=0, tokens_out=0):
+        self.clauses, self.tokens = clauses, (tokens_in, tokens_out)
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def __call__(self, raw_text: str, feedback: list[str]) -> ExtractionResult:
+        self.calls.append((raw_text, list(feedback)))
+        return ExtractionResult(clauses=self.clauses,
+                                usage=[usage(*self.tokens, node="extract_clauses")])
+
+
+class FakeCrag:
+    """Doublure du CRAG : statut par domaine (OK par défaut), une référence si OK."""
+
+    def __init__(self, statuses: dict | None = None, tokens_in=0, tokens_out=0):
+        self.statuses, self.tokens = statuses or {}, (tokens_in, tokens_out)
+        self.calls: list[str] = []
+
+    def __call__(self, domain, clauses: list[Clause]) -> RetrievalResult:
+        self.calls.append(domain)
+        status = self.statuses.get(domain, "OK")
+        return RetrievalResult(status=status,
+                               evidence_ids=[f"{domain}-ref-1"] if status == "OK" else [],
+                               usage=[usage(*self.tokens, node=f"crag:{domain}")])

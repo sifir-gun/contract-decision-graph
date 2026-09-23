@@ -55,7 +55,9 @@ def aggregate(verdicts: list[AgentVerdict], config: DecisionConfig) -> Aggregate
     return Aggregate(decision=decision, score=score, margin=margin, hard_block=hard_block)
 
 
-def decision_gate(state: ContractState, config: DecisionConfig) -> dict:
+def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
+    # pas « config » : LangGraph réserve ce nom de paramètre au RunnableConfig
+    config = decision_config
     d = aggregate(state["verdicts"], config)
     used = total_tokens(state.get("usage", []))
     limit = config.budget.max_tokens_per_contract

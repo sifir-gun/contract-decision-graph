@@ -159,7 +159,7 @@ def validate_input(state: ContractState) -> dict:
     return {"route": "reject", "reject_reason": reason}
 
 # src/cdg/nodes/verify_extraction.py
-def verify_extraction(state: ContractState, config: DecisionConfig) -> dict:
+def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict:
     text = normalize(state["raw_text"])
     problems = [f"citation introuvable: {c.kind}" for c in state["clauses"]
                 if c.present and normalize(c.quote) not in text]
@@ -167,13 +167,14 @@ def verify_extraction(state: ContractState, config: DecisionConfig) -> dict:
     problems += [f"clause manquante: {k}" for k in REQUIRED_KINDS if k not in found]
     if not problems:
         return {"route": "analysts"}
-    if state["extraction_attempts"] < config.extraction.max_attempts:   # 2 ; extract_clauses a incrémenté
+    if state["extraction_attempts"] < decision_config.extraction.max_attempts:   # 2 ; extract_clauses a incrémenté
         return {"route": "extract_clauses", "extraction_feedback": problems}
     return {"route": "human_review", "proposed_decision": "ESCALADE",
             "failure_report": {"stage": "extraction", "problems": problems}}
 
 # src/cdg/nodes/decision_gate.py
-def decision_gate(state: ContractState, config: DecisionConfig) -> dict:
+def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
+    config = decision_config                                   # « config » est réservé par LangGraph
     d = aggregate(state["verdicts"], config)                   # Python pur, sans LLM, valeurs arrondies
     used = total_tokens(state.get("usage", []))                # tokens_in + tokens_out
     limit = config.budget.max_tokens_per_contract
@@ -433,6 +434,7 @@ contract-decision-graph/
 │   ├── state.py                # schémas d'état et Pydantic
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
 │   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
+│   ├── deps.py                 # contrats injectés : extracteur, CRAG (doublures en test)
 │   ├── crag.py                 # sous-graphe CRAG
 │   ├── nodes/                  # un fichier par nœud, fonctions pures
 │   ├── rules/                  # une fonction par domaine
@@ -489,3 +491,6 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
 - **23 septembre 2026, après la tâche 0 du J1** :
   - image PostgreSQL figée par empreinte (16.11, pgvector 0.8.1) ;
   - verrouillage du sérialiseur des checkpoints ajouté au J2.
+- **23 septembre 2026, J1 tâche 5** :
+  - dans les nœuds, le paramètre de configuration s'appelle `decision_config`, car LangGraph réserve `config` (ainsi que `writer`, `store`, `runtime`, `previous`, `error`) aux objets qu'il injecte ;
+  - ajout de `src/cdg/deps.py` (contrats de l'extracteur et du CRAG injectés).

@@ -150,3 +150,27 @@ Tests :
 - **Ordre de sommation.** Les verdicts arrivent par le réducteur dans l'ordre d'exécution des branches parallèles. La somme pondérée se fait donc dans l'ordre fixe de `DOMAINS`, pour ne pas dépendre de cet ordre (testé).
 - **Verdict manquant ou en double** : `aggregate` lève une `ValueError`. Un doublon pourrait venir d'une branche rejouée. Là encore, pas de repli silencieux.
 - **Test mal calculé.** Une première version de test visait 0,749999 mais avait oublié un domaine. En la corrigeant, l'écart 0,500003 déclenchait le conflit. Il faut vérifier l'arithmétique de chaque scénario, conflit compris.
+
+### J1 tâche 5 : nœuds bouchonnés, analyste, orchestrateur, graphe compilé
+
+**Fait.**
+- `src/cdg/deps.py` : contrats `Extractor` et `Retriever` (CRAG), résultats Pydantic, `Deps`.
+- Nœuds purs dans `src/cdg/nodes/`.
+  - `validate_input` minimal : texte vide → `reject` (version complète au J3).
+  - `extract_clauses` : délègue à l'extracteur injecté et incrémente les essais.
+  - `verify_extraction` : bouchon qui renvoie la route `analysts` (J3).
+  - `analyst` : CRAG injecté, puis `RULES[domain]`, puis ajout des références ; ne renvoie que `verdicts` et `usage`.
+  - `explain`, `audit_seal`, `reject` : bouchons (J4).
+- `src/cdg/orchestrator.py` : `read_route`, `route_after_verify` (les 4 `Send`), `human_review` en passe-plat (J2) et `build_graph(config, deps)`. `reject` mène à `audit_seal`.
+- Tests sur le graphe compilé :
+  - critère n° 1 : 4 verdicts distincts, chacun avec la référence de son domaine ; un seul `decision_gate`, après les 4 analystes ;
+  - critère n° 2 de bout en bout ;
+  - routes marge faible, `INSUFFISANT` et budget ;
+  - rejet scellé ;
+  - arêtes du graphe identiques à la spec.
+
+**Pièges.**
+- **Paramètre `config` d'un nœud.** LangGraph réserve les noms `config`, `writer`, `store`, `runtime`, `previous` et `error` pour ce qu'il injecte. Un nœud `decision_gate(state, config: DecisionConfig)` déclenche un `UserWarning` : `config` doit être typé `RunnableConfig`. Aujourd'hui, une annotation d'un autre type n'est pas injectée, et une valeur liée par `partial` resterait prioritaire. La version installée annonce toutefois un typage plus strict. Le paramètre s'appelle donc `decision_config` dans les nœuds. Les règles, qui ne sont pas des nœuds, gardent `config`.
+- **Canaux à réducteur initialisés à `[]`.** Après un rejet, `verdicts` et `usage` valent `[]` dans l'état final, même si aucun nœud ne les a écrits. Au J4, l'audit ne pourra donc pas distinguer « absent » de « vide » sur ces clés ; il faudra s'appuyer sur `route` et `reject_reason`.
+- **`input_schema` explicite pour `analyst`**, à cause du `partial` (voir la tâche 0). Le test `route_after_verify` vérifie qu'un `Send` ne porte que `domain` et `clauses`.
+- **Doublures et parallélisme.** Les branches `Send` synchrones tournent dans un pool de threads. Les doublures n'enregistrent leurs appels que par `list.append`, qui est atomique en CPython. Les tests comparent ensuite des listes triées, jamais un ordre d'appel.
