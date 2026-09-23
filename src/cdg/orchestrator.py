@@ -1,11 +1,11 @@
-"""Seul module qui importe LangGraph : adaptateurs (Send, interrupt) et câblage du graphe."""
+"""Seul module qui importe LangGraph : adaptateurs (Send, interrupt) et
+câblage du graphe."""
 
 from functools import partial
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send, interrupt
+from langgraph.types import Send
 
-from cdg import policy
 from cdg.config import DecisionConfig
 from cdg.deps import Deps
 from cdg.nodes.analyst import analyst
@@ -20,39 +20,41 @@ from cdg.state import DOMAINS, AnalystInput, ContractState
 
 
 def read_route(state: ContractState) -> str:
+    """Arête conditionnelle : renvoie la route écrite par le nœud précédent."""
     return state["route"]
 
 
 def route_after_verify(state: ContractState) -> str | list[Send]:
-    if state["route"] == "analysts":                  # décision lue dans l'état
-        return [Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS]
+    """Route `analysts` : un `Send` par domaine ;
+    sinon la route telle quelle."""
+    if state["route"] == "analysts":                # décision lue dans l'état
+        return [Send("analyst", {"domain": d, "clauses": state["clauses"]})
+                for d in DOMAINS]
     return state["route"]
 
 
-def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
-    # réexécuté depuis le début à chaque reprise : aucun effet de bord avant interrupt()
-    request = policy.build_request(state, decision_config)
-    while True:
-        human, error = policy.review(interrupt(request), state.get("verdicts", []),
-                                     decision_config)
-        if error is None:
-            return {"human": human, "final_decision": human.decision}
-        request = {**request, "error": error}
+def human_review(state: ContractState) -> dict:
+    """Adaptateur de l'arbitrage humain ; passe-plat pour l'instant."""
+    # TODO J2 : interrupt() puis contrôle par policy.py ;
+    # écrit human et final_decision.
+    return {}
 
 
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
+    """Câble les 9 nœuds, dépendances liées ; renvoie le graphe non compilé."""
     builder = StateGraph(ContractState)
     builder.add_node("validate_input", validate_input)
-    builder.add_node("extract_clauses", partial(extract_clauses, extractor=deps.extractor))
+    builder.add_node("extract_clauses", partial(extract_clauses,
+                                                extractor=deps.extractor))
     builder.add_node("verify_extraction", verify_extraction)
-    # input_schema explicite : LangGraph ne le déduit pas d'un partial (voir docs/journal.md)
+    # input_schema explicite : LangGraph ne le déduit pas d'un partial
+    # (voir docs/journal.md)
     builder.add_node("analyst", partial(
         analyst, crag=deps.crag, decision_config=config),
                      input_schema=AnalystInput)
     builder.add_node("decision_gate", partial(
         decision_gate, decision_config=config))
-    builder.add_node("human_review", partial(
-        human_review, decision_config=config))
+    builder.add_node("human_review", human_review)
     builder.add_node("explain", explain)
     builder.add_node("audit_seal", audit_seal)
     builder.add_node("reject", reject)
