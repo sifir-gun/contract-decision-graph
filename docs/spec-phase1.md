@@ -50,7 +50,7 @@ flowchart TD
     H --> E
     E --> AU[audit_seal]
     AU --> F([END])
-    R --> F
+    R --> AU
 ```
 
 **Routage : un seul mécanisme.** Chaque nœud à plusieurs sorties (`validate_input`, `verify_extraction`, `decision_gate`) écrit `route` dans l'état ; l'arête conditionnelle qui le suit ne fait que la lire. Pour `route = "analysts"`, l'arête construit les 4 `Send` à partir des clauses de l'état : la décision de fan-out est dans l'état, la mécanique dans l'orchestrateur. Aucun `Command(goto=...)` : `Command` ne sert qu'à `Command(resume=...)` pour reprendre après un `interrupt()`.
@@ -69,7 +69,7 @@ Chaque analyste appelle le sous-graphe CRAG pour récupérer les références ut
 | human_review | Adaptateur dans `orchestrator.py` : `interrupt()`, attend la décision humaine, la fait contrôler par `policy.py` | Non |
 | explain | Rédige la justification à partir du verdict figé | Oui |
 | audit_seal | Sérialisation canonique, SHA-256, chaînage | Non |
-| reject | Verdict d'invalidité explicite, tracé | Non |
+| reject | Verdict d'invalidité explicite : `reject_reason` renseigné, `final_decision` reste `None` (pas de valeur « invalide » dans `Decision`) ; mène à `audit_seal`, car un rejet est scellé comme le reste | Non |
 
 Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1.
 
@@ -131,7 +131,7 @@ class ContractState(TypedDict, total=False):
     route: Route          # écrite par un nœud, lue par l'arête
     failure_report: dict | None
     human: HumanDecision | None
-    final_decision: Decision   # écrite par decision_gate (route explain) ou human_review
+    final_decision: Decision | None   # decision_gate (route explain) ou human_review ; None après reject
     explanation: str
     config_hash: str
     decision_hash: str
@@ -151,8 +151,6 @@ Quatre mécanismes portent la démonstration : `route` écrite dans l'état et l
 Nœuds purs, sans import de LangGraph :
 
 ```python
-MAX_EXTRACTION = 2
-
 # src/cdg/nodes/validate_input.py
 def validate_input(state: ContractState) -> dict:
     ok, reason = check_contract(state["raw_text"])
@@ -161,7 +159,7 @@ def validate_input(state: ContractState) -> dict:
     return {"route": "reject", "reject_reason": reason}
 
 # src/cdg/nodes/verify_extraction.py
-def verify_extraction(state: ContractState) -> dict:
+def verify_extraction(state: ContractState, config: DecisionConfig) -> dict:
     text = normalize(state["raw_text"])
     problems = [f"citation introuvable: {c.kind}" for c in state["clauses"]
                 if c.present and normalize(c.quote) not in text]
@@ -169,22 +167,28 @@ def verify_extraction(state: ContractState) -> dict:
     problems += [f"clause manquante: {k}" for k in REQUIRED_KINDS if k not in found]
     if not problems:
         return {"route": "analysts"}
-    if state["extraction_attempts"] < MAX_EXTRACTION:   # extract_clauses a incrémenté
+    if state["extraction_attempts"] < config.extraction.max_attempts:   # 2 ; extract_clauses a incrémenté
         return {"route": "extract_clauses", "extraction_feedback": problems}
     return {"route": "human_review", "proposed_decision": "ESCALADE",
             "failure_report": {"stage": "extraction", "problems": problems}}
 
 # src/cdg/nodes/decision_gate.py
 def decision_gate(state: ContractState, config: DecisionConfig) -> dict:
+    d = aggregate(state["verdicts"], config)                   # Python pur, sans LLM, valeurs arrondies
     used = total_tokens(state.get("usage", []))                # tokens_in + tokens_out
-    if used > config.budget.max_tokens_per_contract:
-        return {"proposed_decision": "ESCALADE", "route": "human_review",
-                "failure_report": {"stage": "budget", "tokens": used,
-                                   "limit": config.budget.max_tokens_per_contract}}
-    d = aggregate(state["verdicts"], config)                   # Python pur, sans LLM
-    if d.hard_block:                                           # NO_GO établi, marge ignorée
-        return {"proposed_decision": "NO_GO", "final_decision": "NO_GO",
-                "margin": d.margin, "route": "explain"}
+    limit = config.budget.max_tokens_per_contract
+    over = used > limit
+    budget_report = {"stage": "budget", "tokens": used, "limit": limit}
+    if d.hard_block:                                           # 1. l'issue la plus conservatrice l'emporte
+        update = {"proposed_decision": "NO_GO", "final_decision": "NO_GO",
+                  "margin": d.margin, "route": "explain"}      #    marge ignorée
+        if over:
+            update["failure_report"] = budget_report          #    dépassement tracé quand même
+        return update
+    if over:                                                   # 2. budget
+        return {"proposed_decision": "ESCALADE", "margin": d.margin,
+                "failure_report": budget_report, "route": "human_review"}
+    # 3. INSUFFISANT, 4. conflit, 5. seuils : déjà ordonnés par aggregate
     if d.decision == "ESCALADE" or d.margin < config.min_margin:
         return {"proposed_decision": d.decision, "margin": d.margin, "route": "human_review"}
     return {"proposed_decision": d.decision, "final_decision": d.decision,
@@ -230,7 +234,7 @@ def build_graph(config: DecisionConfig, deps: Deps):          # les tests inject
     builder.add_edge("human_review", "explain")
     builder.add_edge("explain", "audit_seal")
     builder.add_edge("audit_seal", END)
-    builder.add_edge("reject", END)
+    builder.add_edge("reject", "audit_seal")                   # un rejet est scellé aussi
     return builder
 ```
 
@@ -275,23 +279,27 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
   - seuils de décision : `GO` ≥ 0,75, `GO_RESERVES` ≥ 0,5, sinon `NO_GO` ;
   - `min_margin` = 0,05, écart de conflit = 0,5 ;
   - budget par contrat : 60 000 tokens ;
+  - nombre maximal d'essais d'extraction : 2 ;
   - seuils des règles et pénalités de score ;
   - politique d'arbitrage humain (J2).
 
-  La politique vit dans la configuration, jamais dans un prompt. Le fichier est chargé au démarrage par `pyyaml` et validé par un modèle Pydantic : une configuration invalide arrête le programme avec une erreur explicite. Son empreinte SHA-256 va dans `config_hash`.
+  Tout ce qui se règle vit dans la configuration, et la politique n'est jamais dans un prompt. Le fichier est chargé au démarrage par `pyyaml` et validé par un modèle Pydantic : une configuration invalide arrête le programme avec une erreur explicite. Son empreinte SHA-256 va dans `config_hash`.
 - **Score** : 1 = favorable (risque faible), 0 = défavorable. Score agrégé = somme pondérée des scores de domaine.
-- **decision_gate**, dans cet ordre :
-  1. budget : total `tokens_in + tokens_out` sur `usage` supérieur au plafond → `ESCALADE` ;
-  2. blocage dur : un seul `hard_block` → `NO_GO`, marge ignorée, route `explain`. Un `INSUFFISANT` simultané ne change rien : le blocage établi suffit ;
+- **Arrondi** : score agrégé, marge et tout flottant comparé à un seuil passent par une seule fonction d'arrondi à 6 décimales, appliquée avant toute comparaison. La même fonction sert à la sérialisation canonique au J4. Les 6 décimales sont une constante de format, pas un réglage métier.
+- **decision_gate** applique la règle suivante : l'issue la plus conservatrice l'emporte. Ordre :
+  1. blocage dur : un seul `hard_block` → `NO_GO`, marge ignorée, route `explain`. Si le budget est aussi dépassé, `failure_report` de stade `budget` est quand même renseigné. Un `INSUFFISANT` simultané ne change rien : le blocage établi suffit ;
+  2. budget : total `tokens_in + tokens_out` sur `usage` supérieur au plafond → `ESCALADE` ;
   3. un domaine en `INSUFFISANT` → `ESCALADE` ;
   4. conflit : `max(score) − min(score)` > écart de conflit, calculé sur les seuls domaines en `retrieval_status = OK` → `ESCALADE` ;
-  5. seuils appliqués au score agrégé.
+  5. seuils appliqués au score agrégé, puis marge.
 
   `ESCALADE` ou marge sous `min_margin` → route `human_review`, sinon route `explain`. `decision_gate` n'écrit `final_decision` que sur la route `explain` ; sur la route `human_review`, c'est `human_review` qui l'écrit.
-- **Marge** : distance entre le score agrégé et le seuil de décision le plus proche (0,75 ou 0,5). Sous `min_margin`, passage humain. Calculée sans LLM.
+
+  **Choix de conception : `NO_GO` n'est rendu que sur blocage dur.** Avec la configuration du projet, la conformité n'a que des blocages durs : son score reste à 1,0. Un score agrégé sous 0,5 exigerait alors un domaine si bas que le conflit (étape 4) escalade d'abord. `NO_GO` a donc toujours une raison explicite et nommée : la règle bloquante. Des risques cumulés produisent au pire `GO_RESERVES` ou une escalade vers un humain. Le seuil `NO_GO` reste dans la configuration : une autre configuration client peut l'atteindre. Ce choix est à reprendre dans l'ADR.
+- **Marge** : distance entre le score agrégé et le seuil de décision le plus proche (0,75 ou 0,5), arrondie. Sous `min_margin`, passage humain. Calculée sans LLM.
 - **Budget** : plafond de tokens par contrat, calculé sur `usage`. Dépassement : `proposed_decision = "ESCALADE"` avec rapport d'échec structuré (`stage`, tokens consommés, plafond), jamais de repli silencieux.
 - **explain** : le LLM reçoit le verdict figé et les constats. Si le texte contredit la décision (détection par règles sur les libellés de décision), il est rejeté et regénéré une fois, puis remplacé par un gabarit.
-- **audit_seal** : sérialisation JSON canonique (clés triées, pas d'espaces, flottants arrondis), SHA-256, chaînage par `prev_hash`. Une levée de blocage dur par un humain est scellée avec `overrides_block` et son motif.
+- **audit_seal** : sérialisation JSON canonique (clés triées, pas d'espaces, flottants arrondis par la fonction d'arrondi commune), SHA-256, chaînage par `prev_hash`. Les rejets passent aussi par `audit_seal`. Une levée de blocage dur par un humain est scellée avec `overrides_block` et son motif.
 
 ### Règles par domaine
 
@@ -307,7 +315,25 @@ Chaque clause des `REQUIRED_KINDS` est toujours extraite. Si `present = false`, 
 | operationnel | `duree_engagement` | mois | `value` > 36 | score réduit |
 | operationnel | `preavis_resiliation` | mois | `value` > 6 | score réduit |
 
-Contenu scellé : `contract_id`, `thread_id`, clauses, verdicts, décision proposée, décision humaine le cas échéant, rapport d'échec le cas échéant, décision finale, consommation par nœud, `config_hash`, identifiants des modèles, horodatage.
+Calcul du score de domaine : départ à 1,0, puis chaque règle déclenchée retire sa pénalité, avec un résultat borné entre 0 et 1. Un `hard_block` ne modifie pas le score : il agit par `decision_gate`. Pénalités de la configuration du projet :
+
+| Domaine | Règle | Pénalité |
+| --- | --- | --- |
+| juridique | plafond fournisseur < 100 % | 0,5 |
+| financier | pénalités de retard absentes ou < 5 % | 0,4 |
+| operationnel | engagement > 36 mois | 0,3 |
+| operationnel | préavis > 6 mois | 0,3 |
+
+Scénarios de contrôle, tous les autres domaines à 1,0 :
+
+| Règles déclenchées | Issue |
+| --- | --- |
+| juridique | 0,85 → `GO` |
+| juridique + un opérationnel | 0,79 → `GO`, marge 0,04 → humain |
+| juridique + financier + un opérationnel | 0,69 → `GO_RESERVES`, marge 0,06 |
+| les deux opérationnels | domaine à 0,4 → conflit → `ESCALADE` |
+
+Contenu scellé : `contract_id`, `thread_id`, clauses, verdicts, décision proposée, décision humaine le cas échéant, rapport d'échec le cas échéant, motif de rejet le cas échéant, décision finale, consommation par nœud, `config_hash`, identifiants des modèles, horodatage.
 
 ```python
 import hashlib, json
@@ -332,13 +358,13 @@ Une seule instance PostgreSQL avec pgvector, lancée par Docker Compose.
 | Corpus RAG | `rag_chunks` (id, domain, source, text, embedding vector) | Migration `002` (J3) + script d'ingestion |
 | Journal d'audit | `audit_decisions` | Migration `001` (J1) |
 
-Migrations en phase 1 : scripts montés dans `docker-entrypoint-initdb.d`. Ils ne s'exécutent que sur un volume vide, ce que le README signale. La migration `001` (J1) crée l'extension `vector`, la table `audit_decisions` et le rôle `app_role`, qui reçoit `SELECT, INSERT` sur `audit_decisions` et rien d'autre. `rag_chunks` arrive en `002` au J3, une fois la dimension d'embedding fixée. Les droits sur les tables du checkpointer sont traités au J2. Identifiants dans `.env` (ignoré par git), avec un `.env.example` commité.
+Migrations en phase 1 : un script shell monté dans `docker-entrypoint-initdb.d` applique `migrations/*.sql` avec `psql -v ON_ERROR_STOP=1 -v app_password=...`. Il échoue explicitement si la variable du mot de passe applicatif est absente ou vide. Les migrations ne s'exécutent que sur un volume vide, ce que le README signale. La migration `001` (J1) crée l'extension `vector`, la table `audit_decisions` et le rôle `app_role`, qui reçoit `SELECT, INSERT` sur `audit_decisions` et rien d'autre. `rag_chunks` arrive en `002` au J3, une fois la dimension d'embedding fixée. Les droits sur les tables du checkpointer sont traités au J2. Identifiants dans `.env` (ignoré par git), avec un `.env.example` commité.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE audit_decisions (
-    id            BIGSERIAL PRIMARY KEY,
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,   -- sans droit sur séquence
     contract_id   TEXT NOT NULL,
     thread_id     TEXT NOT NULL,
     record        JSONB NOT NULL,
@@ -349,6 +375,7 @@ CREATE TABLE audit_decisions (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- journal en ajout seul : le rôle applicatif n'a ni UPDATE ni DELETE
+CREATE ROLE app_role LOGIN PASSWORD :'app_password';
 GRANT SELECT, INSERT ON audit_decisions TO app_role;
 REVOKE UPDATE, DELETE ON audit_decisions FROM app_role;
 ```
@@ -389,9 +416,11 @@ contract-decision-graph/
 ├── pyproject.toml
 ├── docs/
 │   ├── spec-phase1.md          # ce document
-│   └── adr-001-fan-out.md      # décision single vs multi, pattern, gates
+│   └── adr-001-fan-out.md      # décision single vs multi, pattern, gates, NO_GO sur blocage dur seul
 ├── config/
 │   └── decision.yaml           # poids, seuils, marge, budget, politique humaine
+├── docker/
+│   └── initdb/                 # script d'init : applique migrations/*.sql
 ├── migrations/
 │   ├── 001_audit.sql           # J1 : extension vector, audit_decisions, app_role
 │   └── 002_rag.sql             # J3 : rag_chunks
@@ -402,6 +431,7 @@ contract-decision-graph/
 │   ├── orchestrator.py         # seul fichier qui importe LangGraph : adaptateurs et câblage
 │   ├── state.py                # schémas d'état et Pydantic
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
+│   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
 │   ├── crag.py                 # sous-graphe CRAG
 │   ├── nodes/                  # un fichier par nœud, fonctions pures
 │   ├── rules/                  # une fonction par domaine
@@ -419,9 +449,9 @@ Chaque jour se termine par un commit qui passe ses tests.
 
 | Jour | Livrable | Tests verts |
 | --- | --- | --- |
-| J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
+| J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
 | J2 | `PostgresSaver`, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire` | 4, 5, 11, 12 |
-| J3 | Ingestion du corpus, sous-graphe CRAG, extraction réelle avec délimitation, `verify_extraction` | 3, 10 |
+| J3 | Ingestion du corpus, sous-graphe CRAG, `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
 | J4 | `explain` avec validation, `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
 
@@ -445,3 +475,13 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
   - `pyyaml` et validation Pydantic de la configuration ;
   - migration `001` sans `rag_chunks`, `app_role`, `.env` ;
   - `extraction_attempts` incrémenté par `extract_clauses`.
+- **23 septembre 2026, avant la tâche 0 du J1** :
+  - pénalités de score fixées ;
+  - `NO_GO` rendu sur blocage dur seulement, choix de conception à reprendre dans l'ADR ;
+  - ordre final de `decision_gate` : blocage dur (avec `failure_report` budget si dépassé), budget, `INSUFFISANT`, conflit, seuils et marge ;
+  - arrondi unique à 6 décimales ;
+  - `audit_decisions.id` en `GENERATED ALWAYS AS IDENTITY` ;
+  - script d'init `psql -v` qui échoue sans mot de passe ;
+  - `validate_input` complet déplacé au J3 ;
+  - `reject` sans valeur de `Decision` et scellé via `audit_seal` ;
+  - nombre d'essais d'extraction dans `decision.yaml`.

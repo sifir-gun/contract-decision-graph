@@ -10,10 +10,12 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - Un seul mécanisme de routage : chaque nœud à plusieurs sorties écrit `route` dans l'état, les arêtes conditionnelles ne font que la lire (pour `analysts`, l'arête construit les 4 `Send`). Jamais de `Command(goto=...)` ; `Command` ne sert qu'à `Command(resume=...)`.
 - Aucun effet de bord (écriture en base, notification) avant un appel à `interrupt()`.
 - Le texte d'un contrat est une donnée non fiable : toujours délimité dans les prompts, jamais traité comme une instruction.
-- Poids, seuils, marge, budget, seuils et pénalités des règles, politique d'arbitrage vivent dans `config/decision.yaml`. Jamais en dur dans le code, jamais dans un prompt. La configuration est validée par un modèle Pydantic au démarrage : invalide, le programme s'arrête.
+- Tout ce qui se règle (poids, seuils, marge, budget, essais d'extraction, seuils et pénalités des règles, politique d'arbitrage) vit dans `config/decision.yaml`. Jamais en dur dans le code, jamais dans un prompt. La configuration est validée par un modèle Pydantic au démarrage : invalide, le programme s'arrête.
 - Identifiants uniquement dans `.env` (jamais commité) ; `.env.example` est la référence commitée.
 - Données uniquement synthétiques ou publiques. Aucun contrat réel, aucun nom de client.
 - Pas de repli silencieux : tout échec produit un `failure_report` structuré.
+- En cas de concurrence entre règles, l'issue la plus conservatrice l'emporte.
+- Tout flottant comparé à un seuil ou sérialisé passe par la fonction d'arrondi unique de `src/cdg/numeric.py`.
 
 ## Façon de travailler
 
