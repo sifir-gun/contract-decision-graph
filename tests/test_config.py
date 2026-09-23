@@ -1,0 +1,109 @@
+"""Chargement et validation de config/decision.yaml (spec, « Configuration »)."""
+
+import copy
+from pathlib import Path
+
+import pytest
+import yaml
+from pydantic import ValidationError
+
+from cdg.config import DEFAULT_CONFIG_PATH, ConfigError, DecisionConfig, load_config
+
+
+@pytest.fixture
+def raw() -> dict:
+    return yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def _write(tmp_path: Path, data) -> Path:
+    path = tmp_path / "decision.yaml"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+def test_configuration_du_projet_conforme_a_la_spec():
+    cfg = load_config()
+    assert (cfg.weights.juridique, cfg.weights.financier,
+            cfg.weights.conformite, cfg.weights.operationnel) == (0.30, 0.25, 0.25, 0.20)
+    assert (cfg.thresholds.go, cfg.thresholds.go_reserves) == (0.75, 0.50)
+    assert cfg.min_margin == 0.05
+    assert cfg.conflict_gap == 0.5
+    assert cfg.budget.max_tokens_per_contract == 60_000
+    assert cfg.extraction.max_attempts == 2
+    j, f, o = cfg.rules.juridique, cfg.rules.financier, cfg.rules.operationnel
+    assert (j.supplier_cap_min_pct, j.supplier_cap_score_penalty) == (100, 0.5)
+    assert (f.late_penalties_min_cap_pct, f.late_penalties_score_penalty) == (5, 0.4)
+    assert (o.commitment_max_months, o.commitment_score_penalty) == (36, 0.3)
+    assert (o.notice_max_months, o.notice_score_penalty) == (6, 0.3)
+
+
+def test_poids_par_domaine():
+    cfg = load_config()
+    assert cfg.weight("financier") == 0.25
+
+
+def test_configuration_immuable():
+    cfg = load_config()
+    with pytest.raises(ValidationError):
+        cfg.min_margin = 0.5
+
+
+def _mutate(raw: dict, path: str, value) -> dict:
+    data = copy.deepcopy(raw)
+    *parents, leaf = path.split(".")
+    node = data
+    for key in parents:
+        node = node[key]
+    if value is _DELETE:
+        del node[leaf]
+    else:
+        node[leaf] = value
+    return data
+
+
+_DELETE = object()
+
+
+@pytest.mark.parametrize("path,value", [
+    ("weights.juridique", 0.25),                 # somme des poids 0,95
+    ("weights.operationnel", _DELETE),           # domaine manquant
+    ("weights.fiscal", 0.0),                     # domaine inconnu
+    ("seuil_secret", 1),                         # clé inconnue au premier niveau
+    ("thresholds.go_reserves", 0.75),            # seuils non ordonnés
+    ("thresholds.go", 1.2),                      # seuil hors de ]0, 1]
+    ("min_margin", -0.01),
+    ("conflict_gap", 0),
+    ("budget.max_tokens_per_contract", 0),
+    ("budget.max_tokens_per_contract", True),    # booléen refusé (mode strict)
+    ("budget.max_tokens_per_contract", "60000"), # chaîne refusée (mode strict)
+    ("extraction.max_attempts", 0),
+    ("rules.juridique.supplier_cap_score_penalty", -0.1),
+    ("rules.operationnel.notice_score_penalty", 1.5),
+    ("rules.financier.late_penalties_min_cap_pct", -5),
+    ("rules.operationnel", _DELETE),
+])
+def test_configuration_invalide_refusee(tmp_path, raw, path, value):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, _mutate(raw, path, value)))
+
+
+def test_fichier_absent(tmp_path):
+    with pytest.raises(ConfigError, match="introuvable"):
+        load_config(tmp_path / "absent.yaml")
+
+
+def test_yaml_illisible(tmp_path):
+    path = tmp_path / "decision.yaml"
+    path.write_text("weights: [juridique: 0.3", encoding="utf-8")
+    with pytest.raises(ConfigError, match="YAML"):
+        load_config(path)
+
+
+def test_yaml_qui_n_est_pas_un_dictionnaire(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(_write(tmp_path, [1, 2, 3]))
+
+
+def test_config_modifiee_valide_directement(raw):
+    data = _mutate(raw, "conflict_gap", 1.0)
+    assert DecisionConfig.model_validate(data).conflict_gap == 1.0

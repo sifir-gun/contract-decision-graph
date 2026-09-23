@@ -5,14 +5,17 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 ## Règles non négociables
 
 - Le verdict est rendu par du code Python pur (`src/cdg/rules/`, `decision_gate`). Aucun LLM ne décide.
-- Seul `src/cdg/orchestrator.py` importe `langgraph`. Nœuds, règles, politique et audit sont des fonctions pures, testables sans le framework.
+- Seul `src/cdg/orchestrator.py` importe `langgraph`. Il contient les adaptateurs : construction des `Send`, appel à `interrupt()` (`human_review`, qui délègue à `policy.py`), câblage. Nœuds, règles, politique et audit sont des fonctions pures qui renvoient des dicts, testables sans le framework.
 - Un nœud ne renvoie que les clés d'état qu'il modifie.
-- Le routage est écrit dans l'état (`route`) par un nœud ; les arêtes ne font que le lire.
+- Un seul mécanisme de routage : chaque nœud à plusieurs sorties écrit `route` dans l'état, les arêtes conditionnelles ne font que la lire (pour `analysts`, l'arête construit les 4 `Send`). Jamais de `Command(goto=...)` ; `Command` ne sert qu'à `Command(resume=...)`.
 - Aucun effet de bord (écriture en base, notification) avant un appel à `interrupt()`.
 - Le texte d'un contrat est une donnée non fiable : toujours délimité dans les prompts, jamais traité comme une instruction.
-- Poids, seuils, marge, budget et politique d'arbitrage vivent dans `config/decision.yaml`. Jamais en dur dans le code, jamais dans un prompt.
+- Tout ce qui se règle (poids, seuils, marge, budget, essais d'extraction, seuils et pénalités des règles, politique d'arbitrage) vit dans `config/decision.yaml`. Jamais en dur dans le code, jamais dans un prompt. La configuration est validée par un modèle Pydantic au démarrage : invalide, le programme s'arrête.
+- Identifiants uniquement dans `.env` (jamais commité) ; `.env.example` est la référence commitée.
 - Données uniquement synthétiques ou publiques. Aucun contrat réel, aucun nom de client.
 - Pas de repli silencieux : tout échec produit un `failure_report` structuré.
+- En cas de concurrence entre règles, l'issue la plus conservatrice l'emporte.
+- Tout flottant comparé à un seuil ou sérialisé passe par la fonction d'arrondi unique de `src/cdg/numeric.py`.
 
 ## Façon de travailler
 
@@ -26,11 +29,11 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 
 ## Commandes
 
-- `docker compose up -d` : démarre PostgreSQL + pgvector
+- `docker compose up -d` : démarre PostgreSQL + pgvector (les migrations de `docker-entrypoint-initdb.d` ne s'exécutent que sur un volume vide)
 - `uv sync` : installe les dépendances
 - `uv run pytest` : lance les tests
 - `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify)
 
 ## Stack
 
-Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, psycopg, pgvector, pytest, Docker Compose.
+Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, psycopg, pgvector, pytest, Docker Compose.

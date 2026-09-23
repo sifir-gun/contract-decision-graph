@@ -1,6 +1,6 @@
 # Phase 1 · Spec LangGraph, décision multi-agents auditable
 
-Version du 23 septembre 2026. Source de vérité pour la phase 1.
+Version du 23 septembre 2026, révisée le même jour avec les décisions prises avant le J1 (voir « Historique des révisions »). Source de vérité pour la phase 1.
 
 ## Objectif et périmètre
 
@@ -29,7 +29,7 @@ Le fan-out à 4 analystes se défend sur la latence et l'audit par domaine, pas 
 - **Pattern retenu** : Fan-out / Fan-in avec gate déterministe, plus un vérificateur sur l'extraction. Écartés : Supervisor piloté par LLM (routage fixe connu d'avance, un routeur LLM ajoute coût et surface d'attaque sans gain), Debate et Council par vote (les analystes ne répondent pas à la même question).
 - **Nature des analystes** : outils bornés sans boucle ouverte, pas des agents autonomes.
 - **Domaine de faute partagé** : les 4 analystes lisent la même extraction. Une erreur ou une injection à cet endroit les touche tous, donc 4 verdicts concordants valent un seul témoin sur les clauses (κ_E = 1). D'où le vérificateur d'extraction.
-- **Place de LangGraph** : orchestration, checkpointing, interruptions. Règles et analystes n'importent pas LangGraph, isolé derrière `orchestrator.py`.
+- **Place de LangGraph** : orchestration, checkpointing, interruptions. Nœuds, règles, politique et analystes n'importent pas LangGraph, isolé derrière `orchestrator.py`.
 
 ## Architecture du graphe
 
@@ -38,36 +38,40 @@ Un graphe principal de 9 nœuds, dont un nœud `analyst` instancié 4 fois en pa
 ```mermaid
 flowchart TD
     S([START]) --> V[validate_input]
-    V -->|invalide| R[reject]
-    V -->|valide| X[extract_clauses]
+    V -->|route = reject| R[reject]
+    V -->|route = extract_clauses| X[extract_clauses]
     X --> VX[verify_extraction]
-    VX -->|citations absentes, essai 2 max| X
-    VX -->|échec après 2 essais| H
-    VX -->|OK, Send x4| A[analyst<br/>juridique, financier,<br/>conformité, opérationnel]
+    VX -->|route = extract_clauses<br/>problèmes, 1er essai| X
+    VX -->|route = human_review<br/>problèmes après 2 essais| H
+    VX -->|route = analysts<br/>Send x4| A[analyst<br/>juridique, financier,<br/>conformité, opérationnel]
     A --> G[decision_gate]
-    G -->|marge suffisante| E[explain]
-    G -->|marge faible, conflit,<br/>budget dépassé| H[human_review<br/>interrupt]
+    G -->|route = explain<br/>marge suffisante,<br/>ou NO_GO par blocage dur| E[explain]
+    G -->|route = human_review<br/>ESCALADE, marge faible,<br/>budget dépassé| H[human_review<br/>interrupt]
     H --> E
     E --> AU[audit_seal]
     AU --> F([END])
-    R --> F
+    R --> AU
 ```
+
+**Routage : un seul mécanisme.** Chaque nœud à plusieurs sorties (`validate_input`, `verify_extraction`, `decision_gate`) écrit `route` dans l'état ; l'arête conditionnelle qui le suit ne fait que la lire. Pour `route = "analysts"`, l'arête construit les 4 `Send` à partir des clauses de l'état : la décision de fan-out est dans l'état, la mécanique dans l'orchestrateur. Aucun `Command(goto=...)` : `Command` ne sert qu'à `Command(resume=...)` pour reprendre après un `interrupt()`.
+
+**Nœuds purs, adaptateurs dans l'orchestrateur.** Chaque nœud de `src/cdg/nodes/` est une fonction pure qui reçoit l'état (et ses dépendances injectées : configuration, extracteur, CRAG, LLM) et renvoie un dict. `orchestrator.py` porte tout ce qui dépend de LangGraph : construction des `Send`, appel à `interrupt()`, câblage. `human_review` est un adaptateur de `orchestrator.py` qui appelle `policy.py`.
 
 Chaque analyste appelle le sous-graphe CRAG pour récupérer les références utiles à son domaine, puis applique ses règles en Python pur.
 
 | Nœud | Rôle | LLM |
 | --- | --- | --- |
-| validate_input | Schéma, taille, langue ; masquage par motifs (e-mails, téléphones, IBAN, SIREN) et des noms de parties déclarés en entrée | Non |
-| extract_clauses | Extraction structurée des clauses ; le contrat est délimité comme donnée, jamais comme instruction ; chaque clause porte sa citation exacte | Oui, sortie Pydantic |
-| verify_extraction | Vérifie par code que chaque citation existe mot pour mot dans le contrat et que les types de clauses attendus sont couverts ; sinon ré-extraction avec retour ciblé | Non |
+| validate_input | Schéma, taille, langue ; masquage par motifs (e-mails, téléphones, IBAN, SIREN) et des noms de parties déclarés en entrée ; écrit `route` (`extract_clauses` ou `reject`) | Non |
+| extract_clauses | Extraction structurée des clauses ; le contrat est délimité comme donnée, jamais comme instruction ; chaque clause attendue est toujours rendue, avec `present` et sa citation exacte si elle est présente ; incrémente `extraction_attempts` | Oui, sortie Pydantic |
+| verify_extraction | Vérifie par code que la citation de chaque clause présente existe mot pour mot dans le contrat et que les `REQUIRED_KINDS` sont tous rendus ; écrit `route` (`analysts`, `extract_clauses` pour une ré-extraction avec retour ciblé, ou `human_review`) | Non |
 | analyst | CRAG + règles du domaine, rend un `AgentVerdict` | Oui pour CRAG uniquement |
-| decision_gate | Agrégation pondérée, blocages durs, marge au seuil, budget ; écrit la route dans l'état | Non |
-| human_review | `interrupt()`, attend la décision humaine, applique la politique d'arbitrage | Non |
+| decision_gate | Budget, blocages durs, agrégation pondérée, marge au seuil ; écrit `route` (`explain` ou `human_review`) | Non |
+| human_review | Adaptateur dans `orchestrator.py` : `interrupt()`, attend la décision humaine, la fait contrôler par `policy.py` | Non |
 | explain | Rédige la justification à partir du verdict figé | Oui |
 | audit_seal | Sérialisation canonique, SHA-256, chaînage | Non |
-| reject | Verdict d'invalidité explicite, tracé | Non |
+| reject | Verdict d'invalidité explicite : `reject_reason` renseigné, `final_decision` reste `None` (pas de valeur « invalide » dans `Decision`) ; mène à `audit_seal`, car un rejet est scellé comme le reste | Non |
 
-Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1.
+Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1. `crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`) ; le sous-graphe est compilé dans `orchestrator.py`, qui reste le seul à importer LangGraph (J3).
 
 ## Schéma d'état
 
@@ -80,12 +84,17 @@ from pydantic import BaseModel
 
 Domain = Literal["juridique", "financier", "conformite", "operationnel"]
 Decision = Literal["GO", "GO_RESERVES", "NO_GO", "ESCALADE"]
-Route = Literal["explain", "human_review", "reject"]
+Route = Literal["extract_clauses", "reject", "analysts", "human_review", "explain"]
+
+REQUIRED_KINDS = ("responsabilite_acheteur", "responsabilite_fournisseur", "revision_prix",
+                  "penalites_retard", "duree_engagement", "preavis_resiliation",
+                  "donnees_personnelles", "accord_traitement_donnees")
 
 class Clause(BaseModel):
-    kind: str            # duree, penalites, responsabilite, donnees...
-    quote: str           # citation exacte, vérifiée par verify_extraction
-    value: float | None  # montant, durée en mois, plafond...
+    kind: str            # un des REQUIRED_KINDS
+    present: bool        # la clause figure-t-elle dans le contrat ?
+    quote: str           # citation exacte si present, "" sinon (alors non vérifiée)
+    value: float | None  # quantité utile à la règle, voir « Règles par domaine »
 
 class AgentVerdict(BaseModel):
     domain: Domain
@@ -122,7 +131,7 @@ class ContractState(TypedDict, total=False):
     route: Route          # écrite par un nœud, lue par l'arête
     failure_report: dict | None
     human: HumanDecision | None
-    final_decision: Decision
+    final_decision: Decision | None   # decision_gate (route explain) ou human_review ; None après reject
     explanation: str
     config_hash: str
     decision_hash: str
@@ -137,117 +146,197 @@ Un nœud ne renvoie que les clés qu'il modifie. Un analyste renvoie `{"verdicts
 
 ## Câblage LangGraph
 
-Quatre mécanismes portent la démonstration : `Command` pour le routage de validation, `Send` pour le fan-out, `interrupt()` pour l'humain, `PostgresSaver` pour la persistance. Les signatures ci-dessous sont indicatives : vérifier contre la documentation de la version installée.
+Quatre mécanismes portent la démonstration : `route` écrite dans l'état et lue par des arêtes conditionnelles pour tout le routage, `Send` pour le fan-out, `interrupt()` et `Command(resume=...)` pour l'humain, `PostgresSaver` pour la persistance. Les signatures ci-dessous sont indicatives : vérifier contre la documentation de la version installée.
+
+Nœuds purs, sans import de LangGraph :
 
 ```python
-from typing import Literal
-from langgraph.graph import StateGraph, START, END
-from langgraph.types import Send, Command, interrupt
-
-DOMAINS = ["juridique", "financier", "conformite", "operationnel"]
-
-def validate_input(state: ContractState) -> Command[Literal["extract_clauses", "reject"]]:
+# src/cdg/nodes/validate_input.py
+def validate_input(state: ContractState) -> dict:
     ok, reason = check_contract(state["raw_text"])
     if ok:
-        return Command(goto="extract_clauses", update={"extraction_attempts": 0})
-    return Command(goto="reject", update={"reject_reason": reason})
+        return {"route": "extract_clauses", "extraction_attempts": 0}
+    return {"route": "reject", "reject_reason": reason}
 
-def verify_extraction(state: ContractState) -> Command[Literal["extract_clauses", "analyst", "human_review"]]:
+# src/cdg/nodes/verify_extraction.py
+def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict:
     text = normalize(state["raw_text"])
     problems = [f"citation introuvable: {c.kind}" for c in state["clauses"]
-                if normalize(c.quote) not in text]
+                if c.present and normalize(c.quote) not in text]
     found = {c.kind for c in state["clauses"]}
     problems += [f"clause manquante: {k}" for k in REQUIRED_KINDS if k not in found]
     if not problems:
-        return Command(goto=[Send("analyst", {"domain": d, "clauses": state["clauses"]})
-                             for d in DOMAINS])
-    if state["extraction_attempts"] < MAX_EXTRACTION:          # 2 essais
-        return Command(goto="extract_clauses", update={"extraction_feedback": problems})
-    return Command(goto="human_review", update={
-        "proposed_decision": "ESCALADE",
-        "failure_report": {"stage": "extraction", "problems": problems}})
+        return {"route": "analysts"}
+    if state["extraction_attempts"] < decision_config.extraction.max_attempts:   # 2 ; extract_clauses a incrémenté
+        return {"route": "extract_clauses", "extraction_feedback": problems}
+    return {"route": "human_review", "proposed_decision": "ESCALADE",
+            "failure_report": {"stage": "extraction", "problems": problems}}
 
-def decision_gate(state: ContractState):
-    d = aggregate(state["verdicts"], CONFIG)                   # Python pur, sans LLM
-    over = budget_exceeded(state["usage"], CONFIG)
-    needs_human = d.decision == "ESCALADE" or d.margin < CONFIG.min_margin or over
-    return {"proposed_decision": d.decision, "margin": d.margin,
-            "final_decision": d.decision,
-            "failure_report": {"stage": "budget"} if over else None,
-            "route": "human_review" if needs_human else "explain"}
-
-def human_review(state: ContractState):
-    request = {"contract_id": state["contract_id"],
-               "proposed": state["proposed_decision"],
-               "margin": state.get("margin"),
-               "blocks": [v.domain for v in state.get("verdicts", []) if v.hard_block],
-               "failure_report": state.get("failure_report")}
-    while True:
-        human = HumanDecision.model_validate(interrupt(request))
-        if policy_ok(human, state.get("verdicts", [])):         # policy-as-code, config versionnée
-            break
-        request = {**request, "error": "lever un blocage dur exige overrides_block et un motif"}
-    return {"human": human, "final_decision": human.decision}
-
-builder = StateGraph(ContractState)
-for name, fn in [("validate_input", validate_input), ("extract_clauses", extract_clauses),
-                 ("verify_extraction", verify_extraction), ("analyst", analyst),
-                 ("decision_gate", decision_gate), ("human_review", human_review),
-                 ("explain", explain), ("audit_seal", audit_seal), ("reject", reject)]:
-    builder.add_node(name, fn)
-
-builder.add_edge(START, "validate_input")
-builder.add_edge("extract_clauses", "verify_extraction")
-builder.add_edge("analyst", "decision_gate")
-builder.add_conditional_edges("decision_gate", lambda s: s["route"], ["human_review", "explain"])
-builder.add_edge("human_review", "explain")
-builder.add_edge("explain", "audit_seal")
-builder.add_edge("audit_seal", END)
-builder.add_edge("reject", END)
+# src/cdg/nodes/decision_gate.py
+def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
+    config = decision_config                                   # « config » est réservé par LangGraph
+    d = aggregate(state["verdicts"], config)                   # Python pur, sans LLM, valeurs arrondies
+    used = total_tokens(state.get("usage", []))                # tokens_in + tokens_out
+    limit = config.budget.max_tokens_per_contract
+    over = used > limit
+    budget_report = {"stage": "budget", "tokens": used, "limit": limit}
+    if d.hard_block:                                           # 1. l'issue la plus conservatrice l'emporte
+        update = {"proposed_decision": "NO_GO", "final_decision": "NO_GO",
+                  "margin": d.margin, "route": "explain"}      #    marge ignorée
+        if over:
+            update["failure_report"] = budget_report          #    dépassement tracé quand même
+        return update
+    if over:                                                   # 2. budget
+        return {"proposed_decision": "ESCALADE", "margin": d.margin,
+                "failure_report": budget_report, "route": "human_review"}
+    # 3. INSUFFISANT, 4. conflit, 5. seuils : déjà ordonnés par aggregate
+    if d.decision == "ESCALADE" or d.margin < config.min_margin:
+        return {"proposed_decision": d.decision, "margin": d.margin, "route": "human_review"}
+    return {"proposed_decision": d.decision, "final_decision": d.decision,
+            "margin": d.margin, "route": "explain"}
 ```
 
-Exécution, interruption et reprise :
+Adaptateurs et câblage, dans `orchestrator.py` uniquement :
+
+```python
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send, interrupt
+
+DOMAINS = ["juridique", "financier", "conformite", "operationnel"]
+
+def read_route(state: ContractState) -> str:
+    return state["route"]
+
+def route_after_verify(state: ContractState):
+    if state["route"] == "analysts":                           # décision lue dans l'état
+        return [Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS]
+    return state["route"]
+
+def human_review(state: ContractState) -> dict:                # adaptateur : interrupt() + policy.py
+    request = policy.build_request(state)
+    while True:
+        human = HumanDecision.model_validate(interrupt(request))
+        error = policy.check(human, state.get("verdicts", []), config)   # config versionnée
+        if error is None:
+            break
+        request = {**request, "error": error}
+    return {"human": human, "final_decision": human.decision}
+
+def build_graph(config: DecisionConfig, deps: Deps):          # les tests injectent des doublures
+    builder = StateGraph(ContractState)
+    ...                                                        # add_node des 9 nœuds, dépendances liées
+    builder.add_edge(START, "validate_input")
+    builder.add_conditional_edges("validate_input", read_route, ["extract_clauses", "reject"])
+    builder.add_edge("extract_clauses", "verify_extraction")
+    builder.add_conditional_edges("verify_extraction", route_after_verify,
+                                  ["extract_clauses", "analyst", "human_review"])
+    builder.add_edge("analyst", "decision_gate")
+    builder.add_conditional_edges("decision_gate", read_route, ["human_review", "explain"])
+    builder.add_edge("human_review", "explain")
+    builder.add_edge("explain", "audit_seal")
+    builder.add_edge("audit_seal", END)
+    builder.add_edge("reject", "audit_seal")                   # un rejet est scellé aussi
+    return builder
+```
+
+Exécution, interruption et reprise (J2, toujours dans `orchestrator.py`) :
 
 ```python
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.types import Command
 
 with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
     checkpointer.setup()                      # crée les tables au premier lancement
-    graph = builder.compile(checkpointer=checkpointer)
-    config = {"configurable": {"thread_id": contract_id}}
+    graph = build_graph(decision_config, deps).compile(checkpointer=checkpointer)
+    run_config = {"configurable": {"thread_id": contract_id}}
 
-    out = graph.invoke({"contract_id": contract_id, "raw_text": text}, config)
+    out = graph.invoke({"contract_id": contract_id, "raw_text": text}, run_config)
     # si escalade : out contient "__interrupt__" avec la charge utile
 
     graph.invoke(Command(resume={"decision": "NO_GO", "reviewer": "gt",
-                                 "reason": "plafond de responsabilité absent"}), config)
+                                 "reason": "plafond de responsabilité absent"}), run_config)
 
-    history = list(graph.get_state_history(config))   # tous les checkpoints du thread
+    history = list(graph.get_state_history(run_config))   # tous les checkpoints du thread
 ```
 
 Points à maîtriser :
 
 - **Reprise après interrupt** : le nœud `human_review` est réexécuté depuis son début. Aucun effet de bord avant `interrupt()`. Plusieurs `interrupt()` dans un même nœud sont appariés par ordre d'appel : vérifier ce comportement dans la version installée avant de garder la boucle de politique.
-- **Route écrite dans l'état** : `decision_gate` écrit `route`, l'arête ne fait que la lire. Le choix de chemin est checkpointé, rejouable et auditable.
+- **Route écrite dans l'état** : `validate_input`, `verify_extraction` et `decision_gate` écrivent `route`, les arêtes ne font que la lire. Le choix de chemin est checkpointé, rejouable et auditable.
+- **Fan-out par l'arête** : l'arête qui suit `verify_extraction` renvoie une liste de `Send` quand `route = "analysts"`, chacun portant un état privé `AnalystInput`. Vérifier dans la version installée ce retour de `Send` depuis une arête conditionnelle et la déclaration du schéma d'entrée de `analyst`.
 - **Fan-out et échecs** : les 4 analystes tournent dans le même superstep. Si un seul échoue, les écritures des autres sont conservées par le checkpointer et seul le fautif est rejoué. `RetryPolicy` sur `analyst` pour les erreurs d'API.
 - **Timeout humain, échec fermé** : une commande `expire` reprend les threads en attente depuis plus de N heures avec une décision système `NO_GO`, motif timeout, tracée comme telle. Jamais d'approbation automatique.
-- **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Vérifier l'héritage du checkpointer par un sous-graphe dans la version installée.
-- **Isolation** : seul `orchestrator.py` importe LangGraph. Nœuds, règles et audit restent des fonctions pures testables sans le framework.
+- **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Vérifier l'héritage du checkpointer par un sous-graphe dans la version installée.
+- **Isolation** : seul `orchestrator.py` importe LangGraph ; il contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework.
 - **thread_id** : un contrat = un thread. Clé de reprise, de l'historique et du lien avec la piste d'audit.
+- **Échecs de nœud (J2)** : une exception dans un nœud (clause ou verdict manquant, erreur d'API) interrompt aujourd'hui l'exécution. Au J2, étudier le paramètre `error_handler` de `add_node` (LangGraph 1.2) pour la transformer en `failure_report` structuré, conformément à la règle « pas de repli silencieux ».
+- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un sérialiseur dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`allowed_msgpack_modules` du `JsonPlusSerializer`, ou `LANGGRAPH_STRICT_MSGPACK=true` complété de cette liste). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement. Un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Un test du J2 vérifie qu'un type hors liste est refusé.
 
 ## Déterminisme et piste d'audit
 
 Le verdict est déterministe à partir des clauses extraites, pas à partir du texte brut. Les clauses extraites sont figées dans l'audit, et le rejeu repart d'elles.
 
-- **Règles** : Python pur, une fonction par domaine, sans appel réseau. Entrée : clauses et statut de récupération ; sortie : `AgentVerdict`.
-- **Configuration** : poids par domaine, seuils de décision, `min_margin`, écart de conflit, budget par contrat et politique d'arbitrage humain dans `config/decision.yaml` versionné. La politique vit dans la configuration, jamais dans un prompt. Son empreinte SHA-256 va dans `config_hash`.
-- **decision_gate** : score = somme pondérée ; tout `hard_block` force `NO_GO` ; un analyste en `INSUFFISANT` force `ESCALADE` ; conflit = écart de score entre deux domaines supérieur au seuil configuré (0,5 par défaut), qui force `ESCALADE`.
-- **Marge** : distance entre le score agrégé et le seuil de décision le plus proche. Sous `min_margin`, passage humain. Calculée sans LLM.
-- **Budget** : plafond de tokens par contrat, calculé sur `usage`. Dépassement : `ESCALADE` avec rapport d'échec structuré, jamais de repli silencieux.
-- **explain** : le LLM reçoit le verdict figé et les constats. Si le texte contredit la décision (détection par règles sur les libellés de décision), il est rejeté et regénéré une fois, puis remplacé par un gabarit.
-- **audit_seal** : sérialisation JSON canonique (clés triées, pas d'espaces, flottants arrondis), SHA-256, chaînage par `prev_hash`. Une levée de blocage dur par un humain est scellée avec `overrides_block` et son motif.
+- **Règles** : Python pur, une fonction par domaine, sans appel réseau. Entrée : clauses et statut de récupération ; sortie : `AgentVerdict`. Un statut `INSUFFISANT` est consigné dans les `findings` du domaine. Détail dans « Règles par domaine ».
+- **Configuration** : tout vit dans `config/decision.yaml` versionné :
+  - poids par domaine : juridique 0,30, financier 0,25, conformite 0,25, operationnel 0,20 ;
+  - seuils de décision : `GO` ≥ 0,75, `GO_RESERVES` ≥ 0,5, sinon `NO_GO` ;
+  - `min_margin` = 0,05, écart de conflit = 0,5 ;
+  - budget par contrat : 60 000 tokens ;
+  - nombre maximal d'essais d'extraction : 2 ;
+  - seuils des règles et pénalités de score ;
+  - politique d'arbitrage humain (J2).
 
-Contenu scellé : `contract_id`, `thread_id`, clauses, verdicts, décision proposée, décision humaine le cas échéant, rapport d'échec le cas échéant, décision finale, consommation par nœud, `config_hash`, identifiants des modèles, horodatage.
+  Tout ce qui se règle vit dans la configuration, et la politique n'est jamais dans un prompt. Le fichier est chargé au démarrage par `pyyaml` et validé par un modèle Pydantic : une configuration invalide arrête le programme avec une erreur explicite. Son empreinte SHA-256 va dans `config_hash`.
+- **Score** : 1 = favorable (risque faible), 0 = défavorable. Score agrégé = somme pondérée des scores de domaine.
+- **Arrondi** : score agrégé, marge et tout flottant comparé à un seuil passent par une seule fonction d'arrondi à 6 décimales, appliquée avant toute comparaison. La même fonction sert à la sérialisation canonique au J4. Les 6 décimales sont une constante de format, pas un réglage métier.
+- **decision_gate** applique la règle suivante : l'issue la plus conservatrice l'emporte. Ordre :
+  1. blocage dur : un seul `hard_block` → `NO_GO`, marge ignorée, route `explain`. Si le budget est aussi dépassé, `failure_report` de stade `budget` est quand même renseigné. Un `INSUFFISANT` simultané ne change rien : le blocage établi suffit ;
+  2. budget : total `tokens_in + tokens_out` sur `usage` supérieur au plafond → `ESCALADE` ;
+  3. un domaine en `INSUFFISANT` → `ESCALADE` ;
+  4. conflit : `max(score) − min(score)` > écart de conflit, calculé sur les seuls domaines en `retrieval_status = OK` → `ESCALADE` ;
+  5. seuils appliqués au score agrégé, puis marge.
+
+  `ESCALADE` ou marge sous `min_margin` → route `human_review`, sinon route `explain`. `decision_gate` n'écrit `final_decision` que sur la route `explain` ; sur la route `human_review`, c'est `human_review` qui l'écrit.
+
+  **Choix de conception : `NO_GO` n'est rendu que sur blocage dur.** Avec la configuration du projet, la conformité n'a que des blocages durs : son score reste à 1,0. Un score agrégé sous 0,5 exigerait alors un domaine si bas que le conflit (étape 4) escalade d'abord. `NO_GO` a donc toujours une raison explicite et nommée : la règle bloquante. Des risques cumulés produisent au pire `GO_RESERVES` ou une escalade vers un humain. Le seuil `NO_GO` reste dans la configuration : une autre configuration client peut l'atteindre. Ce choix est à reprendre dans l'ADR.
+- **Marge** : distance entre le score agrégé et le seuil de décision le plus proche (0,75 ou 0,5), arrondie. Sous `min_margin`, passage humain. Calculée sans LLM.
+- **Budget** : plafond de tokens par contrat, calculé sur `usage`. Dépassement : `proposed_decision = "ESCALADE"` avec rapport d'échec structuré (`stage`, tokens consommés, plafond), jamais de repli silencieux.
+- **explain** : le LLM reçoit le verdict figé et les constats. Si le texte contredit la décision (détection par règles sur les libellés de décision), il est rejeté et regénéré une fois, puis remplacé par un gabarit.
+- **audit_seal** : sérialisation JSON canonique (clés triées, pas d'espaces, flottants arrondis par la fonction d'arrondi commune), SHA-256, chaînage par `prev_hash`. Les rejets passent aussi par `audit_seal`. Une levée de blocage dur par un humain est scellée avec `overrides_block` et son motif.
+
+### Règles par domaine
+
+Chaque clause des `REQUIRED_KINDS` est toujours extraite. Si `present = false`, `quote` est vide et n'est pas vérifiée par `verify_extraction`. `value` porte la quantité utile à la règle, dans l'unité ci-dessous. Tous les seuils (100 %, 5 %, 36 mois, 6 mois) et toutes les pénalités de score vivent dans `config/decision.yaml`.
+
+| Domaine | Clause | Unité de `value` | Règle | Effet |
+| --- | --- | --- | --- | --- |
+| juridique | `responsabilite_acheteur` | plafond, % du montant annuel ; `None` = illimitée | présente et `value` None | `hard_block` |
+| juridique | `responsabilite_fournisseur` | plafond, % du montant annuel ; `None` = illimitée | présente et `value` < 100 | score réduit |
+| financier | `revision_prix` | plafond de révision, % ; `None` = non plafonnée | présente et `value` None | `hard_block` |
+| financier | `penalites_retard` | plafond des pénalités, % ; `None` = non plafonnées | absente, ou `value` < 5 | score réduit |
+| conformite | `donnees_personnelles`, `accord_traitement_donnees` | `None` (seul `present` compte) | données personnelles présentes sans accord de traitement (art. 28 RGPD) | `hard_block` |
+| operationnel | `duree_engagement` | mois ; `None` = non chiffrée | `value` > 36, ou présente et `value` None | score réduit ; si non chiffrée, pénalité par prudence avec constat explicite |
+| operationnel | `preavis_resiliation` | mois ; `None` = non chiffré | `value` > 6, ou présente et `value` None | score réduit ; si non chiffré, pénalité par prudence avec constat explicite |
+
+Calcul du score de domaine : départ à 1,0, puis chaque règle déclenchée retire sa pénalité, avec un résultat borné entre 0 et 1. Un `hard_block` ne modifie pas le score : il agit par `decision_gate`. Pénalités de la configuration du projet :
+
+| Domaine | Règle | Pénalité |
+| --- | --- | --- |
+| juridique | plafond fournisseur < 100 % | 0,5 |
+| financier | pénalités de retard absentes ou < 5 % | 0,4 |
+| operationnel | engagement > 36 mois | 0,3 |
+| operationnel | préavis > 6 mois | 0,3 |
+
+Scénarios de contrôle, tous les autres domaines à 1,0 :
+
+| Règles déclenchées | Issue |
+| --- | --- |
+| juridique | 0,85 → `GO` |
+| juridique + un opérationnel | 0,79 → `GO`, marge 0,04 → humain |
+| juridique + financier + un opérationnel | 0,69 → `GO_RESERVES`, marge 0,06 |
+| les deux opérationnels | domaine à 0,4 → conflit → `ESCALADE` |
+
+Contenu scellé : `contract_id`, `thread_id`, clauses, verdicts, décision proposée, décision humaine le cas échéant, rapport d'échec le cas échéant, motif de rejet le cas échéant, décision finale, consommation par nœud, `config_hash`, identifiants des modèles, horodatage.
 
 ```python
 import hashlib, json
@@ -269,12 +358,16 @@ Une seule instance PostgreSQL avec pgvector, lancée par Docker Compose.
 | Usage | Tables | Création |
 | --- | --- | --- |
 | Checkpoints LangGraph | Tables du checkpointer | `checkpointer.setup()` |
-| Corpus RAG | `rag_chunks` (id, domain, source, text, embedding vector) | Migration SQL + script d'ingestion |
-| Journal d'audit | `audit_decisions` | Migration SQL |
+| Corpus RAG | `rag_chunks` (id, domain, source, text, embedding vector) | Migration `002` (J3) + script d'ingestion |
+| Journal d'audit | `audit_decisions` | Migration `001` (J1) |
+
+Migrations en phase 1 : un script shell monté dans `docker-entrypoint-initdb.d` applique `migrations/*.sql` avec `psql -v ON_ERROR_STOP=1 -v app_password=...`. Il échoue explicitement si la variable du mot de passe applicatif est absente ou vide. Les migrations ne s'exécutent que sur un volume vide, ce que le README signale. La migration `001` (J1) crée l'extension `vector`, la table `audit_decisions` et le rôle `app_role`, qui reçoit `SELECT, INSERT` sur `audit_decisions` et rien d'autre. `rag_chunks` arrive en `002` au J3, une fois la dimension d'embedding fixée. Les droits sur les tables du checkpointer sont traités au J2. Identifiants dans `.env` (ignoré par git), avec un `.env.example` commité.
 
 ```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE audit_decisions (
-    id            BIGSERIAL PRIMARY KEY,
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,   -- sans droit sur séquence
     contract_id   TEXT NOT NULL,
     thread_id     TEXT NOT NULL,
     record        JSONB NOT NULL,
@@ -285,6 +378,8 @@ CREATE TABLE audit_decisions (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- journal en ajout seul : le rôle applicatif n'a ni UPDATE ni DELETE
+CREATE ROLE app_role LOGIN PASSWORD :'app_password';
+GRANT SELECT, INSERT ON audit_decisions TO app_role;
 REVOKE UPDATE, DELETE ON audit_decisions FROM app_role;
 ```
 
@@ -296,7 +391,7 @@ La phase 1 est terminée quand ces 12 tests passent en `pytest`, LLM remplacés 
 
 | # | Test | Attendu |
 | --- | --- | --- |
-| 1 | Fan-out | 4 `AgentVerdict` distincts dans `verdicts`, aucun écrasé |
+| 1 | Fan-out | Sur le graphe compilé, doublures comprises : 4 `AgentVerdict` distincts dans `verdicts`, aucun écrasé |
 | 2 | Blocage dur | Un seul `hard_block` donne `NO_GO`, quel que soit le score moyen |
 | 3 | CRAG hors corpus | Question sans référence : statut `INSUFFISANT`, puis `ESCALADE`, aucune réponse inventée |
 | 4 | Interrupt | Marge sous le seuil : exécution suspendue, charge utile exposée |
@@ -313,28 +408,35 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `psycopg`, `pgvector`, `pytest`, Docker Compose. Modèles configurables par variable d'environnement, avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `psycopg`, `pgvector`, `pytest`, Docker Compose. Modèles configurables par variable d'environnement, avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/
 ├── CLAUDE.md
 ├── README.md
+├── .env.example                # modèle des identifiants ; .env reste hors git
 ├── docker-compose.yml          # postgres + pgvector
 ├── pyproject.toml
 ├── docs/
 │   ├── spec-phase1.md          # ce document
-│   └── adr-001-fan-out.md      # décision single vs multi, pattern, gates
+│   └── adr-001-fan-out.md      # décision single vs multi, pattern, gates, NO_GO sur blocage dur seul
 ├── config/
 │   └── decision.yaml           # poids, seuils, marge, budget, politique humaine
+├── docker/
+│   └── initdb/                 # script d'init : applique migrations/*.sql
 ├── migrations/
-│   └── 001_audit_and_rag.sql
+│   ├── 001_audit.sql           # J1 : extension vector, audit_decisions, app_role
+│   └── 002_rag.sql             # J3 : rag_chunks
 ├── data/
 │   ├── contracts/              # 10 contrats synthétiques + 2 piégés
 │   └── corpus/                 # textes publics à indexer
 ├── src/cdg/
-│   ├── orchestrator.py         # seul fichier qui importe LangGraph
+│   ├── orchestrator.py         # seul fichier qui importe LangGraph : adaptateurs et câblage
 │   ├── state.py                # schémas d'état et Pydantic
-│   ├── crag.py                 # sous-graphe CRAG
+│   ├── config.py               # chargement et validation Pydantic de decision.yaml
+│   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
+│   ├── deps.py                 # contrats injectés : extracteur, CRAG (doublures en test)
+│   ├── crag.py                 # fonctions pures du CRAG ; sous-graphe compilé dans orchestrator.py
 │   ├── nodes/                  # un fichier par nœud, fonctions pures
 │   ├── rules/                  # une fonction par domaine
 │   ├── policy.py               # arbitrage humain, lu depuis la config
@@ -351,9 +453,9 @@ Chaque jour se termine par un commit qui passe ses tests.
 
 | Jour | Livrable | Tests verts |
 | --- | --- | --- |
-| J1 | Compose Postgres, migrations, schémas d'état, `orchestrator.py` avec nœuds bouchonnés, fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
-| J2 | `PostgresSaver`, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire` | 4, 5, 11, 12 |
-| J3 | Ingestion du corpus, sous-graphe CRAG, extraction réelle avec délimitation, `verify_extraction` | 3, 10 |
+| J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
+| J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire`, étude de `error_handler` (LangGraph 1.2) pour qu'un échec de nœud produise un `failure_report` structuré | 4, 5, 11, 12 |
+| J3 | Ingestion du corpus, CRAG (fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py`), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
 | J4 | `explain` avec validation, `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
 
@@ -362,3 +464,39 @@ Priorité si le temps manque : ne sacrifier ni J2, ni l'audit, ni le test d'inje
 ## Hors périmètre
 
 Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI, Helm, k3s (phase 3) ; Cloud Run et Terraform (phase 4, optionnelle). Pas d'interface graphique, pas de repli web dans le CRAG.
+
+## Historique des révisions
+
+- **23 septembre 2026, avant J1** :
+  - isolation : nœuds purs qui renvoient des dicts, adaptateurs LangGraph dans `orchestrator.py`, `human_review` adaptateur appelant `policy.py` ;
+  - routage : un seul mécanisme, `route` dans l'état lue par les arêtes, `Route` élargi, plus de `Command(goto=...)` ;
+  - budget dépassé → `ESCALADE` ;
+  - score, seuils, poids, `min_margin` et plafond de budget fixés ;
+  - ordre de `decision_gate` et blocage dur qui ignore la marge ;
+  - conflit calculé sur les domaines `OK` ;
+  - `final_decision` écrite seulement sur la route `explain` ;
+  - `Clause.present`, `REQUIRED_KINDS` et règles par domaine ;
+  - `pyyaml` et validation Pydantic de la configuration ;
+  - migration `001` sans `rag_chunks`, `app_role`, `.env` ;
+  - `extraction_attempts` incrémenté par `extract_clauses`.
+- **23 septembre 2026, avant la tâche 0 du J1** :
+  - pénalités de score fixées ;
+  - `NO_GO` rendu sur blocage dur seulement, choix de conception à reprendre dans l'ADR ;
+  - ordre final de `decision_gate` : blocage dur (avec `failure_report` budget si dépassé), budget, `INSUFFISANT`, conflit, seuils et marge ;
+  - arrondi unique à 6 décimales ;
+  - `audit_decisions.id` en `GENERATED ALWAYS AS IDENTITY` ;
+  - script d'init `psql -v` qui échoue sans mot de passe ;
+  - `validate_input` complet déplacé au J3 ;
+  - `reject` sans valeur de `Decision` et scellé via `audit_seal` ;
+  - nombre d'essais d'extraction dans `decision.yaml`.
+- **23 septembre 2026, après la tâche 0 du J1** :
+  - image PostgreSQL figée par empreinte (16.11, pgvector 0.8.1) ;
+  - verrouillage du sérialiseur des checkpoints ajouté au J2.
+- **23 septembre 2026, J1 tâche 5** :
+  - dans les nœuds, le paramètre de configuration s'appelle `decision_config`, car LangGraph réserve `config` (ainsi que `writer`, `store`, `runtime`, `previous`, `error`) aux objets qu'il injecte ;
+  - ajout de `src/cdg/deps.py` (contrats de l'extracteur et du CRAG injectés).
+- **23 septembre 2026, fin du J1** :
+  - durée d'engagement et préavis présents mais non chiffrés : pénalité par prudence, avec constat explicite ;
+  - CRAG : fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py` (J3) ;
+  - étude de `error_handler` au J2 pour les `failure_report` d'échec de nœud ;
+  - `LANGSMITH_TRACING=false` explicite dans `.env.example`.
