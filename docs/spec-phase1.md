@@ -275,7 +275,7 @@ Points à maîtriser :
 - **Isolation** : seul `orchestrator.py` importe LangGraph ; il contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework.
 - **thread_id** : un contrat = un thread. Clé de reprise, de l'historique et du lien avec la piste d'audit.
 - **Échecs de nœud (J2)** : une exception dans un nœud (clause ou verdict manquant, erreur d'API) interrompt aujourd'hui l'exécution. Au J2, étudier le paramètre `error_handler` de `add_node` (LangGraph 1.2) pour la transformer en `failure_report` structuré, conformément à la règle « pas de repli silencieux ».
-- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un sérialiseur dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`allowed_msgpack_modules` du `JsonPlusSerializer`, ou `LANGGRAPH_STRICT_MSGPACK=true` complété de cette liste). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement. Un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Un test du J2 vérifie qu'un type hors liste est refusé.
+- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un `StrictSerializer` dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`), plus les types sûrs de LangGraph (`Send`, `Interrupt`, dates…). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement ; un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Même avec une liste, un type bloqué revient **dégradé en `dict`**, avec un simple avertissement : c'est un repli silencieux. `StrictSerializer` capte l'événement de blocage émis par la bibliothèque et lève `BlockedDeserialization`. Tout vit dans `orchestrator.py`.
 
 ## Déterminisme et piste d'audit
 
@@ -367,11 +367,11 @@ Une seule instance PostgreSQL avec pgvector, lancée par Docker Compose.
 
 | Usage | Tables | Création |
 | --- | --- | --- |
-| Checkpoints LangGraph | Tables du checkpointer | `checkpointer.setup()` |
+| Checkpoints LangGraph | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | `uv run python -m cdg.cli setup-db` (identifiants administrateur) : `setup()` puis droits d'`app_role` |
 | Corpus RAG | `rag_chunks` (id, domain, source, text, embedding vector) | Migration `002` (J3) + script d'ingestion |
 | Journal d'audit | `audit_decisions` | Migration `001` (J1) |
 
-Migrations en phase 1 : un script shell monté dans `docker-entrypoint-initdb.d` applique `migrations/*.sql` avec `psql -v ON_ERROR_STOP=1 -v app_password=...`. Il échoue explicitement si la variable du mot de passe applicatif est absente ou vide. Les migrations ne s'exécutent que sur un volume vide, ce que le README signale. La migration `001` (J1) crée l'extension `vector`, la table `audit_decisions` et le rôle `app_role`, qui reçoit `SELECT, INSERT` sur `audit_decisions` et rien d'autre. `rag_chunks` arrive en `002` au J3, une fois la dimension d'embedding fixée. Les droits sur les tables du checkpointer sont traités au J2. Identifiants dans `.env` (ignoré par git), avec un `.env.example` commité.
+Migrations en phase 1 : un script shell monté dans `docker-entrypoint-initdb.d` applique `migrations/*.sql` avec `psql -v ON_ERROR_STOP=1 -v app_password=...`. Il échoue explicitement si la variable du mot de passe applicatif est absente ou vide. Les migrations ne s'exécutent que sur un volume vide, ce que le README signale. La migration `001` (J1) crée l'extension `vector`, la table `audit_decisions` et le rôle `app_role`, qui reçoit `SELECT, INSERT` sur `audit_decisions` et rien d'autre. `rag_chunks` arrive en `002` au J3, une fois la dimension d'embedding fixée. Tables du checkpointer : `app_role` reçoit `SELECT, INSERT, UPDATE` sur `checkpoints`, `checkpoint_blobs` et `checkpoint_writes`, et rien sur `checkpoint_migrations`. C'est ce que demandent les requêtes de `PostgresSaver` 3.1.2 (`SELECT`, `INSERT ... ON CONFLICT DO NOTHING / DO UPDATE`). Pas de `DELETE` : seul `delete_thread` en a besoin, et l'application ne l'utilise pas. Un test vérifie qu'un cycle complet (run, interrupt, resume) passe avec ces seuls droits. Identifiants dans `.env` (ignoré par git), avec un `.env.example` commité.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -418,7 +418,7 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `psycopg`, `pgvector`, `pytest`, Docker Compose. Modèles configurables par variable d'environnement, avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `pytest`, Docker Compose. Modèles configurables par variable d'environnement, avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/
@@ -455,7 +455,9 @@ contract-decision-graph/
 └── tests/
 ```
 
-CLI phase 1 : `run <contrat>`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`.
+CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `run <contrat>`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
+
+Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si la base est arrêtée. On les exclut volontairement avec `-m "not pg"`, jamais par un saut silencieux.
 
 ## Découpage en 4 à 5 jours
 
@@ -511,6 +513,9 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
   - étude de `error_handler` au J2 pour les `failure_report` d'échec de nœud ;
   - `LANGSMITH_TRACING=false` explicite dans `.env.example`.
 - **23 septembre 2026, J2** :
+  - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
+  - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
+  - `python-dotenv` pour lire `.env` ; marqueur pytest `pg`.
   - une réponse humaine mal formée est redemandée, comme une réponse refusée par la politique, au lieu de faire échouer le nœud ;
   - l'appariement de plusieurs `interrupt()` par ordre d'appel est vérifié ;
   - `human_policy.hard_block_review` (option c) : `false` par défaut, auquel cas un blocage dur donne `NO_GO` vers `explain` ; à `true`, il passe en revue humaine avec `NO_GO` proposé. Le critère n° 12 se teste avec `true`.

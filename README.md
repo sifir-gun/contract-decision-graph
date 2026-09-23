@@ -10,7 +10,8 @@ Données uniquement synthétiques ou publiques.
 cp .env.example .env        # puis remplacer chaque valeur
 docker compose up -d        # PostgreSQL 16.11 + pgvector 0.8.1
 uv sync
-uv run pytest
+uv run python -m cdg.cli setup-db   # une fois : tables du checkpointer, droits d'app_role
+uv run pytest                       # -m "not pg" pour exclure volontairement les tests PostgreSQL
 ```
 
 ## Migrations

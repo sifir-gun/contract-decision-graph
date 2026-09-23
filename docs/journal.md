@@ -249,3 +249,37 @@ Tests :
 **Pièges.**
 - Le critère n° 12 était inatteignable avec la décision n° 5 (blocage dur vers `explain`). Cursor l'avait relevé, mais ne l'avait testé que sur la fonction pure de la politique. Un critère d'acceptation doit se tester par le graphe. Sinon, il faut dire explicitement qu'il ne porte que sur une fonction.
 - Le scellement de la levée (`overrides_block` et motif) relève d'`audit_seal`, au J4. Au J2, la levée est seulement portée par `human` dans l'état.
+
+### J2 tâche 1 : checkpointer PostgreSQL, sérialiseur strict, setup-db
+
+**Fait.**
+- `orchestrator.py` :
+  - `StrictSerializer` : liste autorisée `Clause`, `AgentVerdict`, `HumanDecision`, `Usage` ;
+  - `open_graph`, qui compile le graphe avec `PostgresSaver` et le sérialiseur strict ;
+  - `setup_database`, qui appelle `setup()` puis règle les droits d'`app_role` ;
+  - `delete_thread`, réservé au ménage des tests.
+- `settings.py` : `.env` lu par `python-dotenv` (`override=False`), chaînes de connexion administrateur et `app_role`, erreur explicite si une variable manque.
+- `cli.py` : première commande, `setup-db`.
+- Tests :
+  - droits exacts d'`app_role` ;
+  - cycle complet run, interrupt, resume sur PostgreSQL avec les seuls droits d'`app_role`, relu depuis une nouvelle connexion (critère n° 4 sur base réelle) ;
+  - `DELETE` refusé ;
+  - sérialiseur (types admis, types bloqués, isolation entre fils).
+- Marqueur `pg`. Base arrêtée, ces tests sortent **en erreur** avec le message « PostgreSQL injoignable » (vérifié en arrêtant le conteneur). `-m "not pg"` les exclut explicitement.
+
+**Requêtes de `PostgresSaver` 3.1.2**, lues dans le code installé :
+- `SELECT` ;
+- `INSERT ... ON CONFLICT DO NOTHING` sur les blobs et les writes ;
+- `INSERT ... ON CONFLICT DO UPDATE` sur les checkpoints et les writes, qui exige le droit `UPDATE` ;
+- `DELETE` seulement dans `delete_thread`, que l'application n'utilise pas ;
+- `checkpoint_migrations` n'est lue que par `setup()`.
+
+`app_role` reçoit donc `SELECT, INSERT, UPDATE` sur les 3 tables de données, et rien d'autre.
+
+**Pièges.**
+- **Le sérialiseur dégrade en silence** (risque confirmé). Avec `allowed_msgpack_modules`, un type hors liste ne lève pas d'erreur : il revient en `dict` (`Intrus(x=1)` devient `{'x': 1}`), avec un avertissement journalisé une seule fois. Dans un état typé, un `AgentVerdict` falsifié pourrait ainsi revenir en dict sans que rien ne casse.
+- **On ne peut pas lever depuis le hook.** Le hook de lecture de msgpack intercepte **toute** exception et renvoie `None`, et les exceptions des écouteurs d'événements sont avalées et journalisées. `StrictSerializer` collecte donc les événements `msgpack_blocked` dans une variable propre au fil, puis lève `BlockedDeserialization` après `loads_typed`.
+- **Limite restante.** Si le constructeur d'un type **autorisé** échoue (une donnée falsifiée mais de type connu), la bibliothèque renvoie `None` sans émettre d'événement. Le sérialiseur ne protège pas du contenu falsifié ; c'est le rôle de la chaîne d'audit (J4).
+- **`PostgresSaver.from_conn_string`** n'accepte pas de sérialiseur. La connexion est donc ouverte à la main, avec les mêmes paramètres (`autocommit`, `prepare_threshold=0`, `dict_row`).
+- **`prepare_threshold=0`** fait préparer chaque requête, et une requête préparée ne peut contenir qu'une commande (« cannot insert multiple commands into a prepared statement »). `REVOKE` et `GRANT` sont donc exécutés séparément.
+- **Base arrêtée** : pytest compte les tests `pg` en *error* (échec de la fixture de session), pas en *failed*. Le code de sortie est non nul dans les deux cas, et aucun test n'est sauté.

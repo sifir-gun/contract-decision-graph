@@ -31,9 +31,10 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 
 - `docker compose up -d` : démarre PostgreSQL + pgvector (les migrations de `docker-entrypoint-initdb.d` ne s'exécutent que sur un volume vide)
 - `uv sync` : installe les dépendances
-- `uv run pytest` : lance les tests
+- `uv run python -m cdg.cli setup-db` : tables du checkpointer et droits d'app_role (une fois, après `docker compose up -d`)
+- `uv run pytest` : lance les tests (ceux marqués `pg` exigent PostgreSQL ; `-m "not pg"` pour les exclure volontairement)
 - `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify)
 
 ## Stack
 
-Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, psycopg, pgvector, pytest, Docker Compose.
+Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, pytest, Docker Compose.
