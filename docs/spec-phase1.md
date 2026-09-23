@@ -71,7 +71,7 @@ Chaque analyste appelle le sous-graphe CRAG pour récupérer les références ut
 | audit_seal | Sérialisation canonique, SHA-256, chaînage | Non |
 | reject | Verdict d'invalidité explicite : `reject_reason` renseigné, `final_decision` reste `None` (pas de valeur « invalide » dans `Decision`) ; mène à `audit_seal`, car un rejet est scellé comme le reste | Non |
 
-Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1.
+Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1. `crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`) ; le sous-graphe est compilé dans `orchestrator.py`, qui reste le seul à importer LangGraph (J3).
 
 ## Schéma d'état
 
@@ -266,9 +266,10 @@ Points à maîtriser :
 - **Fan-out par l'arête** : l'arête qui suit `verify_extraction` renvoie une liste de `Send` quand `route = "analysts"`, chacun portant un état privé `AnalystInput`. Vérifier dans la version installée ce retour de `Send` depuis une arête conditionnelle et la déclaration du schéma d'entrée de `analyst`.
 - **Fan-out et échecs** : les 4 analystes tournent dans le même superstep. Si un seul échoue, les écritures des autres sont conservées par le checkpointer et seul le fautif est rejoué. `RetryPolicy` sur `analyst` pour les erreurs d'API.
 - **Timeout humain, échec fermé** : une commande `expire` reprend les threads en attente depuis plus de N heures avec une décision système `NO_GO`, motif timeout, tracée comme telle. Jamais d'approbation automatique.
-- **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Vérifier l'héritage du checkpointer par un sous-graphe dans la version installée.
+- **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Vérifier l'héritage du checkpointer par un sous-graphe dans la version installée.
 - **Isolation** : seul `orchestrator.py` importe LangGraph ; il contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework.
 - **thread_id** : un contrat = un thread. Clé de reprise, de l'historique et du lien avec la piste d'audit.
+- **Échecs de nœud (J2)** : une exception dans un nœud (clause ou verdict manquant, erreur d'API) interrompt aujourd'hui l'exécution. Au J2, étudier le paramètre `error_handler` de `add_node` (LangGraph 1.2) pour la transformer en `failure_report` structuré, conformément à la règle « pas de repli silencieux ».
 - **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un sérialiseur dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`allowed_msgpack_modules` du `JsonPlusSerializer`, ou `LANGGRAPH_STRICT_MSGPACK=true` complété de cette liste). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement. Un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Un test du J2 vérifie qu'un type hors liste est refusé.
 
 ## Déterminisme et piste d'audit
@@ -314,8 +315,8 @@ Chaque clause des `REQUIRED_KINDS` est toujours extraite. Si `present = false`, 
 | financier | `revision_prix` | plafond de révision, % ; `None` = non plafonnée | présente et `value` None | `hard_block` |
 | financier | `penalites_retard` | plafond des pénalités, % ; `None` = non plafonnées | absente, ou `value` < 5 | score réduit |
 | conformite | `donnees_personnelles`, `accord_traitement_donnees` | `None` (seul `present` compte) | données personnelles présentes sans accord de traitement (art. 28 RGPD) | `hard_block` |
-| operationnel | `duree_engagement` | mois | `value` > 36 | score réduit |
-| operationnel | `preavis_resiliation` | mois | `value` > 6 | score réduit |
+| operationnel | `duree_engagement` | mois ; `None` = non chiffrée | `value` > 36, ou présente et `value` None | score réduit ; si non chiffrée, pénalité par prudence avec constat explicite |
+| operationnel | `preavis_resiliation` | mois ; `None` = non chiffré | `value` > 6, ou présente et `value` None | score réduit ; si non chiffré, pénalité par prudence avec constat explicite |
 
 Calcul du score de domaine : départ à 1,0, puis chaque règle déclenchée retire sa pénalité, avec un résultat borné entre 0 et 1. Un `hard_block` ne modifie pas le score : il agit par `decision_gate`. Pénalités de la configuration du projet :
 
@@ -435,7 +436,7 @@ contract-decision-graph/
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
 │   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
 │   ├── deps.py                 # contrats injectés : extracteur, CRAG (doublures en test)
-│   ├── crag.py                 # sous-graphe CRAG
+│   ├── crag.py                 # fonctions pures du CRAG ; sous-graphe compilé dans orchestrator.py
 │   ├── nodes/                  # un fichier par nœud, fonctions pures
 │   ├── rules/                  # une fonction par domaine
 │   ├── policy.py               # arbitrage humain, lu depuis la config
@@ -453,8 +454,8 @@ Chaque jour se termine par un commit qui passe ses tests.
 | Jour | Livrable | Tests verts |
 | --- | --- | --- |
 | J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
-| J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire` | 4, 5, 11, 12 |
-| J3 | Ingestion du corpus, sous-graphe CRAG, `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
+| J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire`, étude de `error_handler` (LangGraph 1.2) pour qu'un échec de nœud produise un `failure_report` structuré | 4, 5, 11, 12 |
+| J3 | Ingestion du corpus, CRAG (fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py`), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
 | J4 | `explain` avec validation, `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
 
@@ -494,3 +495,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
 - **23 septembre 2026, J1 tâche 5** :
   - dans les nœuds, le paramètre de configuration s'appelle `decision_config`, car LangGraph réserve `config` (ainsi que `writer`, `store`, `runtime`, `previous`, `error`) aux objets qu'il injecte ;
   - ajout de `src/cdg/deps.py` (contrats de l'extracteur et du CRAG injectés).
+- **23 septembre 2026, fin du J1** :
+  - durée d'engagement et préavis présents mais non chiffrés : pénalité par prudence, avec constat explicite ;
+  - CRAG : fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py` (J3) ;
+  - étude de `error_handler` au J2 pour les `failure_report` d'échec de nœud ;
+  - `LANGSMITH_TRACING=false` explicite dans `.env.example`.

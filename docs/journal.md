@@ -174,3 +174,22 @@ Tests :
 - **Canaux à réducteur initialisés à `[]`.** Après un rejet, `verdicts` et `usage` valent `[]` dans l'état final, même si aucun nœud ne les a écrits. Au J4, l'audit ne pourra donc pas distinguer « absent » de « vide » sur ces clés ; il faudra s'appuyer sur `route` et `reject_reason`.
 - **`input_schema` explicite pour `analyst`**, à cause du `partial` (voir la tâche 0). Le test `route_after_verify` vérifie qu'un `Send` ne porte que `domain` et `clauses`.
 - **Doublures et parallélisme.** Les branches `Send` synchrones tournent dans un pool de threads. Les doublures n'enregistrent leurs appels que par `list.append`, qui est atomique en CPython. Les tests comparent ensuite des listes triées, jamais un ordre d'appel.
+
+## 2026-09-23 · Fin du J1
+
+### Docs : décisions de fin de J1, CRAG, error_handler, télémétrie
+
+**Fait.**
+- Spec :
+  - durée d'engagement et préavis non chiffrés pénalisés par prudence, avec constat (validé) ;
+  - CRAG en fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py` au J3 ; la règle d'isolation ne change pas ;
+  - étude de `error_handler` au J2 pour les `failure_report` d'échec de nœud.
+- `.env.example` : `LANGSMITH_TRACING=false` explicite.
+
+**Pour le README.**
+- **Aucune télémétrie externe par défaut.** `langsmith` arrive comme dépendance de `langchain-core` et se charge même comme plugin de pytest. Il n'envoie rien tant que `LANGSMITH_TRACING` n'est pas activé.
+- **Limite.** Python ne charge pas `.env` tout seul : seul Docker Compose le lit. La variable ne protège donc l'application qu'une fois exportée ou chargée par la CLI (J2). Le traçage reste désactivé quand elle est absente.
+
+**Pièges.**
+- **Deux agents sur la même branche.** Un agent Cursor a commité la tâche 1 du J2 (`99e5d3b`) sur `phase1-j1` pendant la clôture du J1, et continuait à modifier le même dossier de travail. Pour que la PR ne porte que le J1, la livraison part d'une branche dédiée, `phase1-j1-livraison`, créée à partir de `9549040` dans un dossier de travail séparé. Le travail du J2 est resté intact.
+- **Leçon** : un seul agent par dossier de travail, et une branche par jour de spec.
