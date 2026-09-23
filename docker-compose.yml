@@ -1,0 +1,24 @@
+services:
+  db:
+    # PostgreSQL 16.11 + pgvector 0.8.1, figé par empreinte
+    image: pgvector/pgvector:pg16@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER absent, voir .env.example}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent, voir .env.example}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB absent, voir .env.example}
+      # Contrôlé par docker/initdb/00_migrate.sh, qui échoue explicitement s'il est vide
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
