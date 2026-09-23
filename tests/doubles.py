@@ -1,6 +1,6 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
-from cdg.state import REQUIRED_KINDS, Clause
+from cdg.state import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
 
 # Contrat synthétique favorable : aucune règle déclenchée.
 FAVORABLE = {
@@ -35,3 +35,18 @@ def clauses(**overrides) -> list[Clause]:
             result.append(Clause(kind=kind, present=True,
                                  quote=f"Article synthétique : {kind}.", value=value))
     return result
+
+
+def verdict(domain, score=1.0, hard_block=False, status="OK") -> AgentVerdict:
+    return AgentVerdict(domain=domain, score=score, hard_block=hard_block, findings=[],
+                        evidence_ids=[], retrieval_status=status)
+
+
+def verdicts(**by_domain) -> list[AgentVerdict]:
+    """Un verdict favorable par domaine ; `domaine=dict(...)` en surcharge un."""
+    return [verdict(d, **by_domain.get(d, {})) for d in DOMAINS]
+
+
+def usage(tokens_in=0, tokens_out=0, node="double") -> Usage:
+    return Usage(node=node, model="double", tokens_in=tokens_in, tokens_out=tokens_out,
+                 latency_ms=0)

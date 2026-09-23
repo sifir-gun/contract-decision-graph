@@ -131,3 +131,22 @@ Un test garantit que seuls `verdicts` et `usage` portent un réducteur.
 - **Clause attendue manquante ou en double** : la règle lève une `ValueError` au lieu de la traiter comme absente. Il n'y a pas de repli silencieux ; `verify_extraction` (J3) garantit la complétude en amont.
 - **`value = None` n'a pas le même sens selon la clause.** Il vaut « illimitée » ou « non plafonnée » pour les responsabilités, la révision de prix et les pénalités, comme l'indique la spec. Pour la durée d'engagement et le préavis, la spec ne dit rien. **Choix non tranché par la spec** : une clause présente mais non chiffrée est pénalisée par prudence, avec un constat explicite. À valider.
 - **Arrondi** : un plafond fournisseur de 99,9999999 % est lu 100 % après arrondi, donc sans pénalité. Le test le fixe.
+
+### J1 tâche 4 : decision_gate
+
+**Fait.** `src/cdg/nodes/decision_gate.py` : `aggregate`, `conflict`, `total_tokens` et le nœud `decision_gate`, tous en Python pur.
+- Ordre : blocage dur, budget, `INSUFFISANT`, conflit, seuils puis marge.
+- Un blocage dur donne `NO_GO` et part vers `explain`, et le `failure_report` budget reste renseigné si le plafond est dépassé.
+- `final_decision` n'est écrite que sur la route `explain`.
+
+Tests :
+- critère d'acceptation n° 2, décliné sur chacun des 4 domaines ;
+- scénarios de contrôle de la spec ;
+- bornes de budget, de conflit et de marge ;
+- seuil `NO_GO` atteint avec une autre configuration (`conflict_gap = 1`).
+
+**Pièges.**
+- **Bruit flottant réel.** Les scores (0,41 ; 0,47 ; 0,47 ; 0,71) donnent une somme brute de `0.49999999999999994`. Sans l'arrondi, ce serait `NO_GO` au lieu de `GO_RESERVES`. Le test le fixe. Ma première tentative de test ne montrait rien : les combinaisons « rondes » (0,75 ; 0,79 ; 0,80) tombent juste en binaire, et il a fallu chercher un cas qui déraille vraiment.
+- **Ordre de sommation.** Les verdicts arrivent par le réducteur dans l'ordre d'exécution des branches parallèles. La somme pondérée se fait donc dans l'ordre fixe de `DOMAINS`, pour ne pas dépendre de cet ordre (testé).
+- **Verdict manquant ou en double** : `aggregate` lève une `ValueError`. Un doublon pourrait venir d'une branche rejouée. Là encore, pas de repli silencieux.
+- **Test mal calculé.** Une première version de test visait 0,749999 mais avait oublié un domaine. En la corrigeant, l'écart 0,500003 déclenchait le conflit. Il faut vérifier l'arithmétique de chaque scénario, conflit compris.
