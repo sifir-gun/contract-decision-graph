@@ -347,3 +347,24 @@ Tests :
 - **Interblocage dans `PostgresSaver.list()`.** Ce générateur produit ses résultats *à l'intérieur* de `with self._cursor()`, qui détient `self.lock`, un `threading.Lock` non réentrant. Appeler `graph.get_state()` pendant le parcours bloque donc indéfiniment : la suite de tests a gelé. Correctif : épuiser le générateur, pour collecter les identifiants de threads, **puis** interroger chaque thread.
 - **Thread orphelin.** Le processus gelé a été tué, et le nettoyage de la fixture n'a pas tourné : un thread `test-…` est resté en base, suspendu. Il a été supprimé à la main. Un test interrompu peut laisser des threads orphelins, et `expire` les verrait.
 - **`next` et une réponse refusée.** Après une réponse refusée, `human_review` s'interrompt de nouveau, et la tâche est bien présente dans `snapshot.tasks` avec son interrupt. Pourtant, **`snapshot.next` vaut `()`**. L'ancien critère, `next == ("human_review",)`, faisait donc refuser par `resume` la bonne réponse suivante, et `expire` ignorait le thread. **Bug réel**, invisible tant que les tests ne reprenaient qu'une fois par la CLI. Nouveau critère : une tâche `human_review` porte un interrupt. Un test de non-régression enchaîne, via la CLI, une réponse refusée puis une réponse acceptée.
+
+### J2 tâche 5 : étude d'error_handler (rapport, sans code)
+
+**Sonde** (jetable, hors dépôt) dans langgraph 1.2.12 :
+
+| Cas | Résultat |
+| --- | --- |
+| Gestionnaire qui renvoie un dict, arête fixe après le nœud en échec | Écritures appliquées, puis **fin d'exécution** (`next = ()`) : l'arête n'est pas suivie |
+| Gestionnaire qui renvoie un dict avec `route`, arête conditionnelle qui lit `route` | Même chose : `route` est écrite mais jamais lue, fin d'exécution |
+| Gestionnaire qui renvoie `Command(update=..., goto="human_review")`, avec `destinations` | `human_review` est atteint : **seul moyen de continuer** |
+| Un `Send` qui échoue, seul | Gestionnaire appelé, exécution terminée sans erreur |
+| 4 `Send` en parallèle, dont un qui échoue | Gestionnaire appelé, **mais l'exception remonte** et l'exécution échoue |
+
+**Conclusion.**
+- `error_handler` ne s'intègre pas à la règle « un seul mécanisme de routage » : il faut un `Command(goto=...)`.
+- Il ne protège pas non plus notre fan-out d'analystes, qui est pourtant le cas le plus probable d'erreur d'API (CRAG au J3).
+- Arrêt prévu : décision d'architecture soumise au propriétaire du repo.
+
+**Pièges.**
+- La documentation (`NodeError`) donne un exemple qui renvoie un `Command`, sans dire qu'un dict termine l'exécution. Seule une sonde l'a montré.
+- Le comportement en parallèle (exception propagée alors que le gestionnaire a tourné) n'est pas documenté. Bogue ou intention : à revérifier à la prochaine version de LangGraph.
