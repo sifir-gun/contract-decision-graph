@@ -79,3 +79,23 @@ Tenu à jour à chaque commit : ce qui a été fait, et surtout les pièges déc
 **Fait.**
 - Création de ce journal.
 - Verrouillage du sérialiseur des checkpoints inscrit dans la spec (points à maîtriser et ligne J2).
+
+## 2026-09-23 · J1, tâches 1 à 5
+
+### J1 tâche 1 : schémas d'état et modèles métier
+
+**Fait.** `src/cdg/state.py` :
+- types `Domain`, `Decision`, `Route`, `RetrievalStatus` ;
+- constantes `DOMAINS` et `REQUIRED_KINDS` ;
+- modèles `Clause`, `AgentVerdict`, `HumanDecision`, `Usage` ;
+- `ContractState` et `AnalystInput`.
+
+Invariants validés par Pydantic :
+- clause absente : citation vide ; clause présente : citation non vide ;
+- score entre 0 et 1 ;
+- tokens et latence positifs ou nuls.
+
+Un test garantit que seuls `verdicts` et `usage` portent un réducteur.
+
+**Pièges.**
+- En Pydantic v2, un champ `float | None` **sans valeur par défaut** reste obligatoire. `Clause.value` doit donc toujours être fourni, même à `None`. C'est voulu : l'extracteur doit se prononcer explicitement.
