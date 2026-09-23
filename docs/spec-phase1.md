@@ -268,6 +268,7 @@ Points à maîtriser :
 - **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Vérifier l'héritage du checkpointer par un sous-graphe dans la version installée.
 - **Isolation** : seul `orchestrator.py` importe LangGraph ; il contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework.
 - **thread_id** : un contrat = un thread. Clé de reprise, de l'historique et du lien avec la piste d'audit.
+- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un sérialiseur dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`allowed_msgpack_modules` du `JsonPlusSerializer`, ou `LANGGRAPH_STRICT_MSGPACK=true` complété de cette liste). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement. Un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Un test du J2 vérifie qu'un type hors liste est refusé.
 
 ## Déterminisme et piste d'audit
 
@@ -450,7 +451,7 @@ Chaque jour se termine par un commit qui passe ses tests.
 | Jour | Livrable | Tests verts |
 | --- | --- | --- |
 | J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
-| J2 | `PostgresSaver`, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire` | 4, 5, 11, 12 |
+| J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire` | 4, 5, 11, 12 |
 | J3 | Ingestion du corpus, sous-graphe CRAG, `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
 | J4 | `explain` avec validation, `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
@@ -485,3 +486,6 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
   - `validate_input` complet déplacé au J3 ;
   - `reject` sans valeur de `Decision` et scellé via `audit_seal` ;
   - nombre d'essais d'extraction dans `decision.yaml`.
+- **23 septembre 2026, après la tâche 0 du J1** :
+  - image PostgreSQL figée par empreinte (16.11, pgvector 0.8.1) ;
+  - verrouillage du sérialiseur des checkpoints ajouté au J2.
