@@ -115,3 +115,19 @@ Un test garantit que seuls `verdicts` et `usage` portent un réducteur.
 - **Mode strict de Pydantic** : sans lui, `max_tokens_per_contract: true` passe pour `1`, et `"60000"` passe pour un entier. Le mode strict refuse ces conversions silencieuses. Il accepte en revanche un entier YAML (`100`) pour un champ `float`, ce qui nous arrange.
 - **Somme des poids** : elle est comparée à 1 après `rounded`. Les flottants rendraient fragile une égalité stricte.
 - **`-0.0`** : `round(-1e-7, 6)` vaut `-0.0`, que `json.dumps` écrit `"-0.0"`. Sans normalisation, deux valeurs égales produiraient deux empreintes différentes au J4.
+
+### J1 tâche 3 : règles par domaine
+
+**Fait.**
+- `src/cdg/rules/` : une fonction pure par domaine, plus le registre `RULES`.
+- Signature : `(clauses, retrieval_status, config) -> AgentVerdict`.
+- Score : 1,0 moins les pénalités déclenchées, borné à [0, 1].
+- Un blocage dur ne touche pas le score.
+- Un statut `INSUFFISANT` ajoute un constat au domaine.
+- Chaque comparaison à un seuil passe par `rounded`.
+- `tests/doubles.py` : fabrique de 8 clauses synthétiques favorables, surchargeables une par une.
+
+**Pièges et choix.**
+- **Clause attendue manquante ou en double** : la règle lève une `ValueError` au lieu de la traiter comme absente. Il n'y a pas de repli silencieux ; `verify_extraction` (J3) garantit la complétude en amont.
+- **`value = None` n'a pas le même sens selon la clause.** Il vaut « illimitée » ou « non plafonnée » pour les responsabilités, la révision de prix et les pénalités, comme l'indique la spec. Pour la durée d'engagement et le préavis, la spec ne dit rien. **Choix non tranché par la spec** : une clause présente mais non chiffrée est pénalisée par prudence, avec un constat explicite. À valider.
+- **Arrondi** : un plafond fournisseur de 99,9999999 % est lu 100 % après arrondi, donc sans pénalité. Le test le fixe.
