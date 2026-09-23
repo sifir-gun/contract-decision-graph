@@ -114,3 +114,33 @@ def test_seuls_verdicts_et_usage_ont_un_reducteur():
 
 def test_etat_prive_des_analystes():
     assert set(get_type_hints(AnalystInput)) == {"domain", "clauses"}
+
+
+# --- HumanDecision.source : décision humaine ou système ---------------------------
+
+def test_source_humaine_par_defaut():
+    assert HumanDecision(decision="GO", reviewer="relecteur-synth", reason="m").source == "humain"
+
+
+def test_decision_systeme_no_go_acceptee():
+    h = HumanDecision(decision="NO_GO", reviewer="systeme:expire", reason="timeout",
+                      source="systeme")
+    assert (h.source, h.decision) == ("systeme", "NO_GO")
+
+
+@pytest.mark.parametrize("decision", ["GO", "GO_RESERVES", "ESCALADE"])
+def test_decision_systeme_ne_peut_etre_que_no_go(decision):
+    with pytest.raises(ValidationError, match="NO_GO"):
+        HumanDecision(decision=decision, reviewer="systeme:expire", reason="timeout",
+                      source="systeme")
+
+
+def test_decision_systeme_exige_un_relecteur_systeme():
+    with pytest.raises(ValidationError, match="systeme:"):
+        HumanDecision(decision="NO_GO", reviewer="relecteur-synth", reason="timeout",
+                      source="systeme")
+
+
+def test_un_humain_ne_peut_pas_se_dire_systeme():
+    with pytest.raises(ValidationError, match="réservé"):
+        HumanDecision(decision="NO_GO", reviewer="systeme:expire", reason="m")

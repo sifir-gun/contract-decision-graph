@@ -119,3 +119,9 @@ def test_review_applique_la_politique():
     payload = {"decision": "GO", "reviewer": "r", "reason": "m"}
     decision, error = policy.review(payload, BLOCKED, CONFIG)
     assert decision is None and "overrides_block" in error
+
+
+def test_decision_systeme_d_expiration_acceptee_meme_sur_blocage():
+    h = HumanDecision(decision="NO_GO", reviewer="systeme:expire", reason="timeout",
+                      source="systeme")
+    assert policy.check(h, BLOCKED, CONFIG) is None

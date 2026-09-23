@@ -7,10 +7,11 @@ import argparse
 import json
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from cdg import orchestrator, settings, stub_j2
+from cdg import expiry, orchestrator, settings, stub_j2
 from cdg.config import load_config
 from cdg.state import Decision
 
@@ -57,6 +58,15 @@ def _history(args: argparse.Namespace) -> dict:
     return {"mode": stub_j2.MODE, "thread_id": args.thread_id, "checkpoints": checkpoints}
 
 
+def _expire(args: argparse.Namespace) -> dict:
+    older_than = expiry.parse_duration(args.older_than)
+    now = datetime.now(UTC)
+    with _graph() as graph:
+        expired = orchestrator.expire_threads(graph, older_than, now)
+    return {"mode": stub_j2.MODE, "older_than": args.older_than,
+            "now": now.isoformat(), "expired": expired}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cdg", description=__doc__.splitlines()[0],
                                      epilog=STUB_NOTICE)
@@ -89,6 +99,12 @@ def build_parser() -> argparse.ArgumentParser:
                                              "au plus récent")
     history.add_argument("thread_id")
     history.set_defaults(handler=_history)
+
+    expire = sub.add_parser(
+        "expire", help="NO_GO système (motif timeout) pour les threads en attente "
+                       "d'un humain depuis plus que le délai ; jamais d'approbation")
+    expire.add_argument("--older-than", required=True, help="délai : 24h, 30m, 2d…")
+    expire.set_defaults(handler=_expire)
     return parser
 
 

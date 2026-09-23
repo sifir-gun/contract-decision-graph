@@ -41,11 +41,28 @@ class AgentVerdict(BaseModel):
     retrieval_status: RetrievalStatus
 
 
+SYSTEM_REVIEWER_PREFIX = "systeme:"
+
+
 class HumanDecision(BaseModel):
     decision: Decision
     reviewer: str
     reason: str
     overrides_block: bool = False   # vrai si l'humain lève un blocage dur
+    source: Literal["humain", "systeme"] = "humain"   # systeme : expire (timeout)
+
+    @model_validator(mode="after")
+    def _decision_systeme(self) -> "HumanDecision":
+        system_reviewer = self.reviewer.startswith(SYSTEM_REVIEWER_PREFIX)
+        if self.source == "systeme":
+            if self.decision != "NO_GO":   # échec fermé : jamais d'approbation automatique
+                raise ValueError("une décision système ne peut être que NO_GO")
+            if not system_reviewer:
+                raise ValueError(f"décision système : relecteur {SYSTEM_REVIEWER_PREFIX}…")
+        elif system_reviewer:
+            raise ValueError(f"le préfixe {SYSTEM_REVIEWER_PREFIX} est réservé aux "
+                             "décisions système")
+        return self
 
 
 class Usage(BaseModel):

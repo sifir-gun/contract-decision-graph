@@ -321,3 +321,29 @@ Tests :
 **Pièges.**
 - **Où tuer le processus.** Le tuer après la fin de `cli.main` ne prouverait rien : le context manager a déjà fermé la connexion proprement. Il faut le tuer dans le `with`. PostgreSQL referme seul la session orpheline, et le checkpoint écrit avant `interrupt()` suffit à reprendre.
 - **Environnement du sous-processus.** Il faut `sys.executable`, c'est-à-dire le Python du `.venv` lancé par `uv run`, pour que `cdg` et ses dépendances soient importables sans rien configurer.
+
+### J2 tâche 4 : expire, décision système, critère n° 11
+
+**Fait.**
+- `HumanDecision.source` : `humain` par défaut, ou `systeme`. Une décision système n'est valide que si elle vaut `NO_GO` et que son relecteur commence par `systeme:`. Un humain ne peut pas utiliser le préfixe `systeme:`, pour qu'on ne puisse pas se faire passer pour le système.
+- `expiry.py`, en fonctions pures :
+  - `parse_duration` : `24h`, `30m`, `2d`, `90s` ;
+  - `expired` : strictement au-delà du délai, avec une horloge qui doit avoir un fuseau ;
+  - `system_decision` : `NO_GO`, relecteur `systeme:expire`, motif « timeout : en attente depuis … ».
+- `orchestrator.expire_threads(graph, older_than, now, thread_ids=None)` et la commande `expire --older-than`.
+- Tests :
+  - critère n° 11 : le thread expiré finit en `NO_GO` système ;
+  - un thread pile au délai n'est pas touché ;
+  - un thread terminé n'est jamais repris ;
+  - un thread qui a reçu une réponse refusée expire aussi ;
+  - la CLI avec un délai de 1 000 jours n'a aucun effet ;
+  - une durée invalide est rejetée.
+
+**Choix.**
+- **Point de départ du délai** : la date du checkpoint de suspension. Une réponse refusée ne remet pas le compteur à zéro, parce que le thread n'a pas avancé.
+- **`thread_ids`** limite `expire_threads` aux threads des tests. `expire` agit sur **toute** la base, et les tests tournent sur la base de développement : sans ce filtre, un test avec une horloge avancée passerait en `NO_GO` les vrais contrats en attente. La CLI n'expose pas ce filtre.
+
+**Pièges.**
+- **Interblocage dans `PostgresSaver.list()`.** Ce générateur produit ses résultats *à l'intérieur* de `with self._cursor()`, qui détient `self.lock`, un `threading.Lock` non réentrant. Appeler `graph.get_state()` pendant le parcours bloque donc indéfiniment : la suite de tests a gelé. Correctif : épuiser le générateur, pour collecter les identifiants de threads, **puis** interroger chaque thread.
+- **Thread orphelin.** Le processus gelé a été tué, et le nettoyage de la fixture n'a pas tourné : un thread `test-…` est resté en base, suspendu. Il a été supprimé à la main. Un test interrompu peut laisser des threads orphelins, et `expire` les verrait.
+- **`next` et une réponse refusée.** Après une réponse refusée, `human_review` s'interrompt de nouveau, et la tâche est bien présente dans `snapshot.tasks` avec son interrupt. Pourtant, **`snapshot.next` vaut `()`**. L'ancien critère, `next == ("human_review",)`, faisait donc refuser par `resume` la bonne réponse suivante, et `expire` ignorait le thread. **Bug réel**, invisible tant que les tests ne reprenaient qu'une fois par la CLI. Nouveau critère : une tâche `human_review` porte un interrupt. Un test de non-régression enchaîne, via la CLI, une réponse refusée puis une réponse acceptée.

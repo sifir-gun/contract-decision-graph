@@ -4,6 +4,7 @@ câblage du graphe."""
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -16,7 +17,7 @@ from langgraph.types import Command, Send, StateSnapshot, interrupt
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
 
-from cdg import policy
+from cdg import expiry, policy
 from cdg.config import DecisionConfig
 from cdg.deps import Deps
 from cdg.nodes.analyst import analyst
@@ -206,7 +207,10 @@ def _thread(thread_id: str) -> dict:
 
 
 def _awaits_human(snapshot: StateSnapshot) -> bool:
-    return snapshot.next == ("human_review",) and bool(snapshot.interrupts)
+    # pas snapshot.next : après une réponse refusée, human_review s'interrompt
+    # de nouveau mais langgraph 1.2.12 ne la compte plus dans `next`
+    return any(task.name == "human_review" and task.interrupts
+               for task in snapshot.tasks)
 
 
 def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
@@ -270,3 +274,29 @@ def thread_history(graph: CompiledStateGraph, thread_id: str) -> list[dict]:
              "proposed_decision": snap.values.get("proposed_decision"),
              "final_decision": snap.values.get("final_decision")}
             for snap in reversed(history)]
+
+
+def expire_threads(graph: CompiledStateGraph, older_than: timedelta,
+                   now: datetime,
+                   thread_ids: set[str] | None = None) -> list[dict]:
+    """Reprend en NO_GO système les threads en attente depuis plus de `older_than`.
+
+    `thread_ids` restreint la recherche : les tests ne touchent ainsi jamais aux
+    autres threads en attente de la base. La CLI n'en passe pas.
+    """
+    # list() garde le verrou (non réentrant) du checkpointer tant que le
+    # générateur n'est pas épuisé : collecter d'abord, interroger ensuite
+    found = {checkpoint.config["configurable"]["thread_id"]
+             for checkpoint in graph.checkpointer.list(None)}
+    if thread_ids is not None:
+        found &= thread_ids
+    pending = []
+    for thread_id in sorted(found):
+        snapshot = graph.get_state(_thread(thread_id))
+        if _awaits_human(snapshot):
+            # dernier checkpoint = suspension : l'attente ne bouge plus ensuite
+            pending.append((thread_id,
+                            datetime.fromisoformat(snapshot.created_at)))
+    return [resume_thread(graph, thread_id,
+                          expiry.system_decision(now - since, older_than))
+            for thread_id, since in expiry.expired(pending, older_than, now)]

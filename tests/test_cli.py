@@ -100,6 +100,10 @@ def test_resume_refuse_reste_suspendu_avec_le_motif(pg, thread_id, contract, cap
                         "--reviewer", "relecteur-synth", "--reason", "je ne sais pas")
     assert (code, out["statut"]) == (0, "suspendu")
     assert "ESCALADE" in out["demande"]["error"]
+    # la reprise suivante doit rester possible après un refus
+    code, out = run_cli(capsys, "resume", thread_id, "--decision", "NO_GO",
+                        "--reviewer", "relecteur-synth", "--reason", "référentiel insuffisant")
+    assert (code, out["statut"], out["final_decision"]) == (0, "termine", "NO_GO")
 
 
 @pytest.mark.pg
