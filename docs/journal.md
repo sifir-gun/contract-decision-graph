@@ -99,3 +99,19 @@ Un test garantit que seuls `verdicts` et `usage` portent un réducteur.
 
 **Pièges.**
 - En Pydantic v2, un champ `float | None` **sans valeur par défaut** reste obligatoire. `Clause.value` doit donc toujours être fourni, même à `None`. C'est voulu : l'extracteur doit se prononcer explicitement.
+
+### J1 tâche 2 : arrondi unique et configuration validée
+
+**Fait.**
+- `src/cdg/numeric.py` : `rounded` arrondit à 6 décimales, normalise `-0.0` et refuse NaN et l'infini.
+- `config/decision.yaml` : poids, seuils, `min_margin`, `conflict_gap`, budget, essais d'extraction, seuils et pénalités des règles.
+- `src/cdg/config.py` : modèle Pydantic `DecisionConfig`, strict, immuable, clés inconnues refusées, avec ces contrôles :
+  - somme des poids égale à 1 ;
+  - `go_reserves` strictement sous `go` ;
+  - pénalités entre 0 et 1.
+- `load_config` lève `ConfigError` si le fichier est absent, illisible ou invalide.
+
+**Pièges.**
+- **Mode strict de Pydantic** : sans lui, `max_tokens_per_contract: true` passe pour `1`, et `"60000"` passe pour un entier. Le mode strict refuse ces conversions silencieuses. Il accepte en revanche un entier YAML (`100`) pour un champ `float`, ce qui nous arrange.
+- **Somme des poids** : elle est comparée à 1 après `rounded`. Les flottants rendraient fragile une égalité stricte.
+- **`-0.0`** : `round(-1e-7, 6)` vaut `-0.0`, que `json.dumps` écrit `"-0.0"`. Sans normalisation, deux valeurs égales produiraient deux empreintes différentes au J4.

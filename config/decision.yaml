@@ -1,0 +1,42 @@
+# Configuration de décision du projet : tout ce qui se règle vit ici.
+# Validée au démarrage par cdg.config.DecisionConfig ; invalide, le programme s'arrête.
+# Valeurs propres au projet, sans reprise d'aucune mission client.
+
+# Poids par domaine dans le score agrégé (somme = 1). Score : 1 = favorable.
+weights:
+  juridique: 0.30
+  financier: 0.25
+  conformite: 0.25
+  operationnel: 0.20
+
+# Seuils sur le score agrégé : GO >= go, GO_RESERVES >= go_reserves, sinon NO_GO.
+thresholds:
+  go: 0.75
+  go_reserves: 0.50
+
+# Marge minimale au seuil le plus proche ; en dessous, passage humain.
+min_margin: 0.05
+
+# Écart de score entre domaines (retrieval OK) au-delà duquel on escalade.
+conflict_gap: 0.5
+
+budget:
+  max_tokens_per_contract: 60000   # tokens_in + tokens_out, toutes étapes confondues
+
+extraction:
+  max_attempts: 2
+
+# Règles par domaine : seuils et pénalités de score (retirées de 1,0).
+# La conformité n'a que des blocages durs, sans paramètre.
+rules:
+  juridique:
+    supplier_cap_min_pct: 100          # plafond fournisseur, % du montant annuel
+    supplier_cap_score_penalty: 0.5
+  financier:
+    late_penalties_min_cap_pct: 5      # plafond des pénalités de retard, %
+    late_penalties_score_penalty: 0.4  # aussi appliquée si la clause est absente
+  operationnel:
+    commitment_max_months: 36
+    commitment_score_penalty: 0.3
+    notice_max_months: 6
+    notice_score_penalty: 0.3
