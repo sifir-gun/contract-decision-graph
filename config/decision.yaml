@@ -40,3 +40,9 @@ rules:
     commitment_score_penalty: 0.3
     notice_max_months: 6
     notice_score_penalty: 0.3
+
+# Politique d'arbitrage humain, appliquée par cdg.policy à chaque reprise.
+# Relecteur et motif sont toujours exigés ; une réponse refusée est redemandée.
+human_policy:
+  allowed_decisions: [GO, GO_RESERVES, NO_GO]   # NO_GO obligatoire, ESCALADE interdite
+  allow_block_override: true   # levée d'un blocage dur possible, avec overrides_block et motif

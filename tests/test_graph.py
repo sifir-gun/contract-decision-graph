@@ -1,11 +1,12 @@
 """Graphe compilé, doublures comprises : preuve que Send et le réducteur marchent dans LangGraph."""
 
-from langgraph.types import Send
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command, Send
 
 from cdg.config import load_config
 from cdg.deps import Deps
 from cdg.orchestrator import build_graph, route_after_verify
-from cdg.state import DOMAINS
+from cdg.state import DOMAINS, HumanDecision
 from doubles import FakeCrag, FixedExtractor, clauses
 
 CONFIG = load_config()
@@ -75,27 +76,77 @@ def test_2_blocage_dur_no_go_dans_le_graphe():
     assert [v.domain for v in out["verdicts"] if v.hard_block] == ["juridique"]
 
 
-# --- Routes vers human_review (passe-plat au J1) --------------------------------------
+# --- human_review : interrupt() puis reprise par Command(resume=...) --------------------
 
-def test_marge_faible_route_vers_human_review():
-    # juridique 0,5 et opérationnel 0,7 : score 0,79, marge 0,04 < 0,05
-    ov = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
-    out, _, _ = run(clause_overrides=ov)
+# juridique 0,5 et opérationnel 0,7 : score 0,79, marge 0,04 < 0,05
+LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
+THREAD = {"configurable": {"thread_id": "c-synth-001"}}
+VALID = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "marge trop faible"}
+
+
+def start(clause_overrides=None, statuses=None, crag_tokens=0):
+    """Graphe avec checkpointer mémoire, lancé jusqu'à sa première suspension."""
+    extractor = FixedExtractor(clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100)
+    crag = FakeCrag(statuses, tokens_in=crag_tokens)
+    graph = build_graph(CONFIG, Deps(extractor=extractor, crag=crag)).compile(
+        checkpointer=InMemorySaver())
+    out = graph.invoke({"contract_id": "c-synth-001",
+                        "raw_text": "Contrat synthétique de prestation."}, THREAD)
+    return graph, out
+
+
+def request_of(out) -> dict:
+    [pending] = out["__interrupt__"]
+    return pending.value
+
+
+def test_4_marge_faible_suspend_et_expose_la_charge_utile():
+    graph, out = start(clause_overrides=LOW_MARGIN)
     assert (out["route"], out["proposed_decision"], out["margin"]) == ("human_review", "GO", 0.04)
-    assert "final_decision" not in out            # écrite par human_review au J2
-    assert [n for n, _ in updates(clause_overrides=ov)][-3:] == [
-        "human_review", "explain", "audit_seal"]
+    assert "final_decision" not in out
+    assert graph.get_state(THREAD).next == ("human_review",)
+    request = request_of(out)
+    assert (request["contract_id"], request["proposed_decision"], request["margin"]) == (
+        "c-synth-001", "GO", 0.04)
+    assert len(request["verdicts"]) == 4 and "error" not in request
 
 
-def test_insuffisant_route_vers_human_review_en_escalade():
-    out, _, _ = run(statuses={"conformite": "INSUFFISANT"})
+def test_reprise_avec_decision_valide_finalise():
+    graph, _ = start(clause_overrides=LOW_MARGIN)
+    steps = graph.stream(Command(resume=VALID), THREAD, stream_mode="updates")
+    ups = [(node, update) for step in steps for node, update in step.items()]
+    assert [n for n, _ in ups] == ["human_review", "explain", "audit_seal"]
+    assert set(ups[0][1]) == {"human", "final_decision"}   # seules clés modifiées
+    state = graph.get_state(THREAD)
+    assert state.next == ()
+    assert state.values["final_decision"] == "NO_GO"
+    assert state.values["human"] == HumanDecision(**VALID)
+
+
+def test_reponse_refusee_redemandee_avec_erreur_puis_acceptee():
+    graph, _ = start(clause_overrides=LOW_MARGIN)
+    out = graph.invoke(Command(resume={**VALID, "decision": "ESCALADE"}), THREAD)
+    assert "ESCALADE" in request_of(out)["error"] and "final_decision" not in out
+    out = graph.invoke(Command(resume={"decision": "GO"}), THREAD)       # mal formée
+    assert request_of(out)["error"].startswith("réponse invalide")
+    # plusieurs interrupt() dans le même nœud : appariés par ordre d'appel
+    out = graph.invoke(Command(resume=VALID), THREAD)
+    assert "__interrupt__" not in out
+    assert (out["final_decision"], out["human"].decision) == ("NO_GO", "NO_GO")
+
+
+def test_insuffisant_suspend_en_escalade():
+    _, out = start(statuses={"conformite": "INSUFFISANT"})
     assert (out["route"], out["proposed_decision"]) == ("human_review", "ESCALADE")
+    assert request_of(out)["proposed_decision"] == "ESCALADE"
 
 
-def test_budget_depasse_dans_le_graphe():
-    out, _, _ = run(crag_tokens=15_000)           # 4 × 15 000 + 600 d'extraction
+def test_budget_depasse_suspend_avec_rapport_d_echec():
+    _, out = start(crag_tokens=15_000)            # 4 × 15 000 + 600 d'extraction
+    report = {"stage": "budget", "tokens": 60_600, "limit": BUDGET}
     assert (out["route"], out["proposed_decision"]) == ("human_review", "ESCALADE")
-    assert out["failure_report"] == {"stage": "budget", "tokens": 60_600, "limit": BUDGET}
+    assert out["failure_report"] == report
+    assert request_of(out)["failure_report"] == report
 
 
 # --- Rejet --------------------------------------------------------------------------

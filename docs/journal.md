@@ -193,3 +193,21 @@ Tests :
 **Pièges.**
 - **Deux agents sur la même branche.** Un agent Cursor a commité la tâche 1 du J2 (`99e5d3b`) sur `phase1-j1` pendant la clôture du J1, et continuait à modifier le même dossier de travail. Pour que la PR ne porte que le J1, la livraison part d'une branche dédiée, `phase1-j1-livraison`, créée à partir de `9549040` dans un dossier de travail séparé. Le travail du J2 est resté intact.
 - **Leçon** : un seul agent par dossier de travail, et une branche par jour de spec.
+
+## 2026-09-23 · J2
+
+### J2 tâche 1 : human_review, interrupt() et politique d'arbitrage
+
+**Fait.**
+- `src/cdg/policy.py`, pur : `build_request` (charge utile exposée, sans le texte du contrat, flottants arrondis), `check` (politique), `review` (validation de la réponse brute puis `check`).
+- `human_review` dans `orchestrator.py` : boucle `interrupt()` → `policy.review` ; une réponse refusée est redemandée avec `error` dans la charge utile. N'écrit que `human` et `final_decision`.
+- `config/decision.yaml` : section `human_policy` (`allowed_decisions`, `allow_block_override`), validée par `HumanPolicy` : liste non vide, sans doublon, sans `ESCALADE`, `NO_GO` obligatoire.
+- Politique : relecteur et motif non vides ; `GO` ou `GO_RESERVES` sur un blocage dur exige `overrides_block` (et que la levée soit permise) ; `overrides_block` sans blocage levé est refusé.
+- Tests : politique pure, configuration, critère n° 4 (suspension, charge utile), reprise valide, reprise refusée puis acceptée. Les tests J1 des routes vers `human_review` passent désormais par `InMemorySaver`.
+
+**Vérifié dans langgraph 1.2.12.** Plusieurs `interrupt()` dans un même nœud sont appariés aux reprises par ordre d'appel (testé sur trois reprises successives). `interrupt()` a gagné un paramètre `response_schema`, absent de la spec, non utilisé.
+
+**Écarts avec la spec.**
+- `policy.check` reçoit la configuration via `partial`, sous le nom `decision_config` (nom `config` réservé).
+- La spec valide la réponse par `HumanDecision.model_validate` directement : une réponse mal formée ferait échouer le nœud. Ici, elle est redemandée avec le détail de l'erreur.
+- **Critère n° 12 inatteignable par le graphe** : `decision_gate` envoie tout blocage dur vers `explain`, jamais vers `human_review`. La règle de levée n'est donc testée qu'en fonction pure. À trancher dans la spec.
