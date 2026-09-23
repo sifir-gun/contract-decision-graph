@@ -405,7 +405,7 @@ La phase 1 est terminée quand ces 12 tests passent en `pytest`, LLM remplacés 
 | 2 | Blocage dur | Un seul `hard_block` donne `NO_GO`, quel que soit le score moyen |
 | 3 | CRAG hors corpus | Question sans référence : statut `INSUFFISANT`, puis `ESCALADE`, aucune réponse inventée |
 | 4 | Interrupt | Marge sous le seuil : exécution suspendue, charge utile exposée |
-| 5 | Reprise après arrêt | Processus tué pendant l'interrupt, relancé, reprise par `Command(resume=...)` sur le même `thread_id` : décision finalisée |
+| 5 | Reprise après arrêt | Processus tué (`SIGKILL`, connexion PostgreSQL ouverte) pendant l'interrupt, relancé, reprise par `Command(resume=...)` sur le même `thread_id` depuis un autre processus (CLI `resume`) : décision finalisée |
 | 6 | Rejeu | Mêmes clauses et même configuration : même `decision_hash` |
 | 7 | Explication | Une explication qui contredit le verdict est rejetée |
 | 8 | Chaîne d'audit | Modifier un enregistrement en base casse la vérification de chaîne |

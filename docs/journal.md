@@ -309,3 +309,15 @@ Tests :
 **Pièges.**
 - **Thread inconnu.** `get_state` renvoie un état vide (`values == {}`, `next == ()`) au lieu de lever une erreur. Il faut tester `values` pour distinguer un thread inconnu d'un thread terminé.
 - **Horodatage.** `StateSnapshot.created_at` est une chaîne ISO 8601 avec fuseau, qui servira de base à `expire` (tâche 4).
+
+### J2 tâche 3 : critère n° 5, reprise après un processus tué
+
+**Fait.** `tests/test_reprise.py` :
+- un sous-processus ouvre le graphe sur PostgreSQL, lance le contrat, affiche `"suspendu"`, puis se tue avec `SIGKILL`, **à l'intérieur** du `with`, donc connexion encore ouverte et sans aucun nettoyage ;
+- un second processus reprend par `python -m cdg.cli resume` sur le même `thread_id` ;
+- le contrat se termine en `NO_GO` ;
+- le test vérifie le code de sortie `-9` et que le processus n'a rien affiché après sa suspension.
+
+**Pièges.**
+- **Où tuer le processus.** Le tuer après la fin de `cli.main` ne prouverait rien : le context manager a déjà fermé la connexion proprement. Il faut le tuer dans le `with`. PostgreSQL referme seul la session orpheline, et le checkpoint écrit avant `interrupt()` suffit à reprendre.
+- **Environnement du sous-processus.** Il faut `sys.executable`, c'est-à-dire le Python du `.venv` lancé par `uv run`, pour que `cdg` et ses dépendances soient importables sans rien configurer.
