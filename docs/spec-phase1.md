@@ -446,6 +446,8 @@ contract-decision-graph/
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
 │   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
 │   ├── deps.py                 # contrats injectés : extracteur, CRAG (doublures en test)
+│   ├── settings.py             # .env (python-dotenv), chaînes de connexion
+│   ├── stub_j2.py              # mode stub-j2 de la CLI, remplacé au J3
 │   ├── crag.py                 # fonctions pures du CRAG ; sous-graphe compilé dans orchestrator.py
 │   ├── nodes/                  # un fichier par nœud, fonctions pures
 │   ├── rules/                  # une fonction par domaine
@@ -456,6 +458,18 @@ contract-decision-graph/
 ```
 
 CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `run <contrat>`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
+
+Comportement de la CLI (J2) :
+- `run` refuse un thread existant, puisqu'un contrat correspond à un thread ;
+- `resume` n'accepte qu'un thread en attente d'une décision humaine ;
+- `history` liste les checkpoints du plus ancien au plus récent ;
+- les erreurs sont rendues en JSON sur stderr, avec le code de sortie 1.
+
+**Mode `stub-j2`, jusqu'au J3.** L'extraction réelle et le CRAG n'existent pas encore :
+- `run` lit des clauses synthétiques déjà extraites (`--clauses`, liste JSON) et n'analyse pas le texte du contrat ;
+- le CRAG, sans corpus, répond toujours `INSUFFISANT`, sans référence.
+
+Toute exécution escalade donc vers un humain, sauf blocage dur. L'aide de la CLI l'annonce, et chaque sortie JSON porte `"mode": "stub-j2"`, pour qu'aucune démonstration ne laisse croire à une vraie analyse. Les deux doublures sont remplacées au J3.
 
 Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si la base est arrêtée. On les exclut volontairement avec `-m "not pg"`, jamais par un saut silencieux.
 
@@ -515,7 +529,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
-  - `python-dotenv` pour lire `.env` ; marqueur pytest `pg`.
+  - `python-dotenv` pour lire `.env` ; marqueur pytest `pg` ;
+  - CLI `run`, `resume` et `history` en mode `stub-j2` (clauses JSON, CRAG sans corpus toujours `INSUFFISANT`), mode affiché dans l'aide et dans chaque sortie.
   - une réponse humaine mal formée est redemandée, comme une réponse refusée par la politique, au lieu de faire échouer le nœud ;
   - l'appariement de plusieurs `interrupt()` par ordre d'appel est vérifié ;
   - `human_policy.hard_block_review` (option c) : `false` par défaut, auquel cas un blocage dur donne `NO_GO` vers `explain` ; à `true`, il passe en revue humaine avec `NO_GO` proposé. Le critère n° 12 se teste avec `true`.

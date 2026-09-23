@@ -283,3 +283,29 @@ Tests :
 - **`PostgresSaver.from_conn_string`** n'accepte pas de sérialiseur. La connexion est donc ouverte à la main, avec les mêmes paramètres (`autocommit`, `prepare_threshold=0`, `dict_row`).
 - **`prepare_threshold=0`** fait préparer chaque requête, et une requête préparée ne peut contenir qu'une commande (« cannot insert multiple commands into a prepared statement »). `REVOKE` et `GRANT` sont donc exécutés séparément.
 - **Base arrêtée** : pytest compte les tests `pg` en *error* (échec de la fixture de session), pas en *failed*. Le code de sortie est non nul dans les deux cas, et aucun test n'est sauté.
+
+### J2 tâche 2 : CLI run, resume, history en mode stub-j2
+
+**Fait.**
+- `stub_j2.py` :
+  - `JsonClausesExtractor` lit les clauses synthétiques de `--clauses` et les valide, sans LLM ;
+  - `no_corpus_crag` répond toujours `INSUFFISANT`, sans référence ;
+  - sans `--clauses`, l'extraction lève une erreur explicite.
+- `orchestrator.py` : `run_contract`, `resume_thread`, `thread_status` et `thread_history`, les seules fonctions à manipuler `Command` et `StateSnapshot`. `cli.py` n'importe pas LangGraph.
+- `cli.py` : `run <contrat> --clauses <json> [--contract-id]`, `resume <thread_id> --decision --reviewer --reason [--overrides-block]` et `history <thread_id>`. Chaque sortie JSON porte `"mode": "stub-j2"`, et l'aide annonce « AUCUNE ANALYSE RÉELLE avant le J3 ».
+- Tests :
+  - `run` suspend en `ESCALADE`, puisque le CRAG répond `INSUFFISANT` partout ;
+  - un blocage dur termine en `NO_GO` ;
+  - `resume` finalise, puis `history` est chronologique ;
+  - une réponse refusée laisse le thread suspendu, avec le motif ;
+  - erreurs explicites : thread inconnu, thread terminé, thread existant, fichier de clauses absent.
+- Démo réelle vérifiée à la main, puis thread supprimé.
+
+**Choix.**
+- **`run` refuse un thread existant.** Relancer `invoke` sur un thread terminé repartirait de `START` avec l'ancien état. Le réducteur cumulerait alors 8 verdicts, et `aggregate` lèverait une erreur. Mieux vaut refuser tout de suite, avec un message clair.
+- **Réponse humaine refusée : code de sortie 0.** Le refus est une issue normale de la politique : le thread reste suspendu, et la sortie montre `statut: suspendu` avec `demande.error`. Le code 1 est réservé aux erreurs d'exécution.
+- **Tests du graphe sans base.** Ils utilisent aussi le sérialiseur strict (`InMemorySaver(serde=strict_serializer())`), ce qui supprime les avertissements « unregistered type ».
+
+**Pièges.**
+- **Thread inconnu.** `get_state` renvoie un état vide (`values == {}`, `next == ()`) au lieu de lever une erreur. Il faut tester `values` pour distinguer un thread inconnu d'un thread terminé.
+- **Horodatage.** `StateSnapshot.created_at` est une chaîne ISO 8601 avec fuseau, qui servira de base à `expire` (tâche 4).

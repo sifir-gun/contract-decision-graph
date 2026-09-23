@@ -7,7 +7,7 @@ from langgraph.types import Command, Send
 
 from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.deps import Deps
-from cdg.orchestrator import build_graph, route_after_verify
+from cdg.orchestrator import build_graph, route_after_verify, strict_serializer
 from cdg.state import DOMAINS, HumanDecision
 from doubles import ABSENT, FakeCrag, FixedExtractor, clauses
 
@@ -91,7 +91,7 @@ def start(clause_overrides=None, statuses=None, crag_tokens=0, config=CONFIG):
     extractor = FixedExtractor(clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100)
     crag = FakeCrag(statuses, tokens_in=crag_tokens)
     graph = build_graph(config, Deps(extractor=extractor, crag=crag)).compile(
-        checkpointer=InMemorySaver())
+        checkpointer=InMemorySaver(serde=strict_serializer()))
     out = graph.invoke({"contract_id": "c-synth-001",
                         "raw_text": "Contrat synthétique de prestation."}, THREAD)
     return graph, out

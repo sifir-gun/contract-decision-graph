@@ -12,7 +12,7 @@ from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send, interrupt
+from langgraph.types import Command, Send, StateSnapshot, interrupt
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
 
@@ -192,3 +192,81 @@ def delete_thread(conninfo: str, thread_id: str) -> None:
     """Ménage des tests uniquement : exige DELETE, qu'app_role n'a pas."""
     with _saver(conninfo) as saver:
         saver.delete_thread(thread_id)
+
+
+# --- Exécution d'un thread : run, resume, history ---------------------------------
+
+
+class ThreadError(Exception):
+    """Thread inconnu, déjà existant, ou pas en attente d'une décision humaine."""
+
+
+def _thread(thread_id: str) -> dict:
+    return {"configurable": {"thread_id": thread_id}}
+
+
+def _awaits_human(snapshot: StateSnapshot) -> bool:
+    return snapshot.next == ("human_review",) and bool(snapshot.interrupts)
+
+
+def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
+    """État d'un thread, sérialisable en JSON ; `demande` : charge utile en attente."""
+    snapshot = graph.get_state(_thread(thread_id))
+    values = snapshot.values
+    human = values.get("human")
+    pending = [i.value for i in snapshot.interrupts]
+    return {
+        "thread_id": thread_id,
+        "statut": ("suspendu" if pending else "en_cours" if snapshot.next
+                   else "termine"),
+        "route": values.get("route"),
+        "proposed_decision": values.get("proposed_decision"),
+        "final_decision": values.get("final_decision"),
+        "margin": values.get("margin"),
+        "failure_report": values.get("failure_report"),
+        "reject_reason": values.get("reject_reason"),
+        "human": human.model_dump() if human else None,
+        "verdicts": [v.model_dump(exclude={"evidence_ids"})
+                     for v in values.get("verdicts", [])],
+        "demande": pending[0] if pending else None,
+    }
+
+
+def run_contract(graph: CompiledStateGraph, contract_id: str,
+                 raw_text: str) -> dict:
+    """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler."""
+    if graph.get_state(_thread(contract_id)).values:
+        raise ThreadError(f"le thread {contract_id} existe déjà : utiliser "
+                          "resume, ou un autre identifiant de contrat")
+    graph.invoke({"contract_id": contract_id, "raw_text": raw_text},
+                 _thread(contract_id))
+    return thread_status(graph, contract_id)
+
+
+def resume_thread(graph: CompiledStateGraph, thread_id: str,
+                  answer: dict) -> dict:
+    """Reprise par Command(resume=...) d'un thread en attente d'un humain."""
+    snapshot = graph.get_state(_thread(thread_id))
+    if not snapshot.values:
+        raise ThreadError(f"thread inconnu : {thread_id}")
+    if not _awaits_human(snapshot):
+        raise ThreadError(f"le thread {thread_id} n'est pas en attente "
+                          "d'une décision humaine")
+    graph.invoke(Command(resume=answer), _thread(thread_id))
+    return thread_status(graph, thread_id)
+
+
+def thread_history(graph: CompiledStateGraph, thread_id: str) -> list[dict]:
+    """Checkpoints du thread, du plus ancien au plus récent."""
+    history = list(graph.get_state_history(_thread(thread_id)))
+    if not history:
+        raise ThreadError(f"thread inconnu : {thread_id}")
+    return [{"checkpoint_id": snap.config["configurable"]["checkpoint_id"],
+             "step": snap.metadata.get("step"),
+             "source": snap.metadata.get("source"),
+             "created_at": snap.created_at,
+             "next": list(snap.next),
+             "route": snap.values.get("route"),
+             "proposed_decision": snap.values.get("proposed_decision"),
+             "final_decision": snap.values.get("final_decision")}
+            for snap in reversed(history)]
