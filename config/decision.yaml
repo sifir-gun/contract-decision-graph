@@ -46,3 +46,6 @@ rules:
 human_policy:
   allowed_decisions: [GO, GO_RESERVES, NO_GO]   # NO_GO obligatoire, ESCALADE interdite
   allow_block_override: true   # levée d'un blocage dur possible, avec overrides_block et motif
+  # false : un blocage dur donne NO_GO et part vers explain, sans humain.
+  # true : il part en revue humaine avec NO_GO proposé ; la levée exige overrides_block et motif.
+  hard_block_review: false

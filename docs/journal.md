@@ -230,3 +230,22 @@ Tests :
 - **Rebase de `phase1-j1` sur `main`.** Seul conflit, dans ce journal : « Fin du J1 » (côté `main`) et la section J2 (côté Cursor) ont été gardées dans l'ordre chronologique. La branche est renommée `phase1-j2`, et l'état d'avant le rebase est sauvegardé dans `phase1-j1-sauvegarde`.
 
 **Reste ouvert.** Le critère d'acceptation n° 12 ne peut pas être atteint dans le graphe, puisqu'un blocage dur va directement à `explain`. Décision d'architecture en attente.
+
+### J2 : hard_block_review, critère n° 12 atteignable dans le graphe
+
+**Fait.**
+- `human_policy.hard_block_review`, un booléen **obligatoire**, à `false` dans `decision.yaml`.
+  - À `false` : un blocage dur donne `NO_GO` et part vers `explain`, sans humain (comportement du J1).
+  - À `true` : `decision_gate` propose `NO_GO` et route vers `human_review`, où seul un humain peut lever le blocage, avec `overrides_block` et un motif.
+- Tests :
+  - critère n° 12 de bout en bout, avec une configuration de test à `true` : suspension, refus sans `overrides_block`, acceptation avec motif, confirmation du `NO_GO` ;
+  - avec la configuration par défaut, un blocage dur (juridique, financier, conformité) n'atteint jamais `human_review` ;
+  - rapport budget conservé en revue humaine.
+- Spec : schéma, code du gate, politique humaine, critère n° 12, historique.
+
+**Choix.**
+- La clé est obligatoire plutôt que dotée d'une valeur par défaut dans le modèle Pydantic. « False par défaut » est donc porté par `decision.yaml`, et une configuration qui l'omet est refusée au démarrage. C'est cohérent avec les autres clés de `human_policy` et avec « tout ce qui se règle vit dans la config ».
+
+**Pièges.**
+- Le critère n° 12 était inatteignable avec la décision n° 5 (blocage dur vers `explain`). Cursor l'avait relevé, mais ne l'avait testé que sur la fonction pure de la politique. Un critère d'acceptation doit se tester par le graphe. Sinon, il faut dire explicitement qu'il ne porte que sur une fonction.
+- Le scellement de la levée (`overrides_block` et motif) relève d'`audit_seal`, au J4. Au J2, la levée est seulement portée par `human` dans l'état.

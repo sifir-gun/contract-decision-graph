@@ -77,8 +77,13 @@ def decision_gate(state: ContractState,
     budget_report = {"stage": "budget", "tokens": used, "limit": limit}
 
     if d.hard_block:                     # 1. NO_GO établi, marge ignorée
-        update = {"proposed_decision": "NO_GO", "final_decision": "NO_GO",
-                  "margin": d.margin, "route": "explain"}
+        if config.human_policy.hard_block_review:
+            # NO_GO proposé ; seul un humain peut le lever (overrides_block)
+            update = {"proposed_decision": "NO_GO", "margin": d.margin,
+                      "route": "human_review"}
+        else:
+            update = {"proposed_decision": "NO_GO", "final_decision": "NO_GO",
+                      "margin": d.margin, "route": "explain"}
         if over:
             # dépassement tracé quand même
             update["failure_report"] = budget_report

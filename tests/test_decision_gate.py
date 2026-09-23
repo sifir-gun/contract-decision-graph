@@ -158,3 +158,24 @@ def test_verdict_manquant_refuse():
 def test_verdict_en_double_refuse():
     with pytest.raises(ValueError, match="un verdict par domaine"):
         aggregate(verdicts() + [verdict("juridique")], CONFIG)
+
+
+# --- human_policy.hard_block_review -------------------------------------------------
+
+def with_hard_block_review() -> DecisionConfig:
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data["human_policy"]["hard_block_review"] = True
+    return DecisionConfig.model_validate(data)
+
+
+def test_blocage_dur_en_revue_humaine_si_configure():
+    out = gate(verdicts(juridique=dict(hard_block=True)), config=with_hard_block_review())
+    assert out == {"proposed_decision": "NO_GO", "margin": 0.25, "route": "human_review"}
+
+
+def test_blocage_dur_en_revue_humaine_conserve_le_rapport_budget():
+    out = gate(verdicts(juridique=dict(hard_block=True)), tokens=BUDGET + 1,
+               config=with_hard_block_review())
+    assert (out["route"], out["proposed_decision"]) == ("human_review", "NO_GO")
+    assert out["failure_report"] == {"stage": "budget", "tokens": BUDGET + 1, "limit": BUDGET}
+    assert "final_decision" not in out

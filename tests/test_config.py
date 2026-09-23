@@ -37,6 +37,7 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert (o.notice_max_months, o.notice_score_penalty) == (6, 0.3)
     assert cfg.human_policy.allowed_decisions == ["GO", "GO_RESERVES", "NO_GO"]
     assert cfg.human_policy.allow_block_override is True
+    assert cfg.human_policy.hard_block_review is False
 
 
 def test_poids_par_domaine():
@@ -90,6 +91,8 @@ _DELETE = object()
     ("human_policy.allowed_decisions", ["GO", "NO_GO", "NO_GO"]),         # doublon
     ("human_policy.allowed_decisions", ["GO", "NO_GO", "PEUT_ETRE"]),
     ("human_policy.allow_block_override", "oui"),                         # mode strict
+    ("human_policy.hard_block_review", _DELETE),                          # réglage explicite
+    ("human_policy.hard_block_review", "non"),                            # mode strict
 ])
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):
     with pytest.raises(ConfigError):

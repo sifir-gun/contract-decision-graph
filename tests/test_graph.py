@@ -1,13 +1,15 @@
 """Graphe compilé, doublures comprises : preuve que Send et le réducteur marchent dans LangGraph."""
 
+import pytest
+import yaml
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Send
 
-from cdg.config import load_config
+from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.deps import Deps
 from cdg.orchestrator import build_graph, route_after_verify
 from cdg.state import DOMAINS, HumanDecision
-from doubles import FakeCrag, FixedExtractor, clauses
+from doubles import ABSENT, FakeCrag, FixedExtractor, clauses
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
@@ -84,11 +86,11 @@ THREAD = {"configurable": {"thread_id": "c-synth-001"}}
 VALID = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "marge trop faible"}
 
 
-def start(clause_overrides=None, statuses=None, crag_tokens=0):
+def start(clause_overrides=None, statuses=None, crag_tokens=0, config=CONFIG):
     """Graphe avec checkpointer mémoire, lancé jusqu'à sa première suspension."""
     extractor = FixedExtractor(clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100)
     crag = FakeCrag(statuses, tokens_in=crag_tokens)
-    graph = build_graph(CONFIG, Deps(extractor=extractor, crag=crag)).compile(
+    graph = build_graph(config, Deps(extractor=extractor, crag=crag)).compile(
         checkpointer=InMemorySaver())
     out = graph.invoke({"contract_id": "c-synth-001",
                         "raw_text": "Contrat synthétique de prestation."}, THREAD)
@@ -147,6 +149,57 @@ def test_budget_depasse_suspend_avec_rapport_d_echec():
     assert (out["route"], out["proposed_decision"]) == ("human_review", "ESCALADE")
     assert out["failure_report"] == report
     assert request_of(out)["failure_report"] == report
+
+
+# --- Blocage dur et revue humaine : human_policy.hard_block_review ---------------------
+
+# un blocage dur par domaine qui en a (l'opérationnel n'a que des pénalités)
+BLOCKS = {"juridique": {"responsabilite_acheteur": None},
+          "financier": {"revision_prix": None},
+          "conformite": {"accord_traitement_donnees": ABSENT}}
+BLOCKED = BLOCKS["juridique"]
+
+
+def hard_block_review_config() -> DecisionConfig:
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data["human_policy"]["hard_block_review"] = True
+    return DecisionConfig.model_validate(data)
+
+
+@pytest.mark.parametrize("domain", BLOCKS)
+def test_par_defaut_un_blocage_dur_n_atteint_jamais_human_review(domain):
+    assert CONFIG.human_policy.hard_block_review is False
+    graph, out = start(clause_overrides=BLOCKS[domain])      # avec checkpointer
+    assert "__interrupt__" not in out and graph.get_state(THREAD).next == ()
+    assert (out["route"], out["final_decision"]) == ("explain", "NO_GO")
+    assert "human_review" not in [n for n, _ in updates(clause_overrides=BLOCKS[domain])]
+
+
+def test_12_blocage_dur_en_revue_suspend_avec_no_go_propose():
+    graph, out = start(clause_overrides=BLOCKED, config=hard_block_review_config())
+    assert (out["route"], out["proposed_decision"]) == ("human_review", "NO_GO")
+    assert "final_decision" not in out and graph.get_state(THREAD).next == ("human_review",)
+    request = request_of(out)
+    assert [v["domain"] for v in request["verdicts"] if v["hard_block"]] == ["juridique"]
+
+
+def test_12_levee_sans_overrides_block_refusee_puis_acceptee_avec_motif():
+    graph, _ = start(clause_overrides=BLOCKED, config=hard_block_review_config())
+    lift = {"decision": "GO", "reviewer": "relecteur-synth",
+            "reason": "responsabilité plafonnée par avenant synthétique n° 2"}
+    out = graph.invoke(Command(resume=lift), THREAD)            # sans overrides_block
+    assert "overrides_block" in request_of(out)["error"] and "final_decision" not in out
+    out = graph.invoke(Command(resume={**lift, "overrides_block": True}), THREAD)
+    assert "__interrupt__" not in out
+    assert out["final_decision"] == "GO" and out["proposed_decision"] == "NO_GO"
+    # la levée est tracée comme telle dans l'état, que audit_seal scellera (J4)
+    assert out["human"] == HumanDecision(**lift, overrides_block=True)
+
+
+def test_12_humain_confirme_le_no_go_sans_levee():
+    graph, _ = start(clause_overrides=BLOCKED, config=hard_block_review_config())
+    out = graph.invoke(Command(resume=VALID), THREAD)
+    assert (out["final_decision"], out["human"].overrides_block) == ("NO_GO", False)
 
 
 # --- Rejet --------------------------------------------------------------------------
