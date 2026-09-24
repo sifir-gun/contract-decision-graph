@@ -566,14 +566,14 @@ Chaque jour se termine par un commit qui passe ses tests.
 | J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
 | J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire`, étude de `error_handler` (LangGraph 1.2) pour qu'un échec de nœud produise un `failure_report` structuré | 4, 5, 11, 12 |
 | J3 | Ingestion du corpus, CRAG (fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py`), gardes d'échec de nœud (clé `failures`, escalade par `decision_gate`, `RetryPolicy` sur les analystes), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
-| J4 | `explain` avec validation, `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
+| J4 | `explain` avec validation (rejeté s'il contredit le verdict, ou s'il cite un article absent des références effectivement récupérées, avec un test), `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
 
 Priorité si le temps manque : ne sacrifier ni J2, ni l'audit, ni le test d'injection. Le CRAG peut rester simplifié (une seule réécriture).
 
 ## Hors périmètre
 
-Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI, Helm, k3s (phase 3) ; Cloud Run et Terraform (phase 4, optionnelle). Pas d'interface graphique, pas de repli web dans le CRAG.
+Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses qui ne correspondent à aucun type connu, signalées à l'humain comme « clause non couverte par les règles » (phase 2) ; API FastAPI, Helm, k3s (phase 3) ; Cloud Run et Terraform (phase 4, optionnelle). Pas d'interface graphique, pas de repli web dans le CRAG.
 
 ## Historique des révisions
 
