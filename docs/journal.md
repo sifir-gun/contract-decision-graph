@@ -619,3 +619,19 @@ Tests :
 - **Faux renvoi.** « articles 32 à 36 » (art. 28) désigne aussi 34 et 35, qui n'ont pas été récupérés. Ils sont listés dans les limites connues du README.
 - **Format EUR-Lex.** L'intitulé suit le titre, parfois après une ligne vide (art. 4). Les points `a)`, `b)` sont sur une ligne à part, et le découpage par paragraphes les conserve dans l'ordre (vérifié : aucun mot perdu sur l'art. 28).
 - **Règles de nettoyage modifiées.** Une ingestion seulement additive laisserait les anciens extraits en base, avec des doublons contradictoires. D'où `sync`, qui supprime les extraits obsolètes (testé).
+
+### J3 tâche 9 : sonde du sous-graphe CRAG (point d'arrêt)
+
+La spec demande de vérifier, dans la version installée, si un sous-graphe hérite du checkpointer.
+
+**Sonde** (jetable, hors dépôt), dans langgraph 1.2.12 : un sous-graphe invoqué à l'intérieur de `analyst`, lancé 4 fois en parallèle par `Send`, dans un graphe parent muni d'un checkpointer à sérialiseur strict.
+
+| Compilation du sous-graphe | Résultat |
+| --- | --- |
+| `compile()`, par défaut (`checkpointer=None`) | **Il hérite du checkpointer du parent.** Chaque étape du sous-graphe est écrite dans les checkpoints du parent, sous un espace de noms par analyste (`analyst:<id de tâche>`). Son état contient un type hors de la liste autorisée : `StrictSerializer` lève `BlockedDeserialization` et **l'exécution échoue**. |
+| `compile(checkpointer=False)` | Aucun checkpoint du sous-graphe. Les 4 analystes aboutissent, et l'état du parent se relit normalement. |
+| Par défaut, avec le type du sous-graphe ajouté à la liste autorisée | Les 4 analystes aboutissent, avec 4 espaces de noms de checkpoints en plus de celui du parent. |
+
+**Conclusion.** L'héritage est le comportement par défaut. Il touche à trois choses : la liste des types autorisés du sérialiseur, le volume de la base, et la reprise (un CRAG interrompu reprend-il en cours de route, ou repart-il de zéro ?). Décision soumise au propriétaire du repo.
+
+**Piège.** Sans le sérialiseur strict du J2, l'héritage serait passé inaperçu : les états du CRAG se seraient retrouvés en `dict` dans les checkpoints, avec seulement un avertissement.
