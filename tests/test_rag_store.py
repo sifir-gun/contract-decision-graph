@@ -43,3 +43,22 @@ def test_dimension_divergente_erreur_explicite(pg):
 def test_app_role_ne_peut_pas_ecrire_dans_le_corpus(pg):
     with psycopg.connect(pg.app) as conn, pytest.raises(psycopg.errors.InsufficientPrivilege):
         conn.execute("DELETE FROM rag_chunks WHERE false")
+
+
+def test_migration_003_metadonnees_de_version(pg):
+    with psycopg.connect(pg.admin) as conn:
+        columns = {
+            r[0]
+            for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'rag_chunks'"
+            )
+        }
+    assert {
+        "article",
+        "chunk_index",
+        "valid_from",
+        "valid_until",
+        "amendment",
+        "note",
+        "retrieved_at",
+    } <= columns

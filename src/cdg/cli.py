@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from cdg import embeddings, expiry, orchestrator, rag_store, settings, stub_j2
+from cdg import corpus, embeddings, expiry, orchestrator, rag_store, settings, stub_j2
 from cdg.config import load_config
 from cdg.state import Decision
 
@@ -39,6 +39,14 @@ def _fetch_embedding_model(args: argparse.Namespace) -> dict:
     cache_dir = settings.embedding_cache_dir()
     embeddings.fetch_model(config, cache_dir)
     return {"fetch_embedding_model": "ok", "model": config.model, "cache_dir": str(cache_dir)}
+
+
+def _ingest(args: argparse.Namespace) -> dict:
+    config = load_config()
+    embedder = embeddings.FastembedEmbedder(config.embedding, settings.embedding_cache_dir())
+    rows = corpus.rows(embedder, config.corpus.chunk_max_words)
+    summary = rag_store.sync(settings.admin_conninfo(), rows, embedder.model)
+    return {"ingest": "ok", "model": embedder.model, **summary}
 
 
 def _graph(clauses_path: str | None = None):
@@ -106,6 +114,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="télécharge les poids du modèle d'embedding dans EMBEDDING_CACHE_DIR "
         "(réseau, environ 2,2 Go, une seule fois)",
     ).set_defaults(handler=_fetch_embedding_model)
+
+    sub.add_parser(
+        "ingest",
+        help="nettoie, découpe et indexe le corpus (data/corpus) dans rag_chunks, "
+        "identifiants administrateur ; rejouable, supprime les extraits disparus",
+    ).set_defaults(handler=_ingest)
 
     run = sub.add_parser("run", help="analyse un contrat (mode stub-j2)", description=STUB_NOTICE)
     run.add_argument("contract", help="fichier texte du contrat (synthétique)")

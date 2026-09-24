@@ -50,4 +50,13 @@ URL officielles :
 
 ## Fiches de référence
 
-Rédigées pour ce projet, dans `fiches/`. Chaque fiche commence par « Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique », et cite pour chaque affirmation l'article paraphrasé (`source_id` et numéro d'article). Liste complétée à la tâche 8.
+Rédigées pour ce projet, dans `fiches/`. Chaque fiche commence par « Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique », et chaque ligne d'affirmation cite l'article qu'elle paraphrase (`source_id`, `art.`). Un test vérifie que chaque citation désigne un article admis ci-dessus.
+
+| source_id | Fiche | Domaine | Articles cités |
+| --- | --- | --- | --- |
+| `fiche-sous-traitance-rgpd` | `fiches/sous-traitance-rgpd.md` | conformite | RGPD 4, 28, 32, 33, 36, 40, 42, 82, 83, 84 |
+| `fiche-transferts-hors-ue` | `fiches/transferts-hors-ue.md` | conformite | RGPD 40, 42, 44, 45, 46 |
+| `fiche-responsabilite-plafonds` | `fiches/responsabilite-plafonds.md` | juridique | C. civ. 1170, 1171, 1231-3 ; C. com. L442-1 |
+| `fiche-penalites-retard` | `fiches/penalites-retard.md` | financier | C. com. L441-10 |
+| `fiche-revision-prix` | `fiches/revision-prix.md` | financier | C. mon. fin. L112-2 |
+| `fiche-duree-preavis` | `fiches/duree-preavis.md` | operationnel | C. civ. 1210, 1211 ; C. com. L442-1 |

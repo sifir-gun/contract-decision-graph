@@ -89,3 +89,8 @@ embedding:
   dimension: 1024                          # = colonne rag_chunks.embedding (migration 002)
   query_prefix: "query: "                  # préfixes attendus par les modèles e5
   passage_prefix: "passage: "
+
+# Découpage du corpus à l'ingestion : paragraphes regroupés jusqu'à ce nombre de mots
+# (environ 1,5 token par mot en français : reste sous la limite de 512 tokens de e5).
+corpus:
+  chunk_max_words: 300

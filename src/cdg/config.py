@@ -125,6 +125,10 @@ class EmbeddingConfig(_Strict):
     passage_prefix: str
 
 
+class CorpusConfig(_Strict):
+    chunk_max_words: Annotated[int, Field(gt=0)]  # e5 : 512 tokens au plus
+
+
 Tier = Literal["main", "light"]
 ModelId = Annotated[str, Field(min_length=1)]
 
@@ -172,6 +176,7 @@ class DecisionConfig(_Strict):
     input: InputConfig
     llm: LLMConfig
     embedding: EmbeddingConfig
+    corpus: CorpusConfig
 
     def weight(self, domain: Domain) -> float:
         return getattr(self.weights, domain)

@@ -520,11 +520,12 @@ contract-decision-graph/
 │   └── 002_rag.sql             # J3 : rag_chunks, idempotente, lecture seule pour app_role
 ├── data/
 │   ├── contracts/              # 10 contrats synthétiques + 2 piégés
-│   └── corpus/                 # textes publics à indexer
+│   └── corpus/                 # SOURCES.md, manifest.yaml, raw/ (textes publics), fiches/
 ├── src/cdg/
 │   ├── orchestrator.py         # seul fichier qui importe LangGraph : adaptateurs et câblage
 │   ├── state.py                # schémas d'état et Pydantic
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
+│   ├── corpus.py               # nettoyage (versions, notes, interface), découpage, manifeste, fiches
 │   ├── embeddings.py           # embedding local (fastembed), préfixes e5, sans téléchargement implicite
 │   ├── rag_store.py            # rag_chunks : migration 002, insertion, recherche exacte filtrée
 │   ├── extraction.py           # extraction LLM (modèle main), contrat délimité comme donnée
@@ -617,6 +618,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
   - option pytest `--llm` ;
+  - corpus : nettoyage explicite (version et texte modificateur en métadonnées, notes « Conformément à » sorties du texte, lignes d'interface supprimées), fin de validité stockée (migration `003`), ingestion rejouable (`ingest`), 6 fiches sourcées ;
   - type de clause `transfert_hors_ue` et champ `Clause.category` ; règle de conformité sur les transferts (RGPD, art. 44 à 46), garanties reconnues et pénalité de localisation dans `rules.conformite` ;
   - embedding local : préfixes e5 ajoutés par le code (fastembed ne le fait pas) ; poids dans `EMBEDDING_CACHE_DIR`, jamais téléchargés à l'exécution (`local_files_only`) mais par `fetch-embedding-model` ; recherche filtrée par domaine **et** par modèle d'embedding ;
   - migration `002_rag.sql` appliquée par `setup-db`, recherche exacte filtrée par domaine (pas d'index HNSW), section `embedding` ;

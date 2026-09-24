@@ -592,3 +592,30 @@ Tests :
 **Piège.** `set -e && commande` ne protège rien : dans une liste `&&`, bash n'interrompt pas le script sur l'échec d'une commande qui n'est pas la dernière. Deux commits de documentation sont ainsi passés sans leur mise à jour de la spec (corrigés par `--amend`). `set -e` se met désormais seul sur sa ligne.
 
 **Vérification du choix de conception « `NO_GO` seulement sur blocage dur ».** La conformité peut désormais perdre 0,3. Le pire cumul de toutes les pénalités donne 0,555, sans conflit, donc au pire `GO_RESERVES`. Le choix tient toujours, mais sa justification change ; la spec est mise à jour.
+
+### J3 tâche 8 : corpus, nettoyage, fiches, ingestion
+
+**Fait.**
+- `corpus.py` : analyse des fichiers Légifrance et EUR-Lex, règles de nettoyage, `expired`, découpage (paragraphes regroupés jusqu'à `corpus.chunk_max_words = 300` mots), manifeste et fiches.
+- `data/corpus/manifest.yaml` : pour chaque article admis, son domaine d'indexation. RGPD art. 79 est explicitement exclu. Un test vérifie que **chaque fichier de `raw/` est ingéré ou exclu**, jamais ignoré en silence.
+- Migration `003_rag_versions.sql`, idempotente : `article`, `chunk_index`, `valid_from`, `valid_until`, `amendment`, `note`, `retrieved_at`. `setup-db` applique désormais toutes les migrations du corpus (002, 003).
+- `rag_store.sync` aligne la base sur le corpus : il supprime les extraits disparus, par exemple après un changement de règle de nettoyage, et insère les nouveaux. La commande `ingest` s'en sert.
+- **6 fiches** (`data/corpus/fiches/`), listées dans `SOURCES.md`. Un test vérifie que chacune commence par l'avertissement demandé, et que chaque ligne d'affirmation cite un article admis du corpus.
+- Ingestion réelle (vrai modèle, hors ligne) : 57 extraits, en 1 min 28 s. Les recherches de contrôle tombent juste dans chaque domaine (voir le rapport de tâche).
+- README : exemple de gestion des versions (L441-10), et section « Limites connues ».
+
+**Règles de nettoyage, testées sur les fichiers réels :**
+1. Métadonnées de version : L441-10 (du 26/04/2019 au 01/01/2027, « Modifié par ») et 1231-3 (« Création », version ouverte).
+2. Lignes d'interface : **aucun fichier réel n'en contient**. Le test les ajoute au texte réel de L441-10 et vérifie qu'on retrouve exactement le texte d'origine.
+3. Note « Conformément aux dispositions … » : 1171, sortie du texte et stockée dans `note` (vérifié aussi en base).
+4. Validité : `expired(valid_until, date)` est vrai à partir du 01/01/2027. La date est stockée ; son exploitation à l'analyse arrive à la tâche 9 (CRAG).
+
+**Choix.**
+- **Périmètre, art. 4 du RGPD.** Il est admis comme « servant la règle conformité », au titre des définitions. Aucun article servant une règle ne le cite : c'est une interprétation, à valider.
+- **Texte embarqué et texte stocké.** Le texte embarqué est précédé de la référence et de l'intitulé (`RGPD, art. 28 — Sous-traitant`), ce qui améliore la recherche. Le texte stocké reste celui de l'article, pour être cité tel quel.
+- **Un article dans plusieurs domaines.** C'est le cas de L442-1 (opérationnel et juridique) : une ligne par domaine, pour que le filtre avant recherche reste simple.
+
+**Pièges.**
+- **Faux renvoi.** « articles 32 à 36 » (art. 28) désigne aussi 34 et 35, qui n'ont pas été récupérés. Ils sont listés dans les limites connues du README.
+- **Format EUR-Lex.** L'intitulé suit le titre, parfois après une ligne vide (art. 4). Les points `a)`, `b)` sont sur une ligne à part, et le découpage par paragraphes les conserve dans l'ordre (vérifié : aucun mot perdu sur l'art. 28).
+- **Règles de nettoyage modifiées.** Une ingestion seulement additive laisserait les anciens extraits en base, avec des doublons contradictoires. D'où `sync`, qui supprime les extraits obsolètes (testé).
