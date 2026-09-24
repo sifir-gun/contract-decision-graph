@@ -73,7 +73,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     builder = StateGraph(ContractState)
     builder.add_node("validate_input", partial(validate_input, decision_config=config))
     builder.add_node("extract_clauses", partial(extract_clauses, extractor=deps.extractor))
-    builder.add_node("verify_extraction", verify_extraction)
+    builder.add_node("verify_extraction", partial(verify_extraction, decision_config=config))
     # input_schema explicite : LangGraph ne le déduit pas d'un partial
     # (voir docs/journal.md)
     builder.add_node(

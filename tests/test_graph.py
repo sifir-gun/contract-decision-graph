@@ -290,3 +290,44 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
     for original in ("jeanne.martin@exemple.fr", "01 23 45 67 89", "Acme Industrie"):
         assert original not in call["user"] and original not in call["system"]
+
+
+# --- Critère d'acceptation n° 10 : citation inventée ---------------------------------------
+
+
+def extraction_graph(answers):
+    from cdg.extraction import LLMExtractor
+
+    llm = FakeLLM({"extract_clauses": answers})
+    graph = build_graph(CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())).compile(
+        checkpointer=InMemorySaver(serde=strict_serializer())
+    )
+    return graph, llm
+
+
+def with_invented_quote():
+    items = [c.model_dump() for c in clauses()]
+    items[2].update(quote="Les prix sont révisés librement par le fournisseur.")
+    return {"clauses": items}
+
+
+def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
+    graph, llm = extraction_graph([with_invented_quote(), with_invented_quote()])
+    status = orchestrator.run_contract(graph, "c-10", CONTRACT_TEXT)
+    assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
+    assert status["failure_report"] == {
+        "stage": "extraction",
+        "attempts": 2,
+        "problems": ["citation introuvable: revision_prix"],
+    }
+    assert status["verdicts"] == []  # aucun analyste sur une citation non vérifiée
+    first, second = llm.calls
+    assert "Retour de vérification" not in first["user"]
+    assert "citation introuvable: revision_prix" in second["user"]
+
+
+def test_10_citation_corrigee_au_second_essai():
+    good = {"clauses": [c.model_dump() for c in clauses()]}
+    graph, llm = extraction_graph([with_invented_quote(), good])
+    status = orchestrator.run_contract(graph, "c-10b", CONTRACT_TEXT)
+    assert len(llm.calls) == 2 and len(status["verdicts"]) == 4

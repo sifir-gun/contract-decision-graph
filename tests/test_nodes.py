@@ -10,7 +10,6 @@ from cdg.nodes.explain import explain
 from cdg.nodes.extract_clauses import extract_clauses
 from cdg.nodes.reject import reject
 from cdg.nodes.validate_input import validate_input
-from cdg.nodes.verify_extraction import verify_extraction
 from cdg.state import AgentVerdict
 
 CONFIG = load_config()
@@ -82,13 +81,6 @@ def test_extract_clauses_premier_essai_sans_retour():
     extractor = FixedExtractor(clauses())
     out = extract_clauses({"raw_text": "Contrat.", "extraction_attempts": 0}, extractor=extractor)
     assert out["extraction_attempts"] == 1 and extractor.calls == [("Contrat.", [])]
-
-
-# --- verify_extraction (bouchon au J1) ------------------------------------------
-
-
-def test_verify_extraction_bouchon_route_vers_les_analystes():
-    assert verify_extraction({"clauses": clauses()}) == {"route": "analysts"}
 
 
 # --- analyst --------------------------------------------------------------------

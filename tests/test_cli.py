@@ -191,20 +191,21 @@ def test_run_fichier_de_clauses_absent(tmp_path, capsys):
 def test_echec_de_noeud_erreur_json_et_etat_lisible_par_history(pg, thread_id, tmp_path, capsys):
     text = tmp_path / "contrat.txt"
     text.write_text(CONTRACT_TEXT, encoding="utf-8")
-    # clause attendue manquante : la règle financière lève pendant le fan-out
-    incomplete = [c.model_dump() for c in clauses() if c.kind != "penalites_retard"]
+    # clause présente sans citation : le nœud d'extraction échoue (ValidationError)
+    broken = [c.model_dump() for c in clauses()]
+    broken[0].update(present=True, quote="")
     cl = tmp_path / "contrat.clauses.json"
-    cl.write_text(json.dumps(incomplete, ensure_ascii=False), encoding="utf-8")
+    cl.write_text(json.dumps(broken, ensure_ascii=False), encoding="utf-8")
 
     code, err = run_cli(capsys, "run", str(text), "--clauses", str(cl), "--contract-id", thread_id)
     assert code == 1
-    assert err["erreur"] == "ValueError" and "penalites_retard" in err["detail"]
+    assert err["erreur"] == "ValidationError" and "citation" in err["detail"]
 
     # l'état reste dans le dernier checkpoint, lisible par history
     code, out = run_cli(capsys, "history", thread_id)
     assert code == 0 and out["checkpoints"]
-    assert out["checkpoints"][-1]["next"] == ["analyst"] * 4
-    assert out["checkpoints"][-1]["route"] == "analysts"
+    assert out["checkpoints"][-1]["next"] == ["extract_clauses"]
+    assert out["checkpoints"][-1]["route"] == "extract_clauses"
 
     # pas en attente d'un humain : resume refuse explicitement
     code, err = run_cli(

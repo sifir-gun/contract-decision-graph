@@ -488,3 +488,22 @@ Tests :
 **Pièges.**
 - **Faux positif possible dans le test « aucune règle de décision ».** Il cherche `GO` dans le prompt : un mot en capitales comme « CATÉGORIE » le déclencherait. Le prompt est écrit en minuscules.
 - **Prompt livré avec le paquet.** Le fichier `.md` doit partir avec le paquet. Vérifié : il est bien présent dans la wheel construite par hatchling.
+
+### J3 tâche 5 : verify_extraction réel, critère n° 10
+
+**Fait.**
+- `verify_extraction`, sans LLM :
+  - normalisation : NFKC, apostrophes, guillemets et tirets typographiques unifiés, espaces (insécables compris) réduits, **casse conservée** ;
+  - problèmes détectés : clause manquante, clause en double, type inconnu, citation introuvable ;
+  - essais : retour ciblé tant qu'il en reste, puis `ESCALADE` avec `failure_report` (`stage`, `attempts`, `problems`).
+- Tests :
+  - normalisation ;
+  - citation typographiquement différente mais équivalente, acceptée ;
+  - clause absente non vérifiée ;
+  - ré-extraction puis escalade ;
+  - citations comparées **au texte masqué** : une citation qui porte la donnée d'origine est introuvable (précision 5) ;
+  - **critère n° 10** sur le graphe : deux citations inventées donnent une escalade avec rapport d'échec, **aucun analyste** ne tourne, et le second essai reçoit le retour ciblé. Une citation corrigée au second essai mène aux 4 analystes.
+
+**Pièges.**
+- **Le test d'échec de nœud du J2 ne provoquait plus de panne.** Il retirait une clause attendue pour faire échouer une règle pendant le fan-out. Désormais, `verify_extraction` intercepte ce cas en amont : un nouvel essai, puis une escalade. Le test provoque maintenant la panne par une clause présente sans citation, qui fait échouer le nœud d'extraction lui-même. C'est aussi une preuve que la vérification protège les règles.
+- **Normalisation et guillemets français.** « » devient `"`, mais l'espace insécable qui suit le guillemet français reste un espace. Une citation copiée sans ces espaces serait déclarée introuvable. Ce cas est volontairement strict ; le retour ciblé laisse au modèle une chance de corriger.
