@@ -524,3 +524,27 @@ Tests :
 - **Lire la dimension d'une colonne `vector`.** Elle se trouve dans `pg_attribute.atttypmod` : ici 1024, sans décalage, contrairement à `varchar`.
 - **ruff et le Markdown.** `ruff format` (0.16) reformate aussi les blocs de code Python des fichiers Markdown, donc ceux de la spec. C'est sans effet sur le sens, mais il faut le savoir en lisant un diff de la spec.
 - **Plusieurs commandes SQL en une fois.** psycopg les accepte dans un seul `execute`, mais seulement sans paramètre et sur une connexion ordinaire. Celle du checkpointer (`prepare_threshold=0`) les refuserait (voir J2).
+
+### J3 tâche 7 : embedding local et recherche filtrée
+
+**Fait.**
+- `embeddings.FastembedEmbedder` :
+  - `embed_passages` et `embed_query` ajoutent les préfixes e5 (`passage: ` et `query: `) ;
+  - la dimension de chaque vecteur est contrôlée ;
+  - à l'exécution, `local_files_only=True` : sans poids en cache, `EmbeddingError` cite la commande à lancer.
+- `embeddings.fetch_model` et la commande `cdg.cli fetch-embedding-model` : le seul chemin qui télécharge, lancé explicitement.
+- `settings.embedding_cache_dir()` : `EMBEDDING_CACHE_DIR` est obligatoire, et un chemin relatif part de la racine du dépôt. `.cache/` est ignoré par git, et `.env.example` est complété.
+- `rag_store` :
+  - `insert` : idempotent grâce à `ON CONFLICT` sur (`domain`, hash, modèle) ;
+  - `search` : recherche exacte `WHERE domain = … AND embedding_model = … ORDER BY embedding <=> …`.
+- Doublure `HashEmbedder` : sac de mots haché, normalisé et déterministe, sans modèle.
+- Tests `pg` :
+  - le filtre par domaine s'applique **avant** la distance : un extrait d'un autre domaine, pourtant plus proche de la requête, ne sort jamais ;
+  - `k` est respecté ;
+  - un autre modèle d'embedding ne voit pas ces extraits.
+
+**Pièges.**
+- **Pas de préfixes e5 par fastembed.** `query_embed` et `passage_embed` appellent simplement `embed`, alors que les modèles e5 attendent `query: ` et `passage: `. Sans eux, la qualité de la recherche chute sans aucune erreur.
+- **Cache temporaire par défaut.** fastembed range les poids dans un dossier temporaire du système (`tempfile.gettempdir()/fastembed_cache`), qui peut être vidé : 2,2 Go à retélécharger à chaque fois. Le chemin est donc explicite et persistant.
+- **Aucun téléchargement à l'exécution.** Sans `local_files_only`, le premier embedding lancé déclencherait un téléchargement de 2,2 Go en plein graphe. Le paramètre passe par les `kwargs` de `TextEmbedding`.
+- **Filtre par modèle.** On filtre aussi sur `embedding_model` : des vecteurs de deux modèles différents ne sont pas comparables, même à dimension égale.

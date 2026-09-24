@@ -122,3 +122,36 @@ class FakeLLM:
         answer = scripted.pop(0) if isinstance(scripted, list) else scripted
         answer = answer(user) if callable(answer) else answer
         return schema.model_validate(answer), usage(*self.tokens, node=node)
+
+
+class HashEmbedder:
+    """Doublure d'embedding, déterministe : sac de mots haché, normalisé.
+
+    Deux textes qui partagent des mots ont une similarité positive, sans modèle.
+    """
+
+    model = "hash-test"
+
+    def __init__(self, dimension: int = 1024):
+        self.dimension = dimension
+        self.calls: list[str] = []
+
+    def _vector(self, text: str) -> list[float]:
+        import hashlib
+        import math
+        import re
+
+        vector = [0.0] * self.dimension
+        for word in re.findall(r"\w+", text.lower()):
+            digest = hashlib.blake2b(word.encode(), digest_size=8).digest()
+            vector[int.from_bytes(digest, "big") % self.dimension] += 1.0
+        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
+        return [v / norm for v in vector]
+
+    def embed_passages(self, texts: list[str]) -> list[list[float]]:
+        self.calls.extend(texts)
+        return [self._vector(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        self.calls.append(text)
+        return self._vector(text)

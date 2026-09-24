@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from cdg import expiry, orchestrator, rag_store, settings, stub_j2
+from cdg import embeddings, expiry, orchestrator, rag_store, settings, stub_j2
 from cdg.config import load_config
 from cdg.state import Decision
 
@@ -32,6 +32,13 @@ def _setup_db(args: argparse.Namespace) -> dict:
         "droits": ["SELECT", "INSERT", "UPDATE"],
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
     }
+
+
+def _fetch_embedding_model(args: argparse.Namespace) -> dict:
+    config = load_config().embedding
+    cache_dir = settings.embedding_cache_dir()
+    embeddings.fetch_model(config, cache_dir)
+    return {"fetch_embedding_model": "ok", "model": config.model, "cache_dir": str(cache_dir)}
 
 
 def _graph(clauses_path: str | None = None):
@@ -93,6 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="crée les tables du checkpointer et donne à app_role SELECT, INSERT, "
         "UPDATE (identifiants administrateur de .env, à lancer une fois)",
     ).set_defaults(handler=_setup_db)
+
+    sub.add_parser(
+        "fetch-embedding-model",
+        help="télécharge les poids du modèle d'embedding dans EMBEDDING_CACHE_DIR "
+        "(réseau, environ 2,2 Go, une seule fois)",
+    ).set_defaults(handler=_fetch_embedding_model)
 
     run = sub.add_parser("run", help="analyse un contrat (mode stub-j2)", description=STUB_NOTICE)
     run.add_argument("contract", help="fichier texte du contrat (synthétique)")

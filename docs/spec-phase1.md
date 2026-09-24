@@ -521,6 +521,8 @@ contract-decision-graph/
 │   ├── orchestrator.py         # seul fichier qui importe LangGraph : adaptateurs et câblage
 │   ├── state.py                # schémas d'état et Pydantic
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
+│   ├── embeddings.py           # embedding local (fastembed), préfixes e5, sans téléchargement implicite
+│   ├── rag_store.py            # rag_chunks : migration 002, insertion, recherche exacte filtrée
 │   ├── extraction.py           # extraction LLM (modèle main), contrat délimité comme donnée
 │   ├── prompts/                # prompts système, sans règle de décision
 │   ├── masking.py              # masquage des données personnelles avant le graphe
@@ -539,7 +541,7 @@ contract-decision-graph/
 └── tests/
 ```
 
-CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `run <contrat>`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
+CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `run <contrat>`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
 
 Comportement de la CLI (J2) :
 - `run` refuse un thread existant, puisqu'un contrat correspond à un thread ;
@@ -611,6 +613,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
   - option pytest `--llm` ;
+  - embedding local : préfixes e5 ajoutés par le code (fastembed ne le fait pas) ; poids dans `EMBEDDING_CACHE_DIR`, jamais téléchargés à l'exécution (`local_files_only`) mais par `fetch-embedding-model` ; recherche filtrée par domaine **et** par modèle d'embedding ;
   - migration `002_rag.sql` appliquée par `setup-db`, recherche exacte filtrée par domaine (pas d'index HNSW), section `embedding` ;
   - `verify_extraction` réel : normalisation, types en double ou inconnus, citations comparées au texte masqué ;
   - extraction réelle : contrat entre balises à jeton aléatoire, schéma de sortie limité aux 8 types, retour de vérification hors du bloc ;

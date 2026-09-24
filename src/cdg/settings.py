@@ -46,3 +46,9 @@ def admin_conninfo() -> str:
 def app_conninfo() -> str:
     """Rôle applicatif app_role : exécution du graphe et CLI."""
     return _conninfo(APP_ROLE, "APP_DB_PASSWORD")
+
+
+def embedding_cache_dir() -> Path:
+    """Cache persistant des poids d'embedding ; un chemin relatif part de la racine du dépôt."""
+    path = Path(_require("EMBEDDING_CACHE_DIR"))
+    return path if path.is_absolute() else DEFAULT_ENV_PATH.parent / path

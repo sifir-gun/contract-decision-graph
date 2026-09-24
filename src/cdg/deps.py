@@ -33,6 +33,15 @@ class LLMProvider(Protocol):
     ) -> tuple[SchemaT, Usage]: ...
 
 
+class Embedder(Protocol):
+    model: str
+    dimension: int
+
+    def embed_passages(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed_query(self, text: str) -> list[float]: ...
+
+
 class Extractor(Protocol):
     def __call__(self, raw_text: str, feedback: list[str]) -> ExtractionResult: ...
 
