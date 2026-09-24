@@ -14,8 +14,8 @@ from cdg import orchestrator, settings
 
 @dataclass(frozen=True)
 class Pg:
-    admin: str   # chaîne de connexion administrateur : setup-db et ménage des tests
-    app: str     # chaîne de connexion app_role : tout le reste
+    admin: str  # chaîne de connexion administrateur : setup-db et ménage des tests
+    app: str  # chaîne de connexion app_role : tout le reste
 
 
 @pytest.fixture(scope="session")
@@ -24,15 +24,17 @@ def pg() -> Pg:
     try:
         admin, app = settings.admin_conninfo(), settings.app_conninfo()
     except settings.SettingsError as exc:
-        pytest.fail(f"tests PostgreSQL : {exc}. Exclusion volontaire : -m \"not pg\"",
-                    pytrace=False)
+        pytest.fail(f'tests PostgreSQL : {exc}. Exclusion volontaire : -m "not pg"', pytrace=False)
     try:
         psycopg.connect(admin, connect_timeout=3).close()
     except psycopg.OperationalError as exc:
-        pytest.fail("PostgreSQL injoignable : lancer `docker compose up -d`, "
-                    "ou exclure volontairement ces tests avec -m \"not pg\".\n"
-                    f"{exc}", pytrace=False)
-    orchestrator.setup_database(admin)   # idempotent : tables du checkpointer et droits
+        pytest.fail(
+            "PostgreSQL injoignable : lancer `docker compose up -d`, "
+            'ou exclure volontairement ces tests avec -m "not pg".\n'
+            f"{exc}",
+            pytrace=False,
+        )
+    orchestrator.setup_database(admin)  # idempotent : tables du checkpointer et droits
     return Pg(admin=admin, app=app)
 
 

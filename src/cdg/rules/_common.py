@@ -24,12 +24,26 @@ def above(value: float, threshold: float) -> bool:
     return rounded(value) > rounded(threshold)
 
 
-def verdict(domain: Domain, status: RetrievalStatus, *, hard_block: bool,
-            penalties: list[float], findings: list[str]) -> AgentVerdict:
+def verdict(
+    domain: Domain,
+    status: RetrievalStatus,
+    *,
+    hard_block: bool,
+    penalties: list[float],
+    findings: list[str],
+) -> AgentVerdict:
     """Score : 1,0 moins les pénalités, borné à [0, 1]. Un blocage ne touche pas le score."""
     if status == "INSUFFISANT":
-        findings = [*findings, f"référentiel insuffisant pour le domaine {domain} : "
-                               "constats non étayés par le corpus"]
+        findings = [
+            *findings,
+            f"référentiel insuffisant pour le domaine {domain} : constats non étayés par le corpus",
+        ]
     score = rounded(min(1.0, max(0.0, 1.0 - sum(penalties))))
-    return AgentVerdict(domain=domain, score=score, hard_block=hard_block, findings=findings,
-                        evidence_ids=[], retrieval_status=status)
+    return AgentVerdict(
+        domain=domain,
+        score=score,
+        hard_block=hard_block,
+        findings=findings,
+        evidence_ids=[],
+        retrieval_status=status,
+    )

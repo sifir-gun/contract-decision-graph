@@ -3,10 +3,10 @@
 import json
 
 import pytest
+from doubles import clauses
 from pydantic import ValidationError
 
 from cdg import stub_j2
-from doubles import clauses
 
 
 def write_clauses(tmp_path, items) -> str:

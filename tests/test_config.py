@@ -23,8 +23,12 @@ def _write(tmp_path: Path, data) -> Path:
 
 def test_configuration_du_projet_conforme_a_la_spec():
     cfg = load_config()
-    assert (cfg.weights.juridique, cfg.weights.financier,
-            cfg.weights.conformite, cfg.weights.operationnel) == (0.30, 0.25, 0.25, 0.20)
+    assert (
+        cfg.weights.juridique,
+        cfg.weights.financier,
+        cfg.weights.conformite,
+        cfg.weights.operationnel,
+    ) == (0.30, 0.25, 0.25, 0.20)
     assert (cfg.thresholds.go, cfg.thresholds.go_reserves) == (0.75, 0.50)
     assert cfg.min_margin == 0.05
     assert cfg.conflict_gap == 0.5
@@ -67,33 +71,36 @@ def _mutate(raw: dict, path: str, value) -> dict:
 _DELETE = object()
 
 
-@pytest.mark.parametrize("path,value", [
-    ("weights.juridique", 0.25),                 # somme des poids 0,95
-    ("weights.operationnel", _DELETE),           # domaine manquant
-    ("weights.fiscal", 0.0),                     # domaine inconnu
-    ("seuil_secret", 1),                         # clé inconnue au premier niveau
-    ("thresholds.go_reserves", 0.75),            # seuils non ordonnés
-    ("thresholds.go", 1.2),                      # seuil hors de ]0, 1]
-    ("min_margin", -0.01),
-    ("conflict_gap", 0),
-    ("budget.max_tokens_per_contract", 0),
-    ("budget.max_tokens_per_contract", True),    # booléen refusé (mode strict)
-    ("budget.max_tokens_per_contract", "60000"), # chaîne refusée (mode strict)
-    ("extraction.max_attempts", 0),
-    ("rules.juridique.supplier_cap_score_penalty", -0.1),
-    ("rules.operationnel.notice_score_penalty", 1.5),
-    ("rules.financier.late_penalties_min_cap_pct", -5),
-    ("rules.operationnel", _DELETE),
-    ("human_policy", _DELETE),
-    ("human_policy.allowed_decisions", []),
-    ("human_policy.allowed_decisions", ["GO", "GO_RESERVES"]),            # NO_GO requis
-    ("human_policy.allowed_decisions", ["GO", "NO_GO", "ESCALADE"]),      # l'humain tranche
-    ("human_policy.allowed_decisions", ["GO", "NO_GO", "NO_GO"]),         # doublon
-    ("human_policy.allowed_decisions", ["GO", "NO_GO", "PEUT_ETRE"]),
-    ("human_policy.allow_block_override", "oui"),                         # mode strict
-    ("human_policy.hard_block_review", _DELETE),                          # réglage explicite
-    ("human_policy.hard_block_review", "non"),                            # mode strict
-])
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        ("weights.juridique", 0.25),  # somme des poids 0,95
+        ("weights.operationnel", _DELETE),  # domaine manquant
+        ("weights.fiscal", 0.0),  # domaine inconnu
+        ("seuil_secret", 1),  # clé inconnue au premier niveau
+        ("thresholds.go_reserves", 0.75),  # seuils non ordonnés
+        ("thresholds.go", 1.2),  # seuil hors de ]0, 1]
+        ("min_margin", -0.01),
+        ("conflict_gap", 0),
+        ("budget.max_tokens_per_contract", 0),
+        ("budget.max_tokens_per_contract", True),  # booléen refusé (mode strict)
+        ("budget.max_tokens_per_contract", "60000"),  # chaîne refusée (mode strict)
+        ("extraction.max_attempts", 0),
+        ("rules.juridique.supplier_cap_score_penalty", -0.1),
+        ("rules.operationnel.notice_score_penalty", 1.5),
+        ("rules.financier.late_penalties_min_cap_pct", -5),
+        ("rules.operationnel", _DELETE),
+        ("human_policy", _DELETE),
+        ("human_policy.allowed_decisions", []),
+        ("human_policy.allowed_decisions", ["GO", "GO_RESERVES"]),  # NO_GO requis
+        ("human_policy.allowed_decisions", ["GO", "NO_GO", "ESCALADE"]),  # l'humain tranche
+        ("human_policy.allowed_decisions", ["GO", "NO_GO", "NO_GO"]),  # doublon
+        ("human_policy.allowed_decisions", ["GO", "NO_GO", "PEUT_ETRE"]),
+        ("human_policy.allow_block_override", "oui"),  # mode strict
+        ("human_policy.hard_block_review", _DELETE),  # réglage explicite
+        ("human_policy.hard_block_review", "non"),  # mode strict
+    ],
+)
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):
     with pytest.raises(ConfigError):
         load_config(_write(tmp_path, _mutate(raw, path, value)))

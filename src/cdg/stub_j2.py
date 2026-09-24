@@ -24,7 +24,9 @@ class JsonClausesExtractor:
     def __call__(self, raw_text: str, feedback: list[str]) -> ExtractionResult:
         data = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(data, list):
-            raise ValueError(f"{self.path} : une liste de clauses JSON est attendue")
+            # ValueError et non TypeError : contenu de fichier invalide, comportement testé
+            message = f"{self.path} : une liste de clauses JSON est attendue"
+            raise ValueError(message)  # noqa: TRY004
         return ExtractionResult(clauses=[Clause.model_validate(c) for c in data], usage=[])
 
 

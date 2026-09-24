@@ -7,7 +7,6 @@ import sys
 import textwrap
 
 import pytest
-
 from doubles import clauses
 
 pytestmark = pytest.mark.pg
@@ -35,15 +34,35 @@ def test_5_processus_tue_pendant_l_interrupt_puis_reprise(pg, thread_id, tmp_pat
     cl = tmp_path / "contrat.clauses.json"
     cl.write_text(json.dumps([c.model_dump() for c in clauses()]), encoding="utf-8")
 
-    killed = subprocess.run([sys.executable, "-c", KILLED_RUN, str(text), str(cl), thread_id],
-                            capture_output=True, text=True, timeout=60)
+    killed = subprocess.run(
+        [sys.executable, "-c", KILLED_RUN, str(text), str(cl), thread_id],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,  # code de retour vérifié ci-dessous : -9 attendu
+    )
     assert killed.returncode == -signal.SIGKILL, killed.stderr
-    assert killed.stdout.splitlines() == ['"suspendu"']        # tué pendant l'interrupt
+    assert killed.stdout.splitlines() == ['"suspendu"']  # tué pendant l'interrupt
 
     resumed = subprocess.run(
-        [sys.executable, "-m", "cdg.cli", "resume", thread_id, "--decision", "NO_GO",
-         "--reviewer", "relecteur-synth", "--reason", "référentiel insuffisant"],
-        capture_output=True, text=True, timeout=60)
+        [
+            sys.executable,
+            "-m",
+            "cdg.cli",
+            "resume",
+            thread_id,
+            "--decision",
+            "NO_GO",
+            "--reviewer",
+            "relecteur-synth",
+            "--reason",
+            "référentiel insuffisant",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,  # code de retour vérifié ci-dessous
+    )
     assert resumed.returncode == 0, resumed.stderr
     out = json.loads(resumed.stdout)
     assert (out["statut"], out["final_decision"]) == ("termine", "NO_GO")

@@ -11,5 +11,6 @@ def analyst(inp: AnalystInput, crag: Retriever, decision_config: DecisionConfig)
     retrieval = RetrievalResult.model_validate(crag(domain, clauses))
     verdict = RULES[domain](clauses, retrieval.status, decision_config)
     verdict = AgentVerdict.model_validate(
-        verdict.model_dump() | {"evidence_ids": retrieval.evidence_ids})
+        verdict.model_dump() | {"evidence_ids": retrieval.evidence_ids}
+    )
     return {"verdicts": [verdict], "usage": retrieval.usage}

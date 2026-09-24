@@ -387,3 +387,22 @@ Tests :
 ### chore : .vscode retiré du dépôt
 
 **Fait.** `.vscode/settings.json`, commité par Cursor, est retiré de l'index (`git rm --cached`), mais conservé sur le disque. `.vscode/` est ajouté au `.gitignore` : la configuration de l'IDE reste locale.
+
+### style : ruff format et ruff check, line-length 100
+
+**Fait.**
+- ruff 0.16.8 en dépendance de dev, avec `[tool.ruff]` : `line-length = 100`, `target-version = "py312"`.
+- `ruff format` sur tout le dépôt. Le formatage à 79 colonnes de Cursor laisse place à une seule convention.
+- `ruff check --fix`.
+- Commandes ajoutées à CLAUDE.md.
+- **Aucun changement de comportement** : les 255 tests restent verts avec `-W error`. Côté `src/`, le diff ne contient que du reformatage et des commentaires.
+
+**Pièges.**
+- **Le jeu de règles par défaut a changé.** ruff 0.16 active environ 410 règles, pas seulement l'ancien noyau `E4`, `E7`, `E9` et `F`. `ruff check --fix` n'en corrige qu'une partie. Traitement des 40 signalements restants :
+  - **C408** (34 cas, `dict(score=…)` dans les tests) : conversion en littéraux par le correctif « unsafe » de ruff, **limité à cette règle**. Les deux formes sont strictement équivalentes.
+  - **PLW1510** : `check=False` rendu explicite. Les tests vérifient déjà le code de retour, et le processus tué doit rendre `-9`.
+  - **RUF015** (un test) : accès direct à l'élément au lieu d'une liste intermédiaire.
+  - **BLE001** (le `except Exception` de la CLI, volontaire), **TRY004** (passer à `TypeError` changerait le comportement testé) et **DTZ001** (un test veut une horloge sans fuseau) : `# noqa`, avec la raison sur la ligne au-dessus.
+- **Une correction sûre qui gêne l'audit.** SIM114, pourtant marqué « sûr », avait fusionné les étapes 3 (`INSUFFISANT`) et 4 (conflit) du gate en un seul `or`. Le résultat était équivalent, mais l'ordre de la spec devenait illisible. Les deux branches ont été rétablies, commentées. Il faut relire les corrections automatiques, même sûres, quand elles touchent la logique de décision.
+- **Tri des imports (I001).** ruff classe `doubles`, le module de test, parmi les imports tiers, car il ne le connaît pas comme premier parti. C'est sans effet.
+- **Commentaires déplacés.** Le formateur avait sorti un commentaire de fin de ligne de son contexte, dans un `parametrize` de `test_rules.py`. Il a été remis à la main.

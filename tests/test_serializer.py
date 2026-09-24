@@ -3,11 +3,11 @@
 import threading
 
 import pytest
+from doubles import clauses, usage, verdict
 from langgraph.types import Interrupt, Send
 from pydantic import BaseModel
 
 from cdg.orchestrator import BlockedDeserialization, strict_serializer
-from doubles import clauses, usage, verdict
 from cdg.state import HumanDecision
 
 
@@ -24,11 +24,16 @@ def roundtrip(serde, obj):
     return serde.loads_typed(serde.dumps_typed(obj))
 
 
-@pytest.mark.parametrize("obj", [
-    clauses()[0], verdict("juridique", score=0.5), usage(10, 5),
-    HumanDecision(decision="NO_GO", reviewer="relecteur-synth", reason="motif"),
-    {"verdicts": [verdict("financier")], "failure_report": {"stage": "budget"}},
-])
+@pytest.mark.parametrize(
+    "obj",
+    [
+        clauses()[0],
+        verdict("juridique", score=0.5),
+        usage(10, 5),
+        HumanDecision(decision="NO_GO", reviewer="relecteur-synth", reason="motif"),
+        {"verdicts": [verdict("financier")], "failure_report": {"stage": "budget"}},
+    ],
+)
 def test_nos_modeles_passent_intacts(serde, obj):
     back = roundtrip(serde, obj)
     assert back == obj and type(back) is type(obj)

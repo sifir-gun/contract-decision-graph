@@ -86,32 +86,43 @@ Domain = Literal["juridique", "financier", "conformite", "operationnel"]
 Decision = Literal["GO", "GO_RESERVES", "NO_GO", "ESCALADE"]
 Route = Literal["extract_clauses", "reject", "analysts", "human_review", "explain"]
 
-REQUIRED_KINDS = ("responsabilite_acheteur", "responsabilite_fournisseur", "revision_prix",
-                  "penalites_retard", "duree_engagement", "preavis_resiliation",
-                  "donnees_personnelles", "accord_traitement_donnees")
+REQUIRED_KINDS = (
+    "responsabilite_acheteur",
+    "responsabilite_fournisseur",
+    "revision_prix",
+    "penalites_retard",
+    "duree_engagement",
+    "preavis_resiliation",
+    "donnees_personnelles",
+    "accord_traitement_donnees",
+)
+
 
 class Clause(BaseModel):
-    kind: str            # un des REQUIRED_KINDS
-    present: bool        # la clause figure-t-elle dans le contrat ?
-    quote: str           # citation exacte si present, "" sinon (alors non vérifiée)
+    kind: str  # un des REQUIRED_KINDS
+    present: bool  # la clause figure-t-elle dans le contrat ?
+    quote: str  # citation exacte si present, "" sinon (alors non vérifiée)
     value: float | None  # quantité utile à la règle, voir « Règles par domaine »
+
 
 class AgentVerdict(BaseModel):
     domain: Domain
-    score: float         # 0 à 1
+    score: float  # 0 à 1
     hard_block: bool
     findings: list[str]
     evidence_ids: list[str]
     retrieval_status: Literal["OK", "INSUFFISANT"]
 
+
 class HumanDecision(BaseModel):
     decision: Decision
     reviewer: str
     reason: str
-    overrides_block: bool = False   # vrai si l'humain lève un blocage dur
+    overrides_block: bool = False  # vrai si l'humain lève un blocage dur
     source: Literal["humain", "systeme"] = "humain"
     # systeme : décision d'expire ; validé dans le modèle : NO_GO seulement,
     # relecteur « systeme:… » (systeme:expire) ; préfixe interdit à un humain
+
 
 class Usage(BaseModel):
     node: str
@@ -119,6 +130,7 @@ class Usage(BaseModel):
     tokens_in: int
     tokens_out: int
     latency_ms: int
+
 
 class ContractState(TypedDict, total=False):
     contract_id: str
@@ -131,16 +143,19 @@ class ContractState(TypedDict, total=False):
     usage: Annotated[list[Usage], operator.add]
     proposed_decision: Decision
     margin: float
-    route: Route          # écrite par un nœud, lue par l'arête
+    route: Route  # écrite par un nœud, lue par l'arête
     failure_report: dict | None
     human: HumanDecision | None
-    final_decision: Decision | None   # decision_gate (route explain) ou human_review ; None après reject
+    final_decision: (
+        Decision | None
+    )  # decision_gate (route explain) ou human_review ; None après reject
     explanation: str
     config_hash: str
     decision_hash: str
     chain_hash: str
 
-class AnalystInput(TypedDict):   # état privé reçu via Send
+
+class AnalystInput(TypedDict):  # état privé reçu via Send
     domain: Domain
     clauses: list[Clause]
 ```
@@ -161,45 +176,67 @@ def validate_input(state: ContractState) -> dict:
         return {"route": "extract_clauses", "extraction_attempts": 0}
     return {"route": "reject", "reject_reason": reason}
 
+
 # src/cdg/nodes/verify_extraction.py
 def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict:
     text = normalize(state["raw_text"])
-    problems = [f"citation introuvable: {c.kind}" for c in state["clauses"]
-                if c.present and normalize(c.quote) not in text]
+    problems = [
+        f"citation introuvable: {c.kind}"
+        for c in state["clauses"]
+        if c.present and normalize(c.quote) not in text
+    ]
     found = {c.kind for c in state["clauses"]}
     problems += [f"clause manquante: {k}" for k in REQUIRED_KINDS if k not in found]
     if not problems:
         return {"route": "analysts"}
-    if state["extraction_attempts"] < decision_config.extraction.max_attempts:   # 2 ; extract_clauses a incrémenté
+    if (
+        state["extraction_attempts"] < decision_config.extraction.max_attempts
+    ):  # 2 ; extract_clauses a incrémenté
         return {"route": "extract_clauses", "extraction_feedback": problems}
-    return {"route": "human_review", "proposed_decision": "ESCALADE",
-            "failure_report": {"stage": "extraction", "problems": problems}}
+    return {
+        "route": "human_review",
+        "proposed_decision": "ESCALADE",
+        "failure_report": {"stage": "extraction", "problems": problems},
+    }
+
 
 # src/cdg/nodes/decision_gate.py
 def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
-    config = decision_config                                   # « config » est réservé par LangGraph
-    d = aggregate(state["verdicts"], config)                   # Python pur, sans LLM, valeurs arrondies
-    used = total_tokens(state.get("usage", []))                # tokens_in + tokens_out
+    config = decision_config  # « config » est réservé par LangGraph
+    d = aggregate(state["verdicts"], config)  # Python pur, sans LLM, valeurs arrondies
+    used = total_tokens(state.get("usage", []))  # tokens_in + tokens_out
     limit = config.budget.max_tokens_per_contract
     over = used > limit
     budget_report = {"stage": "budget", "tokens": used, "limit": limit}
-    if d.hard_block:                                           # 1. l'issue la plus conservatrice l'emporte
-        if config.human_policy.hard_block_review:              #    NO_GO proposé, levée humaine possible
+    if d.hard_block:  # 1. l'issue la plus conservatrice l'emporte
+        if config.human_policy.hard_block_review:  #    NO_GO proposé, levée humaine possible
             update = {"proposed_decision": "NO_GO", "margin": d.margin, "route": "human_review"}
-        else:                                                  #    NO_GO établi, marge ignorée
-            update = {"proposed_decision": "NO_GO", "final_decision": "NO_GO",
-                      "margin": d.margin, "route": "explain"}
+        else:  #    NO_GO établi, marge ignorée
+            update = {
+                "proposed_decision": "NO_GO",
+                "final_decision": "NO_GO",
+                "margin": d.margin,
+                "route": "explain",
+            }
         if over:
-            update["failure_report"] = budget_report          #    dépassement tracé quand même
+            update["failure_report"] = budget_report  #    dépassement tracé quand même
         return update
-    if over:                                                   # 2. budget
-        return {"proposed_decision": "ESCALADE", "margin": d.margin,
-                "failure_report": budget_report, "route": "human_review"}
+    if over:  # 2. budget
+        return {
+            "proposed_decision": "ESCALADE",
+            "margin": d.margin,
+            "failure_report": budget_report,
+            "route": "human_review",
+        }
     # 3. INSUFFISANT, 4. conflit, 5. seuils : déjà ordonnés par aggregate
     if d.decision == "ESCALADE" or d.margin < config.min_margin:
         return {"proposed_decision": d.decision, "margin": d.margin, "route": "human_review"}
-    return {"proposed_decision": d.decision, "final_decision": d.decision,
-            "margin": d.margin, "route": "explain"}
+    return {
+        "proposed_decision": d.decision,
+        "final_decision": d.decision,
+        "margin": d.margin,
+        "route": "explain",
+    }
 ```
 
 Adaptateurs et câblage, dans `orchestrator.py` uniquement :
@@ -210,39 +247,43 @@ from langgraph.types import Send, interrupt
 
 DOMAINS = ["juridique", "financier", "conformite", "operationnel"]
 
+
 def read_route(state: ContractState) -> str:
     return state["route"]
 
+
 def route_after_verify(state: ContractState):
-    if state["route"] == "analysts":                           # décision lue dans l'état
+    if state["route"] == "analysts":  # décision lue dans l'état
         return [Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS]
     return state["route"]
+
 
 def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
     # adaptateur : interrupt() + policy.py ; aucun effet de bord avant interrupt()
     request = policy.build_request(state, decision_config)
     while True:
         # review : validation Pydantic de la réponse brute, puis politique versionnée
-        human, error = policy.review(interrupt(request), state.get("verdicts", []),
-                                     decision_config)
+        human, error = policy.review(interrupt(request), state.get("verdicts", []), decision_config)
         if error is None:
             return {"human": human, "final_decision": human.decision}
-        request = {**request, "error": error}   # mal formée ou refusée : redemandée
+        request = {**request, "error": error}  # mal formée ou refusée : redemandée
 
-def build_graph(config: DecisionConfig, deps: Deps):          # les tests injectent des doublures
+
+def build_graph(config: DecisionConfig, deps: Deps):  # les tests injectent des doublures
     builder = StateGraph(ContractState)
-    ...                                                        # add_node des 9 nœuds, dépendances liées
+    ...  # add_node des 9 nœuds, dépendances liées
     builder.add_edge(START, "validate_input")
     builder.add_conditional_edges("validate_input", read_route, ["extract_clauses", "reject"])
     builder.add_edge("extract_clauses", "verify_extraction")
-    builder.add_conditional_edges("verify_extraction", route_after_verify,
-                                  ["extract_clauses", "analyst", "human_review"])
+    builder.add_conditional_edges(
+        "verify_extraction", route_after_verify, ["extract_clauses", "analyst", "human_review"]
+    )
     builder.add_edge("analyst", "decision_gate")
     builder.add_conditional_edges("decision_gate", read_route, ["human_review", "explain"])
     builder.add_edge("human_review", "explain")
     builder.add_edge("explain", "audit_seal")
     builder.add_edge("audit_seal", END)
-    builder.add_edge("reject", "audit_seal")                   # un rejet est scellé aussi
+    builder.add_edge("reject", "audit_seal")  # un rejet est scellé aussi
     return builder
 ```
 
@@ -253,17 +294,25 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.types import Command
 
 with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
-    checkpointer.setup()                      # crée les tables au premier lancement
+    checkpointer.setup()  # crée les tables au premier lancement
     graph = build_graph(decision_config, deps).compile(checkpointer=checkpointer)
     run_config = {"configurable": {"thread_id": contract_id}}
 
     out = graph.invoke({"contract_id": contract_id, "raw_text": text}, run_config)
     # si escalade : out contient "__interrupt__" avec la charge utile
 
-    graph.invoke(Command(resume={"decision": "NO_GO", "reviewer": "gt",
-                                 "reason": "plafond de responsabilité absent"}), run_config)
+    graph.invoke(
+        Command(
+            resume={
+                "decision": "NO_GO",
+                "reviewer": "gt",
+                "reason": "plafond de responsabilité absent",
+            }
+        ),
+        run_config,
+    )
 
-    history = list(graph.get_state_history(run_config))   # tous les checkpoints du thread
+    history = list(graph.get_state_history(run_config))  # tous les checkpoints du thread
 ```
 
 Points à maîtriser :
@@ -365,9 +414,12 @@ Contenu scellé : `contract_id`, `thread_id`, clauses, verdicts, décision propo
 ```python
 import hashlib, json
 
+
 def canonical(obj) -> bytes:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, default=str).encode()
+    return json.dumps(
+        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+    ).encode()
+
 
 def seal(record: dict, prev_hash: str) -> str:
     return hashlib.sha256(prev_hash.encode() + canonical(record)).hexdigest()
@@ -432,7 +484,7 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `pytest`, Docker Compose. Modèles configurables par variable d'environnement, avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `pytest`, `ruff` (dev, line-length 100), Docker Compose. Modèles configurables par variable d'environnement, avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/

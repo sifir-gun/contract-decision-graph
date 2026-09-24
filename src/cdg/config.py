@@ -84,7 +84,7 @@ class RulesConfig(_Strict):
 class HumanPolicy(_Strict):
     allowed_decisions: Annotated[list[Decision], Field(min_length=1)]
     allow_block_override: bool
-    hard_block_review: bool   # vrai : un blocage dur passe en revue humaine
+    hard_block_review: bool  # vrai : un blocage dur passe en revue humaine
 
     @model_validator(mode="after")
     def _decisions_coherentes(self) -> "HumanPolicy":

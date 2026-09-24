@@ -7,8 +7,15 @@ from psycopg.conninfo import conninfo_to_dict
 
 from cdg import settings
 
-VARS = ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER",
-        "POSTGRES_PASSWORD", "APP_DB_PASSWORD", "LANGSMITH_TRACING")
+VARS = (
+    "POSTGRES_HOST",
+    "POSTGRES_PORT",
+    "POSTGRES_DB",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "APP_DB_PASSWORD",
+    "LANGSMITH_TRACING",
+)
 
 
 @pytest.fixture
@@ -24,9 +31,14 @@ def _env_file(tmp_path, **values):
     return path
 
 
-FULL = dict(POSTGRES_PORT="5432", POSTGRES_DB="cdg", POSTGRES_USER="cdg_admin",
-            POSTGRES_PASSWORD="admin secret", APP_DB_PASSWORD="app'secret",
-            LANGSMITH_TRACING="false")
+FULL = {
+    "POSTGRES_PORT": "5432",
+    "POSTGRES_DB": "cdg",
+    "POSTGRES_USER": "cdg_admin",
+    "POSTGRES_PASSWORD": "admin secret",
+    "APP_DB_PASSWORD": "app'secret",
+    "LANGSMITH_TRACING": "false",
+}
 
 
 def test_env_charge_le_fichier(clean_env, tmp_path):
@@ -45,9 +57,16 @@ def test_chaines_de_connexion_admin_et_app_role(clean_env, tmp_path):
     admin = conninfo_to_dict(settings.admin_conninfo())
     app = conninfo_to_dict(settings.app_conninfo())
     assert (admin["user"], admin["password"], admin["host"]) == (
-        "cdg_admin", "admin secret", "localhost")
+        "cdg_admin",
+        "admin secret",
+        "localhost",
+    )
     assert (app["user"], app["password"], app["dbname"], app["port"]) == (
-        "app_role", "app'secret", "cdg", "5432")
+        "app_role",
+        "app'secret",
+        "cdg",
+        "5432",
+    )
 
 
 @pytest.mark.parametrize("missing", ["POSTGRES_PORT", "POSTGRES_PASSWORD", "APP_DB_PASSWORD"])

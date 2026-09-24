@@ -4,11 +4,11 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from doubles import FakeCrag, FixedExtractor, clauses
 
 from cdg import cli, orchestrator
 from cdg.config import load_config
 from cdg.deps import Deps
-from doubles import FakeCrag, FixedExtractor, clauses
 
 pytestmark = pytest.mark.pg
 
@@ -21,8 +21,9 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 def suspend(graph, thread_id: str) -> datetime:
     status = orchestrator.run_contract(graph, thread_id, "Contrat synthétique.")
     assert status["statut"] == "suspendu"
-    return datetime.fromisoformat(graph.get_state(
-        {"configurable": {"thread_id": thread_id}}).created_at)
+    return datetime.fromisoformat(
+        graph.get_state({"configurable": {"thread_id": thread_id}}).created_at
+    )
 
 
 @pytest.fixture
@@ -34,26 +35,40 @@ def graph(pg):
 
 def test_11_thread_expire_no_go_systeme_motif_timeout(graph, thread_id):
     since = suspend(graph, thread_id)
-    [status] = orchestrator.expire_threads(graph, DAY, now=since + DAY + timedelta(hours=1),
-                                           thread_ids={thread_id})
+    [status] = orchestrator.expire_threads(
+        graph, DAY, now=since + DAY + timedelta(hours=1), thread_ids={thread_id}
+    )
     assert (status["thread_id"], status["statut"], status["final_decision"]) == (
-        thread_id, "termine", "NO_GO")
+        thread_id,
+        "termine",
+        "NO_GO",
+    )
     human = status["human"]
     assert (human["source"], human["reviewer"], human["decision"]) == (
-        "systeme", "systeme:expire", "NO_GO")
+        "systeme",
+        "systeme:expire",
+        "NO_GO",
+    )
     assert human["reason"].startswith("timeout : en attente depuis 25 h")
     assert orchestrator.thread_status(graph, thread_id)["statut"] == "termine"
 
 
 def test_thread_recent_non_expire(graph, thread_id):
     since = suspend(graph, thread_id)
-    assert orchestrator.expire_threads(graph, DAY, now=since + DAY,   # pile au délai
-                                       thread_ids={thread_id}) == []
+    assert (
+        orchestrator.expire_threads(
+            graph,
+            DAY,
+            now=since + DAY,  # pile au délai
+            thread_ids={thread_id},
+        )
+        == []
+    )
     assert orchestrator.thread_status(graph, thread_id)["statut"] == "suspendu"
 
 
 def test_thread_termine_jamais_repris(pg, thread_id):
-    deps = Deps(extractor=FixedExtractor(clauses()), crag=FakeCrag())   # GO direct
+    deps = Deps(extractor=FixedExtractor(clauses()), crag=FakeCrag())  # GO direct
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         assert orchestrator.run_contract(g, thread_id, "x")["statut"] == "termine"
         far = datetime.now(UTC) + timedelta(days=365)
@@ -62,11 +77,11 @@ def test_thread_termine_jamais_repris(pg, thread_id):
 
 def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
     since = suspend(graph, thread_id)
-    refused = orchestrator.resume_thread(graph, thread_id, {"decision": "ESCALADE",
-                                                            "reviewer": "r", "reason": "m"})
+    refused = orchestrator.resume_thread(
+        graph, thread_id, {"decision": "ESCALADE", "reviewer": "r", "reason": "m"}
+    )
     assert refused["statut"] == "suspendu"
-    [status] = orchestrator.expire_threads(graph, DAY, now=since + 2 * DAY,
-                                           thread_ids={thread_id})
+    [status] = orchestrator.expire_threads(graph, DAY, now=since + 2 * DAY, thread_ids={thread_id})
     assert status["final_decision"] == "NO_GO"
 
 

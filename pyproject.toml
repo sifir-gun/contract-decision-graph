@@ -21,6 +21,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/cdg"]
 
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
@@ -30,4 +34,5 @@ markers = [
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "ruff>=0.16.8",
 ]

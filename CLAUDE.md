@@ -33,8 +33,10 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `uv sync` : installe les dépendances
 - `uv run python -m cdg.cli setup-db` : tables du checkpointer et droits d'app_role (une fois, après `docker compose up -d`)
 - `uv run pytest` : lance les tests (ceux marqués `pg` exigent PostgreSQL ; `-m "not pg"` pour les exclure volontairement)
+- `uv run ruff format` : formate le code (line-length 100)
+- `uv run ruff check` : lint (jeu de règles par défaut de ruff 0.16) ; doit passer avant chaque commit
 - `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify)
 
 ## Stack
 
-Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, pytest, Docker Compose.
+Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, pytest, ruff (dev), Docker Compose.

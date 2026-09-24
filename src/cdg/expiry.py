@@ -23,18 +23,22 @@ def format_duration(delta: timedelta) -> str:
     return f"{minutes // 60} h {minutes % 60:02d} min"
 
 
-def expired(pending: list[tuple[str, datetime]], older_than: timedelta,
-            now: datetime) -> list[tuple[str, datetime]]:
+def expired(
+    pending: list[tuple[str, datetime]], older_than: timedelta, now: datetime
+) -> list[tuple[str, datetime]]:
     """Threads en attente depuis strictement plus que `older_than`."""
     if now.tzinfo is None:
         raise ValueError("horloge sans fuseau horaire : comparaison ambiguë")
-    return [(thread_id, since) for thread_id, since in pending
-            if now - since > older_than]
+    return [(thread_id, since) for thread_id, since in pending if now - since > older_than]
 
 
 def system_decision(waited: timedelta, older_than: timedelta) -> dict:
     """Réponse de reprise : NO_GO système, motif timeout, tracée comme telle."""
-    return {"decision": "NO_GO", "reviewer": EXPIRE_REVIEWER, "source": "systeme",
-            "overrides_block": False,
-            "reason": f"timeout : en attente depuis {format_duration(waited)}, "
-                      f"délai {format_duration(older_than)}"}
+    return {
+        "decision": "NO_GO",
+        "reviewer": EXPIRE_REVIEWER,
+        "source": "systeme",
+        "overrides_block": False,
+        "reason": f"timeout : en attente depuis {format_duration(waited)}, "
+        f"délai {format_duration(older_than)}",
+    }

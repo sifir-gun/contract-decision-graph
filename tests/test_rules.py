@@ -2,11 +2,11 @@
 
 import pytest
 import yaml
+from doubles import ABSENT, clauses
 
 from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.rules import RULES
 from cdg.state import DOMAINS, Clause
-from doubles import ABSENT, clauses
 
 CONFIG = load_config()
 
@@ -34,9 +34,10 @@ def test_contrat_favorable(domain):
 
 # --- juridique ------------------------------------------------------------------
 
+
 def test_juridique_responsabilite_acheteur_illimitee_bloque():
     v = run("juridique", responsabilite_acheteur=None)
-    assert v.hard_block and v.score == 1.0          # le blocage ne touche pas le score
+    assert v.hard_block and v.score == 1.0  # le blocage ne touche pas le score
     assert "illimitée" in v.findings[0]
 
 
@@ -44,15 +45,23 @@ def test_juridique_responsabilite_acheteur_absente_ne_bloque_pas():
     assert not run("juridique", responsabilite_acheteur=ABSENT).hard_block
 
 
-@pytest.mark.parametrize("cap,score", [(50, 0.5), (99.9, 0.5), (100, 1.0),
-                                       (99.9999999, 1.0),      # arrondi avant comparaison
-                                       (None, 1.0),            # illimitée : favorable
-                                       (ABSENT, 1.0)])
+@pytest.mark.parametrize(
+    "cap,score",
+    [
+        (50, 0.5),
+        (99.9, 0.5),
+        (100, 1.0),
+        (99.9999999, 1.0),  # arrondi avant comparaison
+        (None, 1.0),  # illimitée : favorable
+        (ABSENT, 1.0),
+    ],
+)
 def test_juridique_plafond_fournisseur(cap, score):
     assert run("juridique", responsabilite_fournisseur=cap).score == score
 
 
 # --- financier ------------------------------------------------------------------
+
 
 def test_financier_revision_de_prix_non_plafonnee_bloque():
     v = run("financier", revision_prix=None)
@@ -63,13 +72,21 @@ def test_financier_revision_de_prix_absente_ne_bloque_pas():
     assert not run("financier", revision_prix=ABSENT).hard_block
 
 
-@pytest.mark.parametrize("cap,score", [(ABSENT, 0.6), (4.99, 0.6), (5, 1.0),
-                                       (None, 1.0)])          # non plafonnées : favorable
+@pytest.mark.parametrize(
+    "cap,score",
+    [
+        (ABSENT, 0.6),
+        (4.99, 0.6),
+        (5, 1.0),
+        (None, 1.0),  # non plafonnées : favorable
+    ],
+)
 def test_financier_penalites_de_retard(cap, score):
     assert run("financier", penalites_retard=cap).score == score
 
 
 # --- conformite -----------------------------------------------------------------
+
 
 def test_conformite_donnees_sans_accord_de_traitement_bloque():
     v = run("conformite", accord_traitement_donnees=ABSENT)
@@ -84,6 +101,7 @@ def test_conformite_sans_blocage(donnees, accord):
 
 
 # --- operationnel ---------------------------------------------------------------
+
 
 @pytest.mark.parametrize("months,score", [(37, 0.7), (36, 1.0), (ABSENT, 1.0)])
 def test_operationnel_duree_engagement(months, score):
@@ -107,6 +125,7 @@ def test_operationnel_duree_non_chiffree_penalisee_par_prudence(kind):
 
 
 # --- transverses ----------------------------------------------------------------
+
 
 @pytest.mark.parametrize("domain", DOMAINS)
 def test_insuffisant_consigne_dans_les_constats(domain):
@@ -147,5 +166,9 @@ def test_clause_en_double_leve_une_erreur():
 
 
 def _kind_read_by(domain: str) -> str:
-    return {"juridique": "responsabilite_acheteur", "financier": "penalites_retard",
-            "conformite": "donnees_personnelles", "operationnel": "preavis_resiliation"}[domain]
+    return {
+        "juridique": "responsabilite_acheteur",
+        "financier": "penalites_retard",
+        "conformite": "donnees_personnelles",
+        "operationnel": "preavis_resiliation",
+    }[domain]

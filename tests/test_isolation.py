@@ -24,14 +24,16 @@ def _imports_langgraph(path: Path) -> bool:
 def test_seul_orchestrator_importe_langgraph():
     sources = sorted(SRC.rglob("*.py"))
     assert sources, f"aucun fichier source trouvé sous {SRC}"
-    offenders = [str(p.relative_to(SRC)) for p in sources
-                 if p != ALLOWED and _imports_langgraph(p)]
+    offenders = [str(p.relative_to(SRC)) for p in sources if p != ALLOWED and _imports_langgraph(p)]
     assert offenders == []
 
 
 def test_detection_import_langgraph(tmp_path):
-    for code in ("import langgraph", "from langgraph.types import Send",
-                 "import langgraph.graph as g"):
+    for code in (
+        "import langgraph",
+        "from langgraph.types import Send",
+        "import langgraph.graph as g",
+    ):
         f = tmp_path / "m.py"
         f.write_text(code)
         assert _imports_langgraph(f), code

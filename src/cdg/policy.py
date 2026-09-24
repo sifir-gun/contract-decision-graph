@@ -17,15 +17,21 @@ def build_request(state: ContractState, config: DecisionConfig) -> dict:
         "proposed_decision": state.get("proposed_decision"),
         "margin": None if margin is None else rounded(margin),
         "failure_report": state.get("failure_report"),
-        "verdicts": [{"domain": v.domain, "score": rounded(v.score), "hard_block": v.hard_block,
-                      "findings": list(v.findings), "retrieval_status": v.retrieval_status}
-                     for v in state.get("verdicts", [])],
+        "verdicts": [
+            {
+                "domain": v.domain,
+                "score": rounded(v.score),
+                "hard_block": v.hard_block,
+                "findings": list(v.findings),
+                "retrieval_status": v.retrieval_status,
+            }
+            for v in state.get("verdicts", [])
+        ],
         "allowed_decisions": list(config.human_policy.allowed_decisions),
     }
 
 
-def check(human: HumanDecision, verdicts: list[AgentVerdict],
-          config: DecisionConfig) -> str | None:
+def check(human: HumanDecision, verdicts: list[AgentVerdict], config: DecisionConfig) -> str | None:
     """None si la décision est recevable, sinon le motif du refus."""
     rules = config.human_policy
     if human.decision not in rules.allowed_decisions:
@@ -45,14 +51,16 @@ def check(human: HumanDecision, verdicts: list[AgentVerdict],
     return None
 
 
-def review(payload: Any, verdicts: list[AgentVerdict],
-           config: DecisionConfig) -> tuple[HumanDecision | None, str | None]:
+def review(
+    payload: Any, verdicts: list[AgentVerdict], config: DecisionConfig
+) -> tuple[HumanDecision | None, str | None]:
     """Valide la réponse brute reçue à la reprise, puis applique la politique."""
     try:
         human = HumanDecision.model_validate(payload)
     except ValidationError as exc:
-        details = "; ".join(f"{'.'.join(map(str, e['loc'])) or 'réponse'} : {e['msg']}"
-                            for e in exc.errors())
+        details = "; ".join(
+            f"{'.'.join(map(str, e['loc'])) or 'réponse'} : {e['msg']}" for e in exc.errors()
+        )
         return None, f"réponse invalide : {details}"
     error = check(human, verdicts, config)
     return (None, error) if error else (human, None)
