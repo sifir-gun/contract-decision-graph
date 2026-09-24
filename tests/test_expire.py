@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from doubles import FakeCrag, FixedExtractor, clauses
+from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 
 from cdg import cli, orchestrator
 from cdg.config import load_config
@@ -19,7 +19,7 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 
 
 def suspend(graph, thread_id: str) -> datetime:
-    status = orchestrator.run_contract(graph, thread_id, "Contrat synthétique.")
+    status = orchestrator.run_contract(graph, thread_id, CONTRACT_TEXT)
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
         graph.get_state({"configurable": {"thread_id": thread_id}}).created_at
@@ -70,7 +70,7 @@ def test_thread_recent_non_expire(graph, thread_id):
 def test_thread_termine_jamais_repris(pg, thread_id):
     deps = Deps(extractor=FixedExtractor(clauses()), crag=FakeCrag())  # GO direct
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
-        assert orchestrator.run_contract(g, thread_id, "x")["statut"] == "termine"
+        assert orchestrator.run_contract(g, thread_id, CONTRACT_TEXT)["statut"] == "termine"
         far = datetime.now(UTC) + timedelta(days=365)
         assert orchestrator.expire_threads(g, DAY, now=far, thread_ids={thread_id}) == []
 

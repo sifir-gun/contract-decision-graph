@@ -55,13 +55,19 @@ flowchart TD
 
 **Routage : un seul mécanisme.** Chaque nœud à plusieurs sorties (`validate_input`, `verify_extraction`, `decision_gate`) écrit `route` dans l'état ; l'arête conditionnelle qui le suit ne fait que la lire. Pour `route = "analysts"`, l'arête construit les 4 `Send` à partir des clauses de l'état : la décision de fan-out est dans l'état, la mécanique dans l'orchestrateur. Aucun `Command(goto=...)` : `Command` ne sert qu'à `Command(resume=...)` pour reprendre après un `interrupt()`.
 
+**Masquage avant le graphe.** L'entrée d'un `invoke` est écrite dans le premier checkpoint, avant tout nœud. `orchestrator.run_contract` masque donc le texte **avant** d'invoquer le graphe (`masking.py`) :
+- motifs : e-mails, téléphones, IBAN, SIRET et SIREN (clé de Luhn, et pas suivi d'une unité : un montant n'est pas un SIREN) ;
+- noms des parties déclarés (`--party`).
+
+Le texte original n'est ainsi jamais écrit en base ni envoyé au LLM. `validate_input` rejette tout texte où un motif subsiste. Des tests le vérifient jusque dans les tables de checkpoints.
+
 **Nœuds purs, adaptateurs dans l'orchestrateur.** Chaque nœud de `src/cdg/nodes/` est une fonction pure qui reçoit l'état (et ses dépendances injectées : configuration, extracteur, CRAG, LLM) et renvoie un dict. `orchestrator.py` porte tout ce qui dépend de LangGraph : construction des `Send`, appel à `interrupt()`, câblage. `human_review` est un adaptateur de `orchestrator.py` qui appelle `policy.py`.
 
 Chaque analyste appelle le sous-graphe CRAG pour récupérer les références utiles à son domaine, puis applique ses règles en Python pur.
 
 | Nœud | Rôle | LLM |
 | --- | --- | --- |
-| validate_input | Schéma, taille, langue ; masquage par motifs (e-mails, téléphones, IBAN, SIREN) et des noms de parties déclarés en entrée ; écrit `route` (`extract_clauses` ou `reject`) | Non |
+| validate_input | Taille, langue (part de mots-outils français) et absence de données personnelles résiduelles, sur un texte **déjà masqué** par `run_contract` ; écrit `route` (`extract_clauses` ou `reject`) | Non |
 | extract_clauses | Extraction structurée des clauses ; le contrat est délimité comme donnée, jamais comme instruction ; chaque clause attendue est toujours rendue, avec `present` et sa citation exacte si elle est présente ; incrémente `extraction_attempts` | Oui, sortie Pydantic |
 | verify_extraction | Vérifie par code que la citation de chaque clause présente existe mot pour mot dans le contrat et que les `REQUIRED_KINDS` sont tous rendus ; écrit `route` (`analysts`, `extract_clauses` pour une ré-extraction avec retour ciblé, ou `human_review`) | Non |
 | analyst | CRAG + règles du domaine, rend un `AgentVerdict` | Oui pour CRAG uniquement |
@@ -511,6 +517,7 @@ contract-decision-graph/
 │   ├── orchestrator.py         # seul fichier qui importe LangGraph : adaptateurs et câblage
 │   ├── state.py                # schémas d'état et Pydantic
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
+│   ├── masking.py              # masquage des données personnelles avant le graphe
 │   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
 │   ├── deps.py                 # contrats injectés : extracteur, CRAG, LLMProvider (doublures en test)
 │   ├── providers/              # fournisseurs LLM : mistral.py, anthropic.py, choisis par la config
@@ -598,6 +605,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
   - option pytest `--llm` ;
+  - masquage dans `run_contract` avant le graphe, `validate_input` complet (section `input` : `max_chars`, `min_words`, `min_french_ratio`) ;
   - interface `LLMProvider` (sortie structurée Pydantic, consommation mesurée), fournisseurs Mistral et Anthropic. `temperature` ne vaut que pour Mistral, car `messages.parse` ne l'accepte pas dans anthropic 1.8.0.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;

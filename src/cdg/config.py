@@ -97,6 +97,12 @@ class HumanPolicy(_Strict):
         return self
 
 
+class InputConfig(_Strict):
+    max_chars: Annotated[int, Field(gt=0)]
+    min_words: Annotated[int, Field(gt=0)]  # en dessous, la langue n'est pas vérifiable
+    min_french_ratio: Unit  # part minimale de mots-outils français
+
+
 Tier = Literal["main", "light"]
 ModelId = Annotated[str, Field(min_length=1)]
 
@@ -141,6 +147,7 @@ class DecisionConfig(_Strict):
     extraction: Extraction
     rules: RulesConfig
     human_policy: HumanPolicy
+    input: InputConfig
     llm: LLMConfig
 
     def weight(self, domain: Domain) -> float:

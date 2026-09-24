@@ -2,10 +2,11 @@
 
 import pytest
 import yaml
-from doubles import ABSENT, FakeCrag, FixedExtractor, clauses
+from doubles import ABSENT, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Send
 
+from cdg import orchestrator
 from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.deps import Deps
 from cdg.orchestrator import build_graph, route_after_verify, strict_serializer
@@ -22,13 +23,13 @@ def make(clause_overrides=None, statuses=None, crag_tokens=0):
     return graph, extractor, crag
 
 
-def run(raw_text="Contrat synthétique de prestation.", **kwargs):
+def run(raw_text=CONTRACT_TEXT, **kwargs):
     graph, extractor, crag = make(**kwargs)
     out = graph.invoke({"contract_id": "c-synth-001", "raw_text": raw_text})
     return out, extractor, crag
 
 
-def updates(raw_text="Contrat synthétique de prestation.", **kwargs) -> list[tuple[str, dict]]:
+def updates(raw_text=CONTRACT_TEXT, **kwargs) -> list[tuple[str, dict]]:
     graph, _, _ = make(**kwargs)
     steps = graph.stream(
         {"contract_id": "c-synth-001", "raw_text": raw_text}, stream_mode="updates"
@@ -101,9 +102,7 @@ def start(clause_overrides=None, statuses=None, crag_tokens=0, config=CONFIG):
     graph = build_graph(config, Deps(extractor=extractor, crag=crag)).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
-    out = graph.invoke(
-        {"contract_id": "c-synth-001", "raw_text": "Contrat synthétique de prestation."}, THREAD
-    )
+    out = graph.invoke({"contract_id": "c-synth-001", "raw_text": CONTRACT_TEXT}, THREAD)
     return graph, out
 
 
@@ -254,3 +253,26 @@ def test_aretes_du_graphe_conformes_a_la_spec():
         ("reject", "audit_seal"),
         ("audit_seal", "__end__"),
     }
+
+
+# --- Masquage avant le graphe : le texte original n'entre jamais dans l'état -------------
+
+PII = "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89, société Acme Industrie.\n"
+
+
+def test_run_contract_masque_avant_le_graphe():
+    extractor = FixedExtractor(clauses())
+    graph = build_graph(CONFIG, Deps(extractor=extractor, crag=FakeCrag())).compile(
+        checkpointer=InMemorySaver(serde=strict_serializer())
+    )
+    status = orchestrator.run_contract(
+        graph, "c-pii", CONTRACT_TEXT + PII, parties=["Acme Industrie"]
+    )
+    assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
+    raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
+    assert "[EMAIL]" in raw and "[TELEPHONE]" in raw and "[PARTIE_1]" in raw
+    for original in ("jeanne.martin@exemple.fr", "01 23 45 67 89", "Acme Industrie"):
+        assert original not in raw
+    # l'extracteur ne reçoit que le texte masqué
+    [(received, _)] = extractor.calls
+    assert received == raw

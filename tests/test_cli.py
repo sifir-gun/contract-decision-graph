@@ -33,7 +33,7 @@ def test_commande_obligatoire(capsys):
 
 # --- run, resume, history (mode stub-j2) ---------------------------------------------
 
-from doubles import clauses
+from doubles import CONTRACT_TEXT, clauses
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def contract(tmp_path):
 
     def make(**overrides):
         text = tmp_path / "contrat-synth.txt"
-        text.write_text("Contrat synthétique de prestation de services.", encoding="utf-8")
+        text.write_text(CONTRACT_TEXT, encoding="utf-8")
         cl = tmp_path / "contrat-synth.clauses.json"
         cl.write_text(
             json.dumps([c.model_dump() for c in clauses(**overrides)], ensure_ascii=False),
@@ -179,7 +179,7 @@ def test_run_refuse_un_thread_existant(pg, thread_id, contract, capsys):
 
 def test_run_fichier_de_clauses_absent(tmp_path, capsys):
     text = tmp_path / "c.txt"
-    text.write_text("x", encoding="utf-8")
+    text.write_text(CONTRACT_TEXT, encoding="utf-8")
     code, err = run_cli(capsys, "run", str(text), "--clauses", str(tmp_path / "absent.json"))
     assert code == 1 and err["erreur"] == "FileNotFoundError"
 
@@ -190,7 +190,7 @@ def test_run_fichier_de_clauses_absent(tmp_path, capsys):
 @pytest.mark.pg
 def test_echec_de_noeud_erreur_json_et_etat_lisible_par_history(pg, thread_id, tmp_path, capsys):
     text = tmp_path / "contrat.txt"
-    text.write_text("Contrat synthétique.", encoding="utf-8")
+    text.write_text(CONTRACT_TEXT, encoding="utf-8")
     # clause attendue manquante : la règle financière lève pendant le fan-out
     incomplete = [c.model_dump() for c in clauses() if c.kind != "penalites_retard"]
     cl = tmp_path / "contrat.clauses.json"

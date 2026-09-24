@@ -44,7 +44,9 @@ def _run(args: argparse.Namespace) -> dict:
     if not Path(args.clauses).is_file():
         raise FileNotFoundError(f"fichier de clauses introuvable : {args.clauses}")
     with _graph(args.clauses) as graph:
-        status = orchestrator.run_contract(graph, args.contract_id or contract.stem, raw_text)
+        status = orchestrator.run_contract(
+            graph, args.contract_id or contract.stem, raw_text, parties=args.party
+        )
     return {"mode": stub_j2.MODE, **status}
 
 
@@ -94,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("contract", help="fichier texte du contrat (synthétique)")
     run.add_argument(
         "--clauses", required=True, help="clauses déjà extraites, liste JSON (mode stub-j2)"
+    )
+    run.add_argument(
+        "--party",
+        action="append",
+        default=[],
+        help="nom d'une partie, masqué avant analyse (option répétable)",
     )
     run.add_argument(
         "--contract-id", help="identifiant du contrat et du thread (défaut : nom du fichier)"

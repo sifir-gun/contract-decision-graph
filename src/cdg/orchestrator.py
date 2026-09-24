@@ -2,7 +2,7 @@
 câblage du graphe."""
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import partial
@@ -17,7 +17,7 @@ from langgraph.types import Command, Send, StateSnapshot, interrupt
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
 
-from cdg import expiry, policy
+from cdg import expiry, masking, policy
 from cdg.config import DecisionConfig
 from cdg.deps import Deps
 from cdg.nodes.analyst import analyst
@@ -71,7 +71,7 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     """Câble les 9 nœuds, dépendances liées ; renvoie le graphe non compilé."""
     builder = StateGraph(ContractState)
-    builder.add_node("validate_input", validate_input)
+    builder.add_node("validate_input", partial(validate_input, decision_config=config))
     builder.add_node("extract_clauses", partial(extract_clauses, extractor=deps.extractor))
     builder.add_node("verify_extraction", verify_extraction)
     # input_schema explicite : LangGraph ne le déduit pas d'un partial
@@ -236,15 +236,22 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
     }
 
 
-def run_contract(graph: CompiledStateGraph, contract_id: str, raw_text: str) -> dict:
-    """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler."""
+def run_contract(
+    graph: CompiledStateGraph, contract_id: str, raw_text: str, parties: Sequence[str] = ()
+) -> dict:
+    """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
+
+    Le texte est masqué AVANT l'invocation : l'entrée du graphe est écrite dans le
+    premier checkpoint, le texte original n'atteint donc jamais la base ni le LLM.
+    """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
             f"le thread {contract_id} existe déjà : utiliser "
             "resume, ou un autre identifiant de contrat"
         )
-    graph.invoke({"contract_id": contract_id, "raw_text": raw_text}, _thread(contract_id))
-    return thread_status(graph, contract_id)
+    masked = masking.mask(raw_text, parties)
+    graph.invoke({"contract_id": contract_id, "raw_text": masked.text}, _thread(contract_id))
+    return {**thread_status(graph, contract_id), "masquage": masked.counts}
 
 
 def resume_thread(graph: CompiledStateGraph, thread_id: str, answer: dict) -> dict:

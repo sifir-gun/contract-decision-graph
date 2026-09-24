@@ -50,6 +50,12 @@ human_policy:
   # true : il part en revue humaine avec NO_GO proposé ; la levée exige overrides_block et motif.
   hard_block_review: false
 
+# Contrôle de l'entrée (validate_input), sur le texte déjà masqué.
+input:
+  max_chars: 200000        # au-delà : rejet
+  min_words: 30            # en dessous : langue non vérifiable, rejet
+  min_french_ratio: 0.15   # part minimale de mots-outils français parmi les mots
+
 # LLM : extraction (modèle principal) et juge CRAG (modèle léger). Clés d'API dans .env.
 # Identifiants figés, jamais d'alias « -latest » : le modèle est scellé dans l'audit.
 # Vérifiés le 2026-09-24 dans la documentation officielle (docs.mistral.ai,

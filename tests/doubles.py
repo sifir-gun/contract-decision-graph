@@ -17,6 +17,18 @@ FAVORABLE = {
 
 ABSENT = object()  # marqueur : la clause ne figure pas dans le contrat
 
+# Contrat synthétique en français, sans donnée réelle : contient la citation de chaque
+# clause rendue par `clauses()` (« Article synthétique : <kind>. »).
+CONTRACT_TEXT = (
+    "CONTRAT DE PRESTATION DE SERVICES (document synthétique)\n\n"
+    "Entre la société cliente, ci-après dénommée l'Acheteur, et la société prestataire, "
+    "ci-après dénommée le Fournisseur, il est convenu ce qui suit.\n\n"
+    + "".join(f"Article synthétique : {kind}.\n" for kind in REQUIRED_KINDS)
+    + "\nLe présent contrat est soumis au droit français. Les parties s'engagent à exécuter "
+    "leurs obligations de bonne foi et dans les délais convenus. Toute modification du "
+    "présent contrat fera l'objet d'un avenant écrit signé par les deux parties.\n"
+)
+
 
 def clauses(**overrides) -> list[Clause]:
     """Les 8 clauses attendues, favorables par défaut.

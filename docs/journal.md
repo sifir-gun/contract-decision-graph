@@ -447,3 +447,28 @@ Tests :
 - **Pas de `temperature` chez Anthropic.** `anthropic` 1.8.0 : `messages.parse` n'a plus de paramètre `temperature` (liste lue dans la signature installée). Le réglage `llm.temperature: 0` ne vaut donc que pour Mistral. Le verdict reste déterministe à partir des clauses, mais l'extraction par Claude peut varier d'une exécution à l'autre.
 - **Bug corrigé** : le fournisseur Anthropic lisait les modèles du fournisseur *configuré* (Mistral). Chaque fournisseur lit désormais ses propres modèles (`config.model(tier, provider=self.name)`).
 - **Aucun essai réel du fournisseur Anthropic** : pas de clé d'API. Seul le test avec faux client le couvre.
+
+### J3 tâche 3 : masquage avant le graphe, validate_input complet
+
+**Fait.**
+- `masking.py` : e-mails, téléphones, IBAN, SIRET et SIREN, remplacés par un repère (`[EMAIL]`, `[IBAN]`…). Les noms de parties déclarés deviennent `[PARTIE_n]`, en mot entier, sans tenir compte de la casse. `residual_pii` signale ce qui subsiste.
+- `run_contract(…, parties)` masque **avant** `graph.invoke`, et renvoie le nombre de masquages par type. La CLI accepte `--party`, répétable.
+- `validate_input`, sur le texte masqué :
+  - rejette un texte vide ;
+  - rejette un texte trop long (`max_chars`) ;
+  - rejette un texte trop court pour juger de la langue (`min_words`) ;
+  - rejette un texte dont la part de mots-outils français est trop faible (`min_french_ratio`) ;
+  - rejette un texte où subsiste une donnée personnelle.
+- `tests/doubles.CONTRACT_TEXT` : contrat synthétique en français, qui contient les citations des clauses de test. Les anciens tests qui envoyaient `"x"` ou `"Contrat synthétique."` l'utilisent désormais.
+- Tests :
+  - chaque motif est masqué ;
+  - montants et références sans clé de Luhn ne sont pas masqués ;
+  - le masquage est idempotent ;
+  - l'état et l'extracteur ne voient que le texte masqué ;
+  - **sur PostgreSQL**, aucune trace du texte original dans `checkpoints`, `checkpoint_blobs` ni `checkpoint_writes`, alors que le texte masqué y est bien.
+
+**Pièges.**
+- **Masquer dans le nœud aurait été trop tard.** L'entrée de `graph.invoke` est écrite dans le premier checkpoint *avant* `validate_input`. Masquer dans le nœud aurait laissé le texte en clair dans PostgreSQL. C'était la recommandation 5, et le test sur la base réelle le démontre.
+- **Faux positifs SIREN.** `150 000 000 euros` a la forme d'un SIREN. Deux filtres évitent de masquer des montants : la clé de Luhn (vérifiée par un test sur `123 456 789`) et l'absence d'unité juste après (€, euros, %, mois, jours, ans).
+- **Langue.** La liste de mots-outils exclut « a » et « on », qui sont aussi anglais. Un texte anglais typique donne une part proche de 0, un contrat français environ 0,3.
+- **Recherche dans PostgreSQL.** Un `jsonb` ne se convertit pas en `bytea` par un simple cast (`InvalidTextRepresentation`) : il faut `convert_to(x::text, 'UTF8')`.

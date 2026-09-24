@@ -1,7 +1,7 @@
 """Nœuds purs, testés sans LangGraph."""
 
 import pytest
-from doubles import FakeCrag, FixedExtractor, clauses
+from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 
 from cdg.config import load_config
 from cdg.nodes.analyst import analyst
@@ -16,19 +16,47 @@ from cdg.state import AgentVerdict
 CONFIG = load_config()
 
 
-# --- validate_input (minimal au J1, complet au J3) ------------------------------
+# --- validate_input : taille, langue, résidus de données personnelles ----------------
+
+
+def test_validate_input_accepte_un_contrat_masque_en_francais():
+    out = validate_input({"raw_text": CONTRACT_TEXT}, decision_config=CONFIG)
+    assert out == {"route": "extract_clauses", "extraction_attempts": 0}
 
 
 @pytest.mark.parametrize("state", [{"raw_text": ""}, {"raw_text": "  \n "}, {}])
 def test_validate_input_rejette_un_texte_vide(state):
-    assert validate_input(state) == {"route": "reject", "reject_reason": "texte du contrat vide"}
+    out = validate_input(state, decision_config=CONFIG)
+    assert out == {"route": "reject", "reject_reason": "texte du contrat vide"}
 
 
-def test_validate_input_accepte_et_initialise_les_essais():
-    assert validate_input({"raw_text": "Contrat."}) == {
-        "route": "extract_clauses",
-        "extraction_attempts": 0,
-    }
+def test_validate_input_rejette_un_texte_trop_long():
+    text = CONTRACT_TEXT * (CONFIG.input.max_chars // len(CONTRACT_TEXT) + 1)
+    out = validate_input({"raw_text": text}, decision_config=CONFIG)
+    assert out["route"] == "reject" and "trop long" in out["reject_reason"]
+
+
+def test_validate_input_rejette_un_texte_trop_court_pour_la_langue():
+    out = validate_input({"raw_text": "Contrat de prestation."}, decision_config=CONFIG)
+    assert out["route"] == "reject" and "trop court" in out["reject_reason"]
+
+
+def test_validate_input_rejette_un_texte_qui_n_est_pas_en_francais():
+    english = (
+        "This services agreement is made between the customer and the supplier. "
+        "The supplier shall perform the services with reasonable care and skill, "
+        "and the customer shall pay the invoices within thirty days of receipt. "
+        "Either party may terminate this agreement by giving written notice."
+    )
+    out = validate_input({"raw_text": english}, decision_config=CONFIG)
+    assert out["route"] == "reject" and "français" in out["reject_reason"]
+
+
+def test_validate_input_rejette_un_texte_non_masque():
+    text = CONTRACT_TEXT + "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89.\n"
+    out = validate_input({"raw_text": text}, decision_config=CONFIG)
+    assert out["route"] == "reject"
+    assert out["reject_reason"] == "texte non masqué : EMAIL, TELEPHONE"
 
 
 # --- extract_clauses ------------------------------------------------------------

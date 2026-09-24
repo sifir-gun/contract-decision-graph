@@ -7,7 +7,7 @@ import sys
 import textwrap
 
 import pytest
-from doubles import clauses
+from doubles import CONTRACT_TEXT, clauses
 
 pytestmark = pytest.mark.pg
 
@@ -30,7 +30,7 @@ KILLED_RUN = textwrap.dedent("""
 
 def test_5_processus_tue_pendant_l_interrupt_puis_reprise(pg, thread_id, tmp_path):
     text = tmp_path / "contrat.txt"
-    text.write_text("Contrat synthétique de prestation de services.", encoding="utf-8")
+    text.write_text(CONTRACT_TEXT, encoding="utf-8")
     cl = tmp_path / "contrat.clauses.json"
     cl.write_text(json.dumps([c.model_dump() for c in clauses()]), encoding="utf-8")
 
