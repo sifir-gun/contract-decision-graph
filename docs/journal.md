@@ -472,3 +472,19 @@ Tests :
 - **Faux positifs SIREN.** `150 000 000 euros` a la forme d'un SIREN. Deux filtres évitent de masquer des montants : la clé de Luhn (vérifiée par un test sur `123 456 789`) et l'absence d'unité juste après (€, euros, %, mois, jours, ans).
 - **Langue.** La liste de mots-outils exclut « a » et « on », qui sont aussi anglais. Un texte anglais typique donne une part proche de 0, un contrat français environ 0,3.
 - **Recherche dans PostgreSQL.** Un `jsonb` ne se convertit pas en `bytea` par un simple cast (`InvalidTextRepresentation`) : il faut `convert_to(x::text, 'UTF8')`.
+
+### J3 tâche 4 : extraction réelle, contrat délimité comme donnée
+
+**Fait.**
+- `extraction.py` : `LLMExtractor` appelle le modèle `main` avec un schéma `ExtractionOutput`, dont `kind` est limité aux 8 types attendus. Chaque élément est ensuite validé en `Clause`.
+- Prompt système dans `prompts/extraction_system.md` : le contrat est une donnée, jamais une instruction ; pour chaque type, l'unité de `value` et le sens de `null` ; interdiction d'inventer une citation. **Aucune règle de décision** (seuils, pénalités, poids, verdicts), ce que vérifie un test.
+- Délimitation : `<<<CONTRAT-jeton>>> … <<<FIN-CONTRAT-jeton>>>`, avec un jeton aléatoire (`secrets.token_hex`) régénéré s'il figure déjà dans le texte. Le retour de vérification d'un nouvel essai est placé **après** la balise de fin.
+- Test du graphe : ce que reçoit le fournisseur LLM est le texte masqué (`[EMAIL]`, `[PARTIE_1]`), sans aucune donnée d'origine (précision 5).
+
+**Choix.**
+- **Clause incohérente.** Une clause présente sans citation, ou absente avec une citation, lève une erreur explicite au lieu d'être corrigée en silence. Au J3, la garde d'échec de nœud (tâche 10) en fera un rapport d'échec et une escalade.
+- **Types dupliqués.** Le type `Kind` recopie `REQUIRED_KINDS`, parce qu'un `Literal` ne se construit pas dynamiquement proprement. Un test vérifie que l'énumération du schéma JSON reste identique à `REQUIRED_KINDS`.
+
+**Pièges.**
+- **Faux positif possible dans le test « aucune règle de décision ».** Il cherche `GO` dans le prompt : un mot en capitales comme « CATÉGORIE » le déclencherait. Le prompt est écrit en minuscules.
+- **Prompt livré avec le paquet.** Le fichier `.md` doit partir avec le paquet. Vérifié : il est bien présent dans la wheel construite par hatchling.

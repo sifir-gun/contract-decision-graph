@@ -2,7 +2,7 @@
 
 import pytest
 import yaml
-from doubles import ABSENT, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import ABSENT, CONTRACT_TEXT, FakeCrag, FakeLLM, FixedExtractor, clauses
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Send
 
@@ -276,3 +276,17 @@ def test_run_contract_masque_avant_le_graphe():
     # l'extracteur ne reçoit que le texte masqué
     [(received, _)] = extractor.calls
     assert received == raw
+
+
+def test_texte_envoye_au_fournisseur_llm_est_masque():
+    from cdg.extraction import LLMExtractor
+
+    llm = FakeLLM({"extract_clauses": {"clauses": [c.model_dump() for c in clauses()]}})
+    graph = build_graph(CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())).compile(
+        checkpointer=InMemorySaver(serde=strict_serializer())
+    )
+    orchestrator.run_contract(graph, "c-llm", CONTRACT_TEXT + PII, parties=["Acme Industrie"])
+    [call] = llm.calls
+    assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
+    for original in ("jeanne.martin@exemple.fr", "01 23 45 67 89", "Acme Industrie"):
+        assert original not in call["user"] and original not in call["system"]

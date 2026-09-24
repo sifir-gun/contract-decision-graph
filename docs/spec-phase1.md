@@ -68,7 +68,7 @@ Chaque analyste appelle le sous-graphe CRAG pour récupérer les références ut
 | Nœud | Rôle | LLM |
 | --- | --- | --- |
 | validate_input | Taille, langue (part de mots-outils français) et absence de données personnelles résiduelles, sur un texte **déjà masqué** par `run_contract` ; écrit `route` (`extract_clauses` ou `reject`) | Non |
-| extract_clauses | Extraction structurée des clauses ; le contrat est délimité comme donnée, jamais comme instruction ; chaque clause attendue est toujours rendue, avec `present` et sa citation exacte si elle est présente ; incrémente `extraction_attempts` | Oui, sortie Pydantic |
+| extract_clauses | Extraction structurée des clauses par le modèle `main` (`extraction.py`, prompt dans `prompts/`) ; le contrat est délimité comme donnée, jamais comme instruction, entre deux balises portant un jeton aléatoire, régénéré s'il figure déjà dans le texte ; le retour de vérification d'un nouvel essai est placé hors du bloc du contrat ; aucune règle de décision dans le prompt ; chaque clause attendue est toujours rendue, avec `present` et sa citation exacte si elle est présente ; incrémente `extraction_attempts` | Oui, sortie Pydantic |
 | verify_extraction | Vérifie par code que la citation de chaque clause présente existe mot pour mot dans le contrat et que les `REQUIRED_KINDS` sont tous rendus ; écrit `route` (`analysts`, `extract_clauses` pour une ré-extraction avec retour ciblé, ou `human_review`) | Non |
 | analyst | CRAG + règles du domaine, rend un `AgentVerdict` | Oui pour CRAG uniquement |
 | decision_gate | Budget, blocages durs, agrégation pondérée, marge au seuil ; écrit `route` (`explain` ou `human_review`) | Non |
@@ -517,6 +517,8 @@ contract-decision-graph/
 │   ├── orchestrator.py         # seul fichier qui importe LangGraph : adaptateurs et câblage
 │   ├── state.py                # schémas d'état et Pydantic
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
+│   ├── extraction.py           # extraction LLM (modèle main), contrat délimité comme donnée
+│   ├── prompts/                # prompts système, sans règle de décision
 │   ├── masking.py              # masquage des données personnelles avant le graphe
 │   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
 │   ├── deps.py                 # contrats injectés : extracteur, CRAG, LLMProvider (doublures en test)
@@ -605,6 +607,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
   - option pytest `--llm` ;
+  - extraction réelle : contrat entre balises à jeton aléatoire, schéma de sortie limité aux 8 types, retour de vérification hors du bloc ;
   - masquage dans `run_contract` avant le graphe, `validate_input` complet (section `input` : `max_chars`, `min_words`, `min_french_ratio`) ;
   - interface `LLMProvider` (sortie structurée Pydantic, consommation mesurée), fournisseurs Mistral et Anthropic. `temperature` ne vaut que pour Mistral, car `messages.parse` ne l'accepte pas dans anthropic 1.8.0.
 - **23 septembre 2026, J2** :
