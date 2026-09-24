@@ -5,8 +5,9 @@ from cdg.rules._common import below, clause, verdict
 from cdg.state import AgentVerdict, Clause, RetrievalStatus
 
 
-def juridique(clauses: list[Clause], retrieval_status: RetrievalStatus,
-              config: DecisionConfig) -> AgentVerdict:
+def juridique(
+    clauses: list[Clause], retrieval_status: RetrievalStatus, config: DecisionConfig
+) -> AgentVerdict:
     cfg = config.rules.juridique
     hard_block, penalties, findings = False, [], []
 
@@ -16,11 +17,17 @@ def juridique(clauses: list[Clause], retrieval_status: RetrievalStatus,
         findings.append("blocage : responsabilité de l'acheteur illimitée")
 
     fournisseur = clause(clauses, "responsabilite_fournisseur")
-    if (fournisseur.present and fournisseur.value is not None
-            and below(fournisseur.value, cfg.supplier_cap_min_pct)):
+    if (
+        fournisseur.present
+        and fournisseur.value is not None
+        and below(fournisseur.value, cfg.supplier_cap_min_pct)
+    ):
         penalties.append(cfg.supplier_cap_score_penalty)
-        findings.append(f"plafond de responsabilité du fournisseur à {fournisseur.value:g} % "
-                        f"du montant annuel, sous le minimum de {cfg.supplier_cap_min_pct:g} %")
+        findings.append(
+            f"plafond de responsabilité du fournisseur à {fournisseur.value:g} % "
+            f"du montant annuel, sous le minimum de {cfg.supplier_cap_min_pct:g} %"
+        )
 
-    return verdict("juridique", retrieval_status, hard_block=hard_block,
-                   penalties=penalties, findings=findings)
+    return verdict(
+        "juridique", retrieval_status, hard_block=hard_block, penalties=penalties, findings=findings
+    )

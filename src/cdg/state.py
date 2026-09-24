@@ -12,15 +12,22 @@ RetrievalStatus = Literal["OK", "INSUFFISANT"]
 
 DOMAINS: tuple[Domain, ...] = ("juridique", "financier", "conformite", "operationnel")
 
-REQUIRED_KINDS = ("responsabilite_acheteur", "responsabilite_fournisseur", "revision_prix",
-                  "penalites_retard", "duree_engagement", "preavis_resiliation",
-                  "donnees_personnelles", "accord_traitement_donnees")
+REQUIRED_KINDS = (
+    "responsabilite_acheteur",
+    "responsabilite_fournisseur",
+    "revision_prix",
+    "penalites_retard",
+    "duree_engagement",
+    "preavis_resiliation",
+    "donnees_personnelles",
+    "accord_traitement_donnees",
+)
 
 
 class Clause(BaseModel):
-    kind: str            # un des REQUIRED_KINDS
-    present: bool        # la clause figure-t-elle dans le contrat ?
-    quote: str           # citation exacte si present, "" sinon (alors non vérifiée)
+    kind: str  # un des REQUIRED_KINDS
+    present: bool  # la clause figure-t-elle dans le contrat ?
+    quote: str  # citation exacte si present, "" sinon (alors non vérifiée)
     value: float | None  # quantité utile à la règle, voir « Règles par domaine »
 
     @model_validator(mode="after")
@@ -34,18 +41,36 @@ class Clause(BaseModel):
 
 class AgentVerdict(BaseModel):
     domain: Domain
-    score: float = Field(ge=0.0, le=1.0)   # 1 = favorable
+    score: float = Field(ge=0.0, le=1.0)  # 1 = favorable
     hard_block: bool
     findings: list[str]
     evidence_ids: list[str]
     retrieval_status: RetrievalStatus
 
 
+SYSTEM_REVIEWER_PREFIX = "systeme:"
+
+
 class HumanDecision(BaseModel):
     decision: Decision
     reviewer: str
     reason: str
-    overrides_block: bool = False   # vrai si l'humain lève un blocage dur
+    overrides_block: bool = False  # vrai si l'humain lève un blocage dur
+    source: Literal["humain", "systeme"] = "humain"  # systeme : expire (timeout)
+
+    @model_validator(mode="after")
+    def _decision_systeme(self) -> "HumanDecision":
+        system_reviewer = self.reviewer.startswith(SYSTEM_REVIEWER_PREFIX)
+        if self.source == "systeme":
+            if self.decision != "NO_GO":  # échec fermé : jamais d'approbation automatique
+                raise ValueError("une décision système ne peut être que NO_GO")
+            if not system_reviewer:
+                raise ValueError(f"décision système : relecteur {SYSTEM_REVIEWER_PREFIX}…")
+        elif system_reviewer:
+            raise ValueError(
+                f"le préfixe {SYSTEM_REVIEWER_PREFIX} est réservé aux décisions système"
+            )
+        return self
 
 
 class Usage(BaseModel):
@@ -67,16 +92,18 @@ class ContractState(TypedDict, total=False):
     usage: Annotated[list[Usage], operator.add]
     proposed_decision: Decision
     margin: float
-    route: Route                      # écrite par un nœud, lue par l'arête
+    route: Route  # écrite par un nœud, lue par l'arête
     failure_report: dict | None
     human: HumanDecision | None
-    final_decision: Decision | None   # decision_gate (route explain) ou human_review ; None après reject
+    final_decision: (
+        Decision | None
+    )  # decision_gate (route explain) ou human_review ; None après reject
     explanation: str
     config_hash: str
     decision_hash: str
     chain_hash: str
 
 
-class AnalystInput(TypedDict):   # état privé reçu via Send
+class AnalystInput(TypedDict):  # état privé reçu via Send
     domain: Domain
     clauses: list[Clause]

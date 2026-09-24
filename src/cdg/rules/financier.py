@@ -5,8 +5,9 @@ from cdg.rules._common import below, clause, verdict
 from cdg.state import AgentVerdict, Clause, RetrievalStatus
 
 
-def financier(clauses: list[Clause], retrieval_status: RetrievalStatus,
-              config: DecisionConfig) -> AgentVerdict:
+def financier(
+    clauses: list[Clause], retrieval_status: RetrievalStatus, config: DecisionConfig
+) -> AgentVerdict:
     cfg = config.rules.financier
     hard_block, penalties, findings = False, [], []
 
@@ -21,8 +22,11 @@ def financier(clauses: list[Clause], retrieval_status: RetrievalStatus,
         findings.append("pénalités de retard absentes")
     elif penalites.value is not None and below(penalites.value, cfg.late_penalties_min_cap_pct):
         penalties.append(cfg.late_penalties_score_penalty)
-        findings.append(f"pénalités de retard plafonnées à {penalites.value:g} %, "
-                        f"sous le minimum de {cfg.late_penalties_min_cap_pct:g} %")
+        findings.append(
+            f"pénalités de retard plafonnées à {penalites.value:g} %, "
+            f"sous le minimum de {cfg.late_penalties_min_cap_pct:g} %"
+        )
 
-    return verdict("financier", retrieval_status, hard_block=hard_block,
-                   penalties=penalties, findings=findings)
+    return verdict(
+        "financier", retrieval_status, hard_block=hard_block, penalties=penalties, findings=findings
+    )

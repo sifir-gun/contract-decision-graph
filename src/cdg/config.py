@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cdg.numeric import rounded
-from cdg.state import Domain
+from cdg.state import Decision, Domain
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "decision.yaml"
 
@@ -81,6 +81,22 @@ class RulesConfig(_Strict):
     operationnel: OperationnelRules
 
 
+class HumanPolicy(_Strict):
+    allowed_decisions: Annotated[list[Decision], Field(min_length=1)]
+    allow_block_override: bool
+    hard_block_review: bool  # vrai : un blocage dur passe en revue humaine
+
+    @model_validator(mode="after")
+    def _decisions_coherentes(self) -> "HumanPolicy":
+        if len(set(self.allowed_decisions)) != len(self.allowed_decisions):
+            raise ValueError("allowed_decisions contient un doublon")
+        if "ESCALADE" in self.allowed_decisions:
+            raise ValueError("ESCALADE interdite : l'humain doit trancher")
+        if "NO_GO" not in self.allowed_decisions:
+            raise ValueError("NO_GO doit rester possible pour l'humain")
+        return self
+
+
 class DecisionConfig(_Strict):
     weights: Weights
     thresholds: Thresholds
@@ -89,6 +105,7 @@ class DecisionConfig(_Strict):
     budget: Budget
     extraction: Extraction
     rules: RulesConfig
+    human_policy: HumanPolicy
 
     def weight(self, domain: Domain) -> float:
         return getattr(self.weights, domain)
