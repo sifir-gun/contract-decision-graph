@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from cdg.deps import ExtractionResult, LLMProvider
-from cdg.state import Clause
+from cdg.state import Clause, TransferCategory
 
 PROMPTS = Path(__file__).parent / "prompts"
 Kind = Literal[
@@ -25,6 +25,7 @@ Kind = Literal[
     "preavis_resiliation",
     "donnees_personnelles",
     "accord_traitement_donnees",
+    "transfert_hors_ue",
 ]
 
 
@@ -33,6 +34,7 @@ class ExtractedClause(BaseModel):
     present: bool
     quote: str
     value: float | None
+    category: TransferCategory | None = None
 
 
 class ExtractionOutput(BaseModel):

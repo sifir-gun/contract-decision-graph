@@ -39,6 +39,15 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert (f.late_penalties_min_cap_pct, f.late_penalties_score_penalty) == (5, 0.4)
     assert (o.commitment_max_months, o.commitment_score_penalty) == (36, 0.3)
     assert (o.notice_max_months, o.notice_score_penalty) == (6, 0.3)
+    c = cfg.rules.conformite
+    assert c.transfer_safeguards == [
+        "decision_adequation",
+        "clauses_contractuelles_types",
+        "regles_entreprise_contraignantes",
+        "code_conduite",
+        "certification",
+    ]
+    assert c.unlocated_data_score_penalty == 0.3
     assert cfg.human_policy.allowed_decisions == ["GO", "GO_RESERVES", "NO_GO"]
     assert cfg.human_policy.allow_block_override is True
     assert cfg.human_policy.hard_block_review is False
@@ -123,6 +132,11 @@ _DELETE = object()
         ("llm.max_output_tokens", 0),
         ("llm.timeout_seconds", 0),
         ("embedding.dimension", 0),
+        ("rules.conformite.transfer_safeguards", []),
+        ("rules.conformite.transfer_safeguards", ["aucune_garantie"]),  # pas une garantie
+        ("rules.conformite.transfer_safeguards", ["sans_transfert"]),
+        ("rules.conformite.transfer_safeguards", ["certification", "certification"]),
+        ("rules.conformite.unlocated_data_score_penalty", 1.5),
         ("embedding.model", ""),
     ],
 )

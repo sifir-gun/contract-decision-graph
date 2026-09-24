@@ -101,6 +101,7 @@ REQUIRED_KINDS = (
     "preavis_resiliation",
     "donnees_personnelles",
     "accord_traitement_donnees",
+    "transfert_hors_ue",
 )
 
 
@@ -109,6 +110,7 @@ class Clause(BaseModel):
     present: bool  # la clause figure-t-elle dans le contrat ?
     quote: str  # citation exacte si present, "" sinon (alors non vérifiée)
     value: float | None  # quantité utile à la règle, voir « Règles par domaine »
+    category: str | None = None  # transfert_hors_ue seulement (TransferCategory)
 
 
 class AgentVerdict(BaseModel):
@@ -382,7 +384,7 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
 
   `ESCALADE` ou marge sous `min_margin` → route `human_review`, sinon route `explain`. `decision_gate` n'écrit `final_decision` que sur la route `explain` ; sur la route `human_review`, c'est `human_review` qui l'écrit.
 
-  **Choix de conception : `NO_GO` n'est rendu que sur blocage dur.** Avec la configuration du projet, la conformité n'a que des blocages durs : son score reste à 1,0. Un score agrégé sous 0,5 exigerait alors un domaine si bas que le conflit (étape 4) escalade d'abord. `NO_GO` a donc toujours une raison explicite et nommée : la règle bloquante. Des risques cumulés produisent au pire `GO_RESERVES` ou une escalade vers un humain. Le seuil `NO_GO` reste dans la configuration : une autre configuration client peut l'atteindre. Ce choix est à reprendre dans l'ADR.
+  **Choix de conception : `NO_GO` n'est rendu que sur blocage dur.** Avec la configuration du projet, le pire cumul de toutes les pénalités donne 0,3 × 0,5 + 0,25 × 0,6 + 0,25 × 0,7 + 0,2 × 0,4 = 0,555, sans conflit (écart de 0,3) : au pire `GO_RESERVES`. Avant la règle de transfert (J3), la conformité n'avait que des blocages, et le conflit escaladait d'abord ; le résultat est le même. `NO_GO` a donc toujours une raison explicite et nommée : la règle bloquante. Des risques cumulés produisent au pire `GO_RESERVES` ou une escalade vers un humain. Le seuil `NO_GO` reste dans la configuration : une autre configuration client peut l'atteindre. Ce choix est à reprendre dans l'ADR.
 - **Marge** : distance entre le score agrégé et le seuil de décision le plus proche (0,75 ou 0,5), arrondie. Sous `min_margin`, passage humain. Calculée sans LLM.
 - **Budget** : plafond de tokens par contrat, calculé sur `usage`. Dépassement : `proposed_decision = "ESCALADE"` avec rapport d'échec structuré (`stage`, tokens consommés, plafond), jamais de repli silencieux.
 - **explain** : le LLM reçoit le verdict figé et les constats. Si le texte contredit la décision (détection par règles sur les libellés de décision), il est rejeté et regénéré une fois, puis remplacé par un gabarit.
@@ -399,6 +401,7 @@ Chaque clause des `REQUIRED_KINDS` est toujours extraite. Si `present = false`, 
 | financier | `revision_prix` | plafond de révision, % ; `None` = non plafonnée | présente et `value` None | `hard_block` |
 | financier | `penalites_retard` | plafond des pénalités, % ; `None` = non plafonnées | absente, ou `value` < 5 | score réduit |
 | conformite | `donnees_personnelles`, `accord_traitement_donnees` | `None` (seul `present` compte) | données personnelles présentes sans accord de traitement (art. 28 RGPD) | `hard_block` |
+| conformite | `transfert_hors_ue` | `None` ; `category` : `sans_transfert`, une garantie nommée (`decision_adequation`, `clauses_contractuelles_types`, `regles_entreprise_contraignantes`, `code_conduite`, `certification`) ou `aucune_garantie` | présente avec une garantie de `transfer_safeguards` (config) ou `sans_transfert` : rien ; présente avec une autre catégorie (dont `aucune_garantie`, ou catégorie absente) : blocage ; absente alors que des données personnelles sont traitées : localisation non précisée | `hard_block`, ou score réduit avec le constat « à vérifier ». La règle juge ce que dit le contrat, jamais une liste de pays (RGPD, art. 44 à 46) |
 | operationnel | `duree_engagement` | mois ; `None` = non chiffrée | `value` > 36, ou présente et `value` None | score réduit ; si non chiffrée, pénalité par prudence avec constat explicite |
 | operationnel | `preavis_resiliation` | mois ; `None` = non chiffré | `value` > 6, ou présente et `value` None | score réduit ; si non chiffré, pénalité par prudence avec constat explicite |
 
@@ -408,6 +411,7 @@ Calcul du score de domaine : départ à 1,0, puis chaque règle déclenchée ret
 | --- | --- | --- |
 | juridique | plafond fournisseur < 100 % | 0,5 |
 | financier | pénalités de retard absentes ou < 5 % | 0,4 |
+| conformite | localisation des données non précisée | 0,3 |
 | operationnel | engagement > 36 mois | 0,3 |
 | operationnel | préavis > 6 mois | 0,3 |
 
@@ -613,6 +617,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
   - option pytest `--llm` ;
+  - type de clause `transfert_hors_ue` et champ `Clause.category` ; règle de conformité sur les transferts (RGPD, art. 44 à 46), garanties reconnues et pénalité de localisation dans `rules.conformite` ;
   - embedding local : préfixes e5 ajoutés par le code (fastembed ne le fait pas) ; poids dans `EMBEDDING_CACHE_DIR`, jamais téléchargés à l'exécution (`local_files_only`) mais par `fetch-embedding-model` ; recherche filtrée par domaine **et** par modèle d'embedding ;
   - migration `002_rag.sql` appliquée par `setup-db`, recherche exacte filtrée par domaine (pas d'index HNSW), section `embedding` ;
   - `verify_extraction` réel : normalisation, types en double ou inconnus, citations comparées au texte masqué ;

@@ -5,7 +5,7 @@ from doubles import CONTRACT_TEXT, FakeLLM, clauses
 from pydantic import ValidationError
 
 from cdg.extraction import ExtractionOutput, LLMExtractor
-from cdg.state import REQUIRED_KINDS
+from cdg.state import REQUIRED_KINDS, TRANSFER_CATEGORIES
 
 
 def output_of(items):
@@ -73,7 +73,7 @@ def test_type_de_clause_inconnu_refuse_par_le_schema():
         )
 
 
-def test_schema_liste_les_huit_types_attendus():
+def test_schema_liste_les_types_attendus():
     schema = ExtractionOutput.model_json_schema()
     kinds = schema["$defs"]["ExtractedClause"]["properties"]["kind"]["enum"]
     assert kinds == list(REQUIRED_KINDS)
@@ -85,3 +85,10 @@ def test_clause_incoherente_leve_une_erreur_explicite():
     ext, _ = extractor(answer=bad)
     with pytest.raises(ValidationError, match="citation"):
         ext(CONTRACT_TEXT, [])
+
+
+def test_schema_limite_les_categories_de_transfert():
+    schema = ExtractionOutput.model_json_schema()
+    prop = schema["$defs"]["ExtractedClause"]["properties"]["category"]
+    enum = next(option["enum"] for option in prop["anyOf"] if "enum" in option)
+    assert enum == list(TRANSFER_CATEGORIES)

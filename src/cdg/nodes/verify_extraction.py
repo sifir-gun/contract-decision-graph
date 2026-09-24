@@ -10,7 +10,7 @@ import unicodedata
 from collections import Counter
 
 from cdg.config import DecisionConfig
-from cdg.state import REQUIRED_KINDS, ContractState
+from cdg.state import CATEGORY_KINDS, REQUIRED_KINDS, ContractState
 
 # typographie équivalente : apostrophes, guillemets, tirets, espaces insécables
 _TYPOGRAPHY = str.maketrans(
@@ -42,6 +42,16 @@ def problems_of(raw_text: str, clauses: list) -> list[str]:
     problems = [f"clause manquante: {k}" for k in REQUIRED_KINDS if counts[k] == 0]
     problems += [f"clause en double: {k}" for k in counts if counts[k] > 1]
     problems += [f"type de clause inconnu: {k}" for k in counts if k not in REQUIRED_KINDS]
+    problems += [
+        f"catégorie manquante: {c.kind}"
+        for c in clauses
+        if c.kind in CATEGORY_KINDS and c.present and c.category is None
+    ]
+    problems += [
+        f"catégorie inattendue: {c.kind}"
+        for c in clauses
+        if c.kind not in CATEGORY_KINDS and c.category is not None
+    ]
     problems += [
         f"citation introuvable: {c.kind}"
         for c in clauses

@@ -1,7 +1,7 @@
 """Schémas d'état du graphe et modèles métier, validés à chaque frontière de nœud."""
 
 import operator
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, TypedDict, get_args
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -21,7 +21,21 @@ REQUIRED_KINDS = (
     "preavis_resiliation",
     "donnees_personnelles",
     "accord_traitement_donnees",
+    "transfert_hors_ue",
 )
+
+# Catégorie d'une clause de transfert (RGPD, art. 44 à 46) : ce que dit le contrat.
+TransferCategory = Literal[
+    "sans_transfert",  # données hébergées dans l'UE ou l'EEE
+    "decision_adequation",
+    "clauses_contractuelles_types",
+    "regles_entreprise_contraignantes",
+    "code_conduite",
+    "certification",
+    "aucune_garantie",  # transfert annoncé sans garantie nommée
+]
+TRANSFER_CATEGORIES: tuple[str, ...] = get_args(TransferCategory)
+CATEGORY_KINDS = frozenset({"transfert_hors_ue"})  # types dont la catégorie est obligatoire
 
 
 class Clause(BaseModel):
@@ -29,6 +43,7 @@ class Clause(BaseModel):
     present: bool  # la clause figure-t-elle dans le contrat ?
     quote: str  # citation exacte si present, "" sinon (alors non vérifiée)
     value: float | None  # quantité utile à la règle, voir « Règles par domaine »
+    category: str | None = None  # types de CATEGORY_KINDS seulement
 
     @model_validator(mode="after")
     def _citation_selon_presence(self) -> "Clause":

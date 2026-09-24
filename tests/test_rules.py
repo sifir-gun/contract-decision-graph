@@ -100,6 +100,59 @@ def test_conformite_sans_blocage(donnees, accord):
     assert not v.hard_block
 
 
+# --- conformite : transfert hors UE (RGPD, art. 44 à 46) ------------------------------
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        "sans_transfert",
+        "decision_adequation",
+        "clauses_contractuelles_types",
+        "regles_entreprise_contraignantes",
+        "code_conduite",
+        "certification",
+    ],
+)
+def test_transfert_encadre_ou_absent_sans_penalite(category):
+    v = run("conformite", categories={"transfert_hors_ue": category})
+    assert (v.hard_block, v.score) == (False, 1.0)
+
+
+def test_transfert_annonce_sans_garantie_bloque():
+    v = run("conformite", categories={"transfert_hors_ue": "aucune_garantie"})
+    assert v.hard_block and "sans garantie" in v.findings[0]
+
+
+def test_transfert_sans_categorie_bloque_par_prudence():
+    v = run("conformite", categories={"transfert_hors_ue": None})
+    assert v.hard_block
+
+
+def test_localisation_non_precisee_penalisee_et_a_verifier():
+    v = run("conformite", transfert_hors_ue=ABSENT)
+    assert (v.hard_block, v.score) == (False, 0.7)
+    assert "à vérifier" in v.findings[0]
+
+
+def test_localisation_sans_objet_sans_donnees_personnelles():
+    v = run(
+        "conformite",
+        transfert_hors_ue=ABSENT,
+        donnees_personnelles=ABSENT,
+        accord_traitement_donnees=ABSENT,
+    )
+    assert (v.hard_block, v.score, v.findings) == (False, 1.0, [])
+
+
+def test_garanties_reconnues_lues_dans_la_configuration():
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data["rules"]["conformite"]["transfer_safeguards"] = ["decision_adequation"]
+    cfg = DecisionConfig.model_validate(data)
+    v = run("conformite", config=cfg, categories={"transfert_hors_ue": "certification"})
+    assert v.hard_block
+
+
 # --- operationnel ---------------------------------------------------------------
 
 

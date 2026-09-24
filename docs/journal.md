@@ -569,3 +569,26 @@ Tests :
 **Pièges.**
 - Cet échec n'apparaissait dans aucun test à doublures : il fallait les vrais poids. Un test reproduit désormais la structure du cache, avec des blobs dans des sous-dossiers différents et un instantané en liens symboliques.
 - Les similarités cosinus de e5 sont resserrées (environ 0,78 à 0,87). Un seuil fixe de pertinence serait fragile. Le tri reste bon, et c'est le juge du CRAG, pas un seuil, qui décidera de la pertinence.
+
+### J3 : règle de transfert hors UE (avant la tâche 8)
+
+**Fait.**
+- Nouveau type de clause `transfert_hors_ue`, et un champ `Clause.category`, optionnel et nul par défaut, obligatoire pour les types de `CATEGORY_KINDS`.
+- Catégories possibles, figées dans le schéma d'extraction (`TransferCategory`) : `sans_transfert`, cinq garanties nommées, et `aucune_garantie`.
+- Règle de conformité :
+  - transfert avec une garantie de `rules.conformite.transfer_safeguards` : aucune pénalité, un constat informatif ;
+  - données dans l'UE (`sans_transfert`) : rien ;
+  - toute autre catégorie (dont `aucune_garantie`, ou catégorie absente) : **blocage dur** ;
+  - clause absente alors que des données personnelles sont traitées : pénalité `unlocated_data_score_penalty` (0,3) et constat « à vérifier ».
+- `verify_extraction` signale une catégorie manquante sur un transfert et une catégorie inattendue sur un autre type. Le prompt d'extraction décrit les catégories.
+- Configuration validée : liste non vide, sans doublon, et ni `sans_transfert` ni `aucune_garantie` ne peuvent y figurer.
+
+**Choix, à valider.**
+- **Pourquoi un champ `category` plutôt que `value` :** un transfert se décrit par une catégorie (quelle garantie ?), pas par une quantité. C'est un changement du schéma des clauses, compatible avec les 8 autres types (nul par défaut).
+- **Pénalité de localisation : 0,3.** La valeur n'était pas fixée ; c'est celle que je propose, réglable dans la config.
+- **Localisation non précisée sans données personnelles : aucune pénalité**, puisqu'il n'y a alors rien à localiser. En revanche, un transfert annoncé sans garantie bloque même sans clause de données personnelles, car la règle juge ce que dit le contrat.
+- **Catégorie absente : blocage, par prudence.** `verify_extraction` la signale d'abord et relance l'extraction ; la règle ne la voit donc qu'en dernier recours.
+
+**Piège.** `set -e && commande` ne protège rien : dans une liste `&&`, bash n'interrompt pas le script sur l'échec d'une commande qui n'est pas la dernière. Deux commits de documentation sont ainsi passés sans leur mise à jour de la spec (corrigés par `--amend`). `set -e` se met désormais seul sur sa ligne.
+
+**Vérification du choix de conception « `NO_GO` seulement sur blocage dur ».** La conformité peut désormais perdre 0,3. Le pire cumul de toutes les pénalités donne 0,555, sans conflit, donc au pire `GO_RESERVES`. Le choix tient toujours, mais sa justification change ; la spec est mise à jour.

@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from cdg.state import (
+    CATEGORY_KINDS,
     DOMAINS,
     REQUIRED_KINDS,
     AgentVerdict,
@@ -110,7 +111,9 @@ def test_domaines_et_types_de_clauses():
         "preavis_resiliation",
         "donnees_personnelles",
         "accord_traitement_donnees",
+        "transfert_hors_ue",
     )
+    assert CATEGORY_KINDS == {"transfert_hors_ue"}
 
 
 def test_valeurs_de_route_et_de_decision():

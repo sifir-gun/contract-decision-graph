@@ -35,6 +35,16 @@ rules:
   financier:
     late_penalties_min_cap_pct: 5      # plafond des pénalités de retard, %
     late_penalties_score_penalty: 0.4  # aussi appliquée si la clause est absente
+  conformite:
+    # transfert hors UE (RGPD, art. 44 à 46) : la règle juge ce que dit le contrat,
+    # jamais une liste de pays. Garanties nommées acceptées :
+    transfer_safeguards:
+      - decision_adequation
+      - clauses_contractuelles_types
+      - regles_entreprise_contraignantes
+      - code_conduite
+      - certification
+    unlocated_data_score_penalty: 0.3   # localisation des données non précisée
   operationnel:
     commitment_max_months: 36
     commitment_score_penalty: 0.3

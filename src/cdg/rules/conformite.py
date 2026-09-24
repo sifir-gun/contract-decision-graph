@@ -1,4 +1,4 @@
-"""Règles du domaine conformité : traitement de données personnelles (RGPD)."""
+"""Règles du domaine conformité : données personnelles et transferts hors UE (RGPD)."""
 
 from cdg.config import DecisionConfig
 from cdg.rules._common import clause, verdict
@@ -8,7 +8,8 @@ from cdg.state import AgentVerdict, Clause, RetrievalStatus
 def conformite(
     clauses: list[Clause], retrieval_status: RetrievalStatus, config: DecisionConfig
 ) -> AgentVerdict:
-    hard_block, findings = False, []
+    cfg = config.rules.conformite
+    hard_block, penalties, findings = False, [], []
 
     donnees = clause(clauses, "donnees_personnelles")
     accord = clause(clauses, "accord_traitement_donnees")
@@ -18,6 +19,25 @@ def conformite(
             "blocage : données personnelles traitées sans accord de traitement (art. 28 RGPD)"
         )
 
+    # transfert hors UE (art. 44 à 46) : la règle juge ce que dit le contrat, jamais une
+    # liste de pays ; une catégorie absente est traitée comme « aucune garantie »
+    transfert = clause(clauses, "transfert_hors_ue")
+    if transfert.present:
+        if transfert.category in cfg.transfer_safeguards:
+            findings.append(f"transfert hors UE encadré par une garantie : {transfert.category}")
+        elif transfert.category != "sans_transfert":
+            hard_block = True
+            findings.append(
+                "blocage : transfert hors UE annoncé sans garantie reconnue (art. 44 à 46 RGPD)"
+            )
+    elif donnees.present:
+        penalties.append(cfg.unlocated_data_score_penalty)
+        findings.append("localisation des données non précisée : à vérifier (art. 44 RGPD)")
+
     return verdict(
-        "conformite", retrieval_status, hard_block=hard_block, penalties=[], findings=findings
+        "conformite",
+        retrieval_status,
+        hard_block=hard_block,
+        penalties=penalties,
+        findings=findings,
     )

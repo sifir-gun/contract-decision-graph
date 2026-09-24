@@ -10,7 +10,7 @@ from cdg.nodes.explain import explain
 from cdg.nodes.extract_clauses import extract_clauses
 from cdg.nodes.reject import reject
 from cdg.nodes.validate_input import validate_input
-from cdg.state import AgentVerdict
+from cdg.state import REQUIRED_KINDS, AgentVerdict
 
 CONFIG = load_config()
 
@@ -72,7 +72,7 @@ def test_extract_clauses_incremente_les_essais_et_transmet_le_retour():
         extractor=extractor,
     )
     assert set(out) == {"clauses", "extraction_attempts", "usage"}
-    assert out["extraction_attempts"] == 2 and len(out["clauses"]) == 8
+    assert out["extraction_attempts"] == 2 and len(out["clauses"]) == len(REQUIRED_KINDS)
     assert out["usage"][0].tokens_in == 100
     assert extractor.calls == [("Contrat.", ["citation introuvable: revision_prix"])]
 

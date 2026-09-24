@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cdg.numeric import rounded
-from cdg.state import Decision, Domain
+from cdg.state import Decision, Domain, TransferCategory
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "decision.yaml"
 
@@ -75,9 +75,24 @@ class OperationnelRules(_Strict):
     notice_score_penalty: Penalty
 
 
+class ConformiteRules(_Strict):
+    # garanties nommées acceptées pour un transfert hors UE (RGPD, art. 45 et 46)
+    transfer_safeguards: Annotated[list[TransferCategory], Field(min_length=1)]
+    unlocated_data_score_penalty: Penalty  # localisation des données non précisée
+
+    @model_validator(mode="after")
+    def _garanties(self) -> "ConformiteRules":
+        if len(set(self.transfer_safeguards)) != len(self.transfer_safeguards):
+            raise ValueError("transfer_safeguards contient un doublon")
+        if {"sans_transfert", "aucune_garantie"} & set(self.transfer_safeguards):
+            raise ValueError("sans_transfert et aucune_garantie ne sont pas des garanties")
+        return self
+
+
 class RulesConfig(_Strict):
     juridique: JuridiqueRules
     financier: FinancierRules
+    conformite: ConformiteRules
     operationnel: OperationnelRules
 
 

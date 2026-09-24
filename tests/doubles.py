@@ -13,6 +13,7 @@ FAVORABLE = {
     "preavis_resiliation": 3.0,  # mois
     "donnees_personnelles": None,  # traitement présent
     "accord_traitement_donnees": None,  # accord présent
+    "transfert_hors_ue": None,  # stipulation de localisation présente
 }
 
 ABSENT = object()  # marqueur : la clause ne figure pas dans le contrat
@@ -30,12 +31,16 @@ CONTRACT_TEXT = (
 )
 
 
-def clauses(**overrides) -> list[Clause]:
-    """Les 8 clauses attendues, favorables par défaut.
+CATEGORIES = {"transfert_hors_ue": "sans_transfert"}  # données hébergées dans l'UE
+
+
+def clauses(categories: dict | None = None, **overrides) -> list[Clause]:
+    """Les clauses attendues, favorables par défaut.
 
     `kind=valeur` remplace la valeur d'une clause présente (None compris) ;
-    `kind=ABSENT` la rend absente.
+    `kind=ABSENT` la rend absente ; `categories={kind: catégorie}` remplace une catégorie.
     """
+    categories = CATEGORIES | (categories or {})
     unknown = set(overrides) - set(REQUIRED_KINDS)
     if unknown:
         raise TypeError(f"types de clauses inconnus : {sorted(unknown)}")
@@ -46,7 +51,13 @@ def clauses(**overrides) -> list[Clause]:
             result.append(Clause(kind=kind, present=False, quote="", value=None))
         else:
             result.append(
-                Clause(kind=kind, present=True, quote=f"Article synthétique : {kind}.", value=value)
+                Clause(
+                    kind=kind,
+                    present=True,
+                    quote=f"Article synthétique : {kind}.",
+                    value=value,
+                    category=categories.get(kind),
+                )
             )
     return result
 

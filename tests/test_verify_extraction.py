@@ -91,3 +91,16 @@ def test_citations_comparees_au_texte_masque():
         "citation introuvable: revision_prix"
     ]
     assert verify(masked, text=text) == {"route": "analysts"}
+
+
+def test_categorie_de_transfert_obligatoire_si_presente():
+    out = verify(clauses(categories={"transfert_hors_ue": None}))
+    assert out["extraction_feedback"] == ["catégorie manquante: transfert_hors_ue"]
+
+
+def test_categorie_inattendue_sur_un_autre_type():
+    items = [
+        c if c.kind != "revision_prix" else c.model_copy(update={"category": "certification"})
+        for c in clauses()
+    ]
+    assert verify(items)["extraction_feedback"] == ["catégorie inattendue: revision_prix"]
