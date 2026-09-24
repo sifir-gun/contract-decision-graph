@@ -103,6 +103,13 @@ class InputConfig(_Strict):
     min_french_ratio: Unit  # part minimale de mots-outils français
 
 
+class EmbeddingConfig(_Strict):
+    model: Annotated[str, Field(min_length=1)]
+    dimension: Annotated[int, Field(gt=0)]  # = colonne rag_chunks.embedding, contrôlé par setup-db
+    query_prefix: str  # préfixes exigés par la famille e5
+    passage_prefix: str
+
+
 Tier = Literal["main", "light"]
 ModelId = Annotated[str, Field(min_length=1)]
 
@@ -149,6 +156,7 @@ class DecisionConfig(_Strict):
     human_policy: HumanPolicy
     input: InputConfig
     llm: LLMConfig
+    embedding: EmbeddingConfig
 
     def weight(self, domain: Domain) -> float:
         return getattr(self.weights, domain)

@@ -507,3 +507,20 @@ Tests :
 **Pièges.**
 - **Le test d'échec de nœud du J2 ne provoquait plus de panne.** Il retirait une clause attendue pour faire échouer une règle pendant le fan-out. Désormais, `verify_extraction` intercepte ce cas en amont : un nouvel essai, puis une escalade. Le test provoque maintenant la panne par une clause présente sans citation, qui fait échouer le nœud d'extraction lui-même. C'est aussi une preuve que la vérification protège les règles.
 - **Normalisation et guillemets français.** « » devient `"`, mais l'espace insécable qui suit le guillemet français reste un espace. Une citation copiée sans ces espaces serait déclarée introuvable. Ce cas est volontairement strict ; le retour ciblé laisse au modèle une chance de corriger.
+
+### J3 tâche 6 : migration 002, table rag_chunks
+
+**Fait.**
+- `migrations/002_rag.sql`, idempotente (`IF NOT EXISTS`) : table `rag_chunks`, domaine contrôlé par `CHECK`, unicité (`domain`, `content_hash`, `embedding_model`), index sur `domain`, `GRANT SELECT` à `app_role`.
+- `rag_store.setup` : appliquée par `setup-db` sur une base existante, puis contrôle de la dimension de la colonne par rapport à `embedding.dimension`. En cas d'écart, `RagStoreError`, qui nomme les deux valeurs.
+- Section `embedding` de `decision.yaml` : `intfloat/multilingual-e5-large`, 1024 dimensions, préfixes e5.
+- Vérifié :
+  - sur la base existante (tests `pg`) : lecture seule, dimension, migration rejouable, écriture refusée à `app_role` ;
+  - sur un **volume vide** (instance jetable), par l'init Docker : les deux migrations passent, dimension 1024, `SELECT` seul.
+
+**Écart avec mon plan : pas d'index HNSW.** La spec veut le filtre `domain` *avant* la recherche vectorielle. Or un index HNSW filtre après son parcours, et peut rendre moins de `k` résultats (pgvector propose des parcours itératifs, mais c'est de la complexité inutile ici). Pour quelques centaines d'extraits, une recherche exacte `WHERE domain = … ORDER BY embedding <=> …` est fidèle à la spec et rapide.
+
+**Pièges.**
+- **Lire la dimension d'une colonne `vector`.** Elle se trouve dans `pg_attribute.atttypmod` : ici 1024, sans décalage, contrairement à `varchar`.
+- **ruff et le Markdown.** `ruff format` (0.16) reformate aussi les blocs de code Python des fichiers Markdown, donc ceux de la spec. C'est sans effet sur le sens, mais il faut le savoir en lisant un diff de la spec.
+- **Plusieurs commandes SQL en une fois.** psycopg les accepte dans un seul `execute`, mais seulement sans paramètre et sur une connexion ordinaire. Celle du checkpointer (`prepare_threshold=0`) les refuserait (voir J2).

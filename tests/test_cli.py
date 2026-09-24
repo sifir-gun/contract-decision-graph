@@ -22,6 +22,7 @@ def test_setup_db(pg, capsys):
         "role": "app_role",
         "tables": ["checkpoints", "checkpoint_blobs", "checkpoint_writes"],
         "droits": ["SELECT", "INSERT", "UPDATE"],
+        "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
     }
 
 

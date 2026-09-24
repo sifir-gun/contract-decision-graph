@@ -9,7 +9,8 @@ from dataclasses import dataclass
 import psycopg
 import pytest
 
-from cdg import orchestrator, settings
+from cdg import orchestrator, rag_store, settings
+from cdg.config import load_config
 
 
 def pytest_addoption(parser):
@@ -60,6 +61,7 @@ def pg() -> Pg:
             pytrace=False,
         )
     orchestrator.setup_database(admin)  # idempotent : tables du checkpointer et droits
+    rag_store.setup(admin, load_config().embedding.dimension)  # migration 002, idempotente
     return Pg(admin=admin, app=app)
 
 

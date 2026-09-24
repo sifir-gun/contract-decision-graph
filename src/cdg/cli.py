@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from cdg import expiry, orchestrator, settings, stub_j2
+from cdg import expiry, orchestrator, rag_store, settings, stub_j2
 from cdg.config import load_config
 from cdg.state import Decision
 
@@ -24,11 +24,13 @@ STUB_NOTICE = (
 
 def _setup_db(args: argparse.Namespace) -> dict:
     orchestrator.setup_database(settings.admin_conninfo())
+    rag_store.setup(settings.admin_conninfo(), load_config().embedding.dimension)
     return {
         "setup_db": "ok",
         "role": settings.APP_ROLE,
         "tables": list(orchestrator.CHECKPOINT_TABLES),
         "droits": ["SELECT", "INSERT", "UPDATE"],
+        "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
     }
 
 

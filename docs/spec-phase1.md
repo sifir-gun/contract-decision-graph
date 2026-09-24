@@ -202,8 +202,11 @@ def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> 
     return {
         "route": "human_review",
         "proposed_decision": "ESCALADE",
-        "failure_report": {"stage": "extraction", "attempts": state["extraction_attempts"],
-                           "problems": problems},   # + « clause en double », « type inconnu »
+        "failure_report": {
+            "stage": "extraction",
+            "attempts": state["extraction_attempts"],
+            "problems": problems,
+        },  # + « clause en double », « type inconnu »
     }
 
 
@@ -442,7 +445,7 @@ Une seule instance PostgreSQL avec pgvector, lancée par Docker Compose.
 | Usage | Tables | Création |
 | --- | --- | --- |
 | Checkpoints LangGraph | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | `uv run python -m cdg.cli setup-db` (identifiants administrateur) : `setup()` puis droits d'`app_role` |
-| Corpus RAG | `rag_chunks` (id, domain, source, text, embedding vector) | Migration `002` (J3) + script d'ingestion |
+| Corpus RAG | `rag_chunks` (id, domain, source_id, reference, text, content_hash, embedding_model, embedding `vector(1024)`) | Migration `002_rag.sql`, idempotente : init Docker sur volume vide, ou `setup-db`, qui contrôle aussi la dimension par rapport à `embedding.dimension`. Ingestion par l'administrateur ; `app_role` en lecture seule |
 | Journal d'audit | `audit_decisions` | Migration `001` (J1) |
 
 Migrations en phase 1 : un script shell monté dans `docker-entrypoint-initdb.d` applique `migrations/*.sql` avec `psql -v ON_ERROR_STOP=1 -v app_password=...`. Il échoue explicitement si la variable du mot de passe applicatif est absente ou vide. Les migrations ne s'exécutent que sur un volume vide, ce que le README signale. La migration `001` (J1) crée l'extension `vector`, la table `audit_decisions` et le rôle `app_role`, qui reçoit `SELECT, INSERT` sur `audit_decisions` et rien d'autre. `rag_chunks` arrive en `002` au J3, une fois la dimension d'embedding fixée. Tables du checkpointer : `app_role` reçoit `SELECT, INSERT, UPDATE` sur `checkpoints`, `checkpoint_blobs` et `checkpoint_writes`, et rien sur `checkpoint_migrations`. C'est ce que demandent les requêtes de `PostgresSaver` 3.1.2 (`SELECT`, `INSERT ... ON CONFLICT DO NOTHING / DO UPDATE`). Pas de `DELETE` : seul `delete_thread` en a besoin, et l'application ne l'utilise pas. Un test vérifie qu'un cycle complet (run, interrupt, resume) passe avec ces seuls droits. Identifiants dans `.env` (ignoré par git), avec un `.env.example` commité.
@@ -467,7 +470,7 @@ GRANT SELECT, INSERT ON audit_decisions TO app_role;
 REVOKE UPDATE, DELETE ON audit_decisions FROM app_role;
 ```
 
-Corpus : filtre `domain` appliqué avant la recherche vectorielle. Modèle d'embedding et dimension à fixer au J3.
+Corpus : filtre `domain` appliqué **avant** la recherche vectorielle. D'où une recherche exacte, sans index HNSW : un index approché filtre après son parcours et peut rendre moins de `k` résultats. Pour un corpus de quelques centaines d'extraits, la recherche exacte reste rapide. Modèle d'embedding (section `embedding`) : `intfloat/multilingual-e5-large`, local (fastembed, ONNX), dimension 1024, préfixes `query:` et `passage:`.
 
 ## Critères d'acceptation
 
@@ -510,7 +513,7 @@ contract-decision-graph/
 │   └── initdb/                 # script d'init : applique migrations/*.sql
 ├── migrations/
 │   ├── 001_audit.sql           # J1 : extension vector, audit_decisions, app_role
-│   └── 002_rag.sql             # J3 : rag_chunks
+│   └── 002_rag.sql             # J3 : rag_chunks, idempotente, lecture seule pour app_role
 ├── data/
 │   ├── contracts/              # 10 contrats synthétiques + 2 piégés
 │   └── corpus/                 # textes publics à indexer
@@ -608,6 +611,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
   - option pytest `--llm` ;
+  - migration `002_rag.sql` appliquée par `setup-db`, recherche exacte filtrée par domaine (pas d'index HNSW), section `embedding` ;
   - `verify_extraction` réel : normalisation, types en double ou inconnus, citations comparées au texte masqué ;
   - extraction réelle : contrat entre balises à jeton aléatoire, schéma de sortie limité aux 8 types, retour de vérification hors du bloc ;
   - masquage dans `run_contract` avant le graphe, `validate_input` complet (section `input` : `max_chars`, `min_words`, `min_french_ratio`) ;

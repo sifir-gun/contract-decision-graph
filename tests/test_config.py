@@ -52,6 +52,12 @@ def test_configuration_du_projet_conforme_a_la_spec():
         "light": "claude-haiku-4-5-20251001",
     }
     assert cfg.llm.model("light") == "ministral-8b-2512"
+    assert cfg.embedding.model_dump() == {
+        "model": "intfloat/multilingual-e5-large",
+        "dimension": 1024,
+        "query_prefix": "query: ",
+        "passage_prefix": "passage: ",
+    }
 
 
 def test_poids_par_domaine():
@@ -116,6 +122,8 @@ _DELETE = object()
         ("llm.temperature", 1.5),
         ("llm.max_output_tokens", 0),
         ("llm.timeout_seconds", 0),
+        ("embedding.dimension", 0),
+        ("embedding.model", ""),
     ],
 )
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):

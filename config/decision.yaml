@@ -72,3 +72,10 @@ llm:
     anthropic:
       main: claude-sonnet-5
       light: claude-haiku-4-5-20251001
+
+# Embedding local (fastembed, ONNX), multilingue, sans appel réseau à l'exécution.
+embedding:
+  model: intfloat/multilingual-e5-large   # licence MIT, 1024 dimensions
+  dimension: 1024                          # = colonne rag_chunks.embedding (migration 002)
+  query_prefix: "query: "                  # préfixes attendus par les modèles e5
+  passage_prefix: "passage: "
