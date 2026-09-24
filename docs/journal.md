@@ -383,3 +383,7 @@ Tests :
 **Pièges.**
 - Aucun changement de code n'a été nécessaire : l'option (c) était déjà le comportement réel. Le test la verrouille, pour qu'une future garde (J3) ne la change pas sans que ce soit visible.
 - Après l'échec d'une branche du fan-out, le dernier checkpoint indique `next = [analyst × 4]`. Les écritures des 3 analystes réussis sont conservées en attente, comme le prévoit la spec (« seul le fautif est rejoué »). Au J3, une reprise après correction ne relancera que l'analyste en échec.
+
+### chore : .vscode retiré du dépôt
+
+**Fait.** `.vscode/settings.json`, commité par Cursor, est retiré de l'index (`git rm --cached`), mais conservé sur le disque. `.vscode/` est ajouté au `.gitignore` : la configuration de l'IDE reste locale.
