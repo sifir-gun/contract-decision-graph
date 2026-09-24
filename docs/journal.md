@@ -368,3 +368,18 @@ Tests :
 **Pièges.**
 - La documentation (`NodeError`) donne un exemple qui renvoie un `Command`, sans dire qu'un dict termine l'exécution. Seule une sonde l'a montré.
 - Le comportement en parallèle (exception propagée alors que le gestionnaire a tourné) n'est pas documenté. Bogue ou intention : à revérifier à la prochaine version de LangGraph.
+
+### J2 : échec de nœud, erreur JSON et état lisible (option c)
+
+**Fait.**
+- Décision du propriétaire du repo : option (c) au J2, option (b) conçue au J3.
+- Test ajouté : une clause attendue manque, donc la règle financière lève une erreur pendant le fan-out. On vérifie trois choses :
+  - `run` sort avec le code 1 et une erreur JSON (`ValueError`, qui nomme la clause) ;
+  - `history` relit l'état, dont le dernier checkpoint attend encore les 4 analystes (`route = analysts`) ;
+  - `resume` refuse explicitement, puisque le thread n'attend pas d'humain.
+- Spec : la décision du J2 et la conception prévue pour le J3, à savoir des gardes dans l'orchestrateur, une clé `failures` cumulée par réducteur, une escalade par `decision_gate` et `RetryPolicy` sur les analystes.
+- Ajouts validés : préfixe `systeme:` réservé, filtre `thread_ids` réservé aux tests, `run` qui refuse un thread existant, `resume` limité aux threads en attente.
+
+**Pièges.**
+- Aucun changement de code n'a été nécessaire : l'option (c) était déjà le comportement réel. Le test la verrouille, pour qu'une future garde (J3) ne la change pas sans que ce soit visible.
+- Après l'échec d'une branche du fan-out, le dernier checkpoint indique `next = [analyst × 4]`. Les écritures des 3 analystes réussis sont conservées en attente, comme le prévoit la spec (« seul le fautif est rejoué »). Au J3, une reprise après correction ne relancera que l'analyste en échec.

@@ -277,12 +277,18 @@ Points à maîtriser :
 - **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Vérifier l'héritage du checkpointer par un sous-graphe dans la version installée.
 - **Isolation** : seul `orchestrator.py` importe LangGraph ; il contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework.
 - **thread_id** : un contrat = un thread. Clé de reprise, de l'historique et du lien avec la piste d'audit.
-- **Échecs de nœud (J2, décision en attente)** : une exception dans un nœud (clause ou verdict manquant, erreur d'API) interrompt l'exécution ; l'état reste dans le dernier checkpoint et la CLI rend l'erreur en JSON. Étude de `error_handler` (LangGraph 1.2.12), faite par sonde :
+- **Échecs de nœud** : au J2, une exception dans un nœud (clause ou verdict manquant, erreur d'API) interrompt l'exécution. L'état reste dans le dernier checkpoint, lisible par `history`, et la CLI rend l'erreur en JSON sur stderr avec le code 1. Un test le vérifie. Étude de `error_handler` (LangGraph 1.2.12), faite par sonde :
   - un gestionnaire qui renvoie un dict voit ses écritures appliquées, puis **l'exécution s'arrête** : ni l'arête fixe ni l'arête conditionnelle du nœud en échec ne sont suivies, et `route` écrite dans l'état n'est pas lue ;
   - seul un `Command(goto=...)` renvoyé par le gestionnaire permet de continuer, par exemple vers `human_review`, ce que la règle de routage unique interdit ;
   - sur un fan-out par `Send` (4 analystes en parallèle), le gestionnaire est bien appelé, mais l'exception remonte quand même et l'exécution échoue.
 
-  Le mécanisme de production d'un `failure_report` en cas d'échec de nœud reste à trancher.
+  Décision : pas d'`error_handler`. Des gardes dans l'orchestrateur, conçues au J3, font produire un `failure_report` à tout échec de nœud :
+  - chaque nœud est enveloppé par un adaptateur de `orchestrator.py` qui transforme une exception en rapport d'échec structuré ;
+  - un analyste en échec écrit dans une clé `failures`, cumulée par réducteur comme `verdicts`, au lieu de faire échouer tout le fan-out ;
+  - `decision_gate` escalade (`ESCALADE`, route `human_review`) dès que `failures` n'est pas vide ;
+  - `RetryPolicy` sur les analystes pour les erreurs d'API transitoires, avant la garde.
+
+  Le routage reste unique : la garde écrit `route` et les arêtes la lisent, sans `Command(goto=...)`.
 - **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un `StrictSerializer` dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`), plus les types sûrs de LangGraph (`Send`, `Interrupt`, dates…). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement ; un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Même avec une liste, un type bloqué revient **dégradé en `dict`**, avec un simple avertissement : c'est un repli silencieux. `StrictSerializer` capte l'événement de blocage émis par la bibliothèque et lève `BlockedDeserialization`. Tout vit dans `orchestrator.py`.
 
 ## Déterminisme et piste d'audit
@@ -490,7 +496,7 @@ Chaque jour se termine par un commit qui passe ses tests.
 | --- | --- | --- |
 | J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
 | J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire`, étude de `error_handler` (LangGraph 1.2) pour qu'un échec de nœud produise un `failure_report` structuré | 4, 5, 11, 12 |
-| J3 | Ingestion du corpus, CRAG (fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py`), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
+| J3 | Ingestion du corpus, CRAG (fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py`), gardes d'échec de nœud (clé `failures`, escalade par `decision_gate`, `RetryPolicy` sur les analystes), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
 | J4 | `explain` avec validation, `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
 
@@ -540,7 +546,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
   - `python-dotenv` pour lire `.env` ; marqueur pytest `pg` ;
   - `HumanDecision.source` (`humain` ou `systeme`), décision système limitée à `NO_GO`, `expire` avec horloge injectée ;
-  - étude d'`error_handler` : il exige `Command(goto=...)` pour router et ne protège pas le fan-out ; décision en attente ;
+  - étude d'`error_handler` : il exige `Command(goto=...)` pour router et ne protège pas le fan-out. Décision : au J2, une exception arrête l'exécution (erreur JSON, état lisible par `history`) ; au J3, gardes dans l'orchestrateur, clé `failures` et `RetryPolicy` ;
+  - validés : préfixe `systeme:` réservé, filtre `thread_ids` réservé aux tests, `run` qui refuse un thread existant, `resume` limité aux threads en attente ;
   - CLI `run`, `resume` et `history` en mode `stub-j2` (clauses JSON, CRAG sans corpus toujours `INSUFFISANT`), mode affiché dans l'aide et dans chaque sortie.
   - une réponse humaine mal formée est redemandée, comme une réponse refusée par la politique, au lieu de faire échouer le nœud ;
   - l'appariement de plusieurs `interrupt()` par ordre d'appel est vérifié ;
