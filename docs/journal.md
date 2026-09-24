@@ -548,3 +548,24 @@ Tests :
 - **Cache temporaire par défaut.** fastembed range les poids dans un dossier temporaire du système (`tempfile.gettempdir()/fastembed_cache`), qui peut être vidé : 2,2 Go à retélécharger à chaque fois. Le chemin est donc explicite et persistant.
 - **Aucun téléchargement à l'exécution.** Sans `local_files_only`, le premier embedding lancé déclencherait un téléchargement de 2,2 Go en plein graphe. Le paramètre passe par les `kwargs` de `TextEmbedding`.
 - **Filtre par modèle.** On filtre aussi sur `embedding_model` : des vecteurs de deux modèles différents ne sont pas comparables, même à dimension égale.
+
+### J3 tâche 7 (suite) : chargement ONNX depuis le cache Hugging Face
+
+**Incident.** `fetch-embedding-model`, lancé par le propriétaire du repo, a bien téléchargé les 2,25 Go, puis le chargement a échoué : « External data path validation failed … External data path escapes model directory ».
+
+**Cause.**
+- **Le cache.** Hugging Face, avec le stockage `hf-xet`, range les fichiers dans un stockage dédupliqué, avec un sous-dossier par préfixe de hash (`blobs/29/…`, `blobs/9e/…`). L'instantané du modèle n'est qu'une série de liens symboliques vers ces blobs.
+- **onnxruntime 1.30.** Un contrôle de sécurité exige que `model.onnx_data` (les poids externes) soit dans le même dossier que `model.onnx` *une fois les liens résolus*. Ici, les deux fichiers résolvent vers `blobs/29` et `blobs/9e` : refus.
+
+**Correctif** (sans nouvelle dépendance ni copie) :
+- `embeddings.materialize` crée `EMBEDDING_CACHE_DIR/flat/<modèle>/` avec des **liens physiques** vers les fichiers réels, que fastembed charge par `specific_model_path`. Aucun espace disque supplémentaire : le cache pèse toujours 2,1 Go.
+- Si le cache et ce dossier ne sont pas sur le même système de fichiers, une erreur explicite est levée, plutôt qu'une copie silencieuse de 2 Go.
+- La mise à plat est locale et rejouable. L'exécution la refait au besoin, sans aucun accès réseau (`local_files_only`). Il n'a donc pas fallu relancer le téléchargement.
+
+**Vérifié** avec le vrai modèle, hors ligne (`HF_HUB_OFFLINE=1`, sandbox sans réseau) :
+- chargement en 6,7 s, vecteurs de dimension 1024 ;
+- sur une requête « obligations du sous-traitant », la phrase RGPD sur le sous-traitant score 0,872, contre 0,783 pour une phrase sur les pénalités de retard.
+
+**Pièges.**
+- Cet échec n'apparaissait dans aucun test à doublures : il fallait les vrais poids. Un test reproduit désormais la structure du cache, avec des blobs dans des sous-dossiers différents et un instantané en liens symboliques.
+- Les similarités cosinus de e5 sont resserrées (environ 0,78 à 0,87). Un seuil fixe de pertinence serait fragile. Le tri reste bon, et c'est le juge du CRAG, pas un seuil, qui décidera de la pertinence.

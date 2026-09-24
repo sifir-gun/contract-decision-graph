@@ -1,9 +1,15 @@
 """Embedding local (fastembed, ONNX) : préfixes e5, dimension contrôlée.
 
-À l'exécution, `local_files_only=True` : jamais de téléchargement implicite. Les poids
-se récupèrent une fois par `cdg.cli fetch-embedding-model`, dans EMBEDDING_CACHE_DIR.
+À l'exécution, jamais de téléchargement : les poids se récupèrent une fois par
+`cdg.cli fetch-embedding-model`, dans EMBEDDING_CACHE_DIR.
+
+onnxruntime >= 1.30 exige que les poids externes (`model.onnx_data`) soient dans le même
+dossier que `model.onnx` une fois les liens résolus ; le cache Hugging Face range chaque
+fichier dans un sous-dossier de blobs différent. D'où une copie « à plat » faite de liens
+physiques (aucun espace disque supplémentaire), chargée par `specific_model_path`.
 """
 
+import os
 from pathlib import Path
 
 from cdg.config import EmbeddingConfig
@@ -13,10 +19,50 @@ class EmbeddingError(Exception):
     """Poids absents, ou vecteur d'une dimension inattendue."""
 
 
+def _snapshot(config: EmbeddingConfig, cache_dir: Path, *, local_files_only: bool) -> Path:
+    from fastembed import TextEmbedding
+
+    description = TextEmbedding._get_model_description(config.model)
+    return Path(
+        TextEmbedding.download_model(description, str(cache_dir), local_files_only=local_files_only)
+    )
+
+
+def flat_dir(config: EmbeddingConfig, cache_dir: Path) -> Path:
+    return cache_dir / "flat" / config.model.replace("/", "--")
+
+
+def materialize(snapshot: Path, flat: Path) -> None:
+    """Liens physiques vers les fichiers réels de l'instantané, dans un seul dossier."""
+    flat.mkdir(parents=True, exist_ok=True)
+    for source in snapshot.iterdir():
+        if not source.is_file():
+            continue
+        real, target = Path(os.path.realpath(source)), flat / source.name
+        if target.exists():
+            if target.samefile(real):
+                continue
+            target.unlink()
+        try:
+            os.link(real, target)
+        except OSError as exc:  # autre système de fichiers : pas de copie silencieuse de 2 Go
+            raise EmbeddingError(
+                f"lien physique impossible vers {real} : EMBEDDING_CACHE_DIR doit être sur "
+                "un seul système de fichiers"
+            ) from exc
+
+
 def _load(config: EmbeddingConfig, cache_dir: Path, *, local_files_only: bool):
     from fastembed import TextEmbedding
 
-    return TextEmbedding(config.model, cache_dir=str(cache_dir), local_files_only=local_files_only)
+    flat = flat_dir(config, cache_dir)
+    materialize(_snapshot(config, cache_dir, local_files_only=local_files_only), flat)
+    return TextEmbedding(
+        config.model,
+        cache_dir=str(cache_dir),
+        specific_model_path=str(flat),
+        local_files_only=True,
+    )
 
 
 def fetch_model(config: EmbeddingConfig, cache_dir: Path) -> None:
