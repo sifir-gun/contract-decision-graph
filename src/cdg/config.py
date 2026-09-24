@@ -127,8 +127,9 @@ class LLMConfig(_Strict):
             raise ValueError(f"aucun modèle configuré pour le fournisseur {self.provider}")
         return self
 
-    def model(self, tier: Tier) -> str:
-        return getattr(self.models[self.provider], tier)
+    def model(self, tier: Tier, provider: str | None = None) -> str:
+        """Modèle d'un niveau, pour le fournisseur configuré ou celui indiqué."""
+        return getattr(self.models[provider or self.provider], tier)
 
 
 class DecisionConfig(_Strict):

@@ -90,3 +90,23 @@ class FakeCrag:
             evidence_ids=[f"{domain}-ref-1"] if status == "OK" else [],
             usage=[usage(*self.tokens, node=f"crag:{domain}")],
         )
+
+
+class FakeLLM:
+    """Doublure d'un fournisseur LLM : réponses scriptées par nœud, appels enregistrés."""
+
+    name = "fake"
+
+    def __init__(self, responses: dict | None = None, tokens=(0, 0)):
+        # responses : nœud -> liste de réponses (consommées dans l'ordre) ou réponse fixe
+        self.responses, self.tokens = responses or {}, tokens
+        self.calls: list[dict] = []
+
+    def structured(self, *, tier, system, user, schema, node):
+        self.calls.append(
+            {"tier": tier, "system": system, "user": user, "schema": schema, "node": node}
+        )
+        scripted = self.responses[node]
+        answer = scripted.pop(0) if isinstance(scripted, list) else scripted
+        answer = answer(user) if callable(answer) else answer
+        return schema.model_validate(answer), usage(*self.tokens, node=node)

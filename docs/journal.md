@@ -430,3 +430,20 @@ Tests :
 - **Alias `-latest`.** Ils existent chez Mistral (`mistral-small-latest`…) mais changent de cible sans que la config change. On les refuse pour que le rejeu et l'audit restent fidèles.
 - **Pourquoi une option `--llm`.** Avec un simple marqueur exclu par `addopts`, un `-m "not pg"` passé en ligne de commande aurait remplacé l'exclusion, et lancé les tests payants. Le test `test_exclure_pg_n_active_pas_les_tests_llm` le fixe.
 - **`onnxruntime`.** La version résolue par `uv add` (1.30.0) diffère de celle de ma résolution de dimensionnement (1.19.2) : la résolution dépend du lock existant. Les tailles annoncées restent un ordre de grandeur.
+
+### J3 tâche 2 : interface des fournisseurs LLM
+
+**Fait.**
+- `deps.LLMProvider` expose `structured(tier, system, user, schema, node)`, qui renvoie le modèle Pydantic validé et un `Usage` (tokens et latence).
+- `providers/mistral.py` utilise `chat.parse(response_format=…)`, et `providers/anthropic.py` utilise `messages.parse(output_format=…)`.
+- `providers.build_provider` choisit le fournisseur d'après la configuration. Si la clé d'API manque, il lève une `SettingsError` qui nomme la variable.
+- Une réponse non structurée, ou sans consommation, lève une `LLMOutputError`, jamais un repli.
+- Doublure `FakeLLM` : réponses scriptées par nœud, appels enregistrés, ce qui permet de vérifier le texte envoyé au modèle.
+- Tests avec de faux clients qui imitent les réponses des SDK : aucun appel réseau.
+
+**Pièges.**
+- **Import du client Mistral.** `mistralai` 2.x n'exporte plus `Mistral` à la racine : l'import correct est `from mistralai.client import Mistral`.
+- **Sortie structurée de Mistral.** Elle se trouve dans `choices[0].message.parsed`, qui vaut `None` si le contenu est vide. Il faut le vérifier explicitement.
+- **Pas de `temperature` chez Anthropic.** `anthropic` 1.8.0 : `messages.parse` n'a plus de paramètre `temperature` (liste lue dans la signature installée). Le réglage `llm.temperature: 0` ne vaut donc que pour Mistral. Le verdict reste déterministe à partir des clauses, mais l'extraction par Claude peut varier d'une exécution à l'autre.
+- **Bug corrigé** : le fournisseur Anthropic lisait les modèles du fournisseur *configuré* (Mistral). Chaque fournisseur lit désormais ses propres modèles (`config.model(tier, provider=self.name)`).
+- **Aucun essai réel du fournisseur Anthropic** : pas de clé d'API. Seul le test avec faux client le couvre.

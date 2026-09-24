@@ -512,7 +512,8 @@ contract-decision-graph/
 │   ├── state.py                # schémas d'état et Pydantic
 │   ├── config.py               # chargement et validation Pydantic de decision.yaml
 │   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
-│   ├── deps.py                 # contrats injectés : extracteur, CRAG (doublures en test)
+│   ├── deps.py                 # contrats injectés : extracteur, CRAG, LLMProvider (doublures en test)
+│   ├── providers/              # fournisseurs LLM : mistral.py, anthropic.py, choisis par la config
 │   ├── settings.py             # .env (python-dotenv), chaînes de connexion
 │   ├── stub_j2.py              # mode stub-j2 de la CLI, remplacé au J3
 │   ├── expiry.py               # expire : sélection pure, décision système NO_GO
@@ -596,7 +597,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
   - `LANGSMITH_TRACING=false` explicite dans `.env.example`.
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
-  - option pytest `--llm`.
+  - option pytest `--llm` ;
+  - interface `LLMProvider` (sortie structurée Pydantic, consommation mesurée), fournisseurs Mistral et Anthropic. `temperature` ne vaut que pour Mistral, car `messages.parse` ne l'accepte pas dans anthropic 1.8.0.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

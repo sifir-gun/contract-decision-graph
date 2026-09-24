@@ -1,7 +1,7 @@
 """Dépendances injectées dans les nœuds : extracteur (LLM) et CRAG. Doublures dans les tests."""
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -17,6 +17,20 @@ class RetrievalResult(BaseModel):
     status: RetrievalStatus
     evidence_ids: list[str]
     usage: list[Usage]
+
+
+Tier = Literal["main", "light"]
+SchemaT = TypeVar("SchemaT", bound=BaseModel)
+
+
+class LLMProvider(Protocol):
+    """Fournisseur LLM : sortie structurée validée par un modèle Pydantic, consommation mesurée."""
+
+    name: str
+
+    def structured(
+        self, *, tier: Tier, system: str, user: str, schema: type[SchemaT], node: str
+    ) -> tuple[SchemaT, Usage]: ...
 
 
 class Extractor(Protocol):
