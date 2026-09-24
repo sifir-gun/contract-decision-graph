@@ -351,6 +351,7 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
   - `min_margin` = 0,05, écart de conflit = 0,5 ;
   - budget par contrat : 60 000 tokens ;
   - nombre maximal d'essais d'extraction : 2 ;
+  - LLM (`llm`) : fournisseur (`mistral` par défaut, `anthropic` en alternative), température 0, modèles par niveau, avec `main` pour l'extraction et `light` pour le juge CRAG. Les identifiants sont **figés** (alias `-latest` refusés), car le modèle est scellé dans l'audit. Configuration du projet, vérifiée le 2026-09-24 dans la documentation officielle : Mistral `mistral-small-2603` et `ministral-8b-2512` ; Anthropic `claude-sonnet-5` et `claude-haiku-4-5-20251001`. Les clés d'API restent dans `.env` ;
   - seuils des règles et pénalités de score ;
   - politique d'arbitrage humain `human_policy` (J2) :
     - `allowed_decisions` : décisions permises à l'humain, `NO_GO` obligatoire, `ESCALADE` interdite ;
@@ -484,7 +485,7 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `pytest`, `ruff` (dev, line-length 100), Docker Compose. Modèles configurables par variable d'environnement, avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `ruff` (dev, line-length 100), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/
@@ -538,7 +539,7 @@ Comportement de la CLI (J2) :
 
 Toute exécution escalade donc vers un humain, sauf blocage dur. L'aide de la CLI l'annonce, et chaque sortie JSON porte `"mode": "stub-j2"`, pour qu'aucune démonstration ne laisse croire à une vraie analyse. Les deux doublures sont remplacées au J3.
 
-Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si la base est arrêtée. On les exclut volontairement avec `-m "not pg"`, jamais par un saut silencieux.
+Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si la base est arrêtée. On les exclut volontairement avec `-m "not pg"`, jamais par un saut silencieux. Ceux qui appellent le vrai modèle portent le marqueur `llm`. Ils sont exclus par défaut et comptés comme *deselected*, et ne tournent qu'avec l'option `--llm`. Un `-m` ne peut donc pas les activer par accident. Les critères 3, 9 et 10 y sont répétés 5 fois : 5 réussites sur 5 exigées, sans relance automatique, et chaque série est consignée au journal.
 
 ## Découpage en 4 à 5 jours
 
@@ -593,6 +594,9 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI (phase 2) ; API FastAPI,
   - CRAG : fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py` (J3) ;
   - étude de `error_handler` au J2 pour les `failure_report` d'échec de nœud ;
   - `LANGSMITH_TRACING=false` explicite dans `.env.example`.
+- **24 septembre 2026, J3** :
+  - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
+  - option pytest `--llm`.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

@@ -406,3 +406,27 @@ Tests :
 - **Une correction sûre qui gêne l'audit.** SIM114, pourtant marqué « sûr », avait fusionné les étapes 3 (`INSUFFISANT`) et 4 (conflit) du gate en un seul `or`. Le résultat était équivalent, mais l'ordre de la spec devenait illisible. Les deux branches ont été rétablies, commentées. Il faut relire les corrections automatiques, même sûres, quand elles touchent la logique de décision.
 - **Tri des imports (I001).** ruff classe `doubles`, le module de test, parmi les imports tiers, car il ne le connaît pas comme premier parti. C'est sans effet.
 - **Commentaires déplacés.** Le formateur avait sorti un commentaire de fin de ligne de son contexte, dans un `parametrize` de `test_rules.py`. Il a été remis à la main.
+
+## 2026-09-24 · J3
+
+### J3 tâche 1 : dépendances, section llm, option --llm
+
+**Fait.**
+- Dépendances ajoutées par le propriétaire du repo : `mistralai` 2.10.1, `anthropic` 1.8.0, `fastembed` 0.8.1 (`onnxruntime` 1.30.0) et `pgvector` 0.5.0.
+- Section `llm` de `decision.yaml` : fournisseur `mistral` par défaut, `anthropic` en alternative ; température 0 ; modèles par niveau (`main` pour l'extraction, `light` pour le juge CRAG). Le modèle Pydantic **refuse les alias `-latest`**.
+- Option pytest `--llm` : les tests `llm` sont exclus par défaut et comptés comme *deselected*. L'en-tête de pytest le signale. Des tests à part (`pytester`) vérifient ce mécanisme.
+
+**Vérification des modèles**, faite le 2026-09-24 dans la documentation officielle, par le navigateur intégré :
+- **Mistral** (docs.mistral.ai, fiche de chaque modèle) :
+  - Small 4 : `mistral-small-2603` ;
+  - Ministral 3 8B : `ministral-8b-2512` ;
+  - Medium 3.5 : `mistral-medium-3-5` ;
+  - Large 3 : `mistral-large-2512` ;
+  - Embed : `mistral-embed-2312`, dimension 1024 (page « Text Embeddings »).
+- **Anthropic** (platform.claude.com, « Models overview ») : `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5` et `claude-haiku-4-5-20251001`.
+
+**Pièges.**
+- **Page de Mistral illisible en brut.** Le HTML mélange modèles actuels et retirés. Il a fallu lire la page rendue, puis ouvrir chaque fiche pour voir l'identifiant daté.
+- **Alias `-latest`.** Ils existent chez Mistral (`mistral-small-latest`…) mais changent de cible sans que la config change. On les refuse pour que le rejeu et l'audit restent fidèles.
+- **Pourquoi une option `--llm`.** Avec un simple marqueur exclu par `addopts`, un `-m "not pg"` passé en ligne de commande aurait remplacé l'exclusion, et lancé les tests payants. Le test `test_exclure_pg_n_active_pas_les_tests_llm` le fixe.
+- **`onnxruntime`.** La version résolue par `uv add` (1.30.0) diffère de celle de ma résolution de dimensionnement (1.19.2) : la résolution dépend du lock existant. Les tailles annoncées restent un ordre de grandeur.

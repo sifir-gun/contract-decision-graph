@@ -49,3 +49,20 @@ human_policy:
   # false : un blocage dur donne NO_GO et part vers explain, sans humain.
   # true : il part en revue humaine avec NO_GO proposé ; la levée exige overrides_block et motif.
   hard_block_review: false
+
+# LLM : extraction (modèle principal) et juge CRAG (modèle léger). Clés d'API dans .env.
+# Identifiants figés, jamais d'alias « -latest » : le modèle est scellé dans l'audit.
+# Vérifiés le 2026-09-24 dans la documentation officielle (docs.mistral.ai,
+# platform.claude.com).
+llm:
+  provider: mistral   # mistral ou anthropic
+  temperature: 0
+  max_output_tokens: 4096
+  timeout_seconds: 60
+  models:
+    mistral:
+      main: mistral-small-2603   # Mistral Small 4
+      light: ministral-8b-2512   # Ministral 3 8B
+    anthropic:
+      main: claude-sonnet-5
+      light: claude-haiku-4-5-20251001

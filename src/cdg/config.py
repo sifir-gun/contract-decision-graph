@@ -1,7 +1,7 @@
 """Chargement et validation de config/decision.yaml. Invalide : ConfigError, arrêt au démarrage."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -97,6 +97,40 @@ class HumanPolicy(_Strict):
         return self
 
 
+Tier = Literal["main", "light"]
+ModelId = Annotated[str, Field(min_length=1)]
+
+
+class TierModels(_Strict):
+    main: ModelId  # extraction
+    light: ModelId  # juge CRAG, réécriture de requête
+
+    @model_validator(mode="after")
+    def _identifiants_figes(self) -> "TierModels":
+        # un alias mouvant changerait de modèle sans changer la config : rejeu faussé
+        for model in (self.main, self.light):
+            if "latest" in model:
+                raise ValueError(f"alias mouvant refusé : {model} (identifiant figé attendu)")
+        return self
+
+
+class LLMConfig(_Strict):
+    provider: Literal["mistral", "anthropic"]
+    temperature: Annotated[float, Field(ge=0.0, le=1.0)]
+    max_output_tokens: Annotated[int, Field(gt=0)]
+    timeout_seconds: Annotated[int, Field(gt=0)]
+    models: dict[Literal["mistral", "anthropic"], TierModels]
+
+    @model_validator(mode="after")
+    def _modeles_du_fournisseur(self) -> "LLMConfig":
+        if self.provider not in self.models:
+            raise ValueError(f"aucun modèle configuré pour le fournisseur {self.provider}")
+        return self
+
+    def model(self, tier: Tier) -> str:
+        return getattr(self.models[self.provider], tier)
+
+
 class DecisionConfig(_Strict):
     weights: Weights
     thresholds: Thresholds
@@ -106,6 +140,7 @@ class DecisionConfig(_Strict):
     extraction: Extraction
     rules: RulesConfig
     human_policy: HumanPolicy
+    llm: LLMConfig
 
     def weight(self, domain: Domain) -> float:
         return getattr(self.weights, domain)

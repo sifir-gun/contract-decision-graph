@@ -12,6 +12,31 @@ import pytest
 from cdg import orchestrator, settings
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--llm",
+        action="store_true",
+        help="exécute aussi les tests marqués llm (vrai modèle, payant)",
+    )
+
+
+def pytest_report_header(config):
+    if config.getoption("--llm"):
+        return "tests llm : activés (--llm), vrai modèle"
+    return "tests llm : exclus, lancer avec --llm"
+
+
+def pytest_collection_modifyitems(config, items):
+    # exclusion par défaut, comptée comme « deselected » : jamais de saut silencieux,
+    # et -m "not pg" ne peut pas activer les tests llm par accident
+    if config.getoption("--llm"):
+        return
+    llm = [item for item in items if item.get_closest_marker("llm")]
+    if llm:
+        items[:] = [item for item in items if not item.get_closest_marker("llm")]
+        config.hook.pytest_deselected(items=llm)
+
+
 @dataclass(frozen=True)
 class Pg:
     admin: str  # chaîne de connexion administrateur : setup-db et ménage des tests

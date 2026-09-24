@@ -42,6 +42,16 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert cfg.human_policy.allowed_decisions == ["GO", "GO_RESERVES", "NO_GO"]
     assert cfg.human_policy.allow_block_override is True
     assert cfg.human_policy.hard_block_review is False
+    assert cfg.llm.provider == "mistral" and cfg.llm.temperature == 0
+    assert cfg.llm.models["mistral"].model_dump() == {
+        "main": "mistral-small-2603",
+        "light": "ministral-8b-2512",
+    }
+    assert cfg.llm.models["anthropic"].model_dump() == {
+        "main": "claude-sonnet-5",
+        "light": "claude-haiku-4-5-20251001",
+    }
+    assert cfg.llm.model("light") == "ministral-8b-2512"
 
 
 def test_poids_par_domaine():
@@ -99,6 +109,13 @@ _DELETE = object()
         ("human_policy.allow_block_override", "oui"),  # mode strict
         ("human_policy.hard_block_review", _DELETE),  # réglage explicite
         ("human_policy.hard_block_review", "non"),  # mode strict
+        ("llm.provider", "openai"),  # fournisseur sans modèles configurés
+        ("llm.models.mistral.main", "mistral-small-latest"),  # alias mouvant refusé
+        ("llm.models.mistral.light", ""),
+        ("llm.models.mistral", _DELETE),  # fournisseur choisi sans modèles
+        ("llm.temperature", 1.5),
+        ("llm.max_output_tokens", 0),
+        ("llm.timeout_seconds", 0),
     ],
 )
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):
