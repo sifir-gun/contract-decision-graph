@@ -28,7 +28,7 @@ from cdg.ports.llm import LLMOutputError
 
 CONFIG = load_config()
 L441 = "C. com., art. L441-10"
-FICHE = "Fiche projet : Délais de paiement et pénalités de retard"
+FICHE = "Fiche projet : Délais de paiement entre professionnels"
 
 
 # --- Requête initiale : types et valeurs des clauses, jamais les citations -------------

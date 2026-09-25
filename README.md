@@ -70,4 +70,4 @@ Le corpus (`data/corpus/`) réunit des textes publics (RGPD, Code de commerce, C
   - C. com., art. L441-1, L441-3, L441-4, L441-16 et L441-17 ;
   - C. civ., art. 759 ;
   - le règlement (UE) 2019/1150.
-- **Fiches de référence.** Ce sont des synthèses rédigées pour le projet, non constitutives d'un avis juridique ; chaque affirmation cite l'article qu'elle paraphrase.
+- **Fiches de référence.** Ce sont des synthèses rédigées pour le projet, non constitutives d'un avis juridique. Chacune sépare « Ce que dit le texte », des paraphrases fidèles vérifiées mot à mot et sourcées, de « Comment le projet l'applique », les seuils du projet présentés comme des choix de politique d'achat. Les conséquences que seule la jurisprudence tire des textes (plafond et faute lourde, articulation des art. 1171 C. civ. et L442-1 C. com.) sont signalées comme hors corpus.

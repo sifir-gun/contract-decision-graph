@@ -195,6 +195,22 @@ _CITATION = re.compile(r"\(sources? : ([^)]+)\)")
 _ONE = re.compile(r"([a-z-]+), art\. ([A-Z]?\d+(?:-\d+)?)")
 
 
+TEXT_SECTION = "Ce que dit le texte"  # paraphrases fidèles, chacune sourcée
+APPLICATION_SECTION = "Comment le projet l'applique"  # choix de politique d'achat
+
+
+def fiche_sections(body: str) -> dict[str, list[str]]:
+    """Lignes d'affirmation par section de niveau 2 (`## …`), dans l'ordre du fichier."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in body.splitlines():
+        if line.startswith("## "):
+            current = sections.setdefault(line[3:].strip(), [])
+        elif line.strip() and not line.lstrip().startswith("#") and current is not None:
+            current.append(line)
+    return sections
+
+
 def claim_lines(body: str) -> list[str]:
     """Lignes d'affirmation : tout sauf l'avertissement, les titres et les lignes vides."""
     return [

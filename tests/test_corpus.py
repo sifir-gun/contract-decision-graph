@@ -137,17 +137,58 @@ def test_date_de_recuperation_propre_a_un_article():
 # --- Fiches : avertissement, et aucune affirmation sans source du corpus ------------------
 
 
-def test_fiches_avertissement_et_sources():
-    fiches = ingestion.load_fiches()
-    assert len(fiches) >= 6
+FICHES = {
+    "fiche-sous-traitance-rgpd",
+    "fiche-transferts-hors-ue",
+    "fiche-responsabilite-plafonds",
+    "fiche-penalites-execution",
+    "fiche-delais-paiement",
+    "fiche-revision-prix",
+    "fiche-duree-preavis",
+}
+
+
+def test_fiches_du_corpus():
+    assert {f.id for f in ingestion.load_fiches()} == FICHES
+
+
+def test_fiches_avertissement_et_deux_sections():
+    for fiche in ingestion.load_fiches():
+        assert fiche.body.startswith(corpus.FICHE_DISCLAIMER), fiche.id
+        sections = corpus.fiche_sections(fiche.body)
+        assert list(sections) == [corpus.TEXT_SECTION, corpus.APPLICATION_SECTION], fiche.id
+        assert all(sections.values()), f"{fiche.id} : section vide"
+        # aucune affirmation hors des deux sections
+        assert sum(map(len, sections.values())) == len(corpus.claim_lines(fiche.body)), fiche.id
+
+
+def test_ce_que_dit_le_texte_chaque_paraphrase_cite_un_article_admis():
     manifest = ingestion.load_manifest()
-    for fiche in fiches:
-        assert fiche.body.startswith(corpus.FICHE_DISCLAIMER)
-        for line in corpus.claim_lines(fiche.body):
+    for fiche in ingestion.load_fiches():
+        for line in corpus.fiche_sections(fiche.body)[corpus.TEXT_SECTION]:
             cited = corpus.citations(line)
-            assert cited, f"{fiche.id} : affirmation sans source : {line}"
+            assert cited, f"{fiche.id} : paraphrase sans source : {line}"
             for source_id, number in cited:
                 assert manifest.admits(source_id, number), (fiche.id, source_id, number)
+
+
+def test_comment_le_projet_l_applique_citations_facultatives_mais_admises():
+    manifest = ingestion.load_manifest()
+    for fiche in ingestion.load_fiches():
+        for line in corpus.fiche_sections(fiche.body)[corpus.APPLICATION_SECTION]:
+            for source_id, number in corpus.citations(line):
+                assert manifest.admits(source_id, number), (fiche.id, source_id, number)
+
+
+def test_sections_d_une_fiche():
+    body = (
+        f"{corpus.FICHE_DISCLAIMER}\n\n# Titre\n\n## {corpus.TEXT_SECTION}\n\n- a (source : x, art. 1)\n"
+        f"\n## {corpus.APPLICATION_SECTION}\n\n- b\n- c\n"
+    )
+    assert corpus.fiche_sections(body) == {
+        corpus.TEXT_SECTION: ["- a (source : x, art. 1)"],
+        corpus.APPLICATION_SECTION: ["- b", "- c"],
+    }
 
 
 def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
@@ -156,6 +197,7 @@ def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     validity = {}
     for row in rows:
         validity.setdefault(row.source_id, set()).add(row.valid_until)
-    assert validity["fiche-penalites-retard"] == {date(2027, 1, 1)}
+    assert validity["fiche-delais-paiement"] == {date(2027, 1, 1)}
+    assert validity["fiche-penalites-execution"] == {None}  # C. civ. 1231-5, version ouverte
     assert validity["fiche-sous-traitance-rgpd"] == {None}  # articles sans fin de validité
     assert validity["code-commerce"] >= {date(2027, 1, 1)}

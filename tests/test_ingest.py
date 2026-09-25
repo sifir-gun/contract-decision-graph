@@ -88,7 +88,7 @@ def test_hors_perimetre_et_domaines(pg, ingested):
         "AND source_id LIKE 'fiche-%%'",
         EMBEDDER.model,
     )
-    assert len(fiches) == 6
+    assert len(fiches) == 7
 
 
 def test_extrait_disparu_supprime(pg, ingested):
