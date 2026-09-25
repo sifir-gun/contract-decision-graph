@@ -31,7 +31,7 @@ from cdg.application.state import AnalystInput, ContractState
 from cdg.domain import expiry, masking, policy
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
-from cdg.ports.llm import LLMProvider, LLMTransientError
+from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
 from cdg.ports.retriever import Retriever
 
 
@@ -167,8 +167,18 @@ def retry_policy(
 
 
 def transient(exc: Exception) -> bool:
-    """Erreur passagère du fournisseur LLM (429, 5xx, délai dépassé), traduite par l'adaptateur."""
+    """Erreur passagère du fournisseur LLM (429, 5xx, délai dépassé, connexion refusée),
+    traduite par l'adaptateur. Seule reprise sur l'extraction."""
     return isinstance(exc, LLMTransientError)
+
+
+_LANGGRAPH_RETRY_ON = RetryPolicy().retry_on  # prédicat par défaut de LangGraph
+
+
+def analyst_retryable(exc: Exception) -> bool:
+    """Prédicat par défaut de LangGraph (réseau, 5xx, erreurs hors bogues…), sauf le quota
+    nul, qui n'est jamais passager."""
+    return not isinstance(exc, LLMQuotaError) and _LANGGRAPH_RETRY_ON(exc)
 
 
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
@@ -179,7 +189,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     ne fait pas échouer le fan-out, `decision_gate` escalade ; l'échec de l'extraction
     est escaladé par `verify_extraction`.
     """
-    retry = retry_policy(config.analyst_retry)
+    retry = retry_policy(config.analyst_retry, retry_on=analyst_retryable)
     extraction_retry = retry_policy(config.extraction_retry, retry_on=transient)
     builder = StateGraph(ContractState)
     builder.add_node(

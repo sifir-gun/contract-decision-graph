@@ -1,7 +1,8 @@
 """Fournisseur Mistral : `chat.parse` avec un modèle Pydantic (SDK mistralai 2.x).
 
 Le SDK ne reprend rien (`retry_config=None`) : une erreur passagère devient
-`LLMTransientError`, reprise par la RetryPolicy du nœud, réglée dans la configuration.
+`LLMTransientError`, reprise par la RetryPolicy du nœud, réglée dans la configuration ;
+un 429 dont la limite du compte vaut 0 devient `LLMQuotaError`, jamais reprise.
 """
 
 import time
@@ -10,25 +11,45 @@ from mistralai.client import Mistral, errors
 
 from cdg.domain.config import LLMConfig
 from cdg.domain.models import Usage
-from cdg.ports.llm import LLMOutputError, LLMTransientError, SchemaT, Tier
+from cdg.ports.llm import LLMOutputError, LLMQuotaError, LLMTransientError, SchemaT, Tier
+
+# limites du compte renvoyées avec un 429 ; l'une à 0 : quota nul, pas un débit dépassé
+QUOTA_HEADERS = ("x-ratelimit-limit-req-minute", "x-ratelimit-limit-tokens-minute")
+# exceptions httpx transmises telles quelles par le SDK, reconnues par leur classe sans
+# importer httpx (dépendance du SDK, non déclarée par le projet)
+_HTTPX_TRANSIENT = {
+    "TimeoutException": "délai dépassé",
+    "ConnectError": "connexion refusée ou impossible",
+}
 
 
-def _transient_reason(exc: Exception) -> str | None:
-    """Motif d'une erreur passagère (429, 5xx, délai dépassé), sinon None."""
+def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
+    """Erreur du port qui remplace l'erreur du SDK, ou None si elle reste telle quelle."""
     if isinstance(exc, errors.MistralError):
         if exc.status_code == 429:
+            zero = [h for h in QUOTA_HEADERS if exc.headers.get(h) == "0"]
+            if zero:
+                limits = ", ".join(f"{h} = 0" for h in zero)
+                return LLMQuotaError(
+                    f"{model} : quota nul sur le compte Mistral ({limits}), erreur non "
+                    "passagère : vérifier l'offre du compte dans la console Mistral, ou "
+                    f"changer de modèle dans config/decision.yaml ({node})"
+                )
             limit = exc.headers.get("x-ratelimit-limit-req-minute")
-            if limit is None:
-                return "HTTP 429"
-            unit = "requête" if limit in ("0", "1") else "requêtes"
-            return f"HTTP 429, limite du compte : {limit} {unit} par minute"
-        return f"HTTP {exc.status_code}" if exc.status_code >= 500 else None
-    # délai dépassé : exception httpx transmise telle quelle par le SDK, reconnue par sa
-    # classe sans importer httpx (dépendance du SDK, non déclarée par le projet)
-    for cls in type(exc).__mro__:
-        if cls.__name__ == "TimeoutException" and cls.__module__.split(".")[0] == "httpx":
-            return "délai dépassé"
-    return None
+            detail = "" if limit is None else f", limite du compte : {limit} requêtes par minute"
+            reason = f"HTTP 429{detail}"
+        elif exc.status_code >= 500:
+            reason = f"HTTP {exc.status_code}"
+        else:
+            return None
+    else:
+        httpx_classes = [
+            c.__name__ for c in type(exc).__mro__ if c.__module__.split(".")[0] == "httpx"
+        ]
+        reason = next((_HTTPX_TRANSIENT[n] for n in httpx_classes if n in _HTTPX_TRANSIENT), None)
+        if reason is None:
+            return None
+    return LLMTransientError(f"{model} : erreur passagère, {reason} ({node})")
 
 
 class MistralProvider:
@@ -57,10 +78,10 @@ class MistralProvider:
                 max_tokens=self._config.max_output_tokens,
             )
         except Exception as exc:
-            reason = _transient_reason(exc)
-            if reason is None:
+            error = _port_error(exc, model, node)
+            if error is None:
                 raise
-            raise LLMTransientError(f"{model} : erreur passagère, {reason} ({node})") from exc
+            raise error from exc
         latency_ms = int((time.monotonic() - start) * 1000)
         parsed = response.choices[0].message.parsed if response.choices else None
         if parsed is None:

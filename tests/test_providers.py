@@ -16,7 +16,7 @@ from cdg.adapters.llm import build_provider
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
 from cdg.domain.config import load_config
-from cdg.ports.llm import LLMOutputError, LLMTransientError
+from cdg.ports.llm import LLMOutputError, LLMQuotaError, LLMTransientError
 from cdg.settings import SettingsError
 
 CONFIG = load_config()
@@ -184,7 +184,7 @@ class RaisingChat:
         (httpx.ConnectTimeout("délai", request=MISTRAL_REQUEST), True),
         (mistral_status(400), False),
         (mistral_status(401), False),
-        (httpx.ConnectError("refus", request=MISTRAL_REQUEST), False),
+        (httpx.ConnectError("refus", request=MISTRAL_REQUEST), True),  # décision du 25/09
     ],
 )
 def test_mistral_erreur_passagere_traduite(error, transient):
@@ -200,10 +200,29 @@ def test_mistral_erreur_passagere_traduite(error, transient):
 
 
 def test_mistral_429_indique_la_limite_du_compte():
-    error = mistral_status(429, {"x-ratelimit-limit-req-minute": "0"})
+    error = mistral_status(429, {"x-ratelimit-limit-req-minute": "188"})
     provider = MistralProvider(CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error)))
-    with pytest.raises(LLMTransientError, match="limite du compte : 0 requête par minute"):
+    with pytest.raises(LLMTransientError, match="limite du compte : 188 requêtes par minute"):
         provider.structured(tier="main", system="s", user="u", schema=Answer, node="n")
+
+
+# --- Quota nul (429 avec une limite du compte à 0) : non passager, jamais repris -----------
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"x-ratelimit-limit-req-minute": "0", "x-ratelimit-remaining-req-minute": "0"},
+        {"x-ratelimit-limit-tokens-minute": "0"},
+    ],
+)
+def test_mistral_quota_nul_erreur_non_passagere(headers):
+    error = mistral_status(429, headers)
+    provider = MistralProvider(CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error)))
+    with pytest.raises(LLMQuotaError, match="vérifier l'offre du compte") as info:
+        provider.structured(tier="main", system="s", user="u", schema=Answer, node="n")
+    assert not isinstance(info.value, LLMTransientError) and info.value.__cause__ is error
+    assert "mistral-small-2603" in str(info.value) and "= 0" in str(info.value)
 
 
 class RaisingMessages:
@@ -222,7 +241,7 @@ class RaisingMessages:
         (anthropic_status(anthropic_sdk.APIStatusError, 529), True),  # surcharge
         (anthropic_sdk.APITimeoutError(request=ANTHROPIC_REQUEST), True),
         (anthropic_status(anthropic_sdk.BadRequestError, 400), False),
-        (anthropic_sdk.APIConnectionError(request=ANTHROPIC_REQUEST), False),
+        (anthropic_sdk.APIConnectionError(request=ANTHROPIC_REQUEST), True),  # décision du 25/09
     ],
 )
 def test_anthropic_erreur_passagere_traduite(error, transient):
@@ -243,3 +262,34 @@ def test_pas_de_reprise_cachee_dans_les_sdk():
     assert AnthropicProvider(CONFIG.llm, api_key="test")._client.max_retries == 0
     mistral_client = MistralProvider(CONFIG.llm, api_key="test")._client
     assert mistral_client.sdk_configuration.retry_config is None
+
+
+@pytest.mark.parametrize(
+    "header", ["anthropic-ratelimit-requests-limit", "anthropic-ratelimit-tokens-limit"]
+)
+def test_anthropic_quota_nul_erreur_non_passagere(header):
+    response = httpx2.Response(
+        429, headers={header: "0"}, text='{"message":"x"}', request=ANTHROPIC_REQUEST
+    )
+    error = anthropic_sdk.RateLimitError("limite", response=response, body=None)
+    provider = AnthropicProvider(
+        CONFIG.llm, client=SimpleNamespace(messages=RaisingMessages(error))
+    )
+    with pytest.raises(LLMQuotaError, match="vérifier l'offre du compte") as info:
+        provider.structured(tier="light", system="s", user="u", schema=Answer, node="n")
+    assert info.value.__cause__ is error
+
+
+def test_anthropic_429_avec_limite_non_nulle_reste_passager():
+    response = httpx2.Response(
+        429,
+        headers={"anthropic-ratelimit-requests-limit": "1000"},
+        text='{"message":"x"}',
+        request=ANTHROPIC_REQUEST,
+    )
+    error = anthropic_sdk.RateLimitError("limite", response=response, body=None)
+    provider = AnthropicProvider(
+        CONFIG.llm, client=SimpleNamespace(messages=RaisingMessages(error))
+    )
+    with pytest.raises(LLMTransientError):
+        provider.structured(tier="light", system="s", user="u", schema=Answer, node="n")

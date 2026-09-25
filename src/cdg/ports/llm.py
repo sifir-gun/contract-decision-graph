@@ -19,8 +19,14 @@ class LLMOutputError(Exception):
 
 class LLMTransientError(Exception):
     """Erreur passagère du fournisseur : limite de débit (429), erreur serveur (5xx) ou
-    délai dépassé. L'adaptateur la lève à la place de l'erreur du SDK (en cause) ; seule
-    elle est reprise sur l'extraction (RetryPolicy, section `extraction_retry`)."""
+    délai dépassé, connexion refusée ou impossible. L'adaptateur la lève à la place de
+    l'erreur du SDK (en cause) ; seule elle est reprise sur l'extraction (RetryPolicy,
+    section `extraction_retry`)."""
+
+
+class LLMQuotaError(Exception):
+    """Quota nul : le fournisseur répond 429 et la limite du compte pour ce modèle vaut 0.
+    Pas une erreur passagère, jamais reprise : il faut vérifier l'offre du compte."""
 
 
 class LLMProvider(Protocol):

@@ -3,25 +3,43 @@
 `messages.parse` n'accepte pas `temperature` dans anthropic 1.8.0 : le réglage
 `llm.temperature` ne s'applique qu'à Mistral. Le SDK ne reprend rien (`max_retries=0`,
 2 par défaut) : une erreur passagère devient `LLMTransientError`, reprise par la
-RetryPolicy du nœud, réglée dans la configuration.
+RetryPolicy du nœud, réglée dans la configuration ; un 429 dont la limite du compte vaut 0
+devient `LLMQuotaError`, jamais reprise.
 """
 
 import time
 
-from anthropic import Anthropic, APIStatusError, APITimeoutError
+from anthropic import Anthropic, APIConnectionError, APIStatusError, APITimeoutError
 
 from cdg.domain.config import LLMConfig
 from cdg.domain.models import Usage
-from cdg.ports.llm import LLMOutputError, LLMTransientError, SchemaT, Tier
+from cdg.ports.llm import LLMOutputError, LLMQuotaError, LLMTransientError, SchemaT, Tier
+
+# limites du compte (documentation Anthropic, « Rate limits », vérifiée le 2026-09-25)
+QUOTA_HEADERS = ("anthropic-ratelimit-requests-limit", "anthropic-ratelimit-tokens-limit")
 
 
-def _transient_reason(exc: Exception) -> str | None:
-    """Motif d'une erreur passagère (429, 5xx dont 529 surcharge, délai dépassé), sinon None."""
-    if isinstance(exc, APITimeoutError):
-        return "délai dépassé"
-    if isinstance(exc, APIStatusError) and (exc.status_code == 429 or exc.status_code >= 500):
-        return f"HTTP {exc.status_code}"
-    return None
+def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
+    """Erreur du port qui remplace l'erreur du SDK, ou None si elle reste telle quelle."""
+    if isinstance(exc, APITimeoutError):  # sous-classe d'APIConnectionError : avant elle
+        reason = "délai dépassé"
+    elif isinstance(exc, APIConnectionError):
+        reason = "connexion refusée ou impossible"
+    elif isinstance(exc, APIStatusError) and exc.status_code == 429:
+        zero = [h for h in QUOTA_HEADERS if exc.response.headers.get(h) == "0"]
+        if zero:
+            limits = ", ".join(f"{h} = 0" for h in zero)
+            return LLMQuotaError(
+                f"{model} : quota nul sur le compte Anthropic ({limits}), erreur non "
+                "passagère : vérifier l'offre du compte dans la console Anthropic, ou "
+                f"changer de modèle dans config/decision.yaml ({node})"
+            )
+        reason = "HTTP 429"
+    elif isinstance(exc, APIStatusError) and exc.status_code >= 500:  # dont 529, surcharge
+        reason = f"HTTP {exc.status_code}"
+    else:
+        return None
+    return LLMTransientError(f"{model} : erreur passagère, {reason} ({node})")
 
 
 class AnthropicProvider:
@@ -47,10 +65,10 @@ class AnthropicProvider:
                 output_format=schema,
             )
         except Exception as exc:
-            reason = _transient_reason(exc)
-            if reason is None:
+            error = _port_error(exc, model, node)
+            if error is None:
                 raise
-            raise LLMTransientError(f"{model} : erreur passagère, {reason} ({node})") from exc
+            raise error from exc
         latency_ms = int((time.monotonic() - start) * 1000)
         if response.parsed_output is None:
             raise LLMOutputError(f"{model} : réponse vide ou non structurée ({node})")

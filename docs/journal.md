@@ -775,3 +775,13 @@ Un système qui escaladerait toujours passerait le critère 10 : l'invariant («
 - **Vérifié sans réseau**, avec un faux fournisseur : une extraction exacte aboutit aux analystes sans écart ; une citation inventée pour les pénalités donne une ré-extraction avec le retour « citation introuvable: penalites_retard », puis `ESCALADE`. La ligne de série indique bien un taux de 1/2.
 
 La série 1 (0/5, quota nul) n'entre pas dans la mesure : le vrai modèle n'a jamais répondu. Le taux sera consigné à partir de la série 2.
+
+### J3 : connexion refusée reprise, quota nul non repris (décisions du 25/09)
+
+- **Connexion refusée ou impossible** : ajoutée aux erreurs passagères. Mistral : `httpx.ConnectError`, reconnue par sa classe comme le délai dépassé ; Anthropic : `APIConnectionError` (hors `APITimeoutError`, testée d'abord).
+- **Quota nul** : nouvelle erreur du port, `LLMQuotaError`, pour un 429 dont une limite du compte vaut 0. Mistral : `x-ratelimit-limit-req-minute` ou `x-ratelimit-limit-tokens-minute` ; Anthropic : `anthropic-ratelimit-requests-limit` ou `anthropic-ratelimit-tokens-limit`, noms vérifiés dans la documentation officielle (« Rate limits », platform.claude.com, 2026-09-25). Le message cite l'en-tête à 0 et dit de vérifier l'offre du compte, ou de changer de modèle dans la configuration. Elle n'est jamais reprise, ni sur l'extraction ni sur un analyste : la `RetryPolicy` des analystes garde le prédicat par défaut de LangGraph, qui reprendrait presque toute exception, mais l'exclut explicitement.
+- **Tests** : traduction par en-tête et par fournisseur ; limite non nulle toujours passagère ; graphe : quota nul consigné dès la première tentative, sur l'extraction comme sur un analyste.
+
+**Écart signalé, non traité.** La même page de la documentation Anthropic décrit un autre 429 non passager : le plafond de dépenses mensuel atteint (`error.details.error_code = enforced_spend_limit_reached`, sans en-tête `retry-after`). Il reste traité comme passager (3 tentatives, puis échec consigné). À traduire en `LLMQuotaError` si le propriétaire du repo le souhaite.
+
+**Fichier en cours hors commit.** `data/corpus/raw/code-civil/1231-5.txt`, non suivi, contient la commande de création au lieu du texte de l'article ; `test_manifeste_couvre_tout_le_corpus` échoue tant qu'il n'est ni corrigé et admis dans le manifeste, ni retiré. Sans lui : 508 tests au vert.

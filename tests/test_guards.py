@@ -15,7 +15,7 @@ from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 from cdg.domain.models import DOMAINS, NodeFailure
-from cdg.ports.llm import LLMOutputError, LLMTransientError
+from cdg.ports.llm import LLMOutputError, LLMQuotaError, LLMTransientError
 
 CONFIG = load_config()
 # reprises immédiates : les tests ne dorment pas
@@ -258,9 +258,37 @@ def test_extraction_erreur_passagere_persistante_escalade_apres_les_reprises():
     assert len(extractor.calls) == 3 and values["proposed_decision"] == "ESCALADE"
 
 
-@pytest.mark.parametrize("error", [ConnectionError("réseau"), ValueError("bogue")])
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("bogue"),
+        ConnectionError("hors adaptateur : non traduite"),
+        LLMQuotaError("quota nul sur le compte : vérifier l'offre du compte"),
+    ],
+)
 def test_extraction_autre_erreur_sans_reprise(error):
-    # seules les erreurs passagères du fournisseur sont reprises sur l'extraction
+    # seules les erreurs passagères traduites par l'adaptateur sont reprises (LLMTransientError)
     extractor = FlakyExtractor([error])
     values = run(deps(extractor=extractor)).values
     assert len(extractor.calls) == 1 and values["failures"][0].attempts == 1
+
+
+def test_quota_nul_consigne_des_la_premiere_tentative():
+    extractor = FlakyExtractor([LLMQuotaError("quota nul : vérifier l'offre du compte")])
+    values = run(deps(extractor=extractor)).values
+    [failure] = values["failures"]
+    assert (failure.node, failure.error, failure.attempts) == (
+        "extract_clauses",
+        "LLMQuotaError",
+        1,
+    )
+    assert "vérifier l'offre du compte" in failure.message
+    assert values["proposed_decision"] == "ESCALADE"
+
+
+def test_quota_nul_jamais_repris_sur_un_analyste():
+    # la RetryPolicy des analystes reprend par défaut presque toute exception : pas celle-ci
+    crag = FlakyCrag({"financier": [LLMQuotaError("quota nul")]})
+    values = run(deps(crag)).values
+    assert crag.calls.count("financier") == 1
+    assert values["failures"][0].attempts == 1
