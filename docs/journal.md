@@ -839,3 +839,7 @@ La série 1 (0/5, quota nul) n'entre pas dans la mesure : le vrai modèle n'a ja
 ### J3 : délai de paiement, factures périodiques (décision du 25/09, point 3)
 
 Nouvelle catégorie `facture_periodique` pour `delai_paiement` : plafond de 45 jours après la facture (L441-10, I, 4e alinéa), réglé par `payment_delay_max_days_periodic_invoice`, même pénalité et même constat. Le prompt la place en premier : un délai sur facture périodique est classé ainsi, même s'il est compté « fin de mois ». Point de départ inconnu : le plus bas des trois seuils. Fiche `delais-paiement` mise à jour (application).
+
+### J3 : titre en double dans RGPD art. 32 (décision du 25/09, point 4)
+
+`raw/rgpd/art-32.txt` commençait par deux lignes « Article 32 ». Seule la seconde est supprimée : diff d'une ligne, texte inchangé. L'intitulé ingéré redevient « Sécurité du traitement ». Nouveau test : `test_aucun_fichier_brut_ne_repete_sa_ligne_de_titre` échoue si la première ligne d'un fichier brut y apparaît une seconde fois (vérifié rouge sur l'ancien fichier, et seulement sur lui).

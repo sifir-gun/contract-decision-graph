@@ -201,3 +201,14 @@ def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     assert validity["fiche-penalites-execution"] == {None}  # C. civ. 1231-5, version ouverte
     assert validity["fiche-sous-traitance-rgpd"] == {None}  # articles sans fin de validité
     assert validity["code-commerce"] >= {date(2027, 1, 1)}
+
+
+def test_aucun_fichier_brut_ne_repete_sa_ligne_de_titre():
+    # un titre répété (« Article 32 » deux fois) deviendrait l'intitulé à l'ingestion
+    repeated = []
+    for path in sorted(RAW.rglob("*.txt")):
+        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+        lines = [line for line in lines if line]
+        if lines and lines.count(lines[0]) > 1:
+            repeated.append(path.relative_to(RAW).as_posix())
+    assert repeated == []
