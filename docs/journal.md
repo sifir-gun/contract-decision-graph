@@ -716,3 +716,25 @@ Refonte sans changement de comportement, décidée pour que le CRAG dépende d'u
 - **`--analysis-date AAAA-MM-JJ`**, par défaut le jour légal en France ; `analysis_date` dans le statut.
 - **Tests** : les dépendances réelles sont remplacées par des doublures (`cli.build_deps` substitué) ; `ingest` testé de bout en bout avec l'embedder de test ; le test de reprise après `SIGKILL` construit ses doublures dans le processus tué.
 - README : démarrage complet (poids, ingestion, analyse, reprise).
+
+### J3 tâche 12 : tests llm, série 1 (en cours, décision attendue)
+
+`tests/test_llm_criteres.py`, marqueur `llm`, lancés par `uv run pytest --llm -m llm -s`. Chaque critère est paramétré 5 fois, sans relance automatique ; chaque essai imprime une ligne `LLM-RESULT`.
+- **Critère 10** : extraction réelle (modèle `main`) d'un contrat synthétique réaliste (`tests/fixtures/contrat-synthetique-llm.txt`, parties masquées, **sans clause de pénalités de retard**, pour tenter une invention). Réussite : aucun échec de nœud ; si les analystes ont tourné, toutes les citations sont retrouvées dans le texte masqué ; sinon `ESCALADE` avec rapport d'extraction après 2 essais.
+- **Critère 3** : vrai juge et vraie réécriture (modèle `light`) ; la recherche du domaine financier ne rend que des extraits réels hors sujet (RGPD art. 32 et 33, C. civ. 1211). Réussite : `INSUFFISANT` après 2 passes, sans référence, puis `ESCALADE` ; aucune référence retenue qui n'ait été rendue par la recherche. Témoin : le juridique, avec des extraits pertinents, doit rester `OK`.
+
+**Série 1 : 2026-09-25, 09:18 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 3 | **5/5** | Financier : 2 passes, `INSUFFISANT`, aucune référence, `ESCALADE` à chaque essai. Réécritures variées (« clauses contractuelles : révision des prix… »). Témoin juridique `OK` à chaque essai, en ne retenant que la fiche (jamais C. civ. 1231-3 ni 1170). 3 388 à 4 357 tokens par essai. |
+| 10 | **0/5** | Chaque essai : HTTP 429 « Rate limit exceeded » dès le premier appel d'extraction. La garde l'a transformé en `NodeFailure` (`SDKError`, 1 tentative) et le contrat est parti en `ESCALADE` : comportement correct, mais le vrai modèle n'a jamais répondu, donc le test refuse de compter l'essai. |
+
+**Analyse de l'échec du critère 10** (sans relancer la série) : liste des modèles et appels de 1 token, en lisant les en-têtes `x-ratelimit-*` :
+- `mistral-small-2603` : listé, mais `x-ratelimit-limit-req-minute = 0` ;
+- `mistral-medium-3-5` : 0 requête par minute aussi ; `mistral-large-2512` : 403, absent de la liste ;
+- `ministral-8b-2512` : 188 requêtes et 625 000 tokens par minute ; `ministral-14b-2512` : 30 requêtes et 937 500 tokens par minute.
+
+Ce n'est ni une erreur transitoire (aucune reprise n'y changerait rien) ni un défaut du code : le compte n'accorde aucun quota au modèle principal configuré. Correction soumise au propriétaire du repo : relever la limite de `mistral-small-2603` dans la console Mistral, ou changer `llm.models.mistral.main`. Série 2 du critère 10 ensuite.
+
+**Observation.** Le juge léger est prudent : sur le témoin juridique, il ne retient que la fiche, jamais les articles 1231-3 et 1170, pourtant liés à la responsabilité. Sans effet sur les critères, mais à suivre au J4 (qualité des références citées par `explain`).

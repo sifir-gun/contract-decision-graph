@@ -1,0 +1,30 @@
+CONTRAT DE PRESTATION DE SERVICES INFORMATIQUES
+Document entièrement synthétique, rédigé pour les tests du projet. Aucune partie réelle.
+
+Entre la société Alpha Services Synthétiques, ci-après dénommée le Prestataire,
+et la société Bêta Achats Synthétiques, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire assure pour l'Acheteur la maintenance et l'exploitation de son logiciel de gestion des commandes, dans les conditions décrites au présent contrat et dans son annexe technique.
+
+Article 2 - Durée
+Le présent contrat est conclu pour une durée de 24 mois à compter de sa signature. Il n'est pas renouvelable par tacite reconduction.
+
+Article 3 - Résiliation
+Chaque partie peut résilier le présent contrat moyennant un préavis de 3 mois, notifié à l'autre partie par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+Le prix annuel de la prestation est fixé dans l'annexe financière. Les prix peuvent être révisés une fois par an, à la date anniversaire du contrat, dans la limite de 3 % par an.
+
+Article 5 - Responsabilité
+La responsabilité de l'Acheteur au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+La responsabilité du Prestataire au titre du présent contrat est plafonnée à 150 % du montant annuel du contrat.
+
+Article 6 - Données à caractère personnel
+Pour l'exécution du présent contrat, le Prestataire traite des données à caractère personnel pour le compte de l'Acheteur.
+Les parties concluent un accord de sous-traitance conforme à l'article 28 du règlement général sur la protection des données, annexé au présent contrat.
+Les données sont hébergées exclusivement dans l'Union européenne ; aucun transfert de données hors de l'Union européenne n'est effectué.
+
+Article 7 - Droit applicable
+Le présent contrat est soumis au droit français. Tout différend relatif à son exécution sera porté devant les juridictions compétentes, après une tentative de règlement amiable.

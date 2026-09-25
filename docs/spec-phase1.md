@@ -686,6 +686,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **25 septembre 2026, J3** :
   - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
   - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - tests `llm` des critères 3 et 10 (tâche 12) : 5 essais chacun, une ligne `LLM-RESULT` par essai, séries consignées au journal ;
   - CLI sans le mode `stub-j2` (tâche 11) : dépendances réelles construites par `build_deps`, option `--analysis-date`, `analysis_date` dans le statut ; `stub_j2.py` supprimé ;
   - gardes d'échec de nœud (tâche 10) : `guard` sur chaque nœud sauf `human_review`, `NodeFailure` dans `failures` (réducteur), escalade par `verify_extraction` et `decision_gate`, arête `validate_input → human_review`, `RetryPolicy` sur les analystes avant la garde (section `analyst_retry`), échecs exposés par `thread_status` ; `decision_gate` : l'analyste en échec vient en 2ᵉ position, après le blocage dur ;
   - CRAG (tâche 9) : requêtes à partir des types et valeurs des clauses, juge et réécriture par le modèle léger, `generate` sans LLM, références expirées signalées et jamais retenues ; `analysis_date` dans l'état et dans `AnalystInput`, exigée par `validate_input` ; `RetrievalTrace` dans `AgentVerdict` ; section `crag` de la configuration ; `DOMAIN_KINDS` ; validité des fiches héritée des articles cités ; `sync` sensible aux métadonnées ; `search` rend `valid_until` et `note` (défaut corrigé) ;
