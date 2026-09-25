@@ -35,9 +35,10 @@ FICHE = "Fiche projet : Délais de paiement et pénalités de retard"
 
 
 def test_requete_construite_depuis_types_et_valeurs():
-    query = crag.initial_query("financier", clauses(revision_prix=3.0, penalites_retard=10.0))
+    query = crag.initial_query("financier", clauses(revision_prix=3.0, penalites_execution=10.0))
     assert "révision" in query and "3 %" in query
-    assert "pénalités de retard" in query and "10 %" in query
+    assert "pénalités d'exécution" in query and "10 % du montant du contrat" in query
+    assert "délai de paiement par l'acheteur : 30 jours date de facture" in query
 
 
 def test_requete_limitee_aux_clauses_du_domaine():
@@ -47,8 +48,8 @@ def test_requete_limitee_aux_clauses_du_domaine():
 
 
 def test_requete_clause_absente_et_valeur_non_chiffree():
-    query = crag.initial_query("financier", clauses(penalites_retard=ABSENT, revision_prix=None))
-    assert "pénalités de retard : clause absente" in query
+    query = crag.initial_query("financier", clauses(penalites_execution=ABSENT, revision_prix=None))
+    assert "pénalités d'exécution à la charge du fournisseur : clause absente" in query
     assert "non plafonnée" in query
 
 

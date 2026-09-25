@@ -18,7 +18,8 @@ REQUIRED_KINDS = (
     "responsabilite_acheteur",
     "responsabilite_fournisseur",
     "revision_prix",
-    "penalites_retard",
+    "penalites_execution",  # dues par le fournisseur qui exécute en retard (C. civ., art. 1231-5)
+    "delai_paiement",  # délai de paiement par l'acheteur (C. com., art. L441-10)
     "duree_engagement",
     "preavis_resiliation",
     "donnees_personnelles",
@@ -30,7 +31,7 @@ REQUIRED_KINDS = (
 # du CRAG, construites à partir des seuls types et valeurs des clauses du domaine.
 DOMAIN_KINDS: dict[Domain, tuple[str, ...]] = {
     "juridique": ("responsabilite_acheteur", "responsabilite_fournisseur"),
-    "financier": ("revision_prix", "penalites_retard"),
+    "financier": ("revision_prix", "penalites_execution", "delai_paiement"),
     "conformite": ("donnees_personnelles", "accord_traitement_donnees", "transfert_hors_ue"),
     "operationnel": ("duree_engagement", "preavis_resiliation"),
 }
@@ -46,7 +47,22 @@ TransferCategory = Literal[
     "aucune_garantie",  # transfert annoncé sans garantie nommée
 ]
 TRANSFER_CATEGORIES: tuple[str, ...] = get_args(TransferCategory)
-CATEGORY_KINDS = frozenset({"transfert_hors_ue"})  # types dont la catégorie est obligatoire
+
+# Point de départ d'un délai de paiement (C. com., art. L441-10, I).
+PaymentBasis = Literal[
+    "date_facture",  # jours comptés à partir de la date d'émission de la facture
+    "fin_de_mois",  # jours fin de mois
+]
+PAYMENT_BASES: tuple[str, ...] = get_args(PaymentBasis)
+
+ClauseCategory = Literal[TransferCategory, PaymentBasis]
+CLAUSE_CATEGORIES: tuple[str, ...] = get_args(ClauseCategory)
+# types qui portent une catégorie, et catégories admises pour chacun
+KIND_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "transfert_hors_ue": TRANSFER_CATEGORIES,
+    "delai_paiement": PAYMENT_BASES,
+}
+CATEGORY_KINDS = frozenset(KIND_CATEGORIES)
 
 
 class Clause(BaseModel):
@@ -54,7 +70,7 @@ class Clause(BaseModel):
     present: bool  # la clause figure-t-elle dans le contrat ?
     quote: str  # citation exacte si present, "" sinon (alors non vérifiée)
     value: float | None  # quantité utile à la règle, voir « Règles par domaine »
-    category: str | None = None  # types de CATEGORY_KINDS seulement
+    category: str | None = None  # types de CATEGORY_KINDS seulement, voir KIND_CATEGORIES
 
     @model_validator(mode="after")
     def _citation_selon_presence(self) -> "Clause":
@@ -63,6 +79,14 @@ class Clause(BaseModel):
         if self.present and not self.quote.strip():
             raise ValueError(f"clause présente sans citation : {self.kind}")
         return self
+
+
+def category_required(clause: Clause) -> bool:
+    """Catégorie exigée : transfert présent ; délai de paiement présent et chiffré (un délai
+    non chiffré peut ne pas dire son point de départ)."""
+    if clause.kind not in CATEGORY_KINDS or not clause.present:
+        return False
+    return clause.kind != "delai_paiement" or clause.value is not None
 
 
 class RetrievalTrace(BaseModel):

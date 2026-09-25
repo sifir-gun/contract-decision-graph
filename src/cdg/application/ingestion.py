@@ -47,7 +47,10 @@ def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[s
                 article,
                 source_id=source_id,
                 reference=f"{source['citation']}, art. {number}",
-                retrieved_at=source["retrieved_at"],
+                # date propre à l'article (ajouté plus tard), sinon celle de la source
+                retrieved_at=source.get("retrieved_at_overrides", {}).get(
+                    number, source["retrieved_at"]
+                ),
             ),
             source["articles"][number],
         )

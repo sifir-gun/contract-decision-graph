@@ -64,8 +64,13 @@ class JuridiqueRules(_Strict):
 
 
 class FinancierRules(_Strict):
-    late_penalties_min_cap_pct: Quantity
-    late_penalties_score_penalty: Penalty
+    # pénalités d'exécution dues par le fournisseur (C. civ., art. 1231-5)
+    execution_penalties_min_cap_pct: Quantity
+    execution_penalties_score_penalty: Penalty
+    # délai de paiement par l'acheteur (C. com., art. L441-10)
+    payment_delay_max_days_invoice: Quantity  # à compter de la date de facture
+    payment_delay_max_days_end_of_month: Quantity  # jours fin de mois
+    payment_delay_score_penalty: Penalty
 
 
 class OperationnelRules(_Strict):

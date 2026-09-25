@@ -53,14 +53,15 @@ def compiled(deps: Deps):
 
 # --- Critère 10 : aucun analyste sur une citation non vérifiée -------------------------
 
-# Contrat valide : chaque clause stipulée se cite mot pour mot ; les pénalités de retard
-# n'y figurent pas, une extraction correcte les déclare absentes. Valeurs attendues :
+# Contrat valide : chaque clause stipulée se cite mot pour mot ; ni pénalités d'exécution ni
+# délai de paiement n'y figurent, une extraction correcte les déclare absents. Valeurs attendues :
 # pour information (écarts consignés), le critère porte sur les citations.
 EXPECTED = {
     "responsabilite_acheteur": (True, 100.0, None),
     "responsabilite_fournisseur": (True, 150.0, None),
     "revision_prix": (True, 3.0, None),
-    "penalites_retard": (False, None, None),
+    "penalites_execution": (False, None, None),
+    "delai_paiement": (False, None, None),
     "duree_engagement": (True, 24.0, None),
     "preavis_resiliation": (True, 3.0, None),
     "donnees_personnelles": (True, None, None),

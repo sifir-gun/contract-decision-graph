@@ -2,12 +2,13 @@
 
 import pytest
 import yaml
-from doubles import usage, verdict, verdicts
+from doubles import ABSENT, clauses, usage, verdict, verdicts
 
 from cdg.application.nodes.decision_gate import decision_gate
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.decision import aggregate, conflict, decide, total_tokens
 from cdg.domain.models import DOMAINS, NodeFailure
+from cdg.domain.rules import RULES
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
@@ -284,3 +285,29 @@ def test_decide_rend_une_proposition_que_le_noeud_traduit():
     assert (outcome.proposed, outcome.human_review, outcome.final) == ("GO", False, "GO")
     outcome = decide(verdicts(financier={"status": "INSUFFISANT"}), [], [], CONFIG)
     assert (outcome.proposed, outcome.human_review, outcome.final) == ("ESCALADE", True, None)
+
+
+# --- Choix de conception : NO_GO réservé aux blocages durs --------------------------------
+
+
+def test_pire_cumul_des_penalites_sans_blocage_reste_au_dessus_du_seuil_no_go():
+    """Toutes les pénalités de score déclenchées, aucun blocage : au pire GO_RESERVES.
+    Si une configuration rendait NO_GO atteignable sans blocage dur, ce test le signalerait."""
+    worst = clauses(
+        responsabilite_fournisseur=50,  # juridique : plafond fournisseur < 100 %
+        penalites_execution=ABSENT,  # financier : pénalités d'exécution absentes
+        delai_paiement=90,  # financier : délai non conforme
+        transfert_hors_ue=ABSENT,  # conformité : localisation non précisée
+        duree_engagement=48,  # opérationnel : engagement > 36 mois
+        preavis_resiliation=12,  # opérationnel : préavis > 6 mois
+    )
+    vs = [RULES[d](worst, "OK", CONFIG) for d in DOMAINS]
+    assert not any(v.hard_block for v in vs)
+    assert {v.domain: v.score for v in vs} == {
+        "juridique": 0.5,
+        "financier": 0.4,
+        "conformite": 0.7,
+        "operationnel": 0.4,
+    }
+    d = aggregate(vs, CONFIG)
+    assert (d.score, d.decision, d.margin) == (0.505, "GO_RESERVES", 0.005)

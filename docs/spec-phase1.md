@@ -105,7 +105,8 @@ REQUIRED_KINDS = (
     "responsabilite_acheteur",
     "responsabilite_fournisseur",
     "revision_prix",
-    "penalites_retard",
+    "penalites_execution",  # J3 : remplace penalites_retard
+    "delai_paiement",  # J3
     "duree_engagement",
     "preavis_resiliation",
     "donnees_personnelles",
@@ -383,7 +384,7 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
 
   `ESCALADE` ou marge sous `min_margin` → route `human_review`, sinon route `explain`. `decision_gate` n'écrit `final_decision` que sur la route `explain` ; sur la route `human_review`, c'est `human_review` qui l'écrit.
 
-  **Choix de conception : `NO_GO` n'est rendu que sur blocage dur.** Avec la configuration du projet, le pire cumul de toutes les pénalités donne 0,3 × 0,5 + 0,25 × 0,6 + 0,25 × 0,7 + 0,2 × 0,4 = 0,555, sans conflit (écart de 0,3) : au pire `GO_RESERVES`. Avant la règle de transfert (J3), la conformité n'avait que des blocages, et le conflit escaladait d'abord ; le résultat est le même. `NO_GO` a donc toujours une raison explicite et nommée : la règle bloquante. Des risques cumulés produisent au pire `GO_RESERVES` ou une escalade vers un humain. Le seuil `NO_GO` reste dans la configuration : une autre configuration client peut l'atteindre. Ce choix est à reprendre dans l'ADR.
+  **Choix de conception : `NO_GO` n'est rendu que sur blocage dur.** Avec la configuration du projet, le pire cumul de toutes les pénalités donne 0,3 × 0,5 + 0,25 × 0,4 + 0,25 × 0,7 + 0,2 × 0,4 = 0,505 (0,555 avant la règle du délai de paiement), sans conflit (écart de 0,3) : au pire `GO_RESERVES`, avec une marge de 0,005, donc en revue humaine. La réserve est mince : toute pénalité supplémentaire de plus de 0,005 point pondéré rendrait `NO_GO` atteignable sans blocage dur. Un test fige ce pire cumul (`test_pire_cumul_des_penalites_sans_blocage_reste_au_dessus_du_seuil_no_go`). Avant la règle de transfert (J3), la conformité n'avait que des blocages, et le conflit escaladait d'abord ; le résultat est le même. `NO_GO` a donc toujours une raison explicite et nommée : la règle bloquante. Des risques cumulés produisent au pire `GO_RESERVES` ou une escalade vers un humain. Le seuil `NO_GO` reste dans la configuration : une autre configuration client peut l'atteindre. Ce choix est à reprendre dans l'ADR.
 - **Marge** : distance entre le score agrégé et le seuil de décision le plus proche (0,75 ou 0,5), arrondie. Sous `min_margin`, passage humain. Calculée sans LLM.
 - **Budget** : plafond de tokens par contrat, calculé sur `usage`. Dépassement : `proposed_decision = "ESCALADE"` avec rapport d'échec structuré (`stage`, tokens consommés, plafond), jamais de repli silencieux.
 - **explain** : le LLM reçoit le verdict figé et les constats. Si le texte contredit la décision (détection par règles sur les libellés de décision), il est rejeté et regénéré une fois, puis remplacé par un gabarit.
@@ -391,14 +392,15 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
 
 ### Règles par domaine
 
-Chaque clause des `REQUIRED_KINDS` est toujours extraite. Si `present = false`, `quote` est vide et n'est pas vérifiée par `verify_extraction`. `value` porte la quantité utile à la règle, dans l'unité ci-dessous. Tous les seuils (100 %, 5 %, 36 mois, 6 mois) et toutes les pénalités de score vivent dans `config/decision.yaml`.
+Chaque clause des `REQUIRED_KINDS` est toujours extraite. Si `present = false`, `quote` est vide et n'est pas vérifiée par `verify_extraction`. `value` porte la quantité utile à la règle, dans l'unité ci-dessous. Tous les seuils (100 %, 5 %, 60 et 45 jours, 36 mois, 6 mois) et toutes les pénalités de score vivent dans `config/decision.yaml`.
 
 | Domaine | Clause | Unité de `value` | Règle | Effet |
 | --- | --- | --- | --- | --- |
 | juridique | `responsabilite_acheteur` | plafond, % du montant annuel ; `None` = illimitée | présente et `value` None | `hard_block` |
 | juridique | `responsabilite_fournisseur` | plafond, % du montant annuel ; `None` = illimitée | présente et `value` < 100 | score réduit |
 | financier | `revision_prix` | plafond de révision, % ; `None` = non plafonnée | présente et `value` None | `hard_block` |
-| financier | `penalites_retard` | plafond des pénalités, % ; `None` = non plafonnées | absente, ou `value` < 5 | score réduit |
+| financier | `penalites_execution` | pénalités dues par le fournisseur qui exécute en retard (clause pénale, C. civ., art. 1231-5) : plafond, % du montant du contrat ; `None` = non plafonnées | absente, ou `value` < 5 | score réduit |
+| financier | `delai_paiement` | délai de paiement par l'acheteur (C. com., art. L441-10), jours ; `None` = non chiffré ; `category` : `date_facture` ou `fin_de_mois`, exigée si le délai est chiffré | `date_facture` et `value` > 60, ou `fin_de_mois` et `value` > 45 (point de départ inconnu : seuil le plus strict) ; présent mais non chiffré ; absent : aucune pénalité, constat citant le délai supplétif de trente jours (L441-10, I) | score réduit, constat « délai non conforme, à renégocier » ; jamais de blocage |
 | conformite | `donnees_personnelles`, `accord_traitement_donnees` | `None` (seul `present` compte) | données personnelles présentes sans accord de traitement (art. 28 RGPD) | `hard_block` |
 | conformite | `transfert_hors_ue` | `None` ; `category` : `sans_transfert`, une garantie nommée (`decision_adequation`, `clauses_contractuelles_types`, `regles_entreprise_contraignantes`, `code_conduite`, `certification`) ou `aucune_garantie` | présente avec une garantie de `transfer_safeguards` (config) ou `sans_transfert` : rien ; présente avec une autre catégorie (dont `aucune_garantie`, ou catégorie absente) : blocage ; absente alors que des données personnelles sont traitées : localisation non précisée | `hard_block`, ou score réduit avec le constat « à vérifier ». La règle juge ce que dit le contrat, jamais une liste de pays (RGPD, art. 44 à 46) |
 | operationnel | `duree_engagement` | mois ; `None` = non chiffrée | `value` > 36, ou présente et `value` None | score réduit ; si non chiffrée, pénalité par prudence avec constat explicite |
@@ -409,7 +411,8 @@ Calcul du score de domaine : départ à 1,0, puis chaque règle déclenchée ret
 | Domaine | Règle | Pénalité |
 | --- | --- | --- |
 | juridique | plafond fournisseur < 100 % | 0,5 |
-| financier | pénalités de retard absentes ou < 5 % | 0,4 |
+| financier | pénalités d'exécution absentes ou < 5 % | 0,4 |
+| financier | délai de paiement au-delà du seuil, ou non chiffré | 0,2 |
 | conformite | localisation des données non précisée | 0,3 |
 | operationnel | engagement > 36 mois | 0,3 |
 | operationnel | préavis > 6 mois | 0,3 |
@@ -645,6 +648,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **25 septembre 2026, J3** :
   - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
   - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - types de clauses : `penalites_retard` remplacé par `penalites_execution` (fournisseur, clause pénale, C. civ. 1231-5, règle inchangée) et `delai_paiement` (acheteur, C. com. L441-10, catégorie `date_facture` ou `fin_de_mois`, pénalité 0,2) ; catégories par type (`KIND_CATEGORIES`), catégorie invalide signalée par `verify_extraction` ; pire cumul recalculé : 0,505 ;
   - rangement, sans changement de comportement : `domain/state.py` scindé en `domain/models.py` (modèles métier) et `application/state.py` (état du graphe) ; logique de `decision_gate`, `verify_extraction` et `validate_input` sortie vers `domain/decision.py`, `domain/verification.py` et `domain/input_checks.py`, les nœuds ne gardant que l'adaptation ; écarts assumés documentés dans l'ADR 002 (`config.py`, `ingestion.py`, `ChunkRow`) ;
   - `RetryPolicy` sur `extract_clauses`, limitée aux erreurs passagères (`LLMTransientError` : 429, 5xx, délai dépassé, connexion refusée), section `extraction_retry` ; reprises des SDK désactivées ; quota nul (429 à limite 0) traduit en `LLMQuotaError`, jamais repris ;
   - tests `llm` des critères 3 et 10 (tâche 12) : 5 essais chacun, une ligne `LLM-RESULT` par essai, séries consignées au journal ; mesure du critère 10 (taux d'aboutissement aux analystes sur un contrat valide, ligne `LLM-SERIE`), sans seuil jusqu'à la série 2 ;

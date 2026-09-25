@@ -56,12 +56,12 @@ Le corpus (`data/corpus/`) réunit des textes publics (RGPD, Code de commerce, C
 **Exemple de gestion des versions : C. com., art. L441-10.** Légifrance indique « Version en vigueur du 26 avril 2019 au 01 janvier 2027 ».
 - À l'ingestion, cette ligne ne devient pas du texte indexé, mais des métadonnées : `valid_from = 2019-04-26`, `valid_until = 2027-01-01`, avec le texte modificateur.
 - À l'analyse, la date d'analyse (jour légal en France, écrit dans l'état du contrat) départage les versions. À partir du 1er janvier 2027, un extrait de L441-10 jugé pertinent par le CRAG n'est plus retenu : il est signalé dans les constats du domaine (« référence expirée à la date d'analyse … »). Si aucune autre référence en vigueur n'étaye le domaine, son statut passe à `INSUFFISANT` et le contrat part en revue humaine (`ESCALADE`) : une version expirée ne justifie jamais seule un verdict.
-- La fiche « Délais de paiement et pénalités de retard », qui paraphrase L441-10, expire à la même date : une fiche prend la plus proche des fins de validité des articles qu'elle cite.
+- La fiche « Délais de paiement entre professionnels », qui paraphrase L441-10, expire à la même date : une fiche prend la plus proche des fins de validité des articles qu'elle cite.
 - Pour mettre à jour : récupérer la nouvelle version, reporter la date dans `SOURCES.md`, relancer `ingest`.
 
 ## Limites connues
 
-- **Périmètre des règles.** Seuls 9 types de clauses sont évalués : responsabilités, révision de prix, pénalités de retard, durée, préavis, données personnelles, accord de traitement, transfert hors UE. Une clause d'un autre type n'est pas évaluée. Sa détection, signalée comme « clause non couverte par les règles », est prévue en phase 2.
+- **Périmètre des règles.** Seuls 10 types de clauses sont évalués : responsabilités de l'acheteur et du fournisseur, révision de prix, pénalités d'exécution dues par le fournisseur, délai de paiement par l'acheteur, durée, préavis, données personnelles, accord de traitement, transfert hors UE. Une clause d'un autre type n'est pas évaluée. Sa détection, signalée comme « clause non couverte par les règles », est prévue en phase 2.
 - **Transferts hors UE.** La règle juge la garantie que nomme le contrat, jamais la liste des pays adéquats ni la validité effective de la garantie.
 - **Renvois non suivis.** Un article est admis s'il sert une règle, s'il est cité directement par un article qui en sert une, ou s'il définit un terme utilisé par une règle (voir `SOURCES.md`). Ne sont donc pas dans le corpus :
   - RGPD, art. 79 (renvoi de second degré, fichier conservé mais non ingéré) ;

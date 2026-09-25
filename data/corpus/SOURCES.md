@@ -33,11 +33,12 @@ Licences, indiquées d'après les conditions publiées par chaque site, non vér
 | `rgpd` | art. 82 | `rgpd/art-82.txt` | Cité par l'art. 28 | 24/09/2026 |
 | `rgpd` | art. 83 | `rgpd/art-83.txt` | Cité par l'art. 28 | 24/09/2026 |
 | `rgpd` | art. 84 | `rgpd/art-84.txt` | Cité par l'art. 28 | 24/09/2026 |
-| `code-commerce` | L441-10 | `code-commerce/L441-10.txt` | Sert la règle financière : pénalités de retard. **Version en vigueur jusqu'au 01/01/2027** | 24/09/2026 |
+| `code-commerce` | L441-10 | `code-commerce/L441-10.txt` | Sert la règle financière : délai de paiement par l'acheteur (délai supplétif, délais maximaux). **Version en vigueur jusqu'au 01/01/2027** | 24/09/2026 |
 | `code-commerce` | L442-1 | `code-commerce/L442-1.txt` | Sert les règles opérationnelle (préavis, rupture brutale) et juridique (déséquilibre significatif) | 24/09/2026 |
 | `code-civil` | 1170 | `code-civil/1170.txt` | Sert la règle juridique : clause privant de sa substance l'obligation essentielle | 24/09/2026 |
 | `code-civil` | 1171 | `code-civil/1171.txt` | Sert la règle juridique : déséquilibre significatif | 24/09/2026 |
 | `code-civil` | 1231-3 | `code-civil/1231-3.txt` | Sert la règle juridique : dommages prévisibles, plafonds de responsabilité | 24/09/2026 |
+| `code-civil` | 1231-5 | `code-civil/1231-5.txt` | Sert la règle financière : pénalités d'exécution dues par le fournisseur (clause pénale) | 25/09/2026 |
 | `code-civil` | 1210 | `code-civil/1210.txt` | Sert la règle opérationnelle : durée d'engagement (engagements perpétuels) | 24/09/2026 |
 | `code-civil` | 1211 | `code-civil/1211.txt` | Sert la règle opérationnelle : préavis de résiliation | 24/09/2026 |
 | `code-monetaire-financier` | L112-2 | `code-monetaire-financier/L112-2.txt` | Sert la règle financière : révision de prix (indexation) | 24/09/2026 |

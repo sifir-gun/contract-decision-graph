@@ -154,7 +154,7 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
 
     inp = {
         "domain": "financier",
-        "clauses": clauses(penalites_retard=2.0),
+        "clauses": clauses(penalites_execution=2.0),
         "analysis_date": ANALYSIS_DATE,
     }
     [v] = analyst(inp, crag=crag, decision_config=CONFIG)["verdicts"]

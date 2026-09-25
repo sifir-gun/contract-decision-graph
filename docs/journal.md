@@ -785,3 +785,21 @@ La série 1 (0/5, quota nul) n'entre pas dans la mesure : le vrai modèle n'a ja
 **Écart signalé, non traité.** La même page de la documentation Anthropic décrit un autre 429 non passager : le plafond de dépenses mensuel atteint (`error.details.error_code = enforced_spend_limit_reached`, sans en-tête `retry-after`). Il reste traité comme passager (3 tentatives, puis échec consigné). À traduire en `LLMQuotaError` si le propriétaire du repo le souhaite.
 
 **Fichier en cours hors commit.** `data/corpus/raw/code-civil/1231-5.txt`, non suivi, contient la commande de création au lieu du texte de l'article ; `test_manifeste_couvre_tout_le_corpus` échoue tant qu'il n'est ni corrigé et admis dans le manifeste, ni retiré. Sans lui : 508 tests au vert.
+
+### J3 : pénalités d'exécution et délai de paiement (décisions du 25/09)
+
+**Ce que désignait `penalites_retard`.** Trois lectures incompatibles :
+- **Règle financière** : « pénalités absentes ou plafond < 5 % → pénalité de score », une valeur nulle (non plafonnées) étant favorable. C'est l'intérêt de l'acheteur, donc des pénalités dues par le **fournisseur** qui exécute en retard.
+- **Prompt d'extraction** : « plafond des pénalités de retard, en pourcentage », sans dire qui les doit ni en pourcentage de quoi. Dans un contrat qui prévoit aussi des intérêts de retard de paiement (obligatoires selon L441-10, II), le modèle pouvait extraire l'une ou l'autre clause.
+- **Fiche et corpus** : la fiche « pénalités de retard » et la requête du CRAG (« pénalités de retard ») menaient à L441-10, qui vise les pénalités dues par l'**acheteur** en retard de paiement. Le domaine financier était donc étayé par un texte sur l'autre partie.
+
+**Correction.**
+- **`penalites_execution`** remplace `penalites_retard` : pénalités du fournisseur (clause pénale, C. civ. 1231-5), plafond en % du montant du contrat, règle inchangée (clés de configuration `execution_penalties_*`).
+- **`delai_paiement`** : délai de paiement par l'acheteur, en jours, catégorie `date_facture` ou `fin_de_mois`. Pénalité de 0,2 au-delà de 60 jours après la facture ou de 45 jours fin de mois, ou si le délai est présent mais non chiffré, avec le constat « délai non conforme, à renégocier ». Absent : aucune pénalité, mais un constat qui cite le délai supplétif du texte.
+- **Délai supplétif** : L441-10, I, 1er alinéa, « sauf dispositions contraires […], le délai de règlement des sommes dues ne peut dépasser trente jours après la date de réception des marchandises ou d'exécution de la prestation demandée ». Cité dans le constat (constante de la règle, liée à la version en vigueur jusqu'au 01/01/2027).
+- **Catégories par type** (`KIND_CATEGORIES`) : un délai chiffré exige son point de départ ; un délai non chiffré peut s'en passer. Une catégorie d'un autre type est signalée « catégorie invalide ». Sans point de départ (impossible après vérification), la règle applique le seuil le plus strict (45 jours).
+- **Corpus** : C. civ. 1231-5 admis dans le manifeste (financier, récupéré le 25/09/2026 : nouvelle clé `retrieved_at_overrides`, date propre à un article) et dans `SOURCES.md`.
+
+**Pire cumul recalculé : 0,505** (juridique 0,5, financier 0,4, conformité 0,7, opérationnel 0,4), soit `GO_RESERVES` avec une marge de 0,005, donc en revue humaine. `NO_GO` reste réservé aux blocages durs, mais de justesse ; un test fige ce calcul.
+
+**Écart relevé dans L441-10, non couvert par la règle** : « en cas de facture périodique […], le délai convenu […] ne peut dépasser quarante-cinq jours après la date d'émission de la facture » (I, 4e alinéa). Un délai de 50 jours date de facture sur factures périodiques passe la règle.

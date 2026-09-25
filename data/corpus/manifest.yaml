@@ -42,10 +42,13 @@ sources:
     directory: code-civil
     file: "{article}.txt"
     retrieved_at: 2026-09-24
+    retrieved_at_overrides:
+      "1231-5": 2026-09-25
     articles:
       "1170": [juridique]
       "1171": [juridique]
       "1231-3": [juridique]
+      "1231-5": [financier]   # clause pénale : règle des pénalités d'exécution
       "1210": [operationnel]
       "1211": [operationnel]
 

@@ -107,6 +107,28 @@ def test_categorie_inattendue_sur_un_autre_type():
     assert verify(items)["extraction_feedback"] == ["catégorie inattendue: revision_prix"]
 
 
+def _with(kind, **update):
+    return [c if c.kind != kind else c.model_copy(update=update) for c in clauses()]
+
+
+def test_delai_chiffre_exige_son_point_de_depart():
+    out = verify(_with("delai_paiement", category=None))
+    assert out["extraction_feedback"] == ["catégorie manquante: delai_paiement"]
+
+
+def test_delai_non_chiffre_sans_point_de_depart_accepte():
+    assert verify(_with("delai_paiement", value=None, category=None)) == {"route": "analysts"}
+
+
+@pytest.mark.parametrize(
+    ("kind", "category"),
+    [("transfert_hors_ue", "fin_de_mois"), ("delai_paiement", "sans_transfert")],
+)
+def test_categorie_d_un_autre_type_refusee(kind, category):
+    out = verify(_with(kind, category=category))
+    assert out["extraction_feedback"] == [f"catégorie invalide: {kind}"]
+
+
 def test_extraction_en_echec_escalade_sans_verification():
     failure = NodeFailure(node="extract_clauses", error="LLMOutputError", message="m", attempts=1)
     state = {"raw_text": CONTRACT_TEXT, "extraction_attempts": 0, "failures": [failure]}

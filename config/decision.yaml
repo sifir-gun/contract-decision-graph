@@ -27,14 +27,18 @@ extraction:
   max_attempts: 2
 
 # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
-# La conformité n'a que des blocages durs, sans paramètre.
 rules:
   juridique:
     supplier_cap_min_pct: 100          # plafond fournisseur, % du montant annuel
     supplier_cap_score_penalty: 0.5
   financier:
-    late_penalties_min_cap_pct: 5      # plafond des pénalités de retard, %
-    late_penalties_score_penalty: 0.4  # aussi appliquée si la clause est absente
+    # pénalités d'exécution dues par le fournisseur (C. civ., art. 1231-5)
+    execution_penalties_min_cap_pct: 5        # plafond minimal, % du montant du contrat
+    execution_penalties_score_penalty: 0.4    # aussi appliquée si la clause est absente
+    # délai de paiement par l'acheteur (C. com., art. L441-10) : choix de politique d'achat
+    payment_delay_max_days_invoice: 60        # jours à compter de la date de facture
+    payment_delay_max_days_end_of_month: 45   # jours fin de mois
+    payment_delay_score_penalty: 0.2          # au-delà, ou délai présent mais non chiffré
   conformite:
     # transfert hors UE (RGPD, art. 44 à 46) : la règle juge ce que dit le contrat,
     # jamais une liste de pays. Garanties nommées acceptées :

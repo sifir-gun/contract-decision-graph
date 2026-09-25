@@ -81,8 +81,8 @@ def test_financier_revision_de_prix_absente_ne_bloque_pas():
         (None, 1.0),  # non plafonnées : favorable
     ],
 )
-def test_financier_penalites_de_retard(cap, score):
-    assert run("financier", penalites_retard=cap).score == score
+def test_financier_penalites_d_execution(cap, score):
+    assert run("financier", penalites_execution=cap).score == score
 
 
 # --- conformite -----------------------------------------------------------------
@@ -221,7 +221,68 @@ def test_clause_en_double_leve_une_erreur():
 def _kind_read_by(domain: str) -> str:
     return {
         "juridique": "responsabilite_acheteur",
-        "financier": "penalites_retard",
+        "financier": "penalites_execution",
         "conformite": "donnees_personnelles",
         "operationnel": "preavis_resiliation",
     }[domain]
+
+
+# --- financier : délai de paiement (C. com., art. L441-10) --------------------------------
+
+
+def delay(value, basis="date_facture"):
+    return run("financier", delai_paiement=value, categories={"delai_paiement": basis})
+
+
+@pytest.mark.parametrize(
+    ("value", "basis", "score"),
+    [
+        (60, "date_facture", 1.0),
+        (61, "date_facture", 0.8),
+        (45, "fin_de_mois", 1.0),
+        (46, "fin_de_mois", 0.8),
+        (50, "date_facture", 1.0),  # 50 jours date de facture : conforme
+        (50, "fin_de_mois", 0.8),  # 50 jours fin de mois : non conforme
+    ],
+)
+def test_financier_delai_de_paiement_selon_son_point_de_depart(value, basis, score):
+    v = delay(value, basis)
+    assert v.score == score and not v.hard_block
+    if score < 1.0:
+        label = "fin de mois" if basis == "fin_de_mois" else "date de facture"
+        limit = 60 if basis == "date_facture" else 45
+        expected = (
+            f"délai non conforme, à renégocier : {value} jours {label}, au-delà de {limit} jours"
+        )
+        assert v.findings == [expected]
+
+
+def test_financier_delai_non_chiffre_penalite_par_prudence():
+    v = delay(None, None)
+    assert v.score == 0.8 and not v.hard_block
+    assert v.findings == [
+        "délai de paiement non chiffré : pénalité par prudence, délai non conforme, à renégocier"
+    ]
+
+
+def test_financier_delai_absent_sans_penalite_avec_le_delai_supplétif():
+    v = run("financier", delai_paiement=ABSENT)
+    assert v.score == 1.0
+    [finding] = v.findings
+    assert "trente jours après la date de réception des marchandises" in finding
+    assert "C. com., art. L441-10" in finding
+
+
+def test_financier_delai_sans_point_de_depart_seuil_le_plus_strict():
+    # ne se produit pas après verify_extraction (catégorie exigée) : règle prudente malgré tout
+    assert delay(50, None).score == 0.8
+
+
+def test_financier_seuils_du_delai_dans_la_configuration():
+    config = config_with("financier", "payment_delay_max_days_invoice", 90)
+    assert run("financier", config=config, delai_paiement=80).score == 1.0
+
+
+def test_financier_cumul_des_deux_penalites():
+    v = run("financier", penalites_execution=ABSENT, delai_paiement=90)
+    assert v.score == 0.4 and len(v.findings) == 2

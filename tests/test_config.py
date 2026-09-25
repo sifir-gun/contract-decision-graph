@@ -36,7 +36,12 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert cfg.extraction.max_attempts == 2
     j, f, o = cfg.rules.juridique, cfg.rules.financier, cfg.rules.operationnel
     assert (j.supplier_cap_min_pct, j.supplier_cap_score_penalty) == (100, 0.5)
-    assert (f.late_penalties_min_cap_pct, f.late_penalties_score_penalty) == (5, 0.4)
+    assert (f.execution_penalties_min_cap_pct, f.execution_penalties_score_penalty) == (5, 0.4)
+    assert (
+        f.payment_delay_max_days_invoice,
+        f.payment_delay_max_days_end_of_month,
+        f.payment_delay_score_penalty,
+    ) == (60, 45, 0.2)
     assert (o.commitment_max_months, o.commitment_score_penalty) == (36, 0.3)
     assert (o.notice_max_months, o.notice_score_penalty) == (6, 0.3)
     c = cfg.rules.conformite
@@ -128,7 +133,10 @@ _DELETE = object()
         ("extraction.max_attempts", 0),
         ("rules.juridique.supplier_cap_score_penalty", -0.1),
         ("rules.operationnel.notice_score_penalty", 1.5),
-        ("rules.financier.late_penalties_min_cap_pct", -5),
+        ("rules.financier.execution_penalties_min_cap_pct", -5),
+        ("rules.financier.payment_delay_max_days_invoice", -1),
+        ("rules.financier.payment_delay_score_penalty", 1.5),
+        ("rules.financier.late_penalties_min_cap_pct", 5),  # ancienne clé refusée
         ("rules.operationnel", _DELETE),
         ("human_policy", _DELETE),
         ("human_policy.allowed_decisions", []),

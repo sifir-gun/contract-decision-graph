@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from cdg.application.deps import ExtractionResult
-from cdg.domain.models import Clause, TransferCategory
+from cdg.domain.models import Clause, ClauseCategory
 from cdg.ports.llm import LLMProvider
 
 PROMPTS = Path(__file__).parent / "prompts"
@@ -21,7 +21,8 @@ Kind = Literal[
     "responsabilite_acheteur",
     "responsabilite_fournisseur",
     "revision_prix",
-    "penalites_retard",
+    "penalites_execution",
+    "delai_paiement",
     "duree_engagement",
     "preavis_resiliation",
     "donnees_personnelles",
@@ -35,7 +36,7 @@ class ExtractedClause(BaseModel):
     present: bool
     quote: str
     value: float | None
-    category: TransferCategory | None = None
+    category: ClauseCategory | None = None
 
 
 class ExtractionOutput(BaseModel):

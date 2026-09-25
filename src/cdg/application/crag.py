@@ -20,7 +20,14 @@ from pydantic import BaseModel, StringConstraints
 
 from cdg.application.deps import RetrievalResult
 from cdg.domain.corpus import expired
-from cdg.domain.models import DOMAIN_KINDS, Clause, Domain, RetrievalTrace, Usage
+from cdg.domain.models import (
+    CLAUSE_CATEGORIES,
+    DOMAIN_KINDS,
+    Clause,
+    Domain,
+    RetrievalTrace,
+    Usage,
+)
 from cdg.ports.llm import LLMOutputError, LLMProvider
 from cdg.ports.retriever import Passage, Retriever
 
@@ -42,7 +49,12 @@ _SUBJECTS = {
         "illimitée",
     ),
     "revision_prix": ("révision du prix", "%", "non plafonnée"),
-    "penalites_retard": ("pénalités de retard", "%", "non plafonnées"),
+    "penalites_execution": (
+        "pénalités d'exécution à la charge du fournisseur",
+        "% du montant du contrat",
+        "non plafonnées",
+    ),
+    "delai_paiement": ("délai de paiement par l'acheteur", "jours", "non chiffré"),
     "duree_engagement": ("durée d'engagement", "mois", "non chiffrée"),
     "preavis_resiliation": ("préavis de résiliation", "mois", "non chiffré"),
     "donnees_personnelles": ("traitement de données à caractère personnel", None, None),
@@ -52,6 +64,12 @@ _SUBJECTS = {
         None,
         None,
     ),
+}
+
+
+# libellés des catégories dans les requêtes ; par défaut, le nom sans soulignés
+_CATEGORY_LABELS = {c: c.replace("_", " ") for c in CLAUSE_CATEGORIES} | {
+    "date_facture": "date de facture"
 }
 
 
@@ -81,12 +99,13 @@ def _describe(clause: Clause) -> str:
     subject, unit, none_label = _SUBJECTS[clause.kind]
     if not clause.present:
         detail = "clause absente"
-    elif clause.category is not None:
-        detail = clause.category.replace("_", " ")
     elif clause.value is None:
-        detail = none_label or "clause présente"
+        # catégorie seule (transfert), sinon sens d'une valeur nulle
+        detail = _CATEGORY_LABELS.get(clause.category) or none_label or "clause présente"
     else:
         detail = f"{clause.value:g} {unit}"
+        if clause.category is not None:  # point de départ d'un délai de paiement
+            detail += f" {_CATEGORY_LABELS[clause.category]}"
     return f"{subject} : {detail}"
 
 

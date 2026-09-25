@@ -12,7 +12,13 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
 
-from cdg.domain.models import CATEGORY_KINDS, REQUIRED_KINDS, Clause
+from cdg.domain.models import (
+    CATEGORY_KINDS,
+    KIND_CATEGORIES,
+    REQUIRED_KINDS,
+    Clause,
+    category_required,
+)
 
 # typographie équivalente : apostrophes, guillemets, tirets, espaces insécables
 _TYPOGRAPHY = str.maketrans(
@@ -47,7 +53,14 @@ def problems_of(raw_text: str, clauses: list[Clause]) -> list[str]:
     problems += [
         f"catégorie manquante: {c.kind}"
         for c in clauses
-        if c.kind in CATEGORY_KINDS and c.present and c.category is None
+        if category_required(c) and c.category is None
+    ]
+    problems += [
+        f"catégorie invalide: {c.kind}"
+        for c in clauses
+        if c.kind in CATEGORY_KINDS
+        and c.category is not None
+        and c.category not in KIND_CATEGORIES[c.kind]
     ]
     problems += [
         f"catégorie inattendue: {c.kind}"

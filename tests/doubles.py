@@ -14,7 +14,8 @@ FAVORABLE = {
     "responsabilite_acheteur": 100.0,  # plafonnée à 100 % du montant annuel
     "responsabilite_fournisseur": 150.0,  # plafond fournisseur au-dessus du minimum
     "revision_prix": 3.0,  # révision plafonnée à 3 %
-    "penalites_retard": 10.0,  # pénalités plafonnées à 10 %
+    "penalites_execution": 10.0,  # pénalités du fournisseur plafonnées à 10 % du contrat
+    "delai_paiement": 30.0,  # jours, à compter de la date de facture
     "duree_engagement": 24.0,  # mois
     "preavis_resiliation": 3.0,  # mois
     "donnees_personnelles": None,  # traitement présent
@@ -37,7 +38,10 @@ CONTRACT_TEXT = (
 )
 
 
-CATEGORIES = {"transfert_hors_ue": "sans_transfert"}  # données hébergées dans l'UE
+CATEGORIES = {
+    "transfert_hors_ue": "sans_transfert",  # données hébergées dans l'UE
+    "delai_paiement": "date_facture",
+}
 
 
 def clauses(categories: dict | None = None, **overrides) -> list[Clause]:

@@ -10,9 +10,12 @@ from pydantic import ValidationError
 from cdg.application.state import AnalystInput, ContractState, Route
 from cdg.domain.models import (
     CATEGORY_KINDS,
+    CLAUSE_CATEGORIES,
     DOMAIN_KINDS,
     DOMAINS,
+    KIND_CATEGORIES,
     REQUIRED_KINDS,
+    TRANSFER_CATEGORIES,
     AgentVerdict,
     Clause,
     Decision,
@@ -38,18 +41,18 @@ def test_clause_absente_citation_vide_et_valeur_nulle():
 
 def test_clause_absente_refuse_une_citation():
     with pytest.raises(ValidationError, match="absente"):
-        Clause(kind="penalites_retard", present=False, quote="texte", value=None)
+        Clause(kind="penalites_execution", present=False, quote="texte", value=None)
 
 
 @pytest.mark.parametrize("quote", ["", "   "])
 def test_clause_presente_exige_une_citation(quote):
     with pytest.raises(ValidationError, match="présente"):
-        Clause(kind="penalites_retard", present=True, quote=quote, value=5)
+        Clause(kind="penalites_execution", present=True, quote=quote, value=5)
 
 
 def test_clause_valeur_obligatoire_meme_nulle():
     with pytest.raises(ValidationError):
-        Clause(kind="penalites_retard", present=False, quote="")
+        Clause(kind="penalites_execution", present=False, quote="")
 
 
 # --- AgentVerdict -------------------------------------------------------------
@@ -108,14 +111,18 @@ def test_domaines_et_types_de_clauses():
         "responsabilite_acheteur",
         "responsabilite_fournisseur",
         "revision_prix",
-        "penalites_retard",
+        "penalites_execution",
+        "delai_paiement",
         "duree_engagement",
         "preavis_resiliation",
         "donnees_personnelles",
         "accord_traitement_donnees",
         "transfert_hors_ue",
     )
-    assert CATEGORY_KINDS == {"transfert_hors_ue"}
+    assert CATEGORY_KINDS == {"transfert_hors_ue", "delai_paiement"}
+    assert KIND_CATEGORIES["delai_paiement"] == ("date_facture", "fin_de_mois")
+    assert KIND_CATEGORIES["transfert_hors_ue"] == TRANSFER_CATEGORIES
+    assert CLAUSE_CATEGORIES == TRANSFER_CATEGORIES + ("date_facture", "fin_de_mois")
 
 
 def test_valeurs_de_route_et_de_decision():

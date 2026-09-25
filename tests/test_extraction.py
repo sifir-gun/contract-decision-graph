@@ -1,11 +1,13 @@
 """Extraction réelle : contrat délimité comme donnée, sortie structurée, retour ciblé."""
 
+from pathlib import Path
+
 import pytest
 from doubles import CONTRACT_TEXT, FakeLLM, clauses
 from pydantic import ValidationError
 
 from cdg.application.extraction import ExtractionOutput, LLMExtractor
-from cdg.domain.models import REQUIRED_KINDS, TRANSFER_CATEGORIES
+from cdg.domain.models import CLAUSE_CATEGORIES, REQUIRED_KINDS
 
 
 def output_of(items):
@@ -87,8 +89,19 @@ def test_clause_incoherente_leve_une_erreur_explicite():
         ext(CONTRACT_TEXT, [])
 
 
-def test_schema_limite_les_categories_de_transfert():
+def test_schema_limite_les_categories_aux_valeurs_connues():
     schema = ExtractionOutput.model_json_schema()
     prop = schema["$defs"]["ExtractedClause"]["properties"]["category"]
     enum = next(option["enum"] for option in prop["anyOf"] if "enum" in option)
-    assert enum == list(TRANSFER_CATEGORIES)
+    assert enum == list(CLAUSE_CATEGORIES)
+
+
+def test_prompt_distingue_les_deux_sortes_de_penalites():
+    system = (
+        Path(__file__).parents[1] / "src/cdg/application/prompts/extraction_system.md"
+    ).read_text(encoding="utf-8")
+    assert "10 types de clause" in system
+    for kind in REQUIRED_KINDS:
+        assert f"- {kind} :" in system
+    assert "penalites_retard" not in system
+    assert "date_facture" in system and "fin_de_mois" in system

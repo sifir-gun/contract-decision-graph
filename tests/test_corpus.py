@@ -127,6 +127,13 @@ def test_articles_ingérés():
     assert all(domains for _, domains in rows)
 
 
+def test_date_de_recuperation_propre_a_un_article():
+    by_ref = {a.reference: (a, domains) for a, domains in ingestion.articles()}
+    clause_penale, domains = by_ref["C. civ., art. 1231-5"]
+    assert (clause_penale.retrieved_at, domains) == (date(2026, 9, 25), ["financier"])
+    assert by_ref["C. civ., art. 1231-3"][0].retrieved_at == date(2026, 9, 24)  # date de la source
+
+
 # --- Fiches : avertissement, et aucune affirmation sans source du corpus ------------------
 
 
