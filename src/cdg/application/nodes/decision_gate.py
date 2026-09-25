@@ -1,10 +1,12 @@
 """decision_gate : verdict déterministe, sans LLM.
 L'issue la plus conservatrice l'emporte. Ordre :
-1. blocage dur, 2. budget, 3. INSUFFISANT, 4. conflit, 5. seuils puis marge.
+1. blocage dur, 2. analyste en échec, 3. budget, 4. INSUFFISANT, 5. conflit,
+6. seuils puis marge.
 """
 
 from dataclasses import dataclass
 
+from cdg.application.failures import failure_report
 from cdg.domain.config import DecisionConfig
 from cdg.domain.numeric import rounded
 from cdg.domain.state import DOMAINS, AgentVerdict, ContractState, Decision, Usage
@@ -48,11 +50,11 @@ def aggregate(verdicts: list[AgentVerdict], config: DecisionConfig) -> Aggregate
 
     if hard_block:
         decision: Decision = "NO_GO"
-    # étapes 3 et 4 gardées distinctes pour suivre l'ordre de la spec (audit)
+    # étapes 4 et 5 gardées distinctes pour suivre l'ordre de la spec (audit)
     elif any(v.retrieval_status == "INSUFFISANT" for v in verdicts):
-        decision = "ESCALADE"  # 3. INSUFFISANT
+        decision = "ESCALADE"  # 4. INSUFFISANT
     elif conflict(verdicts, config.conflict_gap):
-        decision = "ESCALADE"  # 4. conflit
+        decision = "ESCALADE"  # 5. conflit
     elif score >= go:
         decision = "GO"
     elif score >= go_reserves:
@@ -62,39 +64,49 @@ def aggregate(verdicts: list[AgentVerdict], config: DecisionConfig) -> Aggregate
     return Aggregate(decision=decision, score=score, margin=margin, hard_block=hard_block)
 
 
+def _hard_block(config: DecisionConfig, margin: float | None, report: dict | None) -> dict:
+    """1. NO_GO établi, marge ignorée ; un rapport d'échec (budget, nœuds) tracé quand même."""
+    if config.human_policy.hard_block_review:
+        # NO_GO proposé ; seul un humain peut le lever (overrides_block)
+        update = {"proposed_decision": "NO_GO", "route": "human_review"}
+    else:
+        update = {"proposed_decision": "NO_GO", "final_decision": "NO_GO", "route": "explain"}
+    if margin is not None:
+        update["margin"] = margin
+    if report is not None:
+        update["failure_report"] = report
+    return update
+
+
 def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
     """Nœud : proposition, marge et route (explain ou human_review)."""
     # pas « config » : LangGraph réserve ce nom de paramètre au RunnableConfig
     config = decision_config
-    d = aggregate(state["verdicts"], config)
+    verdicts, failures = state["verdicts"], state.get("failures", [])
     used = total_tokens(state.get("usage", []))
     limit = config.budget.max_tokens_per_contract
     over = used > limit
     budget_report = {"stage": "budget", "tokens": used, "limit": limit}
 
-    if d.hard_block:  # 1. NO_GO établi, marge ignorée
-        if config.human_policy.hard_block_review:
-            # NO_GO proposé ; seul un humain peut le lever (overrides_block)
-            update = {"proposed_decision": "NO_GO", "margin": d.margin, "route": "human_review"}
-        else:
-            update = {
-                "proposed_decision": "NO_GO",
-                "final_decision": "NO_GO",
-                "margin": d.margin,
-                "route": "explain",
-            }
+    if failures:  # analyste en échec : verdicts incomplets, agrégat incalculable
+        report = failure_report(failures)
         if over:
-            # dépassement tracé quand même
-            update["failure_report"] = budget_report
-        return update
-    if over:  # 2. budget
+            report["budget"] = {"tokens": used, "limit": limit}
+        if any(v.hard_block for v in verdicts):  # 1. le blocage établi suffit
+            return _hard_block(config, None, report)
+        return {"proposed_decision": "ESCALADE", "failure_report": report, "route": "human_review"}
+
+    d = aggregate(verdicts, config)
+    if d.hard_block:  # 1. NO_GO établi, marge ignorée
+        return _hard_block(config, d.margin, budget_report if over else None)
+    if over:  # 3. budget
         return {
             "proposed_decision": "ESCALADE",
             "margin": d.margin,
             "failure_report": budget_report,
             "route": "human_review",
         }
-    # 3. INSUFFISANT, 4. conflit, 5. seuils : déjà ordonnés par aggregate
+    # 4. INSUFFISANT, 5. conflit, 6. seuils : déjà ordonnés par aggregate
     if d.decision == "ESCALADE" or rounded(d.margin) < rounded(config.min_margin):
         return {"proposed_decision": d.decision, "margin": d.margin, "route": "human_review"}
     return {

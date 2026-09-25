@@ -9,6 +9,7 @@ import re
 import unicodedata
 from collections import Counter
 
+from cdg.application.failures import escalate
 from cdg.domain.config import DecisionConfig
 from cdg.domain.state import CATEGORY_KINDS, REQUIRED_KINDS, ContractState
 
@@ -61,6 +62,9 @@ def problems_of(raw_text: str, clauses: list) -> list[str]:
 
 
 def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict:
+    failures = state.get("failures", [])
+    if failures:  # extraction en échec (garde de l'orchestrateur) : rien à vérifier
+        return escalate(failures)
     problems = problems_of(state["raw_text"], state["clauses"])
     if not problems:
         return {"route": "analysts"}

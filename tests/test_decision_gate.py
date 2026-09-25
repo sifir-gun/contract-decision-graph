@@ -6,7 +6,7 @@ from doubles import usage, verdict, verdicts
 
 from cdg.application.nodes.decision_gate import aggregate, conflict, decision_gate, total_tokens
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.domain.state import DOMAINS
+from cdg.domain.state import DOMAINS, NodeFailure
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
@@ -218,4 +218,58 @@ def test_blocage_dur_en_revue_humaine_conserve_le_rapport_budget():
     )
     assert (out["route"], out["proposed_decision"]) == ("human_review", "NO_GO")
     assert out["failure_report"] == {"stage": "budget", "tokens": BUDGET + 1, "limit": BUDGET}
+    assert "final_decision" not in out
+
+
+# --- Analyste en échec (garde de l'orchestrateur) : escalade --------------------------
+
+FAILURE = NodeFailure(
+    node="analyst", error="ValueError", message="m", attempts=1, domain="financier"
+)
+
+
+def gate_with_failure(vs, tokens=0, config=CONFIG):
+    state = {"verdicts": vs, "failures": [FAILURE], "usage": [usage(tokens_in=tokens)]}
+    return decision_gate(state, config)
+
+
+def three_verdicts(**by_domain):
+    return [v for v in verdicts(**by_domain) if v.domain != "financier"]
+
+
+def test_analyste_en_echec_escalade_sans_marge():
+    out = gate_with_failure(three_verdicts())
+    assert out == {
+        "proposed_decision": "ESCALADE",
+        "failure_report": {"stage": "noeuds", "failures": [FAILURE.model_dump()]},
+        "route": "human_review",
+    }
+
+
+def test_analyste_en_echec_et_budget_depasse_rapport_commun():
+    out = gate_with_failure(three_verdicts(), tokens=BUDGET + 1)
+    assert out["proposed_decision"] == "ESCALADE"
+    assert out["failure_report"]["budget"] == {"tokens": BUDGET + 1, "limit": BUDGET}
+
+
+def test_analyste_en_echec_n_empeche_pas_un_blocage_dur_etabli():
+    out = gate_with_failure(three_verdicts(juridique={"hard_block": True}))
+    assert (out["proposed_decision"], out["final_decision"], out["route"]) == (
+        "NO_GO",
+        "NO_GO",
+        "explain",
+    )
+    assert out["failure_report"]["stage"] == "noeuds" and "margin" not in out
+
+
+def test_analyste_en_echec_blocage_dur_en_revue_si_configure():
+    config = config_with(
+        human_policy={
+            "allowed_decisions": ["GO", "GO_RESERVES", "NO_GO"],
+            "allow_block_override": True,
+            "hard_block_review": True,
+        }
+    )
+    out = gate_with_failure(three_verdicts(juridique={"hard_block": True}), config=config)
+    assert (out["proposed_decision"], out["route"]) == ("NO_GO", "human_review")
     assert "final_decision" not in out

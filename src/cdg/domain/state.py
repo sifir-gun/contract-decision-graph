@@ -108,6 +108,16 @@ class HumanDecision(BaseModel):
         return self
 
 
+class NodeFailure(BaseModel):
+    """Échec d'un nœud, capté par la garde de l'orchestrateur : jamais de repli silencieux."""
+
+    node: str
+    error: str  # type de l'exception
+    message: str
+    attempts: int = Field(ge=1)  # tentatives, reprises comprises (RetryPolicy des analystes)
+    domain: Domain | None = None  # analyste en échec
+
+
 class Usage(BaseModel):
     node: str
     model: str
@@ -126,6 +136,7 @@ class ContractState(TypedDict, total=False):
     extraction_feedback: list[str]
     verdicts: Annotated[list[AgentVerdict], operator.add]
     usage: Annotated[list[Usage], operator.add]
+    failures: Annotated[list[NodeFailure], operator.add]  # gardes d'échec de nœud
     proposed_decision: Decision
     margin: float
     route: Route  # écrite par un nœud, lue par l'arête

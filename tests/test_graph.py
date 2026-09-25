@@ -250,6 +250,7 @@ def test_aretes_du_graphe_conformes_a_la_spec():
         ("__start__", "validate_input"),
         ("validate_input", "extract_clauses"),
         ("validate_input", "reject"),
+        ("validate_input", "human_review"),  # garde d'échec (J3)
         ("extract_clauses", "verify_extraction"),
         ("verify_extraction", "extract_clauses"),
         ("verify_extraction", "analyst"),

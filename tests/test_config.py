@@ -62,6 +62,13 @@ def test_configuration_du_projet_conforme_a_la_spec():
     }
     assert cfg.llm.model("light") == "ministral-8b-2512"
     assert cfg.crag.model_dump() == {"top_k": 4, "max_passes": 2}
+    assert cfg.analyst_retry.model_dump() == {
+        "max_attempts": 3,
+        "initial_interval_seconds": 1.0,
+        "backoff_factor": 2.0,
+        "max_interval_seconds": 10.0,
+        "jitter": False,
+    }
     assert cfg.embedding.model_dump() == {
         "model": "intfloat/multilingual-e5-large",
         "dimension": 1024,
@@ -143,6 +150,11 @@ _DELETE = object()
         ("crag.top_k", 0),
         ("crag.max_passes", 0),
         ("crag.max_passes", 2.0),  # mode strict
+        ("analyst_retry", _DELETE),
+        ("analyst_retry.max_attempts", 0),
+        ("analyst_retry.initial_interval_seconds", -1.0),
+        ("analyst_retry.backoff_factor", 0.5),  # intervalle décroissant
+        ("analyst_retry.jitter", "non"),
     ],
 )
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):

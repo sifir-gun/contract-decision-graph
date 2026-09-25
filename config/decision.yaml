@@ -99,3 +99,12 @@ corpus:
 crag:
   top_k: 4          # extraits rendus par recherche, soumis au juge
   max_passes: 2     # recherches au plus : la première, puis une réécriture
+
+# Reprise d'un analyste sur erreur transitoire (réseau, API), par la RetryPolicy de
+# LangGraph, avant que la garde ne transforme l'échec en `failures` (J3).
+analyst_retry:
+  max_attempts: 3                 # tentatives, la première comprise
+  initial_interval_seconds: 1.0
+  backoff_factor: 2.0
+  max_interval_seconds: 10.0
+  jitter: false

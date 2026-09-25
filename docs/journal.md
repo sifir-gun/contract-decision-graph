@@ -691,3 +691,19 @@ Refonte sans changement de comportement, décidée pour que le CRAG dépende d'u
 **Vérification réelle** (modèle d'embedding réel, hors ligne, sans LLM) :
 - `ingest` après la tâche : 1 extrait remplacé (la fiche « pénalités de retard », désormais valable jusqu'au 2027-01-01), 56 inchangés ;
 - `PgvectorRetriever` avec les requêtes initiales du CRAG (contrat favorable de test), 4 premiers extraits par domaine : juridique → fiche responsabilité, L442-1, 1231-3 ; financier → fiche pénalités (fin 2027-01-01), fiche révision des prix, L441-10 (fin 2027-01-01) ; conformité → fiche transferts, RGPD art. 46, fiche sous-traitance ; opérationnel → fiche durée et préavis, L442-1, 1211, 1210. La fin de validité remonte bien jusqu'au CRAG.
+
+### J3 tâche 10 : gardes d'échec de nœud
+
+- **`guard`** (`orchestrator.py`) enveloppe chaque nœud sauf `human_review`. Une exception devient un `NodeFailure` (nœud, type et message, tentatives, domaine d'un analyste) dans `failures`, clé à réducteur. `GraphBubbleUp` (interruption, commande) passe au travers.
+- **Selon le nœud** : les nœuds à plusieurs sorties (`validate_input`, `verify_extraction`, `decision_gate`) routent vers l'humain en `ESCALADE`, d'où une nouvelle arête `validate_input → human_review` ; l'échec d'`extract_clauses` est escaladé par `verify_extraction`, qui le lit en premier ; un analyste en échec laisse les autres finir et `decision_gate` escalade ; `explain`, `audit_seal` et `reject` consignent l'échec et vont à leur terme.
+- **`decision_gate`** : l'analyste en échec vient en 2ᵉ position, après le blocage dur. `failure_report` : `{"stage": "noeuds", "failures": [...]}`, budget compris s'il est dépassé.
+- **Reprise avant la garde** : `RetryPolicy` de LangGraph sur le nœud `analyst`, réglée par la section `analyst_retry` (3 tentatives, 1 s, facteur 2, plafond 10 s, sans gigue). La garde lit `get_runtime().execution_info.node_attempt` : une erreur que la politique reprend est relancée tant qu'il reste des tentatives, et n'est consignée qu'après la dernière (testé : 2 échecs réseau puis réussite ; échec réseau persistant, 3 tentatives ; `ValueError`, 1 seule).
+- **Statut d'un thread** : `failures` exposé par `thread_status`, donc par la CLI.
+- **Changement de comportement voulu** : au J2, une exception de nœud arrêtait l'exécution (erreur JSON, code 1). Le test CLI correspondant vérifie désormais l'escalade avec rapport, puis la reprise par `resume`.
+
+**Choix.**
+- **Blocage dur avant l'analyste en échec.** La spec dit « `decision_gate` escalade dès que `failures` n'est pas vide », mais aussi que le blocage établi suffit (étape 1, « un `INSUFFISANT` simultané ne change rien »). J'ai gardé l'ordre des étapes : un blocage dur établi par un autre verdict donne `NO_GO`, avec le rapport d'échec tracé. À valider.
+- **Pas de garde sur `human_review`** : tous les échecs y aboutissent, il ne peut pas se router vers lui-même. Une exception y arrête l'exécution, comme au J2.
+- **Pas de `RetryPolicy` sur `extract_clauses`** (la spec la prévoit pour les analystes seulement). Les SDK reprennent déjà certaines erreurs (Anthropic : 2 reprises par défaut). Une extraction en échec part donc chez l'humain. À reconsidérer si les tests réels le montrent utile.
+
+**Piège.** Une garde qui capte l'exception empêcherait `RetryPolicy` de la voir : la reprise de LangGraph enveloppe le nœud, donc la garde. D'où la lecture du numéro de tentative dans la garde, plutôt qu'une boucle de reprise maison.

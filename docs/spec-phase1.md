@@ -40,13 +40,14 @@ flowchart TD
     S([START]) --> V[validate_input]
     V -->|route = reject| R[reject]
     V -->|route = extract_clauses| X[extract_clauses]
+    V -->|route = human_review<br/>échec du nœud| H
     X --> VX[verify_extraction]
     VX -->|route = extract_clauses<br/>problèmes, 1er essai| X
-    VX -->|route = human_review<br/>problèmes après 2 essais| H
+    VX -->|route = human_review<br/>problèmes après 2 essais,<br/>ou extraction en échec| H
     VX -->|route = analysts<br/>Send x4| A[analyst<br/>juridique, financier,<br/>conformité, opérationnel]
     A --> G[decision_gate]
     G -->|route = explain<br/>marge suffisante, ou NO_GO par<br/>blocage dur si hard_block_review = false| E[explain]
-    G -->|route = human_review<br/>ESCALADE, marge faible, budget dépassé,<br/>blocage dur si hard_block_review = true| H[human_review<br/>interrupt]
+    G -->|route = human_review<br/>ESCALADE, marge faible, budget dépassé,<br/>analyste en échec,<br/>blocage dur si hard_block_review = true| H[human_review<br/>interrupt]
     H --> E
     E --> AU[audit_seal]
     AU --> F([END])
@@ -88,7 +89,7 @@ Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate`
 
 ## Schéma d'état
 
-L'état global est un `TypedDict` ; les objets métier sont des modèles Pydantic validés à chaque frontière de nœud. Seuls `verdicts` et `usage` ont un réducteur, pour que les 4 branches parallèles s'ajoutent sans s'écraser. `usage` alimente dès la phase 1 le coût par contrat et la latence par nœud.
+L'état global est un `TypedDict` ; les objets métier sont des modèles Pydantic validés à chaque frontière de nœud. Seuls `verdicts`, `usage` et `failures` (J3) ont un réducteur, pour que les 4 branches parallèles s'ajoutent sans s'écraser. `usage` alimente dès la phase 1 le coût par contrat et la latence par nœud.
 
 ```python
 import operator
@@ -148,6 +149,14 @@ class HumanDecision(BaseModel):
     # relecteur « systeme:… » (systeme:expire) ; préfixe interdit à un humain
 
 
+class NodeFailure(BaseModel):  # J3 : échec capté par la garde d'un nœud
+    node: str
+    error: str  # type de l'exception
+    message: str
+    attempts: int  # tentatives, reprises comprises (RetryPolicy des analystes)
+    domain: Domain | None = None  # analyste en échec
+
+
 class Usage(BaseModel):
     node: str
     model: str
@@ -166,6 +175,7 @@ class ContractState(TypedDict, total=False):
     extraction_feedback: list[str]
     verdicts: Annotated[list[AgentVerdict], operator.add]
     usage: Annotated[list[Usage], operator.add]
+    failures: Annotated[list[NodeFailure], operator.add]  # gardes d'échec (J3)
     proposed_decision: Decision
     margin: float
     route: Route  # écrite par un nœud, lue par l'arête
@@ -186,7 +196,7 @@ class AnalystInput(TypedDict):  # état privé reçu via Send
     analysis_date: date
 ```
 
-Un nœud ne renvoie que les clés qu'il modifie. Un analyste renvoie `{"verdicts": [verdict], "usage": [...]}` et rien d'autre.
+Un nœud ne renvoie que les clés qu'il modifie. Un analyste renvoie `{"verdicts": [verdict], "usage": [...]}` et rien d'autre ; en échec, sa garde renvoie `{"failures": [échec]}` (J3).
 
 ## Câblage LangGraph
 
@@ -303,7 +313,9 @@ def build_graph(config: DecisionConfig, deps: Deps):  # les tests injectent des 
     builder = StateGraph(ContractState)
     ...  # add_node des 9 nœuds, dépendances liées
     builder.add_edge(START, "validate_input")
-    builder.add_conditional_edges("validate_input", read_route, ["extract_clauses", "reject"])
+    builder.add_conditional_edges(
+        "validate_input", read_route, ["extract_clauses", "reject", "human_review"]
+    )  # human_review : garde d'échec (J3)
     builder.add_edge("extract_clauses", "verify_extraction")
     builder.add_conditional_edges(
         "verify_extraction", route_after_verify, ["extract_clauses", "analyst", "human_review"]
@@ -373,7 +385,14 @@ Points à maîtriser :
   - `RetryPolicy` sur les analystes pour les erreurs d'API transitoires, avant la garde.
 
   Le routage reste unique : la garde écrit `route` et les arêtes la lisent, sans `Command(goto=...)`.
-- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un `StrictSerializer` dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`), plus les types sûrs de LangGraph (`Send`, `Interrupt`, dates…). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement ; un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Même avec une liste, un type bloqué revient **dégradé en `dict`**, avec un simple avertissement : c'est un repli silencieux. `StrictSerializer` capte l'événement de blocage émis par la bibliothèque et lève `BlockedDeserialization`. Tout vit dans `adapters/langgraph/checkpointer.py`.
+
+  **Réalisé au J3 (tâche 10).** `guard` (dans `orchestrator.py`) enveloppe chaque nœud, sauf `human_review`, où aboutissent les échecs. Une exception devient un `NodeFailure` (nœud, type et message de l'erreur, tentatives, domaine d'un analyste) ajouté à `failures` ; l'interruption et les commandes de LangGraph (`GraphBubbleUp`) passent au travers. `failure_report` d'un échec de nœud : `{"stage": "noeuds", "failures": [...]}`. Selon le nœud :
+  - `validate_input`, `verify_extraction`, `decision_gate` (plusieurs sorties) : la garde écrit `route = human_review`, `proposed_decision = ESCALADE` et `failure_report` ; d'où l'arête `validate_input → human_review` ;
+  - `extract_clauses` : l'échec est consigné, et `verify_extraction`, qui le lit en premier, escalade sans rien vérifier ;
+  - `analyst` : l'échec est consigné sans verdict, les autres analystes continuent, `decision_gate` escalade ;
+  - `explain`, `audit_seal`, `reject` (sortie unique, après la décision) : l'échec est consigné et l'exécution va à son terme ;
+  - reprise « avant la garde » : `RetryPolicy` de LangGraph sur le nœud `analyst` (section `analyst_retry`). La garde lit le numéro de tentative (`get_runtime().execution_info.node_attempt`) : une erreur que la politique reprend (`retry_on` par défaut : réseau, 5xx…) est relancée tant qu'il reste des tentatives, et n'est consignée qu'après la dernière. Une erreur de programmation (`ValueError`…) n'est pas reprise.
+- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un `StrictSerializer` dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`, puis au J3 `RetrievalTrace` et `NodeFailure`), plus les types sûrs de LangGraph (`Send`, `Interrupt`, dates…). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement ; un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Même avec une liste, un type bloqué revient **dégradé en `dict`**, avec un simple avertissement : c'est un repli silencieux. `StrictSerializer` capte l'événement de blocage émis par la bibliothèque et lève `BlockedDeserialization`. Tout vit dans `adapters/langgraph/checkpointer.py`.
 
 ## Déterminisme et piste d'audit
 
@@ -389,6 +408,7 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
   - LLM (`llm`) : fournisseur (`mistral` par défaut, `anthropic` en alternative), température 0, modèles par niveau, avec `main` pour l'extraction et `light` pour le juge CRAG. Les identifiants sont **figés** (alias `-latest` refusés), car le modèle est scellé dans l'audit. Configuration du projet, vérifiée le 2026-09-24 dans la documentation officielle : Mistral `mistral-small-2603` et `ministral-8b-2512` ; Anthropic `claude-sonnet-5` et `claude-haiku-4-5-20251001`. Les clés d'API restent dans `.env` ;
   - seuils des règles et pénalités de score ;
   - CRAG (`crag`, J3) : `top_k` = 4 extraits par recherche, `max_passes` = 2 recherches au plus ;
+  - reprise des analystes (`analyst_retry`, J3) : 3 tentatives, intervalle initial 1 s, facteur 2, plafond 10 s, sans gigue ;
   - politique d'arbitrage humain `human_policy` (J2) :
     - `allowed_decisions` : décisions permises à l'humain, `NO_GO` obligatoire, `ESCALADE` interdite ;
     - `allow_block_override` : levée d'un blocage dur permise ou non ;
@@ -400,11 +420,12 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
 - **Score** : 1 = favorable (risque faible), 0 = défavorable. Score agrégé = somme pondérée des scores de domaine.
 - **Arrondi** : score agrégé, marge et tout flottant comparé à un seuil passent par une seule fonction d'arrondi à 6 décimales, appliquée avant toute comparaison. La même fonction sert à la sérialisation canonique au J4. Les 6 décimales sont une constante de format, pas un réglage métier.
 - **decision_gate** applique la règle suivante : l'issue la plus conservatrice l'emporte. Ordre :
-  1. blocage dur : un seul `hard_block` → `NO_GO`, marge ignorée. Avec `human_policy.hard_block_review = false` (configuration du projet), `NO_GO` est final et la route mène à `explain`, sans humain. Avec `true`, `NO_GO` est seulement proposé et la route mène à `human_review`, où seul un humain peut lever le blocage. Si le budget est aussi dépassé, `failure_report` de stade `budget` est quand même renseigné. Un `INSUFFISANT` simultané ne change rien : le blocage établi suffit ;
-  2. budget : total `tokens_in + tokens_out` sur `usage` supérieur au plafond → `ESCALADE` ;
-  3. un domaine en `INSUFFISANT` → `ESCALADE` ;
-  4. conflit : `max(score) − min(score)` > écart de conflit, calculé sur les seuls domaines en `retrieval_status = OK` → `ESCALADE` ;
-  5. seuils appliqués au score agrégé, puis marge.
+  1. blocage dur : un seul `hard_block` → `NO_GO`, marge ignorée. Avec `human_policy.hard_block_review = false` (configuration du projet), `NO_GO` est final et la route mène à `explain`, sans humain. Avec `true`, `NO_GO` est seulement proposé et la route mène à `human_review`, où seul un humain peut lever le blocage. Si le budget est aussi dépassé, `failure_report` de stade `budget` est quand même renseigné. Un `INSUFFISANT` simultané ne change rien : le blocage établi suffit. Un analyste en échec non plus (J3) : le blocage établi par un autre verdict suffit, et le rapport d'échec est tracé ;
+  2. analyste en échec (J3) : `failures` non vide → `ESCALADE`, marge non calculée (agrégat incomplet), `failure_report` de stade `noeuds`, budget compris s'il est dépassé ;
+  3. budget : total `tokens_in + tokens_out` sur `usage` supérieur au plafond → `ESCALADE` ;
+  4. un domaine en `INSUFFISANT` → `ESCALADE` ;
+  5. conflit : `max(score) − min(score)` > écart de conflit, calculé sur les seuls domaines en `retrieval_status = OK` → `ESCALADE` ;
+  6. seuils appliqués au score agrégé, puis marge.
 
   `ESCALADE` ou marge sous `min_margin` → route `human_review`, sinon route `explain`. `decision_gate` n'écrit `final_decision` que sur la route `explain` ; sur la route `human_review`, c'est `human_review` qui l'écrit.
 
@@ -664,6 +685,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **25 septembre 2026, J3** :
   - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
   - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - gardes d'échec de nœud (tâche 10) : `guard` sur chaque nœud sauf `human_review`, `NodeFailure` dans `failures` (réducteur), escalade par `verify_extraction` et `decision_gate`, arête `validate_input → human_review`, `RetryPolicy` sur les analystes avant la garde (section `analyst_retry`), échecs exposés par `thread_status` ; `decision_gate` : l'analyste en échec vient en 2ᵉ position, après le blocage dur ;
   - CRAG (tâche 9) : requêtes à partir des types et valeurs des clauses, juge et réécriture par le modèle léger, `generate` sans LLM, références expirées signalées et jamais retenues ; `analysis_date` dans l'état et dans `AnalystInput`, exigée par `validate_input` ; `RetrievalTrace` dans `AgentVerdict` ; section `crag` de la configuration ; `DOMAIN_KINDS` ; validité des fiches héritée des articles cités ; `sync` sensible aux métadonnées ; `search` rend `valid_until` et `note` (défaut corrigé) ;
   - refonte en ports et adaptateurs, sans changement de comportement : couches `domain/`, `ports/`, `application/`, `adapters/`, racine de composition `cli.py` ; ports `LLMProvider`, `Embedder`, `Retriever`, `AuditStore` ; règles de dépendance et confinement des bibliothèques testés ; `docs/adr-002-ports-et-adaptateurs.md`.
 - **23 septembre 2026, J2** :

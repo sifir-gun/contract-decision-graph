@@ -19,6 +19,7 @@ from cdg.domain.state import (
     Decision,
     Domain,
     HumanDecision,
+    NodeFailure,
     RetrievalTrace,
     Route,
     Usage,
@@ -130,14 +131,14 @@ def test_valeurs_de_route_et_de_decision():
     assert set(get_args(Decision)) == {"GO", "GO_RESERVES", "NO_GO", "ESCALADE"}
 
 
-def test_seuls_verdicts_et_usage_ont_un_reducteur():
+def test_seuls_verdicts_usage_et_failures_ont_un_reducteur():
     hints = get_type_hints(ContractState, include_extras=True)
     reducers = {
         key
         for key, hint in hints.items()
         if any(meta is operator.add for meta in getattr(hint, "__metadata__", ()))
     }
-    assert reducers == {"verdicts", "usage"}
+    assert reducers == {"verdicts", "usage", "failures"}
 
 
 def test_etat_prive_des_analystes():
@@ -211,3 +212,13 @@ def test_resume_du_crag():
     }
     with pytest.raises(ValidationError):
         RetrievalTrace(queries=[], passes=-1, retained=[], expired=[])
+
+
+def test_echec_de_noeud():
+    f = NodeFailure(node="analyst", error="ValueError", message="m", attempts=1, domain="financier")
+    assert f.model_dump()["domain"] == "financier"
+    assert NodeFailure(node="extract_clauses", error="E", message="m", attempts=1).domain is None
+    with pytest.raises(ValidationError):
+        NodeFailure(node="analyst", error="E", message="m", attempts=0)
+    with pytest.raises(ValidationError):
+        NodeFailure(node="analyst", error="E", message="m", attempts=1, domain="fiscal")

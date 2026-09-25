@@ -3,18 +3,22 @@
 Le checkpointer PostgreSQL et son sérialiseur strict sont dans `checkpointer.py`.
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from functools import partial
+from typing import Any
 
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Command, Send, StateSnapshot, interrupt
+from langgraph.runtime import get_runtime
+from langgraph.types import Command, RetryPolicy, Send, StateSnapshot, interrupt
 
 from cdg.adapters.langgraph import checkpointer
 from cdg.application import crag
 from cdg.application.deps import Crag, Deps, RetrievalResult
+from cdg.application.failures import escalate
 from cdg.application.nodes.analyst import analyst
 from cdg.application.nodes.audit_seal import audit_seal
 from cdg.application.nodes.decision_gate import decision_gate
@@ -24,8 +28,8 @@ from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.domain import expiry, masking, policy
-from cdg.domain.config import DecisionConfig
-from cdg.domain.state import DOMAINS, AnalystInput, Clause, ContractState, Domain
+from cdg.domain.config import AnalystRetry, DecisionConfig
+from cdg.domain.state import DOMAINS, AnalystInput, Clause, ContractState, Domain, NodeFailure
 from cdg.ports.llm import LLMProvider
 from cdg.ports.retriever import Retriever
 
@@ -105,27 +109,106 @@ def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) 
     return run
 
 
+def guard(
+    name: str,
+    fn: Callable[[Any], dict],
+    *,
+    retry: RetryPolicy | None = None,
+    on_failure: Callable[[list[NodeFailure]], dict] | None = None,
+) -> Callable[[Any], dict]:
+    """Garde d'échec de nœud : une exception devient un `NodeFailure` dans `failures`.
+
+    - le contrôle de LangGraph (interruption, commande) passe au travers ;
+    - avec `retry`, une erreur transitoire est relancée tant qu'il reste des tentatives :
+      la RetryPolicy du nœud la reprend, et la garde n'intervient qu'après la dernière ;
+    - `on_failure` complète la mise à jour d'un nœud à plusieurs sorties (route vers
+      l'humain), à partir de tous les échecs connus.
+    """
+
+    def node(state: Any) -> dict:
+        try:
+            return fn(state)
+        except GraphBubbleUp:
+            raise
+        except Exception as exc:
+            attempt = get_runtime().execution_info.node_attempt  # 1 à la première
+            # retry_on : prédicat par défaut de RetryPolicy (erreurs réseau, 5xx...)
+            if retry is not None and retry.retry_on(exc) and attempt < retry.max_attempts:
+                raise
+            failure = NodeFailure(
+                node=name,
+                error=type(exc).__name__,
+                message=str(exc),
+                attempts=attempt,
+                domain=state.get("domain"),  # analyste seulement
+            )
+            update: dict = {"failures": [failure]}
+            if on_failure is not None:
+                update |= on_failure([*state.get("failures", []), failure])
+            return update
+
+    return node
+
+
+def retry_policy(settings: AnalystRetry) -> RetryPolicy:
+    return RetryPolicy(
+        initial_interval=settings.initial_interval_seconds,
+        backoff_factor=settings.backoff_factor,
+        max_interval=settings.max_interval_seconds,
+        max_attempts=settings.max_attempts,
+        jitter=settings.jitter,
+    )
+
+
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
-    """Câble les 9 nœuds, dépendances liées ; renvoie le graphe non compilé."""
+    """Câble les 9 nœuds, dépendances liées et gardes d'échec ; graphe non compilé.
+
+    Tout nœud est gardé, sauf `human_review`, où aboutissent les échecs. Un nœud à
+    plusieurs sorties en échec route vers l'humain (ESCALADE) ; un analyste en échec
+    ne fait pas échouer le fan-out, `decision_gate` escalade ; l'échec de l'extraction
+    est escaladé par `verify_extraction`.
+    """
+    retry = retry_policy(config.analyst_retry)
     builder = StateGraph(ContractState)
-    builder.add_node("validate_input", partial(validate_input, decision_config=config))
-    builder.add_node("extract_clauses", partial(extract_clauses, extractor=deps.extractor))
-    builder.add_node("verify_extraction", partial(verify_extraction, decision_config=config))
+    builder.add_node(
+        "validate_input",
+        guard(
+            "validate_input", partial(validate_input, decision_config=config), on_failure=escalate
+        ),
+    )
+    builder.add_node(
+        "extract_clauses",
+        guard("extract_clauses", partial(extract_clauses, extractor=deps.extractor)),
+    )
+    builder.add_node(
+        "verify_extraction",
+        guard(
+            "verify_extraction",
+            partial(verify_extraction, decision_config=config),
+            on_failure=escalate,
+        ),
+    )
     # input_schema explicite : LangGraph ne le déduit pas d'un partial
     # (voir docs/journal.md)
     builder.add_node(
         "analyst",
-        partial(analyst, crag=deps.crag, decision_config=config),
+        guard("analyst", partial(analyst, crag=deps.crag, decision_config=config), retry=retry),
         input_schema=AnalystInput,
+        retry_policy=retry,
     )
-    builder.add_node("decision_gate", partial(decision_gate, decision_config=config))
+    builder.add_node(
+        "decision_gate",
+        guard("decision_gate", partial(decision_gate, decision_config=config), on_failure=escalate),
+    )
     builder.add_node("human_review", partial(human_review, decision_config=config))
-    builder.add_node("explain", explain)
-    builder.add_node("audit_seal", audit_seal)
-    builder.add_node("reject", reject)
+    builder.add_node("explain", guard("explain", explain))
+    builder.add_node("audit_seal", guard("audit_seal", audit_seal))
+    builder.add_node("reject", guard("reject", reject))
 
     builder.add_edge(START, "validate_input")
-    builder.add_conditional_edges("validate_input", read_route, ["extract_clauses", "reject"])
+    builder.add_conditional_edges(
+        "validate_input", read_route, ["extract_clauses", "reject", "human_review"]
+    )
     builder.add_edge("extract_clauses", "verify_extraction")
     builder.add_conditional_edges(
         "verify_extraction", route_after_verify, ["extract_clauses", "analyst", "human_review"]
@@ -177,6 +260,7 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "final_decision": values.get("final_decision"),
         "margin": values.get("margin"),
         "failure_report": values.get("failure_report"),
+        "failures": [f.model_dump() for f in values.get("failures", [])],
         "reject_reason": values.get("reject_reason"),
         "human": human.model_dump() if human else None,
         "verdicts": [v.model_dump(exclude={"evidence_ids"}) for v in values.get("verdicts", [])],

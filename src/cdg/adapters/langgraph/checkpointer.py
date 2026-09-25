@@ -15,14 +15,21 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
 
-from cdg.domain.state import AgentVerdict, Clause, HumanDecision, RetrievalTrace, Usage
+from cdg.domain.state import (
+    AgentVerdict,
+    Clause,
+    HumanDecision,
+    NodeFailure,
+    RetrievalTrace,
+    Usage,
+)
 from cdg.settings import APP_ROLE
 
 # --- Sérialiseur des checkpoints ---------------------------------------------------
 
 # seuls types métier relus depuis la base ; les types sûrs de LangGraph
 # (Send, Interrupt, datetime...) restent admis par la bibliothèque
-CHECKPOINT_TYPES = (Clause, AgentVerdict, HumanDecision, RetrievalTrace, Usage)
+CHECKPOINT_TYPES = (Clause, AgentVerdict, HumanDecision, NodeFailure, RetrievalTrace, Usage)
 _BLOCKED_KINDS = {"msgpack_blocked", "msgpack_method_blocked"}
 _serde_watch = threading.local()
 

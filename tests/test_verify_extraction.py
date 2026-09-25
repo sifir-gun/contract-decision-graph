@@ -5,7 +5,7 @@ from doubles import ABSENT, CONTRACT_TEXT, clauses
 
 from cdg.application.nodes.verify_extraction import normalize, verify_extraction
 from cdg.domain.config import load_config
-from cdg.domain.state import Clause
+from cdg.domain.state import Clause, NodeFailure
 
 CONFIG = load_config()
 
@@ -104,3 +104,14 @@ def test_categorie_inattendue_sur_un_autre_type():
         for c in clauses()
     ]
     assert verify(items)["extraction_feedback"] == ["catégorie inattendue: revision_prix"]
+
+
+def test_extraction_en_echec_escalade_sans_verification():
+    failure = NodeFailure(node="extract_clauses", error="LLMOutputError", message="m", attempts=1)
+    state = {"raw_text": CONTRACT_TEXT, "extraction_attempts": 0, "failures": [failure]}
+    out = verify_extraction(state, decision_config=CONFIG)
+    assert out == {
+        "route": "human_review",
+        "proposed_decision": "ESCALADE",
+        "failure_report": {"stage": "noeuds", "failures": [failure.model_dump()]},
+    }
