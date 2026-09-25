@@ -7,6 +7,7 @@ reportées au journal avec la date et les modèles.
 """
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,33 @@ CONTRACTS = {
 }
 
 
+# limite du compte pour le modèle principal (console Mistral, 25/09/2026) ; l'API ne compte
+# que les tokens consommés, max_tokens n'est pas réservé (mesuré le même jour)
+ACCOUNT_TOKENS_PER_MINUTE = 20_000
+
+
+class Pacer:
+    """Cadence des extractions : après un essai qui a consommé t tokens, attendre
+    t × 60 / limite secondes avant le suivant. Pas une relance : seulement un espacement,
+    pour ne pas provoquer soi-même un 429."""
+
+    def __init__(self, tokens_per_minute: int):
+        self.tokens_per_minute, self.next_at = tokens_per_minute, 0.0
+
+    def wait(self) -> None:
+        delay = self.next_at - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+    def consumed(self, tokens: int) -> None:
+        self.next_at = time.monotonic() + tokens * 60 / self.tokens_per_minute
+
+
+@pytest.fixture(scope="module")
+def pace():
+    return Pacer(ACCOUNT_TOKENS_PER_MINUTE)
+
+
 @pytest.fixture(scope="module")
 def series_10():
     """Mesure de la série, par contrat : essais qui aboutissent aux analystes, citations
@@ -127,11 +155,12 @@ def value_gaps(clauses, expected: dict) -> list[str]:
 
 @pytest.mark.parametrize("contract", CONTRACTS)
 @pytest.mark.parametrize("run", RUNS)
-def test_10_vrai_modele_aucune_citation_non_verifiee(llm, series_10, contract, run):
+def test_10_vrai_modele_aucune_citation_non_verifiee(llm, series_10, pace, contract, run):
     """L'extraction réelle ne doit mener aux analystes qu'avec des citations toutes
     retrouvées mot pour mot dans le texte masqué ; sinon ré-extraction avec retour ciblé,
     puis ESCALADE avec rapport d'échec. L'issue de chaque essai entre dans la mesure."""
     text, parties, expected = CONTRACTS[contract]
+    pace.wait()
     graph = compiled(Deps(extractor=LLMExtractor(llm), crag=FakeCrag()))
     thread = f"llm-10-{contract}-{run}"
     orchestrator.run_contract(graph, thread, text, parties, analysis_date=ANALYSIS_DATE)
@@ -151,6 +180,7 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(llm, series_10, contract, r
         "echecs": [f"{f.node} : {f.message[:120]}" for f in failures],
         "tokens": sum(u.tokens_in + u.tokens_out for u in values.get("usage", [])),
     }
+    pace.consumed(line["tokens"])
     series_10[contract].append(line)
     report("10", run, contrat=contract, modele=CONFIG.llm.model("main"), **line)
 
