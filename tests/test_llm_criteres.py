@@ -29,10 +29,11 @@ pytestmark = pytest.mark.llm
 
 CONFIG = load_config()
 RUNS = range(1, 6)
-CONTRACT = (Path(__file__).parent / "fixtures" / "contrat-synthetique-llm.txt").read_text(
-    encoding="utf-8"
-)
+FIXTURES = Path(__file__).parent / "fixtures"
+CONTRACT = (FIXTURES / "contrat-synthetique-llm.txt").read_text(encoding="utf-8")
 PARTIES = ["Alpha Services Synthétiques", "Bêta Achats Synthétiques"]
+CONTRACT_FULL = (FIXTURES / "contrat-synthetique-complet.txt").read_text(encoding="utf-8")
+PARTIES_FULL = ["Gamma Transports Synthétiques", "Delta Industries Synthétiques"]
 
 
 @pytest.fixture(scope="module")
@@ -54,9 +55,12 @@ def compiled(deps: Deps):
 
 # --- Critère 10 : aucun analyste sur une citation non vérifiée -------------------------
 
-# Contrat valide : chaque clause stipulée se cite mot pour mot ; ni pénalités d'exécution ni
-# délai de paiement n'y figurent, une extraction correcte les déclare absents. Valeurs attendues :
-# pour information (écarts consignés), le critère porte sur les citations.
+# Deux contrats de mesure, mesurés séparément. Valeurs attendues (présence, valeur,
+# catégorie) : pour information, écarts consignés ; le critère porte sur les citations.
+# - « valide » : chaque clause stipulée se cite mot pour mot ; ni pénalités d'exécution ni
+#   délai de paiement n'y figurent, une extraction correcte les déclare absents ;
+# - « complet » : les 10 types présents, et un piège, des pénalités de retard de paiement
+#   dues par l'acheteur, qui ne sont ni des pénalités d'exécution ni un délai de paiement.
 EXPECTED = {
     "responsabilite_acheteur": (True, 100.0, None),
     "responsabilite_fournisseur": (True, 150.0, None),
@@ -69,46 +73,68 @@ EXPECTED = {
     "accord_traitement_donnees": (True, None, None),
     "transfert_hors_ue": (True, None, "sans_transfert"),
 }
+EXPECTED_FULL = {
+    "responsabilite_acheteur": (True, 100.0, None),
+    "responsabilite_fournisseur": (True, 120.0, None),
+    "revision_prix": (True, 2.0, None),
+    "penalites_execution": (True, 8.0, None),
+    "delai_paiement": (True, 45.0, "fin_de_mois"),
+    "duree_engagement": (True, 36.0, None),
+    "preavis_resiliation": (True, 6.0, None),
+    "donnees_personnelles": (True, None, None),
+    "accord_traitement_donnees": (True, None, None),
+    "transfert_hors_ue": (True, None, "clauses_contractuelles_types"),
+}
+CONTRACTS = {
+    "valide": (CONTRACT, PARTIES, EXPECTED),
+    "complet": (CONTRACT_FULL, PARTIES_FULL, EXPECTED_FULL),
+}
 
 
 @pytest.fixture(scope="module")
-def serie_10():
-    """Mesure de la série : essais qui aboutissent aux analystes, citations toutes
-    vérifiées. Un système qui escaladerait toujours passerait le critère avec 0/5 ici.
+def series_10():
+    """Mesure de la série, par contrat : essais qui aboutissent aux analystes, citations
+    toutes vérifiées. Un système qui escaladerait toujours passerait le critère avec 0/5.
     Pas de seuil pour l'instant : le taux est consigné au journal."""
-    outcomes: list[dict] = []
+    outcomes: dict[str, list[dict]] = {name: [] for name in CONTRACTS}
     yield outcomes
-    reached = [o for o in outcomes if o["issue"] == "analystes"]
-    summary = {
-        "critere": "10",
-        "mesure": "aboutissement aux analystes, citations toutes vérifiées",
-        "taux": f"{len(reached)}/{len(outcomes)}",
-        "au_premier_essai": sum(o["essais_extraction"] == 1 for o in reached),
-        "issues": [o["issue"] for o in outcomes],
-        "extractions_exactes": sum(not o["ecarts_de_valeur"] for o in reached),
-    }
-    print("\nLLM-SERIE " + json.dumps(summary, ensure_ascii=False))
+    for name, lines in outcomes.items():
+        if not lines:
+            continue
+        reached = [o for o in lines if o["issue"] == "analystes"]
+        summary = {
+            "critere": "10",
+            "contrat": name,
+            "mesure": "aboutissement aux analystes, citations toutes vérifiées",
+            "taux": f"{len(reached)}/{len(lines)}",
+            "au_premier_essai": sum(o["essais_extraction"] == 1 for o in reached),
+            "issues": [o["issue"] for o in lines],
+            "extractions_exactes": sum(not o["ecarts_de_valeur"] for o in reached),
+        }
+        print("\nLLM-SERIE " + json.dumps(summary, ensure_ascii=False))
 
 
-def value_gaps(clauses) -> list[str]:
+def value_gaps(clauses, expected: dict) -> list[str]:
     extracted = {c.kind: c for c in clauses}
     gaps = []
-    for kind, expected in EXPECTED.items():
+    for kind, wanted in expected.items():
         c = extracted.get(kind)
         got = (c.present, c.value, c.category) if c else None
-        if got != expected:
-            gaps.append(f"{kind} : attendu {expected}, obtenu {got}")
+        if got != wanted:
+            gaps.append(f"{kind} : attendu {wanted}, obtenu {got}")
     return gaps
 
 
+@pytest.mark.parametrize("contract", CONTRACTS)
 @pytest.mark.parametrize("run", RUNS)
-def test_10_vrai_modele_aucune_citation_non_verifiee(llm, serie_10, run):
+def test_10_vrai_modele_aucune_citation_non_verifiee(llm, series_10, contract, run):
     """L'extraction réelle ne doit mener aux analystes qu'avec des citations toutes
     retrouvées mot pour mot dans le texte masqué ; sinon ré-extraction avec retour ciblé,
     puis ESCALADE avec rapport d'échec. L'issue de chaque essai entre dans la mesure."""
+    text, parties, expected = CONTRACTS[contract]
     graph = compiled(Deps(extractor=LLMExtractor(llm), crag=FakeCrag()))
-    thread = f"llm-10-{run}"
-    orchestrator.run_contract(graph, thread, CONTRACT, PARTIES, analysis_date=ANALYSIS_DATE)
+    thread = f"llm-10-{contract}-{run}"
+    orchestrator.run_contract(graph, thread, text, parties, analysis_date=ANALYSIS_DATE)
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     failures = values.get("failures", [])
     if failures:
@@ -121,12 +147,12 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(llm, serie_10, run):
         "issue": outcome,
         "essais_extraction": values.get("extraction_attempts", 0),
         "retours": values.get("extraction_feedback", []),
-        "ecarts_de_valeur": value_gaps(values.get("clauses", [])),
+        "ecarts_de_valeur": value_gaps(values.get("clauses", []), expected),
         "echecs": [f"{f.node} : {f.message[:120]}" for f in failures],
         "tokens": sum(u.tokens_in + u.tokens_out for u in values.get("usage", [])),
     }
-    serie_10.append(line)
-    report("10", run, modele=CONFIG.llm.model("main"), **line)
+    series_10[contract].append(line)
+    report("10", run, contrat=contract, modele=CONFIG.llm.model("main"), **line)
 
     assert failures == []  # le vrai modèle a répondu, rien n'a échoué
     if outcome == "analystes":  # les analystes ont tourné : tout est vérifié
@@ -135,7 +161,8 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(llm, serie_10, run):
         assert values["proposed_decision"] == "ESCALADE"
         assert values["failure_report"]["stage"] == "extraction"
         assert values["failure_report"]["attempts"] == CONFIG.extraction.max_attempts
-    assert "Alpha" not in values["raw_text"] and "Bêta" not in values["raw_text"]
+    for party in parties:  # masquées avant le graphe
+        assert party.split()[0] not in values["raw_text"]
 
 
 # --- Critère 3 : CRAG hors corpus, INSUFFISANT puis ESCALADE, rien d'inventé ------------

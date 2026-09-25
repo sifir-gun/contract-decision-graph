@@ -853,3 +853,12 @@ Nouvelle catégorie `facture_periodique` pour `delai_paiement` : plafond de 45 j
 - **Coût** : 10 recherches par contrat au lieu de 4, donc jusqu'à 10 appels au juge, et 20 en cas de réécriture partout.
 - **Doublure `FakeLLM`** : une réponse prévue pour un nœud vaut pour ses sous-nœuds (`crag_grade:financier` pour chaque clause du domaine) ; une réponse propre à une clause reste possible.
 - **Test `llm` du critère 3** adapté (2 passes par clause financière ; témoin juridique justifié clause par clause), vérifié sans réseau avec un faux juge.
+
+**Réingestion réelle après les corrections du corpus** (art. 32, fiches `delais-paiement` et `revision-prix`) : 3 extraits remplacés, 64 inchangés, 67 au total.
+
+### J3 tâche 12 : second contrat de mesure du critère 10 (décision du 25/09)
+
+- **`tests/fixtures/contrat-synthetique-complet.txt`** : les 10 types présents. Valeurs attendues : responsabilités 100 % et 120 %, révision 2 %, pénalités d'exécution plafonnées à 8 % du montant du contrat, paiement à 45 jours fin de mois, durée 36 mois, préavis 6 mois, données personnelles et accord de traitement présents, transfert encadré par les clauses types de la Commission.
+- **Un piège** : des pénalités de retard de paiement dues par l'acheteur (trois fois le taux d'intérêt légal, indemnité forfaitaire), qu'une extraction correcte ne prend ni pour des pénalités d'exécution ni pour un délai de paiement.
+- **Mesure séparée** : le test du critère 10 est paramétré par contrat (`valide`, `complet`) ; une ligne `LLM-SERIE` par contrat. 15 tests `llm` en tout.
+- **Vérifié sans réseau** : une extraction exacte simulée du contrat complet aboutit aux analystes au premier essai, sans écart de valeur ; le masquage des parties ne casse aucune citation.

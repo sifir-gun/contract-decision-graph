@@ -1,0 +1,37 @@
+CONTRAT DE PRESTATION DE SERVICES LOGISTIQUES
+Document entièrement synthétique, rédigé pour les tests du projet. Aucune partie réelle.
+
+Entre la société Gamma Transports Synthétiques, ci-après dénommée le Prestataire,
+et la société Delta Industries Synthétiques, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire assure pour l'Acheteur le transport et le stockage de pièces détachées, dans les conditions décrites au présent contrat et dans son annexe technique.
+
+Article 2 - Durée
+Le présent contrat est conclu pour une durée de 36 mois à compter de sa signature. Il n'est pas renouvelable par tacite reconduction.
+
+Article 3 - Résiliation
+Chaque partie peut résilier le présent contrat moyennant un préavis de 6 mois, notifié à l'autre partie par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+Le prix annuel de la prestation est fixé dans l'annexe financière. Les prix peuvent être révisés une fois par an, à la date anniversaire du contrat, dans la limite de 2 % par an.
+
+Article 5 - Conditions de paiement
+Les factures sont payables à 45 jours fin de mois à compter de leur date d'émission.
+Tout retard de paiement de l'Acheteur rend exigibles des pénalités de retard au taux de trois fois le taux d'intérêt légal, ainsi que l'indemnité forfaitaire pour frais de recouvrement.
+
+Article 6 - Pénalités de retard d'exécution
+En cas de retard de livraison imputable au Prestataire, celui-ci est redevable de pénalités de 0,5 % du montant du contrat par semaine de retard, dans la limite de 8 % du montant du contrat.
+
+Article 7 - Responsabilité
+La responsabilité de l'Acheteur au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+La responsabilité du Prestataire au titre du présent contrat est plafonnée à 120 % du montant annuel du contrat.
+
+Article 8 - Données à caractère personnel
+Pour l'exécution du présent contrat, le Prestataire traite des données à caractère personnel, à savoir les coordonnées des destinataires des livraisons, pour le compte de l'Acheteur.
+Les parties concluent un accord de sous-traitance conforme à l'article 28 du règlement général sur la protection des données, annexé au présent contrat.
+Les données sont hébergées dans l'Union européenne ; le support technique, assuré depuis un pays tiers, y accède dans le cadre des clauses types de protection des données adoptées par la Commission européenne.
+
+Article 9 - Droit applicable
+Le présent contrat est soumis au droit français. Tout différend relatif à son exécution sera porté devant les juridictions compétentes, après une tentative de règlement amiable.
