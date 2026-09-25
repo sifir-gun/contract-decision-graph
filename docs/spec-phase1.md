@@ -79,12 +79,13 @@ Chaque analyste appelle le sous-graphe CRAG pour récupérer les références ut
 | reject | Verdict d'invalidité explicite : `reject_reason` renseigné, `final_decision` reste `None` (pas de valeur « invalide » dans `Decision`) ; mène à `audit_seal`, car un rejet est scellé comme le reste | Non |
 
 Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1. `application/crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`), qui passent par les ports `Retriever` et `LLMProvider` ; le sous-graphe est compilé dans `adapters/langgraph/orchestrator.py`, seul paquet à importer LangGraph (J3). Détail (J3) :
-- **Requête** : construite à partir des seuls types, valeurs et catégories des clauses du domaine (`DOMAIN_KINDS`), jamais de leurs citations. Aucun texte du contrat n'atteint le CRAG.
-- **retrieve** : `Retriever.search(domaine, requête, k=crag.top_k)`.
+- **Requête** : une par type de clause du domaine (`DOMAIN_KINDS`), construite à partir du seul type, de la valeur et de la catégorie de la clause, jamais de sa citation. Aucun texte du contrat n'atteint le CRAG. Le sous-graphe traite une clause ; l'analyste l'invoque pour chaque type de son domaine (`per_clause`).
+- **retrieve** : `Retriever.search(domaine, requête, k=crag.top_k)`, `top_k` extraits par requête.
 - **grade** : modèle `light`. Les extraits sont délimités comme données (`<<<EXTRAIT n>>>`), le juge rend les numéros des extraits pertinents. Un numéro hors liste ou répété lève `LLMOutputError`, jamais ignoré. Sans extrait, le juge n'est pas appelé. Route `generate` si un extrait est pertinent ou si `crag.max_passes` recherches ont été faites, sinon `rewrite`.
-- **rewrite** : modèle `light`, à partir des seules requêtes déjà essayées.
-- **generate** : sans LLM. Retient les références (dédoublonnées) des extraits pertinents en vigueur à la date d'analyse. Une référence dont la version a expiré (`valid_until` atteinte) est signalée dans les constats et jamais retenue ; si toutes ont expiré, ou si aucun extrait n'est pertinent, le statut est `INSUFFISANT`.
-- **Résumé** : le CRAG rend `RetrievalResult` (statut, références retenues, consommation, constats, résumé `RetrievalTrace`). L'analyste ajoute les constats du CRAG à ceux des règles, et porte le résumé dans `AgentVerdict.retrieval`.
+- **rewrite** : modèle `light`, à partir du sujet de la clause et des seules requêtes déjà essayées pour elle.
+- **generate** : sans LLM, pour une clause. Retient les références (dédoublonnées) des extraits pertinents en vigueur à la date d'analyse. Une référence dont la version a expiré (`valid_until` atteinte) est signalée dans les constats et jamais retenue.
+- **combine** : le domaine est `INSUFFISANT` dès qu'une de ses clauses n'a aucune référence en vigueur (constat « aucune référence en vigueur retenue pour la clause … ») : l'issue la plus prudente l'emporte. Les références retenues du domaine sont l'union de celles des clauses.
+- **Résumé** : le CRAG rend `RetrievalResult` (statut, références retenues, consommation, constats, résumé `RetrievalTrace`, une entrée `ClauseRetrieval` par type de clause : chaque référence retenue est rattachée à la clause qu'elle justifie). L'analyste ajoute les constats du CRAG à ceux des règles, et porte le résumé dans `AgentVerdict.retrieval`.
 - **Fiches** : une fiche prend la plus proche des fins de validité des articles qu'elle cite (elle les paraphrase, elle expire avec).
 
 ## Schéma d'état
@@ -123,11 +124,16 @@ class Clause(BaseModel):
     category: str | None = None  # transfert_hors_ue seulement (TransferCategory)
 
 
-class RetrievalTrace(BaseModel):  # résumé du CRAG, pour l'audit
+class ClauseRetrieval(BaseModel):  # résumé du CRAG pour un type de clause
+    kind: str
     queries: list[str]  # requêtes essayées, dans l'ordre
     passes: int  # recherches effectuées
     retained: list[str]  # références retenues, en vigueur à la date d'analyse
     expired: list[str]  # références pertinentes mais expirées : jamais retenues
+
+
+class RetrievalTrace(BaseModel):  # résumé du CRAG, pour l'audit
+    clauses: list[ClauseRetrieval]  # une entrée par type de clause du domaine
 
 
 class AgentVerdict(BaseModel):
@@ -318,7 +324,7 @@ Points à maîtriser :
 - **Fan-out par l'arête** : l'arête qui suit `verify_extraction` renvoie une liste de `Send` quand `route = "analysts"`, chacun portant un état privé `AnalystInput`. Vérifier dans la version installée ce retour de `Send` depuis une arête conditionnelle et la déclaration du schéma d'entrée de `analyst`.
 - **Fan-out et échecs** : les 4 analystes tournent dans le même superstep. Si un seul échoue, les écritures des autres sont conservées par le checkpointer et seul le fautif est rejoué. `RetryPolicy` sur `analyst` pour les erreurs d'API.
 - **Timeout humain, échec fermé** : `expire --older-than 24h` reprend chaque thread en attente d'un humain depuis strictement plus que le délai. Le point de départ est la date du checkpoint de suspension. La reprise se fait par une décision système `NO_GO` : `source = "systeme"`, relecteur `systeme:expire`, motif « timeout : en attente depuis … ». Elle passe par la même politique, et `audit_seal` la scellera (J4). Jamais d'approbation automatique : le modèle `HumanDecision` refuse toute décision système autre que `NO_GO`. Un thread qui a reçu des réponses refusées reste en attente, donc il expire aussi. La sélection (`expiry.py`) est pure, avec une horloge injectée ; l'appel à LangGraph reste dans `orchestrator.py`.
-- **Sous-graphe CRAG** : compilé à part avec son propre état (`CragState` : `query`, `queries`, `attempts`, `docs`, `relevant`, `route`, `usage`, `result`) et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; sa fonction de routage est annotée avec `CragState`, car LangGraph déduit un schéma de l'annotation d'une fonction de routage ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Héritage du checkpointer vérifié dans langgraph 1.2.12 : par défaut, le sous-graphe hérite du checkpointer du parent (voir le journal). Décision : `compile(checkpointer=False)`, aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Pour l'audit, le CRAG renvoie un résumé (requêtes essayées, nombre de passes, références retenues et références expirées), porté par le verdict de l'analyste, lui-même checkpointé.
+- **Sous-graphe CRAG** : compilé à part avec son propre état (`CragState` : `clause`, `query`, `queries`, `attempts`, `docs`, `relevant`, `route`, `usage`, `result`), une invocation par type de clause, et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; sa fonction de routage est annotée avec `CragState`, car LangGraph déduit un schéma de l'annotation d'une fonction de routage ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Héritage du checkpointer vérifié dans langgraph 1.2.12 : par défaut, le sous-graphe hérite du checkpointer du parent (voir le journal). Décision : `compile(checkpointer=False)`, aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Pour l'audit, le CRAG renvoie un résumé (requêtes essayées, nombre de passes, références retenues et références expirées), porté par le verdict de l'analyste, lui-même checkpointé.
 - **Isolation** : architecture inspirée de l'architecture hexagonale (ports et adaptateurs, `docs/adr-002-ports-et-adaptateurs.md`). Seul `adapters/langgraph/` importe LangGraph ; `orchestrator.py` y contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework. Règles vérifiées sur les imports (`tests/test_isolation.py`) :
   - chaque bibliothèque externe n'est importée que dans son adaptateur : langgraph dans `adapters/langgraph/`, psycopg et pgvector dans `adapters/postgres/` (psycopg aussi dans `adapters/langgraph/checkpointer.py`, car `PostgresSaver` exige une connexion psycopg), fastembed dans `adapters/fastembed.py`, mistralai et anthropic dans `adapters/llm/` ;
   - `domain/` n'importe ni `ports/`, ni `application/`, ni `adapters/` ; `ports/` n'importe que `domain/` ; `application/` importe `domain/` et `ports/`, jamais `adapters/` ; `adapters/` importe `ports/`, `domain/`, `application/` et `settings`, jamais `cli` ni une autre famille d'adaptateurs ; `cli.py` est la racine de composition ;
@@ -361,7 +367,7 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
   - nombre maximal d'essais d'extraction : 2 ;
   - LLM (`llm`) : fournisseur (`mistral` par défaut, `anthropic` en alternative), température 0, modèles par niveau, avec `main` pour l'extraction et `light` pour le juge CRAG. Les identifiants sont **figés** (alias `-latest` refusés), car le modèle est scellé dans l'audit. Configuration du projet, vérifiée le 2026-09-24 dans la documentation officielle : Mistral `mistral-small-2603` et `ministral-8b-2512` ; Anthropic `claude-sonnet-5` et `claude-haiku-4-5-20251001`. Les clés d'API restent dans `.env` ;
   - seuils des règles et pénalités de score ;
-  - CRAG (`crag`, J3) : `top_k` = 4 extraits par recherche, `max_passes` = 2 recherches au plus ;
+  - CRAG (`crag`, J3) : `top_k` = 4 extraits par requête (une requête par type de clause), `max_passes` = 2 recherches au plus par clause ;
   - reprise des analystes (`analyst_retry`, J3) : 3 tentatives, intervalle initial 1 s, facteur 2, plafond 10 s, sans gigue ;
   - reprise de l'extraction sur erreur passagère (`extraction_retry`, J3) : 3 tentatives, intervalle initial 2 s, facteur 2, plafond 20 s, sans gigue ;
   - politique d'arbitrage humain `human_policy` (J2) :
@@ -649,6 +655,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **25 septembre 2026, J3** :
   - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
   - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - CRAG : une requête par type de clause, références rattachées à leur clause (`ClauseRetrieval` dans `RetrievalTrace`), domaine `INSUFFISANT` dès qu'une clause n'a aucune référence en vigueur ;
   - `delai_paiement` : catégorie `facture_periodique`, plafond de 45 jours (`payment_delay_max_days_periodic_invoice`), même pénalité et même constat ;
   - fiches en deux sections (« Ce que dit le texte », paraphrases sourcées vérifiées mot à mot ; « Comment le projet l'applique », choix de politique d'achat), structure testée ; 7 fiches, dont `delais-paiement` (L441-10) et `penalites-execution` (C. civ. 1231-5) ;
   - transferts : clauses contractuelles types (art. 46, par. 2, c et d) distinguées des clauses ad hoc (par. 3, a) ; clauses ad hoc sans mention d'autorisation : pénalité 0,3 et constat « autorisation de l'autorité de contrôle à vérifier » (`transfer_authorization_to_verify`) ; dérogations de l'art. 49 classées `aucune_garantie`, donc bloquées ;

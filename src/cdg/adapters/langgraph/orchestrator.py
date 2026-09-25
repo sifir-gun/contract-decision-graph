@@ -101,11 +101,13 @@ def build_crag_graph(
 
 
 def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) -> Crag:
-    """CRAG injecté dans les analystes : invoque le sous-graphe compilé."""
+    """CRAG injecté dans les analystes : le sous-graphe compilé, une fois par type de clause."""
     graph = build_crag_graph(retriever, llm, config)
 
     def run(domain: Domain, clauses: list[Clause], analysis_date: date) -> RetrievalResult:
-        return graph.invoke(crag.start(domain, clauses, analysis_date))["result"]
+        return crag.per_clause(
+            domain, clauses, analysis_date, lambda state: graph.invoke(state)["result"]
+        )
 
     return run
 

@@ -843,3 +843,13 @@ Nouvelle catégorie `facture_periodique` pour `delai_paiement` : plafond de 45 j
 ### J3 : titre en double dans RGPD art. 32 (décision du 25/09, point 4)
 
 `raw/rgpd/art-32.txt` commençait par deux lignes « Article 32 ». Seule la seconde est supprimée : diff d'une ligne, texte inchangé. L'intitulé ingéré redevient « Sécurité du traitement ». Nouveau test : `test_aucun_fichier_brut_ne_repete_sa_ligne_de_titre` échoue si la première ligne d'un fichier brut y apparaît une seconde fois (vérifié rouge sur l'ancien fichier, et seulement sur lui).
+
+### J3 : CRAG, une requête par type de clause (décision du 25/09, point 5)
+
+- **Une requête par type de clause** du domaine, construite à partir de la seule clause (type, valeur, catégorie). Le sous-graphe traite une clause ; `crag.per_clause` l'invoque pour chaque type de `DOMAIN_KINDS`, dans l'ordre, et `crag.combine` rassemble les résultats. Le juge et la réécriture voient le sujet de la clause ; leurs nœuds de consommation sont nommés par clause (`crag_grade:financier:delai_paiement`).
+- **Rattachement** : `RetrievalTrace` contient une entrée `ClauseRetrieval` par type de clause (requêtes, passes, références retenues, références expirées). Les `evidence_ids` du verdict sont l'union des références retenues. `ClauseRetrieval` est ajouté à la liste des types autorisés du sérialiseur.
+- **Statut du domaine** (non précisé par la décision, choix à valider) : `INSUFFISANT` dès qu'une clause du domaine n'a aucune référence en vigueur, avec un constat qui nomme la clause. C'est la lecture prudente : chaque clause jugée par une règle doit être étayée. Conséquence : plus d'escalades qu'avant, où une seule référence suffisait pour tout le domaine.
+- **`top_k` par requête** : inchangé dans la configuration (4) ; commentaire précisé.
+- **Coût** : 10 recherches par contrat au lieu de 4, donc jusqu'à 10 appels au juge, et 20 en cas de réécriture partout.
+- **Doublure `FakeLLM`** : une réponse prévue pour un nœud vaut pour ses sous-nœuds (`crag_grade:financier` pour chaque clause du domaine) ; une réponse propre à une clause reste possible.
+- **Test `llm` du critère 3** adapté (2 passes par clause financière ; témoin juridique justifié clause par clause), vérifié sans réseau avec un faux juge.

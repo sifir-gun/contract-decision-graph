@@ -108,7 +108,7 @@ corpus:
 
 # CRAG (J3) : recherche, juge de pertinence (modèle léger), réécriture, puis INSUFFISANT.
 crag:
-  top_k: 4          # extraits rendus par recherche, soumis au juge
+  top_k: 4          # extraits par requête (une requête par type de clause), soumis au juge
   max_passes: 2     # recherches au plus : la première, puis une réécriture
 
 # Reprise d'un analyste sur erreur transitoire (réseau, API), par la RetryPolicy de

@@ -1,17 +1,21 @@
 """CRAG : recherche corrective dans le corpus, en fonctions pures (nœuds du sous-graphe).
 
-retrieve, puis grade (juge de pertinence, modèle léger) ; generate si un extrait est
-pertinent, sinon rewrite et nouvelle recherche, dans la limite de `crag.max_passes` ;
-au-delà, INSUFFISANT. Le sous-graphe est compilé dans `adapters/langgraph/orchestrator.py`,
-sans checkpointer.
+Une recherche par type de clause du domaine (`DOMAIN_KINDS`). Pour chacune : retrieve,
+puis grade (juge de pertinence, modèle léger) ; generate si un extrait est pertinent,
+sinon rewrite et nouvelle recherche, dans la limite de `crag.max_passes`. Le sous-graphe,
+compilé sans checkpointer dans `adapters/langgraph/orchestrator.py`, traite une clause ;
+`per_clause` l'applique à chaque type du domaine et `combine` rassemble les résultats.
 
-- Les requêtes sont construites à partir des seuls types, valeurs et catégories des
-  clauses, jamais de leurs citations : aucun texte du contrat n'atteint le CRAG.
-- generate n'appelle aucun LLM : il rassemble les références retenues. Une référence
-  dont la version a expiré à la date d'analyse est signalée et jamais retenue ; si toutes
-  les références pertinentes ont expiré, le statut est INSUFFISANT.
+- La requête d'une clause est construite à partir de son seul type, de sa valeur et de sa
+  catégorie, jamais de sa citation : aucun texte du contrat n'atteint le CRAG.
+- generate n'appelle aucun LLM : il rassemble les références retenues pour la clause.
+  Une référence dont la version a expiré à la date d'analyse est signalée et jamais
+  retenue.
+- Le domaine est INSUFFISANT dès qu'une de ses clauses n'a aucune référence en vigueur :
+  l'issue la plus prudente l'emporte.
 """
 
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict
@@ -24,6 +28,7 @@ from cdg.domain.models import (
     CLAUSE_CATEGORIES,
     DOMAIN_KINDS,
     Clause,
+    ClauseRetrieval,
     Domain,
     RetrievalTrace,
     Usage,
@@ -74,9 +79,17 @@ _CATEGORY_LABELS = {c: c.replace("_", " ") for c in CLAUSE_CATEGORIES} | {
 }
 
 
+class ClauseResult(BaseModel):
+    """Résultat du CRAG pour une clause : son résumé, ses constats, sa consommation."""
+
+    trace: ClauseRetrieval
+    findings: list[str]
+    usage: list[Usage]
+
+
 class CragState(TypedDict, total=False):
     domain: Domain
-    clauses: list[Clause]
+    clause: Clause  # la clause recherchée : une requête par type de clause
     analysis_date: date
     query: str  # requête courante
     queries: list[str]  # requêtes essayées, dans l'ordre
@@ -85,7 +98,7 @@ class CragState(TypedDict, total=False):
     relevant: list[Passage]  # extraits jugés pertinents
     route: Literal["rewrite", "generate"]  # écrite par grade, lue par l'arête
     usage: list[Usage]
-    result: RetrievalResult
+    result: ClauseResult
 
 
 class GradeOutput(BaseModel):
@@ -110,18 +123,17 @@ def _describe(clause: Clause) -> str:
     return f"{subject} : {detail}"
 
 
-def initial_query(domain: Domain, clauses: list[Clause]) -> str:
-    """Requête du domaine : types, valeurs et catégories des clauses, jamais les citations."""
-    by_kind = {c.kind: c for c in clauses}
-    return f"{domain} : " + " ; ".join(_describe(by_kind[k]) for k in DOMAIN_KINDS[domain])
+def clause_query(domain: Domain, clause: Clause) -> str:
+    """Requête d'une clause : son type, sa valeur et sa catégorie, jamais sa citation."""
+    return f"{domain} : {_describe(clause)}"
 
 
-def start(domain: Domain, clauses: list[Clause], analysis_date: date) -> CragState:
+def start(domain: Domain, clause: Clause, analysis_date: date) -> CragState:
     return {
         "domain": domain,
-        "clauses": clauses,
+        "clause": clause,
         "analysis_date": analysis_date,
-        "query": initial_query(domain, clauses),
+        "query": clause_query(domain, clause),
         "queries": [],
         "attempts": 0,
         "usage": [],
@@ -142,7 +154,13 @@ def _grade_message(state: CragState) -> str:
         f"<<<EXTRAIT {n}>>>\n{p.reference}\n{p.text}\n<<<FIN EXTRAIT {n}>>>"
         for n, p in enumerate(state["docs"], start=1)
     ]
-    return f"Domaine : {state['domain']}\nRecherche : {state['query']}\n\n" + "\n\n".join(blocks)
+    subject = _SUBJECTS[state["clause"].kind][0]
+    header = f"Domaine : {state['domain']}\nClause : {subject}\nRecherche : {state['query']}"
+    return header + "\n\n" + "\n\n".join(blocks)
+
+
+def _node(state: CragState, step: str) -> str:
+    return f"crag_{step}:{state['domain']}:{state['clause'].kind}"
 
 
 def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
@@ -154,12 +172,13 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
             system=_GRADE_SYSTEM,
             user=_grade_message(state),
             schema=GradeOutput,
-            node=f"crag_grade:{state['domain']}",
+            node=_node(state, "grade"),
         )
         numbers = output.relevant
         if len(set(numbers)) != len(numbers) or not all(1 <= n <= len(docs) for n in numbers):
             raise LLMOutputError(
-                f"juge CRAG ({state['domain']}) : numéro d'extrait invalide ou répété : "
+                f"juge CRAG ({state['domain']}, {state['clause'].kind}) : numéro d'extrait "
+                "invalide ou répété : "
                 f"{numbers}, {len(docs)} extraits"
             )
         relevant = [docs[n - 1] for n in sorted(numbers)]
@@ -171,19 +190,21 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
 def rewrite(state: CragState, llm: LLMProvider) -> dict:
     """Nouvelle requête (modèle léger), à partir des seules requêtes déjà essayées."""
     tried = "\n".join(f"- {q}" for q in state["queries"])
+    subject = _SUBJECTS[state["clause"].kind][0]
     output, used = llm.structured(
         tier="light",
         system=_REWRITE_SYSTEM,
-        user=f"Domaine : {state['domain']}\nRequêtes déjà essayées :\n{tried}",
+        user=f"Domaine : {state['domain']}\nClause : {subject}\nRequêtes déjà essayées :\n{tried}",
         schema=RewriteOutput,
-        node=f"crag_rewrite:{state['domain']}",
+        node=_node(state, "rewrite"),
     )
     return {"query": output.query, "usage": [*state["usage"], used]}
 
 
 def generate(state: CragState) -> dict:
-    """Références retenues, sans LLM ; les versions expirées sont signalées, jamais retenues."""
-    on, relevant = state["analysis_date"], state.get("relevant", [])
+    """Références retenues pour la clause, sans LLM ; les versions expirées sont signalées,
+    jamais retenues."""
+    on, relevant, kind = state["analysis_date"], state.get("relevant", []), state["clause"].kind
     valid = [p for p in relevant if not expired(p.valid_until, on)]
     retained = list(dict.fromkeys(p.reference for p in valid))
     old: dict[str, date] = {}
@@ -192,25 +213,46 @@ def generate(state: CragState) -> dict:
             old.setdefault(p.reference, p.valid_until)
     findings = [
         f"référence expirée à la date d'analyse ({on.isoformat()}) : {reference}, "
-        f"version en vigueur jusqu'au {until.isoformat()}, non retenue"
+        f"version en vigueur jusqu'au {until.isoformat()}, non retenue ({kind})"
         for reference, until in old.items()
     ]
     if old and not valid:
         findings.append(
-            "références pertinentes toutes expirées : elles ne peuvent pas justifier seules "
-            "le verdict"
+            f"références pertinentes toutes expirées pour la clause {kind} : elles ne "
+            "peuvent pas justifier seules le verdict"
         )
-    trace = RetrievalTrace(
+    trace = ClauseRetrieval(
+        kind=kind,
         queries=state["queries"],
         passes=state["attempts"],
         retained=retained,
         expired=list(old),
     )
-    result = RetrievalResult(
-        status="OK" if valid else "INSUFFISANT",
-        evidence_ids=retained,
-        usage=state["usage"],
+    return {"result": ClauseResult(trace=trace, findings=findings, usage=state["usage"])}
+
+
+def combine(results: list[ClauseResult]) -> RetrievalResult:
+    """Résultat du domaine : INSUFFISANT dès qu'une clause n'a aucune référence en vigueur."""
+    findings = [f for r in results for f in r.findings]
+    lacking = [r.trace.kind for r in results if not r.trace.retained]
+    findings += [f"aucune référence en vigueur retenue pour la clause {kind}" for kind in lacking]
+    return RetrievalResult(
+        status="INSUFFISANT" if lacking else "OK",
+        evidence_ids=list(dict.fromkeys(ref for r in results for ref in r.trace.retained)),
+        usage=[u for r in results for u in r.usage],
         findings=findings,
-        trace=trace,
+        trace=RetrievalTrace(clauses=[r.trace for r in results]),
     )
-    return {"result": result}
+
+
+def per_clause(
+    domain: Domain,
+    clauses: list[Clause],
+    analysis_date: date,
+    run_clause: Callable[[CragState], ClauseResult],
+) -> RetrievalResult:
+    """Une recherche par type de clause du domaine, dans l'ordre de `DOMAIN_KINDS`."""
+    by_kind = {c.kind: c for c in clauses}
+    return combine(
+        [run_clause(start(domain, by_kind[kind], analysis_date)) for kind in DOMAIN_KINDS[domain]]
+    )

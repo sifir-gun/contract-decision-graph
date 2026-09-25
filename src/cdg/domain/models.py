@@ -92,13 +92,21 @@ def category_required(clause: Clause) -> bool:
     return clause.kind != "delai_paiement" or clause.value is not None
 
 
-class RetrievalTrace(BaseModel):
-    """Résumé du CRAG d'un domaine, porté par le verdict pour l'audit."""
+class ClauseRetrieval(BaseModel):
+    """Résumé du CRAG pour un type de clause : les références qui la justifient."""
 
+    kind: str
     queries: list[str]  # requêtes essayées, dans l'ordre
     passes: int = Field(ge=0)  # recherches effectuées
     retained: list[str]  # références retenues, en vigueur à la date d'analyse
     expired: list[str]  # références pertinentes mais expirées : jamais retenues
+
+
+class RetrievalTrace(BaseModel):
+    """Résumé du CRAG d'un domaine, porté par le verdict pour l'audit : une entrée par type
+    de clause du domaine, chaque référence retenue rattachée à la clause qu'elle justifie."""
+
+    clauses: list[ClauseRetrieval]
 
 
 class AgentVerdict(BaseModel):

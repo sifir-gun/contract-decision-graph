@@ -139,7 +139,12 @@ class FakeLLM:
         self.calls.append(
             {"tier": tier, "system": system, "user": user, "schema": schema, "node": node}
         )
-        scripted = self.responses[node]
+        # réponse du nœud exact, sinon du préfixe : « crag_grade:financier » vaut pour
+        # « crag_grade:financier:revision_prix » et les autres clauses du domaine
+        key = node
+        while key not in self.responses and ":" in key:
+            key = key.rsplit(":", 1)[0]
+        scripted = self.responses[key]
         answer = scripted.pop(0) if isinstance(scripted, list) else scripted
         answer = answer(user) if callable(answer) else answer
         return schema.model_validate(answer), usage(*self.tokens, node=node)

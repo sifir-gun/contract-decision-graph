@@ -21,6 +21,7 @@ from cdg.application import ingestion
 from cdg.application.deps import Deps
 from cdg.application.extraction import LLMExtractor
 from cdg.domain.config import load_config
+from cdg.domain.models import DOMAIN_KINDS
 from cdg.domain.verification import problems_of
 from cdg.ports.retriever import Passage
 
@@ -216,7 +217,9 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
     assert values.get("failures", []) == []
     fin = by_domain["financier"]
     assert fin.retrieval_status == "INSUFFISANT" and fin.evidence_ids == []
-    assert fin.retrieval.passes == CONFIG.crag.max_passes and len(financier.queries) == 2
+    # une requête par type de clause, chacune épuise ses passes
+    assert all(c.passes == CONFIG.crag.max_passes for c in fin.retrieval.clauses)
+    assert len(financier.queries) == CONFIG.crag.max_passes * len(DOMAIN_KINDS["financier"])
     assert (values["proposed_decision"], values["route"]) == ("ESCALADE", "human_review")
     # aucune réponse inventée : toute référence retenue a été rendue par la recherche
     returned = {"financier": off_topic, "juridique": on_topic}
@@ -224,13 +227,14 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
         if verdict.domain in returned:
             assert set(verdict.evidence_ids) <= {p.reference for p in returned[verdict.domain]}
     jur = by_domain["juridique"]
-    assert jur.retrieval_status == "OK" and jur.evidence_ids  # témoin : le juge n'écarte pas tout
+    # témoin : le juge n'écarte pas tout, chaque clause juridique est justifiée
+    assert jur.retrieval_status == "OK" and all(c.retained for c in jur.retrieval.clauses)
     report(
         "3",
         run,
         modele=CONFIG.llm.model("light"),
-        financier={"statut": fin.retrieval_status, "requetes": fin.retrieval.queries},
-        juridique_temoin={"statut": jur.retrieval_status, "retenues": jur.evidence_ids},
+        financier={c.kind: c.queries for c in fin.retrieval.clauses},
+        juridique_temoin={c.kind: c.retained for c in jur.retrieval.clauses},
         decision=values["proposed_decision"],
         tokens=sum(u.tokens_in + u.tokens_out for u in values["usage"]),
     )

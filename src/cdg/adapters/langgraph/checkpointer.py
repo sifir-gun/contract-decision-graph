@@ -18,6 +18,7 @@ from psycopg.rows import dict_row
 from cdg.domain.models import (
     AgentVerdict,
     Clause,
+    ClauseRetrieval,
     HumanDecision,
     NodeFailure,
     RetrievalTrace,
@@ -29,7 +30,15 @@ from cdg.settings import APP_ROLE
 
 # seuls types métier relus depuis la base ; les types sûrs de LangGraph
 # (Send, Interrupt, datetime...) restent admis par la bibliothèque
-CHECKPOINT_TYPES = (Clause, AgentVerdict, HumanDecision, NodeFailure, RetrievalTrace, Usage)
+CHECKPOINT_TYPES = (
+    Clause,
+    AgentVerdict,
+    ClauseRetrieval,
+    HumanDecision,
+    NodeFailure,
+    RetrievalTrace,
+    Usage,
+)
 _BLOCKED_KINDS = {"msgpack_blocked", "msgpack_method_blocked"}
 _serde_watch = threading.local()
 

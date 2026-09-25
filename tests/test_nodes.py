@@ -12,7 +12,7 @@ from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.domain.config import load_config
 from cdg.domain.input_checks import rejection
-from cdg.domain.models import REQUIRED_KINDS, AgentVerdict, RetrievalTrace
+from cdg.domain.models import REQUIRED_KINDS, AgentVerdict, ClauseRetrieval, RetrievalTrace
 
 CONFIG = load_config()
 
@@ -140,7 +140,14 @@ def test_analyst_transmet_le_statut_insuffisant():
 
 
 def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
-    trace = RetrievalTrace(queries=["q1"], passes=1, retained=["Fiche"], expired=["L441-10"])
+    clause = ClauseRetrieval(
+        kind="penalites_execution",
+        queries=["q1"],
+        passes=1,
+        retained=["Fiche"],
+        expired=["L441-10"],
+    )
+    trace = RetrievalTrace(clauses=[clause])
 
     def crag(domain, clauses, analysis_date):
         assert analysis_date == ANALYSIS_DATE

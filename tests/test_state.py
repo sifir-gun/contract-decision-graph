@@ -18,6 +18,7 @@ from cdg.domain.models import (
     TRANSFER_CATEGORIES,
     AgentVerdict,
     Clause,
+    ClauseRetrieval,
     Decision,
     Domain,
     HumanDecision,
@@ -215,16 +216,23 @@ def test_verdict_sans_resume_du_crag_par_defaut():
     assert v.retrieval is None
 
 
-def test_resume_du_crag():
-    trace = RetrievalTrace(queries=["q1", "q2"], passes=2, retained=[], expired=["L441-10"])
-    assert trace.model_dump() == {
-        "queries": ["q1", "q2"],
-        "passes": 2,
-        "retained": [],
-        "expired": ["L441-10"],
+def test_resume_du_crag_par_clause():
+    clause = ClauseRetrieval(
+        kind="delai_paiement", queries=["q1", "q2"], passes=2, retained=[], expired=["L441-10"]
+    )
+    assert RetrievalTrace(clauses=[clause]).model_dump() == {
+        "clauses": [
+            {
+                "kind": "delai_paiement",
+                "queries": ["q1", "q2"],
+                "passes": 2,
+                "retained": [],
+                "expired": ["L441-10"],
+            }
+        ]
     }
     with pytest.raises(ValidationError):
-        RetrievalTrace(queries=[], passes=-1, retained=[], expired=[])
+        ClauseRetrieval(kind="x", queries=[], passes=-1, retained=[], expired=[])
 
 
 def test_echec_de_noeud():
