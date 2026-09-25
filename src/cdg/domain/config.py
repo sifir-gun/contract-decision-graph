@@ -83,14 +83,22 @@ class OperationnelRules(_Strict):
 class ConformiteRules(_Strict):
     # garanties nommées acceptées pour un transfert hors UE (RGPD, art. 45 et 46)
     transfer_safeguards: Annotated[list[TransferCategory], Field(min_length=1)]
+    # garanties dont l'autorisation par l'autorité de contrôle reste à vérifier (46, 3, a)
+    transfer_authorization_to_verify: list[TransferCategory]
+    transfer_authorization_score_penalty: Penalty
     unlocated_data_score_penalty: Penalty  # localisation des données non précisée
 
     @model_validator(mode="after")
     def _garanties(self) -> "ConformiteRules":
-        if len(set(self.transfer_safeguards)) != len(self.transfer_safeguards):
-            raise ValueError("transfer_safeguards contient un doublon")
-        if {"sans_transfert", "aucune_garantie"} & set(self.transfer_safeguards):
-            raise ValueError("sans_transfert et aucune_garantie ne sont pas des garanties")
+        for name in ("transfer_safeguards", "transfer_authorization_to_verify"):
+            values = getattr(self, name)
+            if len(set(values)) != len(values):
+                raise ValueError(f"{name} contient un doublon")
+            if {"sans_transfert", "aucune_garantie"} & set(values):
+                raise ValueError("sans_transfert et aucune_garantie ne sont pas des garanties")
+        both = set(self.transfer_safeguards) & set(self.transfer_authorization_to_verify)
+        if both:
+            raise ValueError(f"catégories à la fois reconnues et à vérifier : {sorted(both)}")
         return self
 
 

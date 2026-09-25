@@ -48,10 +48,13 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert c.transfer_safeguards == [
         "decision_adequation",
         "clauses_contractuelles_types",
+        "clauses_contractuelles_ad_hoc_autorisees",
         "regles_entreprise_contraignantes",
         "code_conduite",
         "certification",
     ]
+    assert c.transfer_authorization_to_verify == ["clauses_contractuelles_ad_hoc"]
+    assert c.transfer_authorization_score_penalty == 0.3
     assert c.unlocated_data_score_penalty == 0.3
     assert cfg.human_policy.allowed_decisions == ["GO", "GO_RESERVES", "NO_GO"]
     assert cfg.human_policy.allow_block_override is True
@@ -160,6 +163,10 @@ _DELETE = object()
         ("rules.conformite.transfer_safeguards", ["sans_transfert"]),
         ("rules.conformite.transfer_safeguards", ["certification", "certification"]),
         ("rules.conformite.unlocated_data_score_penalty", 1.5),
+        ("rules.conformite.transfer_authorization_to_verify", ["certification"]),  # déjà garantie
+        ("rules.conformite.transfer_authorization_to_verify", ["aucune_garantie"]),
+        ("rules.conformite.transfer_authorization_score_penalty", 1.5),
+        ("rules.conformite.transfer_authorization_score_penalty", _DELETE),
         ("embedding.model", ""),
         ("crag", _DELETE),
         ("crag.top_k", 0),

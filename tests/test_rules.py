@@ -109,6 +109,7 @@ def test_conformite_sans_blocage(donnees, accord):
         "sans_transfert",
         "decision_adequation",
         "clauses_contractuelles_types",
+        "clauses_contractuelles_ad_hoc_autorisees",  # autorisation mentionnée (art. 46, 3, a)
         "regles_entreprise_contraignantes",
         "code_conduite",
         "certification",
@@ -117,6 +118,26 @@ def test_conformite_sans_blocage(donnees, accord):
 def test_transfert_encadre_ou_absent_sans_penalite(category):
     v = run("conformite", categories={"transfert_hors_ue": category})
     assert (v.hard_block, v.score) == (False, 1.0)
+
+
+def test_clauses_ad_hoc_sans_autorisation_penalite_et_constat():
+    v = run("conformite", categories={"transfert_hors_ue": "clauses_contractuelles_ad_hoc"})
+    assert (v.hard_block, v.score) == (False, 0.7)
+    expected = (
+        "autorisation de l'autorité de contrôle à vérifier : transfert hors UE fondé sur des "
+        "clauses contractuelles ad hoc, sans mention d'autorisation (art. 46, par. 3, a) RGPD)"
+    )
+    assert v.findings == [expected]
+
+
+def test_categories_a_verifier_lues_dans_la_configuration():
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data["rules"]["conformite"]["transfer_authorization_to_verify"] = []
+    cfg = DecisionConfig.model_validate(data)
+    v = run(
+        "conformite", config=cfg, categories={"transfert_hors_ue": "clauses_contractuelles_ad_hoc"}
+    )
+    assert v.hard_block  # ni garantie reconnue, ni catégorie à vérifier : prudence
 
 
 def test_transfert_annonce_sans_garantie_bloque():

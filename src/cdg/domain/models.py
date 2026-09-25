@@ -40,7 +40,9 @@ DOMAIN_KINDS: dict[Domain, tuple[str, ...]] = {
 TransferCategory = Literal[
     "sans_transfert",  # données hébergées dans l'UE ou l'EEE
     "decision_adequation",
-    "clauses_contractuelles_types",
+    "clauses_contractuelles_types",  # adoptées ou approuvées par la Commission (46, 2, c et d)
+    "clauses_contractuelles_ad_hoc",  # propres aux parties, autorisation non mentionnée
+    "clauses_contractuelles_ad_hoc_autorisees",  # autorisation de l'autorité mentionnée (46, 3, a)
     "regles_entreprise_contraignantes",
     "code_conduite",
     "certification",

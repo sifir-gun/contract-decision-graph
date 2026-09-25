@@ -803,3 +803,12 @@ La série 1 (0/5, quota nul) n'entre pas dans la mesure : le vrai modèle n'a ja
 **Pire cumul recalculé : 0,505** (juridique 0,5, financier 0,4, conformité 0,7, opérationnel 0,4), soit `GO_RESERVES` avec une marge de 0,005, donc en revue humaine. `NO_GO` reste réservé aux blocages durs, mais de justesse ; un test fige ce calcul.
 
 **Écart relevé dans L441-10, non couvert par la règle** : « en cas de facture périodique […], le délai convenu […] ne peut dépasser quarante-cinq jours après la date d'émission de la facture » (I, 4e alinéa). Un délai de 50 jours date de facture sur factures périodiques passe la règle.
+
+### J3 : transferts, clauses types et clauses ad hoc (relecture des fiches, 25/09)
+
+- **Deux sortes de clauses contractuelles**, que la règle confondait :
+  - les clauses types de protection des données, adoptées par la Commission, ou par une autorité de contrôle puis approuvées par la Commission, qui valent garantie sans autorisation (RGPD, art. 46, par. 2, c et d) : catégorie `clauses_contractuelles_types`, inchangée ;
+  - les clauses contractuelles ad hoc, soumises à l'autorisation de l'autorité de contrôle (par. 3, a) : deux nouvelles catégories, `clauses_contractuelles_ad_hoc` (autorisation non mentionnée) et `clauses_contractuelles_ad_hoc_autorisees` (autorisation mentionnée).
+- **Règle** : les clauses ad hoc autorisées sont une garantie reconnue (`transfer_safeguards`) ; les clauses ad hoc sans mention d'autorisation (`transfer_authorization_to_verify`) donnent une pénalité et le constat « autorisation de l'autorité de contrôle à vérifier ». La configuration refuse une catégorie à la fois reconnue et à vérifier.
+- **Montant de la pénalité : 0,3**, non fixé par le propriétaire du repo. Choisi égal à celui de la localisation non précisée, autre constat « à vérifier » du même domaine ; les deux portent sur la même clause et ne se cumulent pas, donc le pire cumul (0,505) ne change pas. À valider.
+- **Dérogations de l'art. 49** (hors corpus) : le prompt les classe en `aucune_garantie`, donc bloquées ; limite ajoutée au README.

@@ -44,10 +44,16 @@ rules:
     # jamais une liste de pays. Garanties nommées acceptées :
     transfer_safeguards:
       - decision_adequation
-      - clauses_contractuelles_types
+      - clauses_contractuelles_types              # adoptées ou approuvées par la Commission
+      - clauses_contractuelles_ad_hoc_autorisees  # autorisation de l'autorité mentionnée
       - regles_entreprise_contraignantes
       - code_conduite
       - certification
+    # clauses ad hoc sans mention d'autorisation (art. 46, par. 3, a) : pénalité et constat
+    # « autorisation de l'autorité de contrôle à vérifier », pas de blocage
+    transfer_authorization_to_verify:
+      - clauses_contractuelles_ad_hoc
+    transfer_authorization_score_penalty: 0.3
     unlocated_data_score_penalty: 0.3   # localisation des données non précisée
   operationnel:
     commitment_max_months: 36

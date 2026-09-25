@@ -25,6 +25,13 @@ def conformite(
     if transfert.present:
         if transfert.category in cfg.transfer_safeguards:
             findings.append(f"transfert hors UE encadré par une garantie : {transfert.category}")
+        elif transfert.category in cfg.transfer_authorization_to_verify:
+            penalties.append(cfg.transfer_authorization_score_penalty)
+            findings.append(
+                "autorisation de l'autorité de contrôle à vérifier : transfert hors UE fondé "
+                "sur des clauses contractuelles ad hoc, sans mention d'autorisation "
+                "(art. 46, par. 3, a) RGPD)"
+            )
         elif transfert.category != "sans_transfert":
             hard_block = True
             findings.append(

@@ -62,7 +62,8 @@ Le corpus (`data/corpus/`) réunit des textes publics (RGPD, Code de commerce, C
 ## Limites connues
 
 - **Périmètre des règles.** Seuls 10 types de clauses sont évalués : responsabilités de l'acheteur et du fournisseur, révision de prix, pénalités d'exécution dues par le fournisseur, délai de paiement par l'acheteur, durée, préavis, données personnelles, accord de traitement, transfert hors UE. Une clause d'un autre type n'est pas évaluée. Sa détection, signalée comme « clause non couverte par les règles », est prévue en phase 2.
-- **Transferts hors UE.** La règle juge la garantie que nomme le contrat, jamais la liste des pays adéquats ni la validité effective de la garantie.
+- **Transferts hors UE.** La règle juge la garantie que nomme le contrat, jamais la liste des pays adéquats ni la validité effective de la garantie. Des clauses contractuelles ad hoc sans mention d'autorisation de l'autorité de contrôle donnent une pénalité et un constat « à vérifier », pas un blocage.
+- **Dérogations de l'art. 49 du RGPD non couvertes** (consentement explicite, exécution d'un contrat, motifs d'intérêt public…) : l'article n'est pas dans le corpus. Un contrat qui fonde un transfert sur une dérogation est classé « aucune garantie », donc bloqué : erreur dans le sens prudent, à lever par un humain.
 - **Renvois non suivis.** Un article est admis s'il sert une règle, s'il est cité directement par un article qui en sert une, ou s'il définit un terme utilisé par une règle (voir `SOURCES.md`). Ne sont donc pas dans le corpus :
   - RGPD, art. 79 (renvoi de second degré, fichier conservé mais non ingéré) ;
   - RGPD, art. 34, 35, 43, 47 à 49, 63 et 93 ;
