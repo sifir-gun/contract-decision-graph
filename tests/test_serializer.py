@@ -7,8 +7,8 @@ from doubles import clauses, usage, verdict
 from langgraph.types import Interrupt, Send
 from pydantic import BaseModel
 
-from cdg.orchestrator import BlockedDeserialization, strict_serializer
-from cdg.state import HumanDecision
+from cdg.adapters.langgraph.checkpointer import BlockedDeserialization, strict_serializer
+from cdg.domain.state import HumanDecision
 
 
 class Intrus(BaseModel):

@@ -5,10 +5,10 @@ import pytest
 from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 from langgraph.types import Command
 
-from cdg import orchestrator
-from cdg.config import load_config
-from cdg.deps import Deps
-from cdg.state import AgentVerdict, HumanDecision
+from cdg.adapters.langgraph import checkpointer, orchestrator
+from cdg.application.deps import Deps
+from cdg.domain.config import load_config
+from cdg.domain.state import AgentVerdict, HumanDecision
 
 pytestmark = pytest.mark.pg
 
@@ -54,7 +54,7 @@ def test_journal_d_audit_toujours_en_ajout_seul(pg):
 
 
 def test_setup_database_idempotent(pg):
-    orchestrator.setup_database(pg.admin)
+    checkpointer.setup_database(pg.admin)
     assert grants(pg, "checkpoints") == {"SELECT", "INSERT", "UPDATE"}
 
 
@@ -82,7 +82,7 @@ def test_app_role_ne_peut_pas_supprimer_un_thread(pg, thread_id):
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
         graph.invoke({"contract_id": thread_id, "raw_text": CONTRACT_TEXT}, thread(thread_id))
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        orchestrator.delete_thread(pg.app, thread_id)
+        checkpointer.delete_thread(pg.app, thread_id)
 
 
 def test_texte_original_jamais_ecrit_en_base(pg, thread_id):

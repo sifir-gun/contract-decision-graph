@@ -3,14 +3,14 @@
 import pytest
 from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 
-from cdg.config import load_config
-from cdg.nodes.analyst import analyst
-from cdg.nodes.audit_seal import audit_seal
-from cdg.nodes.explain import explain
-from cdg.nodes.extract_clauses import extract_clauses
-from cdg.nodes.reject import reject
-from cdg.nodes.validate_input import validate_input
-from cdg.state import REQUIRED_KINDS, AgentVerdict
+from cdg.application.nodes.analyst import analyst
+from cdg.application.nodes.audit_seal import audit_seal
+from cdg.application.nodes.explain import explain
+from cdg.application.nodes.extract_clauses import extract_clauses
+from cdg.application.nodes.reject import reject
+from cdg.application.nodes.validate_input import validate_input
+from cdg.domain.config import load_config
+from cdg.domain.state import REQUIRED_KINDS, AgentVerdict
 
 CONFIG = load_config()
 

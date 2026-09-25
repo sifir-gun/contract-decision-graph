@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from cdg import expiry
-from cdg.state import HumanDecision
+from cdg.domain import expiry
+from cdg.domain.state import HumanDecision
 
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 

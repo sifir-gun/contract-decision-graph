@@ -2,7 +2,7 @@
 
 import pytest
 
-from cdg import masking
+from cdg.domain import masking
 
 
 @pytest.mark.parametrize(

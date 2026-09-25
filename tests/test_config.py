@@ -7,7 +7,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cdg.config import DEFAULT_CONFIG_PATH, ConfigError, DecisionConfig, load_config
+from cdg.domain.config import DEFAULT_CONFIG_PATH, ConfigError, DecisionConfig, load_config
 
 
 @pytest.fixture

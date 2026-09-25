@@ -9,8 +9,10 @@ from dataclasses import dataclass
 import psycopg
 import pytest
 
-from cdg import orchestrator, rag_store, settings
-from cdg.config import load_config
+from cdg import settings
+from cdg.adapters.langgraph import checkpointer
+from cdg.adapters.postgres import conninfo, rag_store
+from cdg.domain.config import load_config
 
 
 def pytest_addoption(parser):
@@ -48,7 +50,7 @@ class Pg:
 def pg() -> Pg:
     settings.load_env()
     try:
-        admin, app = settings.admin_conninfo(), settings.app_conninfo()
+        admin, app = conninfo.admin_conninfo(), conninfo.app_conninfo()
     except settings.SettingsError as exc:
         pytest.fail(f'tests PostgreSQL : {exc}. Exclusion volontaire : -m "not pg"', pytrace=False)
     try:
@@ -60,7 +62,7 @@ def pg() -> Pg:
             f"{exc}",
             pytrace=False,
         )
-    orchestrator.setup_database(admin)  # idempotent : tables du checkpointer et droits
+    checkpointer.setup_database(admin)  # idempotent : tables du checkpointer et droits
     rag_store.setup(admin, load_config().embedding.dimension)  # migration 002, idempotente
     return Pg(admin=admin, app=app)
 
@@ -70,4 +72,4 @@ def thread_id(pg) -> str:
     """Un thread par test, supprimé ensuite avec les droits administrateur."""
     tid = f"test-{uuid.uuid4()}"
     yield tid
-    orchestrator.delete_thread(pg.admin, tid)
+    checkpointer.delete_thread(pg.admin, tid)

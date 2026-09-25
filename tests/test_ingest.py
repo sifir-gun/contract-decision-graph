@@ -6,8 +6,9 @@ import psycopg
 import pytest
 from doubles import HashEmbedder
 
-from cdg import corpus, rag_store
-from cdg.config import load_config
+from cdg.adapters.postgres import rag_store
+from cdg.application import ingestion
+from cdg.domain.config import load_config
 
 pytestmark = pytest.mark.pg
 
@@ -17,7 +18,7 @@ MAX_WORDS = load_config().corpus.chunk_max_words
 
 @pytest.fixture
 def ingested(pg):
-    rows = corpus.rows(EMBEDDER, MAX_WORDS)
+    rows = ingestion.rows(EMBEDDER, MAX_WORDS)
     summary = rag_store.sync(pg.admin, rows, EMBEDDER.model)
     yield rows, summary
     with psycopg.connect(pg.admin) as conn:

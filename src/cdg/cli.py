@@ -11,9 +11,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from cdg import corpus, embeddings, expiry, orchestrator, rag_store, settings, stub_j2
-from cdg.config import load_config
-from cdg.state import Decision
+from cdg import settings, stub_j2
+from cdg.adapters import fastembed
+from cdg.adapters.langgraph import checkpointer, orchestrator
+from cdg.adapters.postgres import conninfo, rag_store
+from cdg.application import ingestion
+from cdg.domain import expiry
+from cdg.domain.config import load_config
+from cdg.domain.state import Decision
 
 STUB_NOTICE = (
     "MODE stub-j2, AUCUNE ANALYSE RÉELLE avant le J3 : les clauses sont lues "
@@ -23,12 +28,12 @@ STUB_NOTICE = (
 
 
 def _setup_db(args: argparse.Namespace) -> dict:
-    orchestrator.setup_database(settings.admin_conninfo())
-    rag_store.setup(settings.admin_conninfo(), load_config().embedding.dimension)
+    checkpointer.setup_database(conninfo.admin_conninfo())
+    rag_store.setup(conninfo.admin_conninfo(), load_config().embedding.dimension)
     return {
         "setup_db": "ok",
         "role": settings.APP_ROLE,
-        "tables": list(orchestrator.CHECKPOINT_TABLES),
+        "tables": list(checkpointer.CHECKPOINT_TABLES),
         "droits": ["SELECT", "INSERT", "UPDATE"],
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
     }
@@ -37,21 +42,21 @@ def _setup_db(args: argparse.Namespace) -> dict:
 def _fetch_embedding_model(args: argparse.Namespace) -> dict:
     config = load_config().embedding
     cache_dir = settings.embedding_cache_dir()
-    embeddings.fetch_model(config, cache_dir)
+    fastembed.fetch_model(config, cache_dir)
     return {"fetch_embedding_model": "ok", "model": config.model, "cache_dir": str(cache_dir)}
 
 
 def _ingest(args: argparse.Namespace) -> dict:
     config = load_config()
-    embedder = embeddings.FastembedEmbedder(config.embedding, settings.embedding_cache_dir())
-    rows = corpus.rows(embedder, config.corpus.chunk_max_words)
-    summary = rag_store.sync(settings.admin_conninfo(), rows, embedder.model)
+    embedder = fastembed.FastembedEmbedder(config.embedding, settings.embedding_cache_dir())
+    rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
+    summary = rag_store.sync(conninfo.admin_conninfo(), rows, embedder.model)
     return {"ingest": "ok", "model": embedder.model, **summary}
 
 
 def _graph(clauses_path: str | None = None):
     return orchestrator.open_graph(
-        load_config(), stub_j2.deps(clauses_path), settings.app_conninfo()
+        load_config(), stub_j2.deps(clauses_path), conninfo.app_conninfo()
     )
 
 

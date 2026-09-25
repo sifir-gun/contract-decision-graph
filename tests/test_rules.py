@@ -4,9 +4,9 @@ import pytest
 import yaml
 from doubles import ABSENT, clauses
 
-from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.rules import RULES
-from cdg.state import DOMAINS, Clause
+from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
+from cdg.domain.rules import RULES
+from cdg.domain.state import DOMAINS, Clause
 
 CONFIG = load_config()
 

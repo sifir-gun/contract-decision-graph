@@ -6,6 +6,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 
 from cdg import settings
+from cdg.adapters.postgres import conninfo
 
 VARS = (
     "POSTGRES_HOST",
@@ -54,8 +55,8 @@ def test_variable_exportee_prioritaire_sur_le_fichier(clean_env, tmp_path):
 
 def test_chaines_de_connexion_admin_et_app_role(clean_env, tmp_path):
     settings.load_env(_env_file(tmp_path, **FULL))
-    admin = conninfo_to_dict(settings.admin_conninfo())
-    app = conninfo_to_dict(settings.app_conninfo())
+    admin = conninfo_to_dict(conninfo.admin_conninfo())
+    app = conninfo_to_dict(conninfo.app_conninfo())
     assert (admin["user"], admin["password"], admin["host"]) == (
         "cdg_admin",
         "admin secret",
@@ -73,4 +74,4 @@ def test_chaines_de_connexion_admin_et_app_role(clean_env, tmp_path):
 def test_variable_manquante_leve_une_erreur_explicite(clean_env, tmp_path, missing):
     settings.load_env(_env_file(tmp_path, **{k: v for k, v in FULL.items() if k != missing}))
     with pytest.raises(settings.SettingsError, match=missing):
-        settings.admin_conninfo() if missing != "APP_DB_PASSWORD" else settings.app_conninfo()
+        conninfo.admin_conninfo() if missing != "APP_DB_PASSWORD" else conninfo.app_conninfo()

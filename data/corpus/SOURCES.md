@@ -4,12 +4,12 @@ Textes publics uniquement, plus des fiches rédigées pour le projet. Chaque sou
 
 ## Règle de périmètre
 
-Un article est admis s'il **sert une règle** (`src/cdg/rules/`), ou s'il est **cité directement** par un article qui sert une règle, ou s'il **définit un terme utilisé par une règle**. Les renvois de second degré ne sont pas suivis. Les renvois non récupérés sont listés dans le README (« Limites connues »).
+Un article est admis s'il **sert une règle** (`src/cdg/domain/rules/`), ou s'il est **cité directement** par un article qui sert une règle, ou s'il **définit un terme utilisé par une règle**. Les renvois de second degré ne sont pas suivis. Les renvois non récupérés sont listés dans le README (« Limites connues »).
 
 ## Récupération
 
 - Manuelle, depuis un navigateur, le **24/09/2026**. EUR-Lex et Légifrance bloquent les requêtes automatiques par une vérification anti-robots, que l'agent n'a pas contournée.
-- Un fichier `.txt` UTF-8 par article, texte copié tel qu'affiché. Le nettoyage (métadonnées de version, notes, lignes d'interface) se fait à l'ingestion, par des règles testées (`src/cdg/corpus.py`).
+- Un fichier `.txt` UTF-8 par article, texte copié tel qu'affiché. Le nettoyage (métadonnées de version, notes, lignes d'interface) se fait à l'ingestion, par des règles testées (`src/cdg/domain/corpus.py`).
 
 Licences, indiquées d'après les conditions publiées par chaque site, non vérifiées par l'agent (sites inaccessibles aux requêtes automatiques) :
 - **EUR-Lex** : réutilisation autorisée avec mention de la source (« © Union européenne, https://eur-lex.europa.eu »), selon la Décision 2011/833/UE ;

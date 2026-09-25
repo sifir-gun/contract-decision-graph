@@ -4,8 +4,8 @@ import pytest
 from doubles import CONTRACT_TEXT, FakeLLM, clauses
 from pydantic import ValidationError
 
-from cdg.extraction import ExtractionOutput, LLMExtractor
-from cdg.state import REQUIRED_KINDS, TRANSFER_CATEGORIES
+from cdg.application.extraction import ExtractionOutput, LLMExtractor
+from cdg.domain.state import REQUIRED_KINDS, TRANSFER_CATEGORIES
 
 
 def output_of(items):

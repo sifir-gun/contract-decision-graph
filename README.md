@@ -14,6 +14,20 @@ uv run python -m cdg.cli setup-db   # une fois : tables du checkpointer, droits 
 uv run pytest                       # -m "not pg" pour exclure volontairement les tests PostgreSQL
 ```
 
+## Architecture
+
+Architecture inspirée de l'architecture hexagonale (ports et adaptateurs), dans une version pragmatique :
+
+- `domain/` : règles pures (état, configuration, règles par domaine, politique d'arbitrage, masquage, nettoyage du corpus). Aucun port, aucune bibliothèque externe ;
+- `ports/` : interfaces des dépendances externes (LLM, embedding, recherche dans le corpus, journal d'audit) ;
+- `application/` : nœuds du graphe, extraction, CRAG, ingestion. Passe par les ports, jamais par un adaptateur ;
+- `adapters/` : LangGraph (orchestration, checkpointer), PostgreSQL, Mistral et Anthropic, fastembed ;
+- `cli.py` : racine de composition, qui assemble adaptateurs et graphe.
+
+Le sens des dépendances et le confinement de chaque bibliothèque dans son adaptateur sont vérifiés sur les imports (`tests/test_isolation.py`). La conformité de chaque adaptateur et de chaque doublure à son port est vérifiée par `tests/test_ports.py`.
+
+**Écart assumé : le flux vit dans le graphe.** Dans une architecture hexagonale stricte, le déroulé d'une analyse (validation, extraction, analystes, décision, arbitrage humain) serait un service de l'application, et LangGraph un simple exécutant. Ici, routes, fan-out et interruption sont câblés dans l'adaptateur LangGraph : c'est ce qui apporte checkpoints, reprise après interruption et historique par contrat. Les nœuds restent des fonctions pures, testables sans le framework ; changer d'orchestrateur voudrait dire réécrire le câblage, pas le domaine ni l'application. Détails : [docs/adr-002-ports-et-adaptateurs.md](docs/adr-002-ports-et-adaptateurs.md).
+
 ## Migrations
 
 Les fichiers `migrations/*.sql` sont appliqués par `docker/initdb/00_migrate.sh`, monté dans `docker-entrypoint-initdb.d`.

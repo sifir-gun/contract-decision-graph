@@ -11,8 +11,8 @@ Remplacés au J3 par l'extraction LLM et le CRAG réel.
 import json
 from pathlib import Path
 
-from cdg.deps import Deps, ExtractionResult, RetrievalResult
-from cdg.state import Clause, Domain
+from cdg.application.deps import Deps, ExtractionResult, RetrievalResult
+from cdg.domain.state import Clause, Domain
 
 MODE = "stub-j2"
 

@@ -1,7 +1,7 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
-from cdg.deps import ExtractionResult, RetrievalResult
-from cdg.state import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
+from cdg.application.deps import ExtractionResult, RetrievalResult
+from cdg.domain.state import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
 
 # Contrat synthétique favorable : aucune règle déclenchée.
 FAVORABLE = {

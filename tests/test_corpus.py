@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from cdg import corpus
-from cdg.config import load_config
+from cdg.application import ingestion
+from cdg.domain import corpus
+from cdg.domain.config import load_config
 
 RAW = Path(__file__).resolve().parents[1] / "data" / "corpus" / "raw"
 CONFIG = load_config()
@@ -110,7 +111,7 @@ def test_decoupage_d_un_long_article_reel():
 
 
 def test_manifeste_couvre_tout_le_corpus():
-    manifest = corpus.load_manifest()
+    manifest = ingestion.load_manifest()
     listed = {path for path, _ in manifest.files()} | set(manifest.excluded_files())
     on_disk = {p.relative_to(RAW).as_posix() for p in RAW.rglob("*.txt")}
     assert listed == on_disk
@@ -118,7 +119,7 @@ def test_manifeste_couvre_tout_le_corpus():
 
 
 def test_articles_ingérés():
-    rows = list(corpus.articles())
+    rows = list(ingestion.articles())
     refs = {a.reference for a, _ in rows}
     assert "C. com., art. L441-10" in refs and "RGPD, art. 28" in refs
     assert "RGPD, art. 79" not in refs
@@ -129,9 +130,9 @@ def test_articles_ingérés():
 
 
 def test_fiches_avertissement_et_sources():
-    fiches = corpus.load_fiches()
+    fiches = ingestion.load_fiches()
     assert len(fiches) >= 6
-    manifest = corpus.load_manifest()
+    manifest = ingestion.load_manifest()
     for fiche in fiches:
         assert fiche.body.startswith(corpus.FICHE_DISCLAIMER)
         for line in corpus.claim_lines(fiche.body):

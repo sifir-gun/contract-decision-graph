@@ -6,7 +6,7 @@ from typing import get_args, get_type_hints
 import pytest
 from pydantic import ValidationError
 
-from cdg.state import (
+from cdg.domain.state import (
     CATEGORY_KINDS,
     DOMAINS,
     REQUIRED_KINDS,

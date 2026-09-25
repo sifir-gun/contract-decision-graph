@@ -3,8 +3,8 @@
 import psycopg
 import pytest
 
-from cdg import rag_store
-from cdg.config import load_config
+from cdg.adapters.postgres import rag_store
+from cdg.domain.config import load_config
 
 pytestmark = pytest.mark.pg
 

@@ -5,9 +5,9 @@ import json
 import pytest
 from doubles import verdicts
 
-from cdg import policy
-from cdg.config import load_config
-from cdg.state import HumanDecision
+from cdg.domain import policy
+from cdg.domain.config import load_config
+from cdg.domain.state import HumanDecision
 
 CONFIG = load_config()
 BLOCKED = verdicts(juridique={"score": 0.5, "hard_block": True})

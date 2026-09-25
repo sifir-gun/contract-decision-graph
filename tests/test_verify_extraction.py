@@ -3,9 +3,9 @@
 import pytest
 from doubles import ABSENT, CONTRACT_TEXT, clauses
 
-from cdg.config import load_config
-from cdg.nodes.verify_extraction import normalize, verify_extraction
-from cdg.state import Clause
+from cdg.application.nodes.verify_extraction import normalize, verify_extraction
+from cdg.domain.config import load_config
+from cdg.domain.state import Clause
 
 CONFIG = load_config()
 

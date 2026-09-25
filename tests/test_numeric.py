@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from cdg.numeric import DECIMALS, rounded
+from cdg.domain.numeric import DECIMALS, rounded
 
 
 def test_six_decimales():

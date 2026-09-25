@@ -6,11 +6,12 @@ from doubles import ABSENT, CONTRACT_TEXT, FakeCrag, FakeLLM, FixedExtractor, cl
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Send
 
-from cdg import orchestrator
-from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.deps import Deps
-from cdg.orchestrator import build_graph, route_after_verify, strict_serializer
-from cdg.state import DOMAINS, HumanDecision
+from cdg.adapters.langgraph import orchestrator
+from cdg.adapters.langgraph.checkpointer import strict_serializer
+from cdg.adapters.langgraph.orchestrator import build_graph, route_after_verify
+from cdg.application.deps import Deps
+from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
+from cdg.domain.state import DOMAINS, HumanDecision
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
@@ -279,7 +280,7 @@ def test_run_contract_masque_avant_le_graphe():
 
 
 def test_texte_envoye_au_fournisseur_llm_est_masque():
-    from cdg.extraction import LLMExtractor
+    from cdg.application.extraction import LLMExtractor
 
     llm = FakeLLM({"extract_clauses": {"clauses": [c.model_dump() for c in clauses()]}})
     graph = build_graph(CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())).compile(
@@ -296,7 +297,7 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
 
 
 def extraction_graph(answers):
-    from cdg.extraction import LLMExtractor
+    from cdg.application.extraction import LLMExtractor
 
     llm = FakeLLM({"extract_clauses": answers})
     graph = build_graph(CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())).compile(

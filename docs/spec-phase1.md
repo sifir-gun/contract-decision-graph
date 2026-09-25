@@ -29,7 +29,7 @@ Le fan-out à 4 analystes se défend sur la latence et l'audit par domaine, pas 
 - **Pattern retenu** : Fan-out / Fan-in avec gate déterministe, plus un vérificateur sur l'extraction. Écartés : Supervisor piloté par LLM (routage fixe connu d'avance, un routeur LLM ajoute coût et surface d'attaque sans gain), Debate et Council par vote (les analystes ne répondent pas à la même question).
 - **Nature des analystes** : outils bornés sans boucle ouverte, pas des agents autonomes.
 - **Domaine de faute partagé** : les 4 analystes lisent la même extraction. Une erreur ou une injection à cet endroit les touche tous, donc 4 verdicts concordants valent un seul témoin sur les clauses (κ_E = 1). D'où le vérificateur d'extraction.
-- **Place de LangGraph** : orchestration, checkpointing, interruptions. Nœuds, règles, politique et analystes n'importent pas LangGraph, isolé derrière `orchestrator.py`.
+- **Place de LangGraph** : orchestration, checkpointing, interruptions. Nœuds, règles, politique et analystes n'importent pas LangGraph, isolé dans l'adaptateur `adapters/langgraph/`.
 
 ## Architecture du graphe
 
@@ -61,7 +61,7 @@ flowchart TD
 
 Le texte original n'est ainsi jamais écrit en base ni envoyé au LLM. `validate_input` rejette tout texte où un motif subsiste. Des tests le vérifient jusque dans les tables de checkpoints.
 
-**Nœuds purs, adaptateurs dans l'orchestrateur.** Chaque nœud de `src/cdg/nodes/` est une fonction pure qui reçoit l'état (et ses dépendances injectées : configuration, extracteur, CRAG, LLM) et renvoie un dict. `orchestrator.py` porte tout ce qui dépend de LangGraph : construction des `Send`, appel à `interrupt()`, câblage. `human_review` est un adaptateur de `orchestrator.py` qui appelle `policy.py`.
+**Nœuds purs, adaptateurs dans l'orchestrateur.** Chaque nœud de `src/cdg/application/nodes/` est une fonction pure qui reçoit l'état (et ses dépendances injectées : configuration, extracteur, CRAG, LLM) et renvoie un dict. `adapters/langgraph/orchestrator.py` porte tout ce qui dépend de LangGraph : construction des `Send`, appel à `interrupt()`, câblage. `human_review` est un adaptateur de `orchestrator.py` qui appelle `domain/policy.py`. L'architecture est inspirée de l'architecture hexagonale (ports et adaptateurs) : voir « Isolation » et `docs/adr-002-ports-et-adaptateurs.md`.
 
 Chaque analyste appelle le sous-graphe CRAG pour récupérer les références utiles à son domaine, puis applique ses règles en Python pur.
 
@@ -77,7 +77,7 @@ Chaque analyste appelle le sous-graphe CRAG pour récupérer les références ut
 | audit_seal | Sérialisation canonique, SHA-256, chaînage | Non |
 | reject | Verdict d'invalidité explicite : `reject_reason` renseigné, `final_decision` reste `None` (pas de valeur « invalide » dans `Decision`) ; mène à `audit_seal`, car un rejet est scellé comme le reste | Non |
 
-Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1. `crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`) ; le sous-graphe est compilé dans `orchestrator.py`, qui reste le seul à importer LangGraph (J3).
+Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1. `application/crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`), qui passent par les ports `Retriever` et `LLMProvider` ; le sous-graphe est compilé dans `adapters/langgraph/orchestrator.py`, seul paquet à importer LangGraph (J3).
 
 ## Schéma d'état
 
@@ -177,7 +177,7 @@ Quatre mécanismes portent la démonstration : `route` écrite dans l'état et l
 Nœuds purs, sans import de LangGraph :
 
 ```python
-# src/cdg/nodes/validate_input.py
+# src/cdg/application/nodes/validate_input.py
 def validate_input(state: ContractState) -> dict:
     ok, reason = check_contract(state["raw_text"])
     if ok:
@@ -185,7 +185,7 @@ def validate_input(state: ContractState) -> dict:
     return {"route": "reject", "reject_reason": reason}
 
 
-# src/cdg/nodes/verify_extraction.py
+# src/cdg/application/nodes/verify_extraction.py
 def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict:
     text = normalize(state["raw_text"])
     problems = [
@@ -212,7 +212,7 @@ def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> 
     }
 
 
-# src/cdg/nodes/decision_gate.py
+# src/cdg/application/nodes/decision_gate.py
 def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
     config = decision_config  # « config » est réservé par LangGraph
     d = aggregate(state["verdicts"], config)  # Python pur, sans LLM, valeurs arrondies
@@ -336,7 +336,12 @@ Points à maîtriser :
 - **Fan-out et échecs** : les 4 analystes tournent dans le même superstep. Si un seul échoue, les écritures des autres sont conservées par le checkpointer et seul le fautif est rejoué. `RetryPolicy` sur `analyst` pour les erreurs d'API.
 - **Timeout humain, échec fermé** : `expire --older-than 24h` reprend chaque thread en attente d'un humain depuis strictement plus que le délai. Le point de départ est la date du checkpoint de suspension. La reprise se fait par une décision système `NO_GO` : `source = "systeme"`, relecteur `systeme:expire`, motif « timeout : en attente depuis … ». Elle passe par la même politique, et `audit_seal` la scellera (J4). Jamais d'approbation automatique : le modèle `HumanDecision` refuse toute décision système autre que `NO_GO`. Un thread qui a reçu des réponses refusées reste en attente, donc il expire aussi. La sélection (`expiry.py`) est pure, avec une horloge injectée ; l'appel à LangGraph reste dans `orchestrator.py`.
 - **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Héritage du checkpointer vérifié dans langgraph 1.2.12 : par défaut, le sous-graphe hérite du checkpointer du parent (voir le journal). Décision : `compile(checkpointer=False)`, aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Pour l'audit, le CRAG renvoie un résumé (requêtes essayées, nombre de passes, références retenues et références expirées), porté par le verdict de l'analyste, lui-même checkpointé.
-- **Isolation** : seul `orchestrator.py` importe LangGraph ; il contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework.
+- **Isolation** : architecture inspirée de l'architecture hexagonale (ports et adaptateurs, `docs/adr-002-ports-et-adaptateurs.md`). Seul `adapters/langgraph/` importe LangGraph ; `orchestrator.py` y contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework. Règles vérifiées sur les imports (`tests/test_isolation.py`) :
+  - chaque bibliothèque externe n'est importée que dans son adaptateur : langgraph dans `adapters/langgraph/`, psycopg et pgvector dans `adapters/postgres/` (psycopg aussi dans `adapters/langgraph/checkpointer.py`, car `PostgresSaver` exige une connexion psycopg), fastembed dans `adapters/fastembed.py`, mistralai et anthropic dans `adapters/llm/` ;
+  - `domain/` n'importe ni `ports/`, ni `application/`, ni `adapters/` ; `ports/` n'importe que `domain/` ; `application/` importe `domain/` et `ports/`, jamais `adapters/` ; `adapters/` importe `ports/`, `domain/`, `application/` et `settings`, jamais `cli` ni une autre famille d'adaptateurs ; `cli.py` est la racine de composition ;
+  - chaque adaptateur et chaque doublure expose les attributs et méthodes de son port, avec la même signature (`tests/test_ports.py`).
+
+  Ports : `LLMProvider`, `Embedder`, `Retriever` (requête en texte : l'adaptateur calcule le vecteur et filtre sur son modèle), `AuditStore` (implémenté au J4 ; `append` lit la tête de chaîne et insère dans une même transaction, le calcul des empreintes reste dans le domaine). Pas de port pour l'écriture du corpus : l'ingestion est une commande d'administration, câblée dans la CLI. **Écart assumé : le flux vit dans le graphe.** Routes, fan-out et interruption sont câblés dans l'adaptateur LangGraph, pas dans un service de l'application.
 - **thread_id** : un contrat = un thread. Clé de reprise, de l'historique et du lien avec la piste d'audit.
 - **Échecs de nœud** : au J2, une exception dans un nœud (clause ou verdict manquant, erreur d'API) interrompt l'exécution. L'état reste dans le dernier checkpoint, lisible par `history`, et la CLI rend l'erreur en JSON sur stderr avec le code 1. Un test le vérifie. Étude de `error_handler` (LangGraph 1.2.12), faite par sonde :
   - un gestionnaire qui renvoie un dict voit ses écritures appliquées, puis **l'exécution s'arrête** : ni l'arête fixe ni l'arête conditionnelle du nœud en échec ne sont suivies, et `route` écrite dans l'état n'est pas lue ;
@@ -350,7 +355,7 @@ Points à maîtriser :
   - `RetryPolicy` sur les analystes pour les erreurs d'API transitoires, avant la garde.
 
   Le routage reste unique : la garde écrit `route` et les arêtes la lisent, sans `Command(goto=...)`.
-- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un `StrictSerializer` dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`), plus les types sûrs de LangGraph (`Send`, `Interrupt`, dates…). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement ; un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Même avec une liste, un type bloqué revient **dégradé en `dict`**, avec un simple avertissement : c'est un repli silencieux. `StrictSerializer` capte l'événement de blocage émis par la bibliothèque et lève `BlockedDeserialization`. Tout vit dans `orchestrator.py`.
+- **Sérialiseur des checkpoints verrouillé (J2)** : le `PostgresSaver` reçoit un `StrictSerializer` dont la liste de types désérialisables est limitée aux modèles Pydantic du projet (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`), plus les types sûrs de LangGraph (`Send`, `Interrupt`, dates…). Raison : par défaut, `langgraph-checkpoint` 4.2 désérialise n'importe quel type avec un simple avertissement ; un accès en écriture à la base des checkpoints permettrait alors une exécution de code. Même avec une liste, un type bloqué revient **dégradé en `dict`**, avec un simple avertissement : c'est un repli silencieux. `StrictSerializer` capte l'événement de blocage émis par la bibliothèque et lève `BlockedDeserialization`. Tout vit dans `adapters/langgraph/checkpointer.py`.
 
 ## Déterminisme et piste d'audit
 
@@ -510,7 +515,8 @@ contract-decision-graph/
 ├── pyproject.toml
 ├── docs/
 │   ├── spec-phase1.md          # ce document
-│   └── adr-001-fan-out.md      # décision single vs multi, pattern, gates, NO_GO sur blocage dur seul
+│   ├── adr-001-fan-out.md      # décision single vs multi, pattern, gates, NO_GO sur blocage dur seul
+│   └── adr-002-ports-et-adaptateurs.md  # couches, ports, règles de dépendance, écart assumé
 ├── config/
 │   └── decision.yaml           # poids, seuils, marge, budget, politique humaine
 ├── docker/
@@ -522,27 +528,37 @@ contract-decision-graph/
 │   ├── contracts/              # 10 contrats synthétiques + 2 piégés
 │   └── corpus/                 # SOURCES.md, manifest.yaml, raw/ (textes publics), fiches/
 ├── src/cdg/
-│   ├── orchestrator.py         # seul fichier qui importe LangGraph : adaptateurs et câblage
-│   ├── state.py                # schémas d'état et Pydantic
-│   ├── config.py               # chargement et validation Pydantic de decision.yaml
-│   ├── corpus.py               # nettoyage (versions, notes, interface), découpage, manifeste, fiches
-│   ├── embeddings.py           # embedding local (fastembed), préfixes e5, sans téléchargement implicite
-│   ├── rag_store.py            # rag_chunks : migration 002, insertion, recherche exacte filtrée
-│   ├── extraction.py           # extraction LLM (modèle main), contrat délimité comme donnée
-│   ├── prompts/                # prompts système, sans règle de décision
-│   ├── masking.py              # masquage des données personnelles avant le graphe
-│   ├── numeric.py              # fonction d'arrondi unique (gate, sérialisation canonique)
-│   ├── deps.py                 # contrats injectés : extracteur, CRAG, LLMProvider (doublures en test)
-│   ├── providers/              # fournisseurs LLM : mistral.py, anthropic.py, choisis par la config
-│   ├── settings.py             # .env (python-dotenv), chaînes de connexion
-│   ├── stub_j2.py              # mode stub-j2 de la CLI, remplacé au J3
-│   ├── expiry.py               # expire : sélection pure, décision système NO_GO
-│   ├── crag.py                 # fonctions pures du CRAG ; sous-graphe compilé dans orchestrator.py
-│   ├── nodes/                  # un fichier par nœud, fonctions pures
-│   ├── rules/                  # une fonction par domaine
-│   ├── policy.py               # arbitrage humain, lu depuis la config
-│   ├── audit.py                # canonical, seal, verify_chain
-│   └── cli.py                  # run, resume, history, expire, verify
+│   ├── cli.py                  # racine de composition : run, resume, history, expire, verify
+│   ├── settings.py             # .env (python-dotenv), variables obligatoires
+│   ├── stub_j2.py              # mode stub-j2 de la CLI, supprimé à la tâche 11 du J3
+│   ├── domain/                 # règles pures : n'importe ni ports, ni application, ni adaptateurs
+│   │   ├── state.py            # schémas d'état et Pydantic
+│   │   ├── config.py           # chargement et validation Pydantic de decision.yaml
+│   │   ├── numeric.py          # fonction d'arrondi unique (gate, sérialisation canonique)
+│   │   ├── rules/              # une fonction par domaine
+│   │   ├── policy.py           # arbitrage humain, lu depuis la config
+│   │   ├── expiry.py           # expire : sélection pure, décision système NO_GO
+│   │   ├── masking.py          # masquage des données personnelles avant le graphe
+│   │   ├── corpus.py           # nettoyage (versions, notes, interface), découpage, fiches, ChunkRow
+│   │   └── audit.py            # J4 : canonical, seal, verify_chain
+│   ├── ports/                  # interfaces des dépendances externes ; n'importent que le domaine
+│   │   ├── llm.py              # LLMProvider
+│   │   ├── embedder.py         # Embedder
+│   │   ├── retriever.py        # Retriever, Passage
+│   │   └── audit_store.py      # AuditStore, implémenté au J4
+│   ├── application/            # orchestre le domaine à travers les ports, jamais un adaptateur
+│   │   ├── nodes/              # un fichier par nœud, fonctions pures
+│   │   ├── deps.py             # dépendances injectées : Extractor, Crag, Deps (doublures en test)
+│   │   ├── extraction.py       # extraction LLM (modèle main), contrat délimité comme donnée
+│   │   ├── prompts/            # prompts système, sans règle de décision
+│   │   ├── crag.py             # fonctions pures du CRAG ; sous-graphe compilé dans l'orchestrateur
+│   │   └── ingestion.py        # lecture du corpus, extraits embarqués par le port Embedder
+│   └── adapters/               # chaque bibliothèque externe n'est importée que dans son adaptateur
+│       ├── langgraph/          # orchestrator.py (câblage, Send, interrupt, sous-graphe CRAG),
+│       │                       # checkpointer.py (PostgresSaver, sérialiseur strict)
+│       ├── postgres/           # conninfo.py, rag_store.py (corpus), audit_store.py (J4)
+│       ├── llm/                # fournisseurs mistral.py, anthropic.py, choisis par la config
+│       └── fastembed.py        # embedding local, préfixes e5, sans téléchargement implicite
 └── tests/
 ```
 
@@ -570,7 +586,7 @@ Chaque jour se termine par un commit qui passe ses tests.
 | --- | --- | --- |
 | J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
 | J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire`, étude de `error_handler` (LangGraph 1.2) pour qu'un échec de nœud produise un `failure_report` structuré | 4, 5, 11, 12 |
-| J3 | Ingestion du corpus, CRAG (fonctions pures dans `crag.py`, sous-graphe compilé dans `orchestrator.py`), gardes d'échec de nœud (clé `failures`, escalade par `decision_gate`, `RetryPolicy` sur les analystes), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
+| J3 | Ingestion du corpus, refonte en ports et adaptateurs, CRAG (fonctions pures dans `application/crag.py`, sous-graphe compilé dans `adapters/langgraph/orchestrator.py`), gardes d'échec de nœud (clé `failures`, escalade par `decision_gate`, `RetryPolicy` sur les analystes), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
 | J4 | `explain` avec validation (rejeté s'il contredit le verdict, ou s'il cite un article absent des références effectivement récupérées, avec un test), `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
 
@@ -618,8 +634,6 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **24 septembre 2026, J3** :
   - section `llm` de la configuration (Mistral par défaut, Anthropic en alternative, identifiants figés) ;
   - option pytest `--llm` ;
-  - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
-  - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
   - corpus : nettoyage explicite (version et texte modificateur en métadonnées, notes « Conformément à » sorties du texte, lignes d'interface supprimées), fin de validité stockée (migration `003`), ingestion rejouable (`ingest`), 6 fiches sourcées ;
   - type de clause `transfert_hors_ue` et champ `Clause.category` ; règle de conformité sur les transferts (RGPD, art. 44 à 46), garanties reconnues et pénalité de localisation dans `rules.conformite` ;
   - embedding local : préfixes e5 ajoutés par le code (fastembed ne le fait pas) ; poids dans `EMBEDDING_CACHE_DIR`, jamais téléchargés à l'exécution (`local_files_only`) mais par `fetch-embedding-model` ; recherche filtrée par domaine **et** par modèle d'embedding ;
@@ -628,6 +642,10 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - extraction réelle : contrat entre balises à jeton aléatoire, schéma de sortie limité aux 8 types, retour de vérification hors du bloc ;
   - masquage dans `run_contract` avant le graphe, `validate_input` complet (section `input` : `max_chars`, `min_words`, `min_french_ratio`) ;
   - interface `LLMProvider` (sortie structurée Pydantic, consommation mesurée), fournisseurs Mistral et Anthropic. `temperature` ne vaut que pour Mistral, car `messages.parse` ne l'accepte pas dans anthropic 1.8.0.
+- **25 septembre 2026, J3** :
+  - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
+  - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - refonte en ports et adaptateurs, sans changement de comportement : couches `domain/`, `ports/`, `application/`, `adapters/`, racine de composition `cli.py` ; ports `LLMProvider`, `Embedder`, `Retriever`, `AuditStore` ; règles de dépendance et confinement des bibliothèques testés ; `docs/adr-002-ports-et-adaptateurs.md`.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

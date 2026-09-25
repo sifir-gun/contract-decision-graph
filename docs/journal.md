@@ -643,3 +643,25 @@ La spec demande de vérifier, dans la version installée, si un sous-graphe hér
 3. **RGPD, art. 79 : exclusion validée.** Le fichier reste dans `raw/`, non ingéré.
 4. **Tests `llm` (tâche 12) : lancés par l'agent**, avec la clé Mistral du propriétaire du repo.
 5. **Refonte en ports et adaptateurs avant la tâche 9**, pour que le CRAG dépende d'un port dès sa création. Plan soumis avant tout code.
+
+### J3 : refonte en ports et adaptateurs (avant la tâche 9)
+
+Refonte sans changement de comportement, décidée pour que le CRAG dépende d'un port dès sa création. Détails et écart assumé (le flux vit dans le graphe) : `docs/adr-002-ports-et-adaptateurs.md`.
+
+- **Couches** : `domain/` (règles pures), `ports/` (`LLMProvider`, `Embedder`, `Retriever`, `AuditStore`), `application/` (nœuds, extraction, CRAG, ingestion, `deps.py`), `adapters/` (`langgraph/`, `postgres/`, `llm/`, `fastembed.py`) ; `cli.py`, `settings.py` et `stub_j2.py` restent à la racine du paquet.
+- **Fichiers scindés** : `deps.py` (ports LLM et embedding d'un côté, dépendances injectées de l'autre), `orchestrator.py` (câblage d'un côté, checkpointer et sérialiseur de l'autre), `corpus.py` (partie pure dans le domaine, lecture des fichiers et construction des `ChunkRow` dans `application/ingestion.py`), `settings.py` (chaînes de connexion vers `adapters/postgres/conninfo.py`, qui seul importe psycopg).
+- **Renommages** : `deps.Retriever` → `application.deps.Crag` (le nom `Retriever` passe au port de recherche) ; `rag_store.Chunk` → `ports.retriever.Passage` ; `settings._require` → `settings.require` ; `providers.LLMOutputError` → `ports.llm.LLMOutputError` (supprime l'import circulaire local des deux fournisseurs) ; `orchestrator._saver` → `checkpointer.open_saver`.
+- **Tests** : `test_isolation.py` réécrit (confinement de 6 bibliothèques, sens des dépendances pour 4 couches, indépendance des familles d'adaptateurs, chaque vérification prouvée sur une arborescence fictive) ; `test_ports.py` ajouté (signatures, 10 implémentations). Imports des tests mis à jour, aucune assertion modifiée. 368 → 405 tests.
+- **Vérification de bout en bout** : `setup-db` puis `ingest` réel après la refonte : 57 extraits inchangés, 0 inséré, 0 supprimé. Le corpus produit est identique.
+
+**Fichiers qui ne se rangent pas proprement dans une couche** (laissés comme demandé, soumis au propriétaire du repo) :
+1. `domain/state.py` mêle les modèles métier (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`) et la forme de l'état du graphe (`ContractState` avec ses réducteurs, `route`, `AnalystInput` pour les `Send`), qui relève de l'orchestration.
+2. `domain/config.py` lit un fichier (`load_config`), et porte des réglages d'adaptateurs : identifiants de modèles LLM, modèle et préfixes d'embedding.
+3. `application/nodes/decision_gate.py`, `verify_extraction.py` et `validate_input.py` contiennent de la logique de décision ou de vérification pure (ordre des gardes, agrégat, conflit, marge ; normalisation des citations ; part de mots-outils), sans aucun port : c'est du domaine logé dans des nœuds.
+4. `application/ingestion.py` lit les fichiers du corpus sans port, comme `load_config`.
+5. `domain/corpus.py` porte `ChunkRow`, qui est la ligne à écrire en base (vecteur, modèle d'embedding) : faute de port d'écriture, le domaine est le seul endroit commun à l'application et à l'adaptateur.
+
+**Pièges.**
+- **Module homonyme d'une variable.** `test_providers.py` avait une variable locale `llm` qui masquait le module `cdg.adapters.llm` importé sous ce nom : import direct de `build_provider`.
+- **`from a import b` dans l'AST.** On ne sait pas sans l'exécuter si `b` est un module ou un nom : le test considère `a` et `a.b`, ce qui suffit pour les deux règles.
+- **`corpus.py` n'était pas formaté** depuis la tâche 8 (une liste de mois sur une ligne) : reformaté par `ruff format` dans ce commit, sans changement de contenu.

@@ -14,13 +14,15 @@ pytestmark = pytest.mark.pg
 # lance le graphe puis se tue en pleine suspension, connexion PostgreSQL ouverte
 KILLED_RUN = textwrap.dedent("""
     import json, os, signal, sys
-    from cdg import orchestrator, settings, stub_j2
-    from cdg.config import load_config
+    from cdg import settings, stub_j2
+    from cdg.adapters.langgraph import orchestrator
+    from cdg.adapters.postgres import conninfo
+    from cdg.domain.config import load_config
 
     text, clauses_path, thread_id = sys.argv[1:4]
     settings.load_env()
     with orchestrator.open_graph(load_config(), stub_j2.deps(clauses_path),
-                                 settings.app_conninfo()) as graph:
+                                 conninfo.app_conninfo()) as graph:
         status = orchestrator.run_contract(graph, thread_id, open(text).read())
         print(json.dumps(status["statut"]), flush=True)
         os.kill(os.getpid(), signal.SIGKILL)

@@ -8,10 +8,11 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
-from cdg import providers
-from cdg.config import load_config
-from cdg.providers.anthropic import AnthropicProvider
-from cdg.providers.mistral import MistralProvider
+from cdg.adapters.llm import build_provider
+from cdg.adapters.llm.anthropic import AnthropicProvider
+from cdg.adapters.llm.mistral import MistralProvider
+from cdg.domain.config import load_config
+from cdg.ports.llm import LLMOutputError
 from cdg.settings import SettingsError
 
 CONFIG = load_config()
@@ -93,13 +94,13 @@ def test_mistral_modele_selon_le_niveau(tier, model):
 
 def test_mistral_reponse_non_structuree_leve():
     provider, _ = mistral(parsed=None)
-    with pytest.raises(providers.LLMOutputError, match="structurée"):
+    with pytest.raises(LLMOutputError, match="structurée"):
         provider.structured(tier="main", system="S", user="U", schema=Answer, node="n")
 
 
 def test_mistral_consommation_absente_leve():
     provider, _ = mistral(usage=None)
-    with pytest.raises(providers.LLMOutputError, match="consommation"):
+    with pytest.raises(LLMOutputError, match="consommation"):
         provider.structured(tier="main", system="S", user="U", schema=Answer, node="n")
 
 
@@ -125,7 +126,7 @@ def test_anthropic_modele_et_sortie_structuree():
 
 def test_anthropic_reponse_non_structuree_leve():
     provider, _ = anthropic(parsed=None)
-    with pytest.raises(providers.LLMOutputError):
+    with pytest.raises(LLMOutputError):
         provider.structured(tier="main", system="S", user="U", schema=Answer, node="n")
 
 
@@ -134,11 +135,11 @@ def test_anthropic_reponse_non_structuree_leve():
 
 def test_fournisseur_choisi_par_la_configuration(monkeypatch):
     monkeypatch.setenv("MISTRAL_API_KEY", "cle-de-test")
-    assert isinstance(providers.build_provider(CONFIG.llm), MistralProvider)
+    assert isinstance(build_provider(CONFIG.llm), MistralProvider)
 
 
 def test_cle_d_api_absente_erreur_explicite(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     llm = CONFIG.llm.model_copy(update={"provider": "anthropic"})
     with pytest.raises(SettingsError, match="ANTHROPIC_API_KEY"):
-        providers.build_provider(llm)
+        build_provider(llm)

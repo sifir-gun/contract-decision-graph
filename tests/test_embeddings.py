@@ -3,8 +3,9 @@
 import pytest
 from doubles import HashEmbedder
 
-from cdg import embeddings, settings
-from cdg.config import load_config
+from cdg import settings
+from cdg.adapters import fastembed
+from cdg.domain.config import load_config
 
 CONFIG = load_config().embedding
 
@@ -21,29 +22,29 @@ class FakeModel:
 
 def test_prefixes_e5_ajoutes():
     model = FakeModel()
-    embedder = embeddings.FastembedEmbedder(CONFIG, model=model)
+    embedder = fastembed.FastembedEmbedder(CONFIG, model=model)
     embedder.embed_passages(["article 28"])
     embedder.embed_query("sous-traitant")
     assert model.seen == ["passage: article 28", "query: sous-traitant"]
 
 
 def test_vecteurs_en_listes_de_la_bonne_dimension():
-    embedder = embeddings.FastembedEmbedder(CONFIG, model=FakeModel())
+    embedder = fastembed.FastembedEmbedder(CONFIG, model=FakeModel())
     [vector] = embedder.embed_passages(["texte"])
     assert isinstance(vector, list) and len(vector) == 1024
     assert (embedder.model, embedder.dimension) == ("intfloat/multilingual-e5-large", 1024)
 
 
 def test_dimension_inattendue_erreur_explicite():
-    embedder = embeddings.FastembedEmbedder(CONFIG, model=FakeModel(dimension=768))
-    with pytest.raises(embeddings.EmbeddingError, match="768"):
+    embedder = fastembed.FastembedEmbedder(CONFIG, model=FakeModel(dimension=768))
+    with pytest.raises(fastembed.EmbeddingError, match="768"):
         embedder.embed_query("texte")
 
 
 def test_poids_absents_erreur_explicite_sans_telechargement(tmp_path):
     # cache vide et local_files_only : aucune tentative réseau, erreur qui cite la commande
-    with pytest.raises(embeddings.EmbeddingError, match="fetch-embedding-model"):
-        embeddings.FastembedEmbedder(CONFIG, cache_dir=tmp_path)
+    with pytest.raises(fastembed.EmbeddingError, match="fetch-embedding-model"):
+        fastembed.FastembedEmbedder(CONFIG, cache_dir=tmp_path)
 
 
 def test_dossier_de_cache_obligatoire(monkeypatch):
@@ -76,8 +77,8 @@ def test_mise_a_plat_par_liens_physiques(tmp_path):
     (snapshot / "model.onnx_data").symlink_to(tmp_path / "blobs" / "9e" / "b")
 
     flat = tmp_path / "flat"
-    embeddings.materialize(snapshot, flat)
-    embeddings.materialize(snapshot, flat)  # idempotent
+    fastembed.materialize(snapshot, flat)
+    fastembed.materialize(snapshot, flat)  # idempotent
     for name, blob in [("model.onnx", "29/a"), ("model.onnx_data", "9e/b")]:
         target = flat / name
         assert not target.is_symlink() and target.samefile(tmp_path / "blobs" / blob)

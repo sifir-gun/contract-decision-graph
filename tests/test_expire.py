@@ -6,9 +6,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 
-from cdg import cli, orchestrator
-from cdg.config import load_config
-from cdg.deps import Deps
+from cdg import cli
+from cdg.adapters.langgraph import orchestrator
+from cdg.application.deps import Deps
+from cdg.domain.config import load_config
 
 pytestmark = pytest.mark.pg
 

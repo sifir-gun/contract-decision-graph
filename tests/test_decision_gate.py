@@ -4,9 +4,9 @@ import pytest
 import yaml
 from doubles import usage, verdict, verdicts
 
-from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.nodes.decision_gate import aggregate, conflict, decision_gate, total_tokens
-from cdg.state import DOMAINS
+from cdg.application.nodes.decision_gate import aggregate, conflict, decision_gate, total_tokens
+from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
+from cdg.domain.state import DOMAINS
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract

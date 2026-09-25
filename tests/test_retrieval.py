@@ -4,7 +4,8 @@ import psycopg
 import pytest
 from doubles import HashEmbedder
 
-from cdg import rag_store
+from cdg.adapters.postgres import rag_store
+from cdg.domain.corpus import ChunkRow
 
 pytestmark = pytest.mark.pg
 
@@ -22,7 +23,7 @@ CHUNKS = [
 @pytest.fixture
 def corpus(pg):
     rows = [
-        rag_store.ChunkRow(
+        ChunkRow(
             domain=d,
             source_id=SOURCE,
             reference=r,
@@ -40,7 +41,7 @@ def corpus(pg):
 
 def test_insertion_idempotente(pg, corpus):
     rows = [
-        rag_store.ChunkRow(
+        ChunkRow(
             domain=d,
             source_id=SOURCE,
             reference=r,
