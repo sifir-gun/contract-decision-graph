@@ -2,7 +2,7 @@
 
 import pytest
 import yaml
-from doubles import ABSENT, CONTRACT_TEXT, FakeCrag, FakeLLM, FixedExtractor, clauses
+from doubles import ABSENT, ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FakeLLM, FixedExtractor, clauses
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Send
 
@@ -26,14 +26,17 @@ def make(clause_overrides=None, statuses=None, crag_tokens=0):
 
 def run(raw_text=CONTRACT_TEXT, **kwargs):
     graph, extractor, crag = make(**kwargs)
-    out = graph.invoke({"contract_id": "c-synth-001", "raw_text": raw_text})
+    out = graph.invoke(
+        {"contract_id": "c-synth-001", "raw_text": raw_text, "analysis_date": ANALYSIS_DATE}
+    )
     return out, extractor, crag
 
 
 def updates(raw_text=CONTRACT_TEXT, **kwargs) -> list[tuple[str, dict]]:
     graph, _, _ = make(**kwargs)
     steps = graph.stream(
-        {"contract_id": "c-synth-001", "raw_text": raw_text}, stream_mode="updates"
+        {"contract_id": "c-synth-001", "raw_text": raw_text, "analysis_date": ANALYSIS_DATE},
+        stream_mode="updates",
     )
     return [(node, update) for step in steps for node, update in step.items()]
 
@@ -72,10 +75,12 @@ def test_1_quatre_analystes_puis_un_seul_decision_gate():
 
 
 def test_route_apres_verification_construit_les_send():
-    sends = route_after_verify({"route": "analysts", "clauses": clauses()})
+    state = {"route": "analysts", "clauses": clauses(), "analysis_date": ANALYSIS_DATE}
+    sends = route_after_verify(state)
     assert all(isinstance(s, Send) and s.node == "analyst" for s in sends)
     assert [s.arg["domain"] for s in sends] == list(DOMAINS)
-    assert all(set(s.arg) == {"domain", "clauses"} for s in sends)
+    assert all(set(s.arg) == {"domain", "clauses", "analysis_date"} for s in sends)
+    assert all(s.arg["analysis_date"] == ANALYSIS_DATE for s in sends)
     assert route_after_verify({"route": "human_review"}) == "human_review"
 
 
@@ -103,7 +108,10 @@ def start(clause_overrides=None, statuses=None, crag_tokens=0, config=CONFIG):
     graph = build_graph(config, Deps(extractor=extractor, crag=crag)).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
-    out = graph.invoke({"contract_id": "c-synth-001", "raw_text": CONTRACT_TEXT}, THREAD)
+    out = graph.invoke(
+        {"contract_id": "c-synth-001", "raw_text": CONTRACT_TEXT, "analysis_date": ANALYSIS_DATE},
+        THREAD,
+    )
     return graph, out
 
 
@@ -267,7 +275,7 @@ def test_run_contract_masque_avant_le_graphe():
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
     status = orchestrator.run_contract(
-        graph, "c-pii", CONTRACT_TEXT + PII, parties=["Acme Industrie"]
+        graph, "c-pii", CONTRACT_TEXT + PII, parties=["Acme Industrie"], analysis_date=ANALYSIS_DATE
     )
     assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
     raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
@@ -286,7 +294,9 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
     graph = build_graph(CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
-    orchestrator.run_contract(graph, "c-llm", CONTRACT_TEXT + PII, parties=["Acme Industrie"])
+    orchestrator.run_contract(
+        graph, "c-llm", CONTRACT_TEXT + PII, parties=["Acme Industrie"], analysis_date=ANALYSIS_DATE
+    )
     [call] = llm.calls
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
     for original in ("jeanne.martin@exemple.fr", "01 23 45 67 89", "Acme Industrie"):
@@ -314,7 +324,7 @@ def with_invented_quote():
 
 def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
     graph, llm = extraction_graph([with_invented_quote(), with_invented_quote()])
-    status = orchestrator.run_contract(graph, "c-10", CONTRACT_TEXT)
+    status = orchestrator.run_contract(graph, "c-10", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
     assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
     assert status["failure_report"] == {
         "stage": "extraction",
@@ -330,5 +340,5 @@ def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
 def test_10_citation_corrigee_au_second_essai():
     good = {"clauses": [c.model_dump() for c in clauses()]}
     graph, llm = extraction_graph([with_invented_quote(), good])
-    status = orchestrator.run_contract(graph, "c-10b", CONTRACT_TEXT)
+    status = orchestrator.run_contract(graph, "c-10b", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
     assert len(llm.calls) == 2 and len(status["verdicts"]) == 4

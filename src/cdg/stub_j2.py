@@ -9,6 +9,7 @@ Remplacés au J3 par l'extraction LLM et le CRAG réel.
 """
 
 import json
+from datetime import date
 from pathlib import Path
 
 from cdg.application.deps import Deps, ExtractionResult, RetrievalResult
@@ -34,7 +35,7 @@ def _no_extraction(raw_text: str, feedback: list[str]) -> ExtractionResult:
     raise RuntimeError("extraction indisponible sans --clauses (mode stub-j2)")
 
 
-def no_corpus_crag(domain: Domain, clauses: list[Clause]) -> RetrievalResult:
+def no_corpus_crag(domain: Domain, clauses: list[Clause], analysis_date: date) -> RetrievalResult:
     return RetrievalResult(status="INSUFFISANT", evidence_ids=[], usage=[])
 
 

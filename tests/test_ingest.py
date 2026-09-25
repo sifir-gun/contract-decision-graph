@@ -97,3 +97,23 @@ def test_extrait_disparu_supprime(pg, ingested):
     rag_store.insert(pg.admin, [obsolete])
     summary = rag_store.sync(pg.admin, rows, EMBEDDER.model)
     assert (summary["inserted"], summary["deleted"]) == (0, 1)
+
+
+def test_sync_remplace_un_extrait_dont_la_validite_change(pg, ingested):
+    rows, _ = ingested
+    target = next(r for r in rows if r.reference == "C. com., art. L441-10")
+    changed = [
+        r.model_copy(update={"valid_until": date(2028, 1, 1)}) if r is target else r for r in rows
+    ]
+    summary = rag_store.sync(pg.admin, changed, EMBEDDER.model)
+    assert (summary["inserted"], summary["deleted"]) == (1, 1)
+    [(valid_until,)] = query(
+        pg,
+        "SELECT valid_until FROM rag_chunks WHERE embedding_model = %s AND reference = %s"
+        " AND chunk_index = %s AND domain = %s",
+        EMBEDDER.model,
+        target.reference,
+        target.chunk_index,
+        target.domain,
+    )
+    assert valid_until == date(2028, 1, 1)

@@ -1,6 +1,7 @@
 """Schémas d'état du graphe et modèles métier, validés à chaque frontière de nœud."""
 
 import operator
+from datetime import date
 from typing import Annotated, Literal, TypedDict, get_args
 
 from pydantic import BaseModel, Field, model_validator
@@ -23,6 +24,15 @@ REQUIRED_KINDS = (
     "accord_traitement_donnees",
     "transfert_hors_ue",
 )
+
+# Clauses jugées par chaque domaine : une partition des REQUIRED_KINDS. Sert aux requêtes
+# du CRAG, construites à partir des seuls types et valeurs des clauses du domaine.
+DOMAIN_KINDS: dict[Domain, tuple[str, ...]] = {
+    "juridique": ("responsabilite_acheteur", "responsabilite_fournisseur"),
+    "financier": ("revision_prix", "penalites_retard"),
+    "conformite": ("donnees_personnelles", "accord_traitement_donnees", "transfert_hors_ue"),
+    "operationnel": ("duree_engagement", "preavis_resiliation"),
+}
 
 # Catégorie d'une clause de transfert (RGPD, art. 44 à 46) : ce que dit le contrat.
 TransferCategory = Literal[
@@ -54,6 +64,15 @@ class Clause(BaseModel):
         return self
 
 
+class RetrievalTrace(BaseModel):
+    """Résumé du CRAG d'un domaine, porté par le verdict pour l'audit."""
+
+    queries: list[str]  # requêtes essayées, dans l'ordre
+    passes: int = Field(ge=0)  # recherches effectuées
+    retained: list[str]  # références retenues, en vigueur à la date d'analyse
+    expired: list[str]  # références pertinentes mais expirées : jamais retenues
+
+
 class AgentVerdict(BaseModel):
     domain: Domain
     score: float = Field(ge=0.0, le=1.0)  # 1 = favorable
@@ -61,6 +80,7 @@ class AgentVerdict(BaseModel):
     findings: list[str]
     evidence_ids: list[str]
     retrieval_status: RetrievalStatus
+    retrieval: RetrievalTrace | None = None  # résumé du CRAG ; None pour une doublure
 
 
 SYSTEM_REVIEWER_PREFIX = "systeme:"
@@ -99,6 +119,7 @@ class Usage(BaseModel):
 class ContractState(TypedDict, total=False):
     contract_id: str
     raw_text: str
+    analysis_date: date  # versions des textes jugées à cette date ; fixée par run_contract
     reject_reason: str | None
     clauses: list[Clause]
     extraction_attempts: int
@@ -122,3 +143,4 @@ class ContractState(TypedDict, total=False):
 class AnalystInput(TypedDict):  # état privé reçu via Send
     domain: Domain
     clauses: list[Clause]
+    analysis_date: date

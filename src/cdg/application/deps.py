@@ -5,11 +5,12 @@ Ce ne sont pas des dépendances externes : elles passent elles-mêmes par les po
 """
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 from pydantic import BaseModel
 
-from cdg.domain.state import Clause, Domain, RetrievalStatus, Usage
+from cdg.domain.state import Clause, Domain, RetrievalStatus, RetrievalTrace, Usage
 
 
 class ExtractionResult(BaseModel):
@@ -19,8 +20,10 @@ class ExtractionResult(BaseModel):
 
 class RetrievalResult(BaseModel):
     status: RetrievalStatus
-    evidence_ids: list[str]
+    evidence_ids: list[str]  # références retenues, en vigueur à la date d'analyse
     usage: list[Usage]
+    findings: list[str] = []  # constats du CRAG (références expirées), ajoutés au verdict
+    trace: RetrievalTrace | None = None  # résumé du CRAG ; None pour une doublure
 
 
 class Extractor(Protocol):
@@ -28,7 +31,9 @@ class Extractor(Protocol):
 
 
 class Crag(Protocol):
-    def __call__(self, domain: Domain, clauses: list[Clause]) -> RetrievalResult: ...
+    def __call__(
+        self, domain: Domain, clauses: list[Clause], analysis_date: date
+    ) -> RetrievalResult: ...
 
 
 @dataclass(frozen=True)

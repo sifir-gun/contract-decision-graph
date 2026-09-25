@@ -7,9 +7,10 @@ import argparse
 import json
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import get_args
+from zoneinfo import ZoneInfo
 
 from cdg import settings, stub_j2
 from cdg.adapters import fastembed
@@ -19,6 +20,14 @@ from cdg.application import ingestion
 from cdg.domain import expiry
 from cdg.domain.config import load_config
 from cdg.domain.state import Decision
+
+# date d'analyse : jour légal en France, où s'appliquent les textes du corpus
+LEGAL_TIMEZONE = ZoneInfo("Europe/Paris")
+
+
+def today() -> date:
+    return datetime.now(LEGAL_TIMEZONE).date()
+
 
 STUB_NOTICE = (
     "MODE stub-j2, AUCUNE ANALYSE RÉELLE avant le J3 : les clauses sont lues "
@@ -67,7 +76,11 @@ def _run(args: argparse.Namespace) -> dict:
         raise FileNotFoundError(f"fichier de clauses introuvable : {args.clauses}")
     with _graph(args.clauses) as graph:
         status = orchestrator.run_contract(
-            graph, args.contract_id or contract.stem, raw_text, parties=args.party
+            graph,
+            args.contract_id or contract.stem,
+            raw_text,
+            parties=args.party,
+            analysis_date=today(),
         )
     return {"mode": stub_j2.MODE, **status}
 

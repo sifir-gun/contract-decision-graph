@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from doubles import HashEmbedder
 
 from cdg.application import ingestion
 from cdg.domain import corpus
@@ -140,3 +141,14 @@ def test_fiches_avertissement_et_sources():
             assert cited, f"{fiche.id} : affirmation sans source : {line}"
             for source_id, number in cited:
                 assert manifest.admits(source_id, number), (fiche.id, source_id, number)
+
+
+def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
+    # la fiche paraphrase L441-10 : quand la version expire, la paraphrase aussi
+    rows = ingestion.rows(HashEmbedder(), CONFIG.corpus.chunk_max_words)
+    validity = {}
+    for row in rows:
+        validity.setdefault(row.source_id, set()).add(row.valid_until)
+    assert validity["fiche-penalites-retard"] == {date(2027, 1, 1)}
+    assert validity["fiche-sous-traitance-rgpd"] == {None}  # articles sans fin de validité
+    assert validity["code-commerce"] >= {date(2027, 1, 1)}

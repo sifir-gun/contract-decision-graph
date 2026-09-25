@@ -94,3 +94,8 @@ embedding:
 # (environ 1,5 token par mot en français : reste sous la limite de 512 tokens de e5).
 corpus:
   chunk_max_words: 300
+
+# CRAG (J3) : recherche, juge de pertinence (modèle léger), réécriture, puis INSUFFISANT.
+crag:
+  top_k: 4          # extraits rendus par recherche, soumis au juge
+  max_passes: 2     # recherches au plus : la première, puis une réécriture

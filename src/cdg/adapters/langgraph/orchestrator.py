@@ -5,7 +5,7 @@ Le checkpointer PostgreSQL et son sérialiseur strict sont dans `checkpointer.py
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import partial
 
 from langgraph.graph import END, START, StateGraph
@@ -13,7 +13,8 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, Send, StateSnapshot, interrupt
 
 from cdg.adapters.langgraph import checkpointer
-from cdg.application.deps import Deps
+from cdg.application import crag
+from cdg.application.deps import Crag, Deps, RetrievalResult
 from cdg.application.nodes.analyst import analyst
 from cdg.application.nodes.audit_seal import audit_seal
 from cdg.application.nodes.decision_gate import decision_gate
@@ -24,7 +25,9 @@ from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.domain import expiry, masking, policy
 from cdg.domain.config import DecisionConfig
-from cdg.domain.state import DOMAINS, AnalystInput, ContractState
+from cdg.domain.state import DOMAINS, AnalystInput, Clause, ContractState, Domain
+from cdg.ports.llm import LLMProvider
+from cdg.ports.retriever import Retriever
 
 
 def read_route(state: ContractState) -> str:
@@ -32,11 +35,24 @@ def read_route(state: ContractState) -> str:
     return state["route"]
 
 
+def read_crag_route(state: crag.CragState) -> str:
+    """Arête du sous-graphe CRAG. Annotée à part : LangGraph déduit un schéma de
+    l'annotation d'une fonction de routage, et celui de ContractState entrerait en
+    conflit avec l'état du CRAG (voir le journal)."""
+    return state["route"]
+
+
 def route_after_verify(state: ContractState) -> str | list[Send]:
     """Route `analysts` : un `Send` par domaine ;
     sinon la route telle quelle."""
     if state["route"] == "analysts":  # décision lue dans l'état
-        return [Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS]
+        return [
+            Send(
+                "analyst",
+                {"domain": d, "clauses": state["clauses"], "analysis_date": state["analysis_date"]},
+            )
+            for d in DOMAINS
+        ]
     return state["route"]
 
 
@@ -53,6 +69,40 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
         if error is None:
             return {"human": human, "final_decision": human.decision}
         request = {**request, "error": error}
+
+
+def build_crag_graph(
+    retriever: Retriever, llm: LLMProvider, config: DecisionConfig
+) -> CompiledStateGraph:
+    """Sous-graphe CRAG, nœuds purs de `application/crag.py`.
+
+    Compilé sans checkpointer (décision du 25/09/2026, voir le journal) : par défaut,
+    il hériterait de celui du parent. Un analyste relancé refait donc son CRAG de zéro ;
+    le résumé du CRAG est porté par le verdict, lui-même checkpointé.
+    """
+    builder = StateGraph(crag.CragState)
+    builder.add_node(
+        "retrieve", partial(crag.retrieve, retriever=retriever, top_k=config.crag.top_k)
+    )
+    builder.add_node("grade", partial(crag.grade, llm=llm, max_passes=config.crag.max_passes))
+    builder.add_node("rewrite", partial(crag.rewrite, llm=llm))
+    builder.add_node("generate", crag.generate)
+    builder.add_edge(START, "retrieve")
+    builder.add_edge("retrieve", "grade")
+    builder.add_conditional_edges("grade", read_crag_route, ["rewrite", "generate"])
+    builder.add_edge("rewrite", "retrieve")
+    builder.add_edge("generate", END)
+    return builder.compile(checkpointer=False)
+
+
+def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) -> Crag:
+    """CRAG injecté dans les analystes : invoque le sous-graphe compilé."""
+    graph = build_crag_graph(retriever, llm, config)
+
+    def run(domain: Domain, clauses: list[Clause], analysis_date: date) -> RetrievalResult:
+        return graph.invoke(crag.start(domain, clauses, analysis_date))["result"]
+
+    return run
 
 
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
@@ -135,12 +185,19 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
 
 
 def run_contract(
-    graph: CompiledStateGraph, contract_id: str, raw_text: str, parties: Sequence[str] = ()
+    graph: CompiledStateGraph,
+    contract_id: str,
+    raw_text: str,
+    parties: Sequence[str] = (),
+    *,
+    analysis_date: date,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
 
     Le texte est masqué AVANT l'invocation : l'entrée du graphe est écrite dans le
     premier checkpoint, le texte original n'atteint donc jamais la base ni le LLM.
+    `analysis_date` fixe la date à laquelle les versions des textes sont jugées ; elle est
+    écrite dans l'état, donc rejouable.
     """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
@@ -148,7 +205,10 @@ def run_contract(
             "resume, ou un autre identifiant de contrat"
         )
     masked = masking.mask(raw_text, parties)
-    graph.invoke({"contract_id": contract_id, "raw_text": masked.text}, _thread(contract_id))
+    graph.invoke(
+        {"contract_id": contract_id, "raw_text": masked.text, "analysis_date": analysis_date},
+        _thread(contract_id),
+    )
     return {**thread_status(graph, contract_id), "masquage": masked.counts}
 
 

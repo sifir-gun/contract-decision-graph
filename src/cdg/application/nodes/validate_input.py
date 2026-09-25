@@ -1,10 +1,11 @@
 """validate_input : contrôle de l'entrée, écrit `route` (extract_clauses ou reject).
 
 Le texte reçu est déjà masqué par `orchestrator.run_contract` ; ce nœud vérifie
-taille, langue et absence de données personnelles résiduelles.
+taille, langue, absence de données personnelles résiduelles et date d'analyse.
 """
 
 import re
+from datetime import date
 
 from cdg.domain.config import DecisionConfig
 from cdg.domain.masking import residual_pii
@@ -105,4 +106,7 @@ def validate_input(state: ContractState, decision_config: DecisionConfig) -> dic
     residual = residual_pii(text)
     if residual:
         return _reject("texte non masqué : " + ", ".join(residual))
+    # date à laquelle les versions des textes sont jugées : jamais implicite
+    if not isinstance(state.get("analysis_date"), date):
+        return _reject("date d'analyse absente")
     return {"route": "extract_clauses", "extraction_attempts": 0}

@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from doubles import clauses
+from doubles import ANALYSIS_DATE, clauses
 from pydantic import ValidationError
 
 from cdg import stub_j2
@@ -38,7 +38,7 @@ def test_extracteur_exige_une_liste(tmp_path):
 
 
 def test_crag_sans_corpus_toujours_insuffisant_sans_reference():
-    result = stub_j2.no_corpus_crag("juridique", clauses())
+    result = stub_j2.no_corpus_crag("juridique", clauses(), ANALYSIS_DATE)
     assert (result.status, result.evidence_ids, result.usage) == ("INSUFFISANT", [], [])
 
 

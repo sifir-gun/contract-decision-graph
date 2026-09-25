@@ -2,24 +2,26 @@
 les méthodes de son interface, avec la même signature.
 
 Un `Protocol` n'est pas contrôlé à l'exécution, et le projet n'a pas de vérificateur
-de types : ce test en tient lieu. Retriever et AuditStore s'y ajoutent avec leurs
-implémentations (tâche 9, J4).
+de types : ce test en tient lieu. AuditStore s'y ajoutera avec son implémentation (J4).
 """
 
 import inspect
 
 import pytest
-from doubles import FakeCrag, FakeLLM, FixedExtractor, HashEmbedder
+from doubles import FakeCrag, FakeLLM, FakeRetriever, FixedExtractor, HashEmbedder
 
 from cdg import stub_j2
 from cdg.adapters.fastembed import FastembedEmbedder
+from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
+from cdg.adapters.postgres.rag_store import PgvectorRetriever
 from cdg.application.deps import Crag, Extractor
 from cdg.application.extraction import LLMExtractor
 from cdg.domain.config import load_config
 from cdg.ports.embedder import Embedder
 from cdg.ports.llm import LLMProvider
+from cdg.ports.retriever import Retriever
 
 CONFIG = load_config()
 
@@ -30,10 +32,13 @@ IMPLEMENTATIONS = [
     (LLMProvider, FakeLLM),
     (Embedder, lambda: FastembedEmbedder(CONFIG.embedding, model=object())),
     (Embedder, HashEmbedder),
+    (Retriever, lambda: PgvectorRetriever("", HashEmbedder())),
+    (Retriever, FakeRetriever),
     (Extractor, lambda: LLMExtractor(FakeLLM())),
     (Extractor, lambda: FixedExtractor([])),
     (Extractor, lambda: stub_j2.JsonClausesExtractor("clauses.json")),
     (Crag, FakeCrag),
+    (Crag, lambda: orchestrator.crag_runner(FakeRetriever(), FakeLLM(), CONFIG)),
     (Crag, lambda: stub_j2.no_corpus_crag),
 ]
 
@@ -88,5 +93,6 @@ def test_detection_signature_differente():
 def test_chaque_port_a_ses_methodes():
     assert _methods(LLMProvider) == ["structured"]
     assert _methods(Embedder) == ["embed_passages", "embed_query"]
+    assert _methods(Retriever) == ["search"]
     assert _methods(Extractor) == ["__call__"]
     assert _methods(Crag) == ["__call__"]

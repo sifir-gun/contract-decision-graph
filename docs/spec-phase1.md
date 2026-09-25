@@ -67,7 +67,7 @@ Chaque analyste appelle le sous-graphe CRAG pour récupérer les références ut
 
 | Nœud | Rôle | LLM |
 | --- | --- | --- |
-| validate_input | Taille, langue (part de mots-outils français) et absence de données personnelles résiduelles, sur un texte **déjà masqué** par `run_contract` ; écrit `route` (`extract_clauses` ou `reject`) | Non |
+| validate_input | Taille, langue (part de mots-outils français) et absence de données personnelles résiduelles, sur un texte **déjà masqué** par `run_contract`, puis présence de la date d'analyse ; écrit `route` (`extract_clauses` ou `reject`) | Non |
 | extract_clauses | Extraction structurée des clauses par le modèle `main` (`extraction.py`, prompt dans `prompts/`) ; le contrat est délimité comme donnée, jamais comme instruction, entre deux balises portant un jeton aléatoire, régénéré s'il figure déjà dans le texte ; le retour de vérification d'un nouvel essai est placé hors du bloc du contrat ; aucune règle de décision dans le prompt ; chaque clause attendue est toujours rendue, avec `present` et sa citation exacte si elle est présente ; incrémente `extraction_attempts` | Oui, sortie Pydantic |
 | verify_extraction | Vérifie par code que la citation de chaque clause présente existe mot pour mot dans le texte **masqué** de l'état, après normalisation : NFKC, apostrophes, guillemets et tirets typographiques unifiés, espaces réduits, casse conservée. Vérifie aussi que chaque type des `REQUIRED_KINDS` est rendu une fois et une seule ; écrit `route` (`analysts`, `extract_clauses` pour une ré-extraction avec retour ciblé, ou `human_review`) | Non |
 | analyst | CRAG + règles du domaine, rend un `AgentVerdict` | Oui pour CRAG uniquement |
@@ -77,7 +77,14 @@ Chaque analyste appelle le sous-graphe CRAG pour récupérer les références ut
 | audit_seal | Sérialisation canonique, SHA-256, chaînage | Non |
 | reject | Verdict d'invalidité explicite : `reject_reason` renseigné, `final_decision` reste `None` (pas de valeur « invalide » dans `Decision`) ; mène à `audit_seal`, car un rejet est scellé comme le reste | Non |
 
-Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1. `application/crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`), qui passent par les ports `Retriever` et `LLMProvider` ; le sous-graphe est compilé dans `adapters/langgraph/orchestrator.py`, seul paquet à importer LangGraph (J3).
+Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon statut `INSUFFISANT` remonté à l'analyste. Pas de repli web en phase 1. `application/crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`), qui passent par les ports `Retriever` et `LLMProvider` ; le sous-graphe est compilé dans `adapters/langgraph/orchestrator.py`, seul paquet à importer LangGraph (J3). Détail (J3) :
+- **Requête** : construite à partir des seuls types, valeurs et catégories des clauses du domaine (`DOMAIN_KINDS`), jamais de leurs citations. Aucun texte du contrat n'atteint le CRAG.
+- **retrieve** : `Retriever.search(domaine, requête, k=crag.top_k)`.
+- **grade** : modèle `light`. Les extraits sont délimités comme données (`<<<EXTRAIT n>>>`), le juge rend les numéros des extraits pertinents. Un numéro hors liste ou répété lève `LLMOutputError`, jamais ignoré. Sans extrait, le juge n'est pas appelé. Route `generate` si un extrait est pertinent ou si `crag.max_passes` recherches ont été faites, sinon `rewrite`.
+- **rewrite** : modèle `light`, à partir des seules requêtes déjà essayées.
+- **generate** : sans LLM. Retient les références (dédoublonnées) des extraits pertinents en vigueur à la date d'analyse. Une référence dont la version a expiré (`valid_until` atteinte) est signalée dans les constats et jamais retenue ; si toutes ont expiré, ou si aucun extrait n'est pertinent, le statut est `INSUFFISANT`.
+- **Résumé** : le CRAG rend `RetrievalResult` (statut, références retenues, consommation, constats, résumé `RetrievalTrace`). L'analyste ajoute les constats du CRAG à ceux des règles, et porte le résumé dans `AgentVerdict.retrieval`.
+- **Fiches** : une fiche prend la plus proche des fins de validité des articles qu'elle cite (elle les paraphrase, elle expire avec).
 
 ## Schéma d'état
 
@@ -85,6 +92,7 @@ L'état global est un `TypedDict` ; les objets métier sont des modèles Pydanti
 
 ```python
 import operator
+from datetime import date
 from typing import Annotated, Literal, TypedDict
 from pydantic import BaseModel
 
@@ -113,6 +121,13 @@ class Clause(BaseModel):
     category: str | None = None  # transfert_hors_ue seulement (TransferCategory)
 
 
+class RetrievalTrace(BaseModel):  # résumé du CRAG, pour l'audit
+    queries: list[str]  # requêtes essayées, dans l'ordre
+    passes: int  # recherches effectuées
+    retained: list[str]  # références retenues, en vigueur à la date d'analyse
+    expired: list[str]  # références pertinentes mais expirées : jamais retenues
+
+
 class AgentVerdict(BaseModel):
     domain: Domain
     score: float  # 0 à 1
@@ -120,6 +135,7 @@ class AgentVerdict(BaseModel):
     findings: list[str]
     evidence_ids: list[str]
     retrieval_status: Literal["OK", "INSUFFISANT"]
+    retrieval: RetrievalTrace | None = None  # résumé du CRAG (J3)
 
 
 class HumanDecision(BaseModel):
@@ -143,6 +159,7 @@ class Usage(BaseModel):
 class ContractState(TypedDict, total=False):
     contract_id: str
     raw_text: str
+    analysis_date: date  # versions des textes jugées à cette date (J3) ; fixée par run_contract
     reject_reason: str | None
     clauses: list[Clause]
     extraction_attempts: int
@@ -166,6 +183,7 @@ class ContractState(TypedDict, total=False):
 class AnalystInput(TypedDict):  # état privé reçu via Send
     domain: Domain
     clauses: list[Clause]
+    analysis_date: date
 ```
 
 Un nœud ne renvoie que les clés qu'il modifie. Un analyste renvoie `{"verdicts": [verdict], "usage": [...]}` et rien d'autre.
@@ -335,7 +353,7 @@ Points à maîtriser :
 - **Fan-out par l'arête** : l'arête qui suit `verify_extraction` renvoie une liste de `Send` quand `route = "analysts"`, chacun portant un état privé `AnalystInput`. Vérifier dans la version installée ce retour de `Send` depuis une arête conditionnelle et la déclaration du schéma d'entrée de `analyst`.
 - **Fan-out et échecs** : les 4 analystes tournent dans le même superstep. Si un seul échoue, les écritures des autres sont conservées par le checkpointer et seul le fautif est rejoué. `RetryPolicy` sur `analyst` pour les erreurs d'API.
 - **Timeout humain, échec fermé** : `expire --older-than 24h` reprend chaque thread en attente d'un humain depuis strictement plus que le délai. Le point de départ est la date du checkpoint de suspension. La reprise se fait par une décision système `NO_GO` : `source = "systeme"`, relecteur `systeme:expire`, motif « timeout : en attente depuis … ». Elle passe par la même politique, et `audit_seal` la scellera (J4). Jamais d'approbation automatique : le modèle `HumanDecision` refuse toute décision système autre que `NO_GO`. Un thread qui a reçu des réponses refusées reste en attente, donc il expire aussi. La sélection (`expiry.py`) est pure, avec une horloge injectée ; l'appel à LangGraph reste dans `orchestrator.py`.
-- **Sous-graphe CRAG** : compilé à part avec son propre état (`query`, `docs`, `attempts`, `status`) et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Héritage du checkpointer vérifié dans langgraph 1.2.12 : par défaut, le sous-graphe hérite du checkpointer du parent (voir le journal). Décision : `compile(checkpointer=False)`, aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Pour l'audit, le CRAG renvoie un résumé (requêtes essayées, nombre de passes, références retenues et références expirées), porté par le verdict de l'analyste, lui-même checkpointé.
+- **Sous-graphe CRAG** : compilé à part avec son propre état (`CragState` : `query`, `queries`, `attempts`, `docs`, `relevant`, `route`, `usage`, `result`) et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; sa fonction de routage est annotée avec `CragState`, car LangGraph déduit un schéma de l'annotation d'une fonction de routage ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Héritage du checkpointer vérifié dans langgraph 1.2.12 : par défaut, le sous-graphe hérite du checkpointer du parent (voir le journal). Décision : `compile(checkpointer=False)`, aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Pour l'audit, le CRAG renvoie un résumé (requêtes essayées, nombre de passes, références retenues et références expirées), porté par le verdict de l'analyste, lui-même checkpointé.
 - **Isolation** : architecture inspirée de l'architecture hexagonale (ports et adaptateurs, `docs/adr-002-ports-et-adaptateurs.md`). Seul `adapters/langgraph/` importe LangGraph ; `orchestrator.py` y contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework. Règles vérifiées sur les imports (`tests/test_isolation.py`) :
   - chaque bibliothèque externe n'est importée que dans son adaptateur : langgraph dans `adapters/langgraph/`, psycopg et pgvector dans `adapters/postgres/` (psycopg aussi dans `adapters/langgraph/checkpointer.py`, car `PostgresSaver` exige une connexion psycopg), fastembed dans `adapters/fastembed.py`, mistralai et anthropic dans `adapters/llm/` ;
   - `domain/` n'importe ni `ports/`, ni `application/`, ni `adapters/` ; `ports/` n'importe que `domain/` ; `application/` importe `domain/` et `ports/`, jamais `adapters/` ; `adapters/` importe `ports/`, `domain/`, `application/` et `settings`, jamais `cli` ni une autre famille d'adaptateurs ; `cli.py` est la racine de composition ;
@@ -370,6 +388,7 @@ Le verdict est déterministe à partir des clauses extraites, pas à partir du t
   - nombre maximal d'essais d'extraction : 2 ;
   - LLM (`llm`) : fournisseur (`mistral` par défaut, `anthropic` en alternative), température 0, modèles par niveau, avec `main` pour l'extraction et `light` pour le juge CRAG. Les identifiants sont **figés** (alias `-latest` refusés), car le modèle est scellé dans l'audit. Configuration du projet, vérifiée le 2026-09-24 dans la documentation officielle : Mistral `mistral-small-2603` et `ministral-8b-2512` ; Anthropic `claude-sonnet-5` et `claude-haiku-4-5-20251001`. Les clés d'API restent dans `.env` ;
   - seuils des règles et pénalités de score ;
+  - CRAG (`crag`, J3) : `top_k` = 4 extraits par recherche, `max_passes` = 2 recherches au plus ;
   - politique d'arbitrage humain `human_policy` (J2) :
     - `allowed_decisions` : décisions permises à l'humain, `NO_GO` obligatoire, `ESCALADE` interdite ;
     - `allow_block_override` : levée d'un blocage dur permise ou non ;
@@ -479,7 +498,7 @@ GRANT SELECT, INSERT ON audit_decisions TO app_role;
 REVOKE UPDATE, DELETE ON audit_decisions FROM app_role;
 ```
 
-Corpus : filtre `domain` appliqué **avant** la recherche vectorielle. D'où une recherche exacte, sans index HNSW : un index approché filtre après son parcours et peut rendre moins de `k` résultats. Pour un corpus de quelques centaines d'extraits, la recherche exacte reste rapide. Modèle d'embedding (section `embedding`) : `intfloat/multilingual-e5-large`, local (fastembed, ONNX), dimension 1024, préfixes `query:` et `passage:`.
+Corpus : `ingest` synchronise `rag_chunks` sur le corpus ; un extrait dont le texte ou une métadonnée (fin de validité, note…) a changé est remplacé. La recherche rend la fin de validité et la note de chaque extrait. Filtre `domain` appliqué **avant** la recherche vectorielle. D'où une recherche exacte, sans index HNSW : un index approché filtre après son parcours et peut rendre moins de `k` résultats. Pour un corpus de quelques centaines d'extraits, la recherche exacte reste rapide. Modèle d'embedding (section `embedding`) : `intfloat/multilingual-e5-large`, local (fastembed, ONNX), dimension 1024, préfixes `query:` et `passage:`.
 
 ## Critères d'acceptation
 
@@ -645,6 +664,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **25 septembre 2026, J3** :
   - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
   - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - CRAG (tâche 9) : requêtes à partir des types et valeurs des clauses, juge et réécriture par le modèle léger, `generate` sans LLM, références expirées signalées et jamais retenues ; `analysis_date` dans l'état et dans `AnalystInput`, exigée par `validate_input` ; `RetrievalTrace` dans `AgentVerdict` ; section `crag` de la configuration ; `DOMAIN_KINDS` ; validité des fiches héritée des articles cités ; `sync` sensible aux métadonnées ; `search` rend `valid_until` et `note` (défaut corrigé) ;
   - refonte en ports et adaptateurs, sans changement de comportement : couches `domain/`, `ports/`, `application/`, `adapters/`, racine de composition `cli.py` ; ports `LLMProvider`, `Embedder`, `Retriever`, `AuditStore` ; règles de dépendance et confinement des bibliothèques testés ; `docs/adr-002-ports-et-adaptateurs.md`.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;

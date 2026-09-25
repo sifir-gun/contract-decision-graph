@@ -7,6 +7,7 @@ L'écriture en base est faite par l'adaptateur PostgreSQL, appelé par la CLI.
 
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,8 @@ from cdg.domain.corpus import (
     Fiche,
     Manifest,
     chunk,
+    citations,
+    claim_lines,
     parse_eurlex,
     parse_legifrance,
 )
@@ -68,10 +71,13 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
     """Extraits des articles admis et des fiches, un par domaine d'indexation.
 
     Le texte embarqué est précédé de la référence (et de l'intitulé) pour la recherche ;
-    le texte stocké reste celui de l'article, cité tel quel.
+    le texte stocké reste celui de l'article, cité tel quel. Une fiche prend la plus proche
+    des fins de validité des articles qu'elle cite : elle les paraphrase, elle expire avec.
     """
     pending: list[tuple[dict, str, list[str]]] = []
+    validity: dict[tuple[str, str], date | None] = {}
     for article, domains in articles():
+        validity[(article.source_id, article.article)] = article.valid_until
         header = article.reference + (f" — {article.heading}" if article.heading else "")
         amendment = (
             f"{article.amendment[0]} : {article.amendment[1]}" if article.amendment else None
@@ -92,12 +98,15 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
             pending.append((meta, f"{header}\n{text}", domains))
     for fiche in load_fiches():
         reference = f"Fiche projet : {fiche.title}"
+        cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
+        ends = [validity[c] for c in cited if validity[c] is not None]
         for index, text in enumerate(chunk(fiche.body, max_words)):
             meta = {
                 "source_id": fiche.id,
                 "reference": reference,
                 "text": text,
                 "chunk_index": index,
+                "valid_until": min(ends, default=None),
             }
             pending.append((meta, f"{reference}\n{text}", fiche.domains))
     vectors = embedder.embed_passages([embedded for _, embedded, _ in pending])

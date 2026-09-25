@@ -665,3 +665,29 @@ Refonte sans changement de comportement, décidée pour que le CRAG dépende d'u
 - **Module homonyme d'une variable.** `test_providers.py` avait une variable locale `llm` qui masquait le module `cdg.adapters.llm` importé sous ce nom : import direct de `build_provider`.
 - **`from a import b` dans l'AST.** On ne sait pas sans l'exécuter si `b` est un module ou un nom : le test considère `a` et `a.b`, ce qui suffit pour les deux règles.
 - **`corpus.py` n'était pas formaté** depuis la tâche 8 (une liste de mois sur une ligne) : reformaté par `ruff format` dans ce commit, sans changement de contenu.
+
+### J3 tâche 9 : CRAG
+
+- **`application/crag.py`**, fonctions pures sur les ports `Retriever` et `LLMProvider` : `retrieve`, `grade` (juge, modèle léger), `rewrite` (modèle léger), `generate` (sans LLM). Sous-graphe compilé dans `adapters/langgraph/orchestrator.py` avec `checkpointer=False` (`build_crag_graph`), injecté dans les analystes par `crag_runner`.
+- **Requêtes** à partir des seuls types, valeurs et catégories des clauses du domaine (`DOMAIN_KINDS`, nouvelle partition des `REQUIRED_KINDS`), jamais des citations : aucun texte du contrat n'atteint le CRAG (testé avec une citation piégée).
+- **Juge** : extraits délimités (`<<<EXTRAIT n>>>`), réponse en numéros d'extraits. Un numéro hors liste ou répété lève `LLMOutputError`, jamais ignoré. Sans extrait, pas d'appel.
+- **Versions** : `analysis_date` dans l'état (fixée par `run_contract`, exigée par `validate_input`) et dans `AnalystInput`. `generate` écarte toute référence expirée à cette date et la signale dans les constats ; si toutes les références pertinentes ont expiré, `INSUFFISANT`. Une fiche prend la plus proche des fins de validité des articles qu'elle cite.
+- **Résumé pour l'audit** : `RetrievalTrace` (requêtes, passes, références retenues, références expirées) dans `AgentVerdict.retrieval`, ajouté à la liste des types autorisés du sérialiseur ; constats du CRAG ajoutés à ceux des règles.
+- **Configuration** : section `crag` (`top_k` 4, `max_passes` 2).
+- **Adaptateur `PgvectorRetriever`** (port `Retriever`) : requête en texte, vecteur par l'`Embedder`, filtre sur son modèle.
+- **Critère 3** avec doublures, sur le graphe complet avec sérialiseur strict : domaine hors corpus → 2 passes, `INSUFFISANT`, `ESCALADE`, aucune référence qui n'ait été rendue par la recherche ; corpus vide → `INSUFFISANT` partout, juge jamais appelé.
+
+**Défauts corrigés.**
+- `rag_store.search` sélectionnait `valid_until` et `note` sans les transmettre (défaut signalé au plan de la refonte) : corrigé, testé.
+- `sync` ne comparait que le texte : une fin de validité modifiée sans changement de texte restait en base. Il compare désormais toutes les métadonnées stockées (testé).
+
+**Choix.**
+- `evidence_ids` = références citables (« RGPD, art. 28 »), dédoublonnées, et non les identifiants de ligne : ceux-ci changent à chaque réingestion, les références restent lisibles et stables dans l'audit.
+- Validité des fiches : la plus proche fin de validité de **toute** la fiche, pas extrait par extrait (plus prudent).
+- Date d'analyse de la CLI : jour légal en France (`Europe/Paris`).
+
+**Piège.** LangGraph déduit un schéma de l'annotation de type d'une fonction de routage. `read_route`, annotée `ContractState`, ajoutait les canaux du graphe principal au sous-graphe (« Channel 'usage' already exists with a different type ») : fonction de routage propre au CRAG, annotée `CragState`.
+
+**Vérification réelle** (modèle d'embedding réel, hors ligne, sans LLM) :
+- `ingest` après la tâche : 1 extrait remplacé (la fiche « pénalités de retard », désormais valable jusqu'au 2027-01-01), 56 inchangés ;
+- `PgvectorRetriever` avec les requêtes initiales du CRAG (contrat favorable de test), 4 premiers extraits par domaine : juridique → fiche responsabilité, L442-1, 1231-3 ; financier → fiche pénalités (fin 2027-01-01), fiche révision des prix, L441-10 (fin 2027-01-01) ; conformité → fiche transferts, RGPD art. 46, fiche sous-traitance ; opérationnel → fiche durée et préavis, L442-1, 1211, 1210. La fin de validité remonte bien jusqu'au CRAG.

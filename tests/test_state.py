@@ -1,6 +1,7 @@
 """Schémas d'état et modèles métier (spec, « Schéma d'état »)."""
 
 import operator
+from datetime import date
 from typing import get_args, get_type_hints
 
 import pytest
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 
 from cdg.domain.state import (
     CATEGORY_KINDS,
+    DOMAIN_KINDS,
     DOMAINS,
     REQUIRED_KINDS,
     AgentVerdict,
@@ -17,6 +19,7 @@ from cdg.domain.state import (
     Decision,
     Domain,
     HumanDecision,
+    RetrievalTrace,
     Route,
     Usage,
 )
@@ -138,7 +141,9 @@ def test_seuls_verdicts_et_usage_ont_un_reducteur():
 
 
 def test_etat_prive_des_analystes():
-    assert set(get_type_hints(AnalystInput)) == {"domain", "clauses"}
+    assert set(get_type_hints(AnalystInput)) == {"domain", "clauses", "analysis_date"}
+    assert get_type_hints(AnalystInput)["analysis_date"] is date
+    assert get_type_hints(ContractState)["analysis_date"] is date
 
 
 # --- HumanDecision.source : décision humaine ou système ---------------------------
@@ -173,3 +178,36 @@ def test_decision_systeme_exige_un_relecteur_systeme():
 def test_un_humain_ne_peut_pas_se_dire_systeme():
     with pytest.raises(ValidationError, match="réservé"):
         HumanDecision(decision="NO_GO", reviewer="systeme:expire", reason="m")
+
+
+# --- Clauses par domaine, résumé du CRAG ----------------------------------------------
+
+
+def test_chaque_type_de_clause_releve_d_un_seul_domaine():
+    assert set(DOMAIN_KINDS) == set(DOMAINS)
+    kinds = [k for d in DOMAINS for k in DOMAIN_KINDS[d]]
+    assert sorted(kinds) == sorted(REQUIRED_KINDS)  # partition : ni oubli, ni doublon
+
+
+def test_verdict_sans_resume_du_crag_par_defaut():
+    v = AgentVerdict(
+        domain="financier",
+        score=1.0,
+        hard_block=False,
+        findings=[],
+        evidence_ids=[],
+        retrieval_status="OK",
+    )
+    assert v.retrieval is None
+
+
+def test_resume_du_crag():
+    trace = RetrievalTrace(queries=["q1", "q2"], passes=2, retained=[], expired=["L441-10"])
+    assert trace.model_dump() == {
+        "queries": ["q1", "q2"],
+        "passes": 2,
+        "retained": [],
+        "expired": ["L441-10"],
+    }
+    with pytest.raises(ValidationError):
+        RetrievalTrace(queries=[], passes=-1, retained=[], expired=[])

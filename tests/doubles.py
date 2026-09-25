@@ -1,7 +1,13 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
+from datetime import date
+
 from cdg.application.deps import ExtractionResult, RetrievalResult
 from cdg.domain.state import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
+from cdg.ports.retriever import Passage
+
+# date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
+ANALYSIS_DATE = date(2026, 9, 25)
 
 # Contrat synthétique favorable : aucune règle déclenchée.
 FAVORABLE = {
@@ -105,7 +111,7 @@ class FakeCrag:
         self.statuses, self.tokens = statuses or {}, (tokens_in, tokens_out)
         self.calls: list[str] = []
 
-    def __call__(self, domain, clauses: list[Clause]) -> RetrievalResult:
+    def __call__(self, domain, clauses: list[Clause], analysis_date: date) -> RetrievalResult:
         self.calls.append(domain)
         status = self.statuses.get(domain, "OK")
         return RetrievalResult(
@@ -166,3 +172,27 @@ class HashEmbedder:
     def embed_query(self, text: str) -> list[float]:
         self.calls.append(text)
         return self._vector(text)
+
+
+def passage(reference: str, domain="financier", valid_until=None, text=None, id=1) -> Passage:
+    return Passage(
+        id=id,
+        domain=domain,
+        source_id="test",
+        reference=reference,
+        text=text or f"Texte de {reference}.",
+        distance=0.1,
+        valid_until=valid_until,
+    )
+
+
+class FakeRetriever:
+    """Doublure du port Retriever : extraits fixes par domaine, requêtes enregistrées."""
+
+    def __init__(self, passages: dict | None = None):
+        self.passages = passages or {}
+        self.calls: list[tuple[str, str, int]] = []
+
+    def search(self, domain, query: str, *, k: int) -> list[Passage]:
+        self.calls.append((domain, query, k))
+        return list(self.passages.get(domain, []))[:k]

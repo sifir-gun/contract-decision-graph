@@ -129,6 +129,11 @@ class CorpusConfig(_Strict):
     chunk_max_words: Annotated[int, Field(gt=0)]  # e5 : 512 tokens au plus
 
 
+class CragConfig(_Strict):
+    top_k: Annotated[int, Field(gt=0)]  # extraits rendus par recherche, soumis au juge
+    max_passes: Annotated[int, Field(gt=0)]  # recherches au plus, réécritures comprises
+
+
 Tier = Literal["main", "light"]
 ModelId = Annotated[str, Field(min_length=1)]
 
@@ -177,6 +182,7 @@ class DecisionConfig(_Strict):
     llm: LLMConfig
     embedding: EmbeddingConfig
     corpus: CorpusConfig
+    crag: CragConfig
 
     def weight(self, domain: Domain) -> float:
         return getattr(self.weights, domain)

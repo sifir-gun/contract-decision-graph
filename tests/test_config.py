@@ -61,6 +61,7 @@ def test_configuration_du_projet_conforme_a_la_spec():
         "light": "claude-haiku-4-5-20251001",
     }
     assert cfg.llm.model("light") == "ministral-8b-2512"
+    assert cfg.crag.model_dump() == {"top_k": 4, "max_passes": 2}
     assert cfg.embedding.model_dump() == {
         "model": "intfloat/multilingual-e5-large",
         "dimension": 1024,
@@ -138,6 +139,10 @@ _DELETE = object()
         ("rules.conformite.transfer_safeguards", ["certification", "certification"]),
         ("rules.conformite.unlocated_data_score_penalty", 1.5),
         ("embedding.model", ""),
+        ("crag", _DELETE),
+        ("crag.top_k", 0),
+        ("crag.max_passes", 0),
+        ("crag.max_passes", 2.0),  # mode strict
     ],
 )
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):
