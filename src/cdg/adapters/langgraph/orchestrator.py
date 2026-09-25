@@ -254,6 +254,7 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
     pending = [i.value for i in snapshot.interrupts]
     return {
         "thread_id": thread_id,
+        "analysis_date": values.get("analysis_date"),
         "statut": ("suspendu" if pending else "en_cours" if snapshot.next else "termine"),
         "route": values.get("route"),
         "proposed_decision": values.get("proposed_decision"),

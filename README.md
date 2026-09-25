@@ -10,9 +10,20 @@ Données uniquement synthétiques ou publiques.
 cp .env.example .env        # puis remplacer chaque valeur
 docker compose up -d        # PostgreSQL 16.11 + pgvector 0.8.1
 uv sync
-uv run python -m cdg.cli setup-db   # une fois : tables du checkpointer, droits d'app_role
+uv run python -m cdg.cli setup-db   # une fois : tables du checkpointer et du corpus, droits d'app_role
 uv run pytest                       # -m "not pg" pour exclure volontairement les tests PostgreSQL
 ```
+
+Analyse d'un contrat (synthétique), avec le fournisseur LLM de `config/decision.yaml` (appels payants, clé dans `.env`) :
+
+```bash
+uv run python -m cdg.cli fetch-embedding-model   # une fois : poids du modèle d'embedding (2,2 Go)
+uv run python -m cdg.cli ingest                  # indexe le corpus ; rejouable
+uv run python -m cdg.cli run contrat.txt --party "Nom de la partie"
+uv run python -m cdg.cli resume <thread_id> --decision NO_GO --reviewer … --reason …
+```
+
+`run` rend un statut JSON : décision proposée ou finale, verdicts par domaine avec le résumé du CRAG, rapport d'échec le cas échéant. Une revue humaine suspend le thread jusqu'à `resume`. `--analysis-date AAAA-MM-JJ` juge les versions des textes à une autre date que celle du jour.
 
 ## Architecture
 

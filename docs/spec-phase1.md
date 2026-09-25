@@ -570,7 +570,6 @@ contract-decision-graph/
 ├── src/cdg/
 │   ├── cli.py                  # racine de composition : run, resume, history, expire, verify
 │   ├── settings.py             # .env (python-dotenv), variables obligatoires
-│   ├── stub_j2.py              # mode stub-j2 de la CLI, supprimé à la tâche 11 du J3
 │   ├── domain/                 # règles pures : n'importe ni ports, ni application, ni adaptateurs
 │   │   ├── state.py            # schémas d'état et Pydantic
 │   │   ├── config.py           # chargement et validation Pydantic de decision.yaml
@@ -602,7 +601,7 @@ contract-decision-graph/
 └── tests/
 ```
 
-CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `run <contrat>`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
+CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `ingest` (identifiants administrateur, rejouable), `run <contrat> [--party …] [--contract-id …] [--analysis-date AAAA-MM-JJ]`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
 
 Comportement de la CLI (J2) :
 - `run` refuse un thread existant, puisqu'un contrat correspond à un thread ;
@@ -610,11 +609,13 @@ Comportement de la CLI (J2) :
 - `history` liste les checkpoints du plus ancien au plus récent ;
 - les erreurs sont rendues en JSON sur stderr, avec le code de sortie 1.
 
-**Mode `stub-j2`, jusqu'au J3.** L'extraction réelle et le CRAG n'existent pas encore :
-- `run` lit des clauses synthétiques déjà extraites (`--clauses`, liste JSON) et n'analyse pas le texte du contrat ;
-- le CRAG, sans corpus, répond toujours `INSUFFISANT`, sans référence.
+**Mode `stub-j2`, jusqu'au J3.** Au J2, `run` lisait des clauses déjà extraites (`--clauses`) et le CRAG, sans corpus, répondait toujours `INSUFFISANT` ; chaque sortie portait `"mode": "stub-j2"`. Supprimé au J3 (tâche 11), ainsi que l'option `--clauses` et la clé `mode`.
 
-Toute exécution escalade donc vers un humain, sauf blocage dur. L'aide de la CLI l'annonce, et chaque sortie JSON porte `"mode": "stub-j2"`, pour qu'aucune démonstration ne laisse croire à une vraie analyse. Les deux doublures sont remplacées au J3.
+Comportement de la CLI (J3) : `cli.py` est la racine de composition.
+- `run` construit les dépendances réelles (`build_deps`) : fournisseur LLM de la configuration, embedding local, `PgvectorRetriever` sur `rag_chunks`. Le fournisseur d'abord : une clé d'API absente échoue en JSON, code 1, avant tout chargement de modèle et avant la création du thread. L'aide annonce les appels payants ;
+- `--analysis-date` fixe la date d'analyse, par défaut le jour légal en France (`Europe/Paris`) ; elle figure dans l'état et dans la sortie (`analysis_date`) ;
+- `resume`, `history` et `expire` ne repassent ni par l'extraction ni par le CRAG : aucune clé d'API ni aucun modèle ne sont exigés, et un appel échouerait explicitement ;
+- la sortie de `run` et de `resume` expose aussi `failures` (gardes d'échec de nœud).
 
 Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si la base est arrêtée. On les exclut volontairement avec `-m "not pg"`, jamais par un saut silencieux. Ceux qui appellent le vrai modèle portent le marqueur `llm`. Ils sont exclus par défaut et comptés comme *deselected*, et ne tournent qu'avec l'option `--llm`. Un `-m` ne peut donc pas les activer par accident. Les critères 3, 9 et 10 y sont répétés 5 fois : 5 réussites sur 5 exigées, sans relance automatique, et chaque série est consignée au journal.
 
@@ -685,6 +686,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **25 septembre 2026, J3** :
   - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
   - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - CLI sans le mode `stub-j2` (tâche 11) : dépendances réelles construites par `build_deps`, option `--analysis-date`, `analysis_date` dans le statut ; `stub_j2.py` supprimé ;
   - gardes d'échec de nœud (tâche 10) : `guard` sur chaque nœud sauf `human_review`, `NodeFailure` dans `failures` (réducteur), escalade par `verify_extraction` et `decision_gate`, arête `validate_input → human_review`, `RetryPolicy` sur les analystes avant la garde (section `analyst_retry`), échecs exposés par `thread_status` ; `decision_gate` : l'analyste en échec vient en 2ᵉ position, après le blocage dur ;
   - CRAG (tâche 9) : requêtes à partir des types et valeurs des clauses, juge et réécriture par le modèle léger, `generate` sans LLM, références expirées signalées et jamais retenues ; `analysis_date` dans l'état et dans `AnalystInput`, exigée par `validate_input` ; `RetrievalTrace` dans `AgentVerdict` ; section `crag` de la configuration ; `DOMAIN_KINDS` ; validité des fiches héritée des articles cités ; `sync` sensible aux métadonnées ; `search` rend `valid_until` et `note` (défaut corrigé) ;
   - refonte en ports et adaptateurs, sans changement de comportement : couches `domain/`, `ports/`, `application/`, `adapters/`, racine de composition `cli.py` ; ports `LLMProvider`, `Embedder`, `Retriever`, `AuditStore` ; règles de dépendance et confinement des bibliothèques testés ; `docs/adr-002-ports-et-adaptateurs.md`.

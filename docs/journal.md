@@ -707,3 +707,12 @@ Refonte sans changement de comportement, décidée pour que le CRAG dépende d'u
 - **Pas de `RetryPolicy` sur `extract_clauses`** (la spec la prévoit pour les analystes seulement). Les SDK reprennent déjà certaines erreurs (Anthropic : 2 reprises par défaut). Une extraction en échec part donc chez l'humain. À reconsidérer si les tests réels le montrent utile.
 
 **Piège.** Une garde qui capte l'exception empêcherait `RetryPolicy` de la voir : la reprise de LangGraph enveloppe le nœud, donc la garde. D'où la lecture du numéro de tentative dans la garde, plutôt qu'une boucle de reprise maison.
+
+### J3 tâche 11 : CLI sans le mode stub-j2
+
+- `stub_j2.py` et ses tests supprimés ; plus d'option `--clauses` ni de clé `mode` dans les sorties.
+- **`build_deps`** (racine de composition) : fournisseur LLM de la configuration, puis embedding local (`FastembedEmbedder`), puis `PgvectorRetriever` sur `rag_chunks` avec le rôle applicatif ; extracteur `LLMExtractor`, CRAG `crag_runner`. Le fournisseur d'abord : une clé absente échoue avant tout chargement de modèle et avant la création du thread (testé : aucun thread en base).
+- **`resume`, `history`, `expire`** reçoivent des dépendances qui échouent explicitement si on les appelle : le graphe n'y repasse ni par l'extraction ni par le CRAG, donc aucune clé ni aucun modèle ne sont exigés (testé : `resume` ne construit pas les dépendances d'analyse).
+- **`--analysis-date AAAA-MM-JJ`**, par défaut le jour légal en France ; `analysis_date` dans le statut.
+- **Tests** : les dépendances réelles sont remplacées par des doublures (`cli.build_deps` substitué) ; `ingest` testé de bout en bout avec l'embedder de test ; le test de reprise après `SIGKILL` construit ses doublures dans le processus tué.
+- README : démarrage complet (poids, ingestion, analyse, reprise).

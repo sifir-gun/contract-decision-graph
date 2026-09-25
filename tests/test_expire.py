@@ -95,7 +95,7 @@ def test_cli_expire_sans_effet_sous_le_delai(pg, capsys):
     # délai de 1 000 jours : aucun thread réel ne peut être touché
     assert cli.main(["expire", "--older-than", "1000d"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert (out["mode"], out["older_than"], out["expired"]) == ("stub-j2", "1000d", [])
+    assert (out["older_than"], out["expired"]) == ("1000d", [])
 
 
 def test_cli_expire_duree_invalide(capsys):

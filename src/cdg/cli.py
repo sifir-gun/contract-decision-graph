@@ -1,5 +1,7 @@
 """CLI phase 1 : `uv run python -m cdg.cli <commande>`.
 
+Racine de composition : lit .env et la configuration, instancie les adaptateurs
+(fournisseur LLM, embedding local, corpus PostgreSQL) et lance le graphe.
 Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 """
 
@@ -12,13 +14,16 @@ from pathlib import Path
 from typing import get_args
 from zoneinfo import ZoneInfo
 
-from cdg import settings, stub_j2
+from cdg import settings
 from cdg.adapters import fastembed
 from cdg.adapters.langgraph import checkpointer, orchestrator
+from cdg.adapters.llm import build_provider
 from cdg.adapters.postgres import conninfo, rag_store
 from cdg.application import ingestion
+from cdg.application.deps import Deps
+from cdg.application.extraction import LLMExtractor
 from cdg.domain import expiry
-from cdg.domain.config import load_config
+from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.state import Decision
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
@@ -29,11 +34,28 @@ def today() -> date:
     return datetime.now(LEGAL_TIMEZONE).date()
 
 
-STUB_NOTICE = (
-    "MODE stub-j2, AUCUNE ANALYSE RÉELLE avant le J3 : les clauses sont lues "
-    "telles quelles dans --clauses (texte du contrat non analysé) et le CRAG, "
-    "sans corpus, répond toujours INSUFFISANT, donc aucun verdict n'est étayé."
-)
+def build_deps(config: DecisionConfig) -> Deps:
+    """Dépendances réelles d'une analyse : fournisseur LLM, embedding local, corpus.
+
+    Le fournisseur d'abord : une clé d'API absente échoue avant tout chargement de
+    modèle et avant la création du thread.
+    """
+    llm = build_provider(config.llm)
+    embedder = fastembed.FastembedEmbedder(config.embedding, settings.embedding_cache_dir())
+    retriever = rag_store.PgvectorRetriever(conninfo.app_conninfo(), embedder)
+    return Deps(extractor=LLMExtractor(llm), crag=orchestrator.crag_runner(retriever, llm, config))
+
+
+def _not_needed(what: str):
+    def fail(*args):
+        raise RuntimeError(f"{what} indisponible : cette commande n'analyse pas de contrat")
+
+    return fail
+
+
+# resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
+# aucun modèle chargé, aucune clé d'API exigée. Un appel échouerait explicitement.
+REVIEW_DEPS = Deps(extractor=_not_needed("extraction"), crag=_not_needed("CRAG"))
 
 
 def _setup_db(args: argparse.Namespace) -> dict:
@@ -63,26 +85,23 @@ def _ingest(args: argparse.Namespace) -> dict:
     return {"ingest": "ok", "model": embedder.model, **summary}
 
 
-def _graph(clauses_path: str | None = None):
-    return orchestrator.open_graph(
-        load_config(), stub_j2.deps(clauses_path), conninfo.app_conninfo()
-    )
+def _graph(config: DecisionConfig, deps: Deps = REVIEW_DEPS):
+    return orchestrator.open_graph(config, deps, conninfo.app_conninfo())
 
 
 def _run(args: argparse.Namespace) -> dict:
     contract = Path(args.contract)
     raw_text = contract.read_text(encoding="utf-8")
-    if not Path(args.clauses).is_file():
-        raise FileNotFoundError(f"fichier de clauses introuvable : {args.clauses}")
-    with _graph(args.clauses) as graph:
-        status = orchestrator.run_contract(
+    config = load_config()
+    deps = build_deps(config)
+    with _graph(config, deps) as graph:
+        return orchestrator.run_contract(
             graph,
             args.contract_id or contract.stem,
             raw_text,
             parties=args.party,
-            analysis_date=today(),
+            analysis_date=args.analysis_date or today(),
         )
-    return {"mode": stub_j2.MODE, **status}
 
 
 def _resume(args: argparse.Namespace) -> dict:
@@ -92,24 +111,22 @@ def _resume(args: argparse.Namespace) -> dict:
         "reason": args.reason,
         "overrides_block": args.overrides_block,
     }
-    with _graph() as graph:
-        status = orchestrator.resume_thread(graph, args.thread_id, answer)
-    return {"mode": stub_j2.MODE, **status}
+    with _graph(load_config()) as graph:
+        return orchestrator.resume_thread(graph, args.thread_id, answer)
 
 
 def _history(args: argparse.Namespace) -> dict:
-    with _graph() as graph:
+    with _graph(load_config()) as graph:
         checkpoints = orchestrator.thread_history(graph, args.thread_id)
-    return {"mode": stub_j2.MODE, "thread_id": args.thread_id, "checkpoints": checkpoints}
+    return {"thread_id": args.thread_id, "checkpoints": checkpoints}
 
 
 def _expire(args: argparse.Namespace) -> dict:
     older_than = expiry.parse_duration(args.older_than)
     now = datetime.now(UTC)
-    with _graph() as graph:
+    with _graph(load_config()) as graph:
         expired = orchestrator.expire_threads(graph, older_than, now)
     return {
-        "mode": stub_j2.MODE,
         "older_than": args.older_than,
         "now": now.isoformat(),
         "expired": expired,
@@ -117,9 +134,7 @@ def _expire(args: argparse.Namespace) -> dict:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="cdg", description=__doc__.splitlines()[0], epilog=STUB_NOTICE
-    )
+    parser = argparse.ArgumentParser(prog="cdg", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
         "setup-db",
@@ -139,11 +154,15 @@ def build_parser() -> argparse.ArgumentParser:
         "identifiants administrateur ; rejouable, supprime les extraits disparus",
     ).set_defaults(handler=_ingest)
 
-    run = sub.add_parser("run", help="analyse un contrat (mode stub-j2)", description=STUB_NOTICE)
-    run.add_argument("contract", help="fichier texte du contrat (synthétique)")
-    run.add_argument(
-        "--clauses", required=True, help="clauses déjà extraites, liste JSON (mode stub-j2)"
+    run_notice = (
+        "Masque le contrat, puis extrait ses clauses et interroge le juge du CRAG par le "
+        "fournisseur LLM de la configuration (appels payants, clé dans .env) ; corpus "
+        "indexé par ingest, modèle d'embedding local."
     )
+    run = sub.add_parser(
+        "run", help="analyse un contrat (appels LLM payants)", description=run_notice
+    )
+    run.add_argument("contract", help="fichier texte du contrat (synthétique)")
     run.add_argument(
         "--party",
         action="append",
@@ -152,6 +171,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--contract-id", help="identifiant du contrat et du thread (défaut : nom du fichier)"
+    )
+    run.add_argument(
+        "--analysis-date",
+        type=date.fromisoformat,
+        help="date à laquelle les versions des textes sont jugées, AAAA-MM-JJ "
+        "(défaut : aujourd'hui, heure de Paris)",
     )
     run.set_defaults(handler=_run)
 

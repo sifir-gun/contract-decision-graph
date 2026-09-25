@@ -10,7 +10,6 @@ import inspect
 import pytest
 from doubles import FakeCrag, FakeLLM, FakeRetriever, FixedExtractor, HashEmbedder
 
-from cdg import stub_j2
 from cdg.adapters.fastembed import FastembedEmbedder
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.llm.anthropic import AnthropicProvider
@@ -36,10 +35,8 @@ IMPLEMENTATIONS = [
     (Retriever, FakeRetriever),
     (Extractor, lambda: LLMExtractor(FakeLLM())),
     (Extractor, lambda: FixedExtractor([])),
-    (Extractor, lambda: stub_j2.JsonClausesExtractor("clauses.json")),
     (Crag, FakeCrag),
     (Crag, lambda: orchestrator.crag_runner(FakeRetriever(), FakeLLM(), CONFIG)),
-    (Crag, lambda: stub_j2.no_corpus_crag),
 ]
 
 
