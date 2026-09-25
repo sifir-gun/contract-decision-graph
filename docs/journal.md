@@ -765,3 +765,13 @@ Sans changement de comportement : les tests existants ne changent que par leurs 
 - **Connexion refusée non reprise.** Elle n'est pas dans la liste demandée (429, 5xx, délai dépassé), donc l'extraction part chez l'humain dès le premier essai. À élargir si les tests réels le justifient.
 - **Délai dépassé côté Mistral reconnu par sa classe.** Le SDK transmet l'exception httpx telle quelle. Importer httpx, dépendance du SDK mais pas du projet, reviendrait à s'appuyer sur une dépendance non déclarée : l'adaptateur reconnaît `httpx.TimeoutException` dans la hiérarchie de l'exception, par son nom et son module.
 - **Un 429 à quota nul est quand même repris.** Il est passager par son statut, mais permanent dans les faits : les 3 tentatives coûtent 6 s d'attente, puis l'échec est consigné avec la limite du compte dans le message.
+
+### J3 tâche 12 : mesure du critère 10 (décision du 25/09, point 2)
+
+Un système qui escaladerait toujours passerait le critère 10 : l'invariant (« aucun analyste sur une citation non vérifiée ») est vrai aussi quand rien n'aboutit. D'où une mesure, sans seuil jusqu'à la série 2 :
+- **Taux d'aboutissement** : sur le contrat valide de test, nombre d'essais sur 5 qui aboutissent aux analystes avec toutes les citations vérifiées. Le contrat est valide : chaque clause stipulée se cite mot pour mot, et les pénalités de retard n'y figurent pas, donc une extraction correcte les déclare absentes.
+- **Ligne `LLM-SERIE`** imprimée en fin de série : taux, aboutissements au premier essai, issue de chaque essai (`analystes`, `escalade`, `echec_de_noeud`), et nombre d'extractions exactes.
+- **Écarts de valeur**, à titre d'information : chaque essai compare présence, valeur et catégorie de chaque clause aux valeurs attendues du contrat (par exemple `duree_engagement` = 24). Ils ne comptent pas dans le critère, qui porte sur les citations.
+- **Vérifié sans réseau**, avec un faux fournisseur : une extraction exacte aboutit aux analystes sans écart ; une citation inventée pour les pénalités donne une ré-extraction avec le retour « citation introuvable: penalites_retard », puis `ESCALADE`. La ligne de série indique bien un taux de 1/2.
+
+La série 1 (0/5, quota nul) n'entre pas dans la mesure : le vrai modèle n'a jamais répondu. Le taux sera consigné à partir de la série 2.
