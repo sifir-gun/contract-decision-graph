@@ -635,3 +635,11 @@ La spec demande de vérifier, dans la version installée, si un sous-graphe hér
 **Conclusion.** L'héritage est le comportement par défaut. Il touche à trois choses : la liste des types autorisés du sérialiseur, le volume de la base, et la reprise (un CRAG interrompu reprend-il en cours de route, ou repart-il de zéro ?). Décision soumise au propriétaire du repo.
 
 **Piège.** Sans le sérialiseur strict du J2, l'héritage serait passé inaperçu : les états du CRAG se seraient retrouvés en `dict` dans les checkpoints, avec seulement un avertissement.
+
+### J3 : décisions du 25/09/2026
+
+1. **Sous-graphe CRAG : `compile(checkpointer=False)`.** Aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Le CRAG renvoie un résumé (requêtes, passes, références retenues et expirées), porté par le verdict de l'analyste. Reporté dans la spec.
+2. **RGPD, art. 4 : admis.** La règle de périmètre de `SOURCES.md` est complétée : un article est aussi admis s'il définit un terme utilisé par une règle.
+3. **RGPD, art. 79 : exclusion validée.** Le fichier reste dans `raw/`, non ingéré.
+4. **Tests `llm` (tâche 12) : lancés par l'agent**, avec la clé Mistral du propriétaire du repo.
+5. **Refonte en ports et adaptateurs avant la tâche 9**, pour que le CRAG dépende d'un port dès sa création. Plan soumis avant tout code.

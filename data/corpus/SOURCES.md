@@ -4,7 +4,7 @@ Textes publics uniquement, plus des fiches rédigées pour le projet. Chaque sou
 
 ## Règle de périmètre
 
-Un article est admis s'il **sert une règle** (`src/cdg/rules/`), ou s'il est **cité directement** par un article qui sert une règle. Les renvois de second degré ne sont pas suivis. Les renvois non récupérés sont listés dans le README (« Limites connues »).
+Un article est admis s'il **sert une règle** (`src/cdg/rules/`), ou s'il est **cité directement** par un article qui sert une règle, ou s'il **définit un terme utilisé par une règle**. Les renvois de second degré ne sont pas suivis. Les renvois non récupérés sont listés dans le README (« Limites connues »).
 
 ## Récupération
 
@@ -19,7 +19,7 @@ Licences, indiquées d'après les conditions publiées par chaque site, non vér
 
 | source_id | Article | Fichier (`data/corpus/raw/`) | Périmètre | Récupéré le |
 | --- | --- | --- | --- | --- |
-| `rgpd` | art. 4 | `rgpd/art-4.txt` | Sert la règle conformité : définitions (« données à caractère personnel », « sous-traitant ») | 24/09/2026 |
+| `rgpd` | art. 4 | `rgpd/art-4.txt` | Définit des termes utilisés par la règle conformité (« données à caractère personnel », « sous-traitant ») | 24/09/2026 |
 | `rgpd` | art. 28 | `rgpd/art-28.txt` | Sert la règle conformité : accord de traitement (sous-traitant) | 24/09/2026 |
 | `rgpd` | art. 32 | `rgpd/art-32.txt` | Cité par l'art. 28 | 24/09/2026 |
 | `rgpd` | art. 33 | `rgpd/art-33.txt` | Cité par l'art. 28 (« articles 32 à 36 ») | 24/09/2026 |
