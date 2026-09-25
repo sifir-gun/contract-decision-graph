@@ -38,6 +38,7 @@ rules:
     # délai de paiement par l'acheteur (C. com., art. L441-10) : choix de politique d'achat
     payment_delay_max_days_invoice: 60        # jours à compter de la date de facture
     payment_delay_max_days_end_of_month: 45   # jours fin de mois
+    payment_delay_max_days_periodic_invoice: 45  # jours après une facture périodique
     payment_delay_score_penalty: 0.2          # au-delà, ou délai présent mais non chiffré
   conformite:
     # transfert hors UE (RGPD, art. 44 à 46) : la règle juge ce que dit le contrat,

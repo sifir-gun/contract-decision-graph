@@ -120,9 +120,17 @@ def test_domaines_et_types_de_clauses():
         "transfert_hors_ue",
     )
     assert CATEGORY_KINDS == {"transfert_hors_ue", "delai_paiement"}
-    assert KIND_CATEGORIES["delai_paiement"] == ("date_facture", "fin_de_mois")
+    assert KIND_CATEGORIES["delai_paiement"] == (
+        "date_facture",
+        "fin_de_mois",
+        "facture_periodique",
+    )
     assert KIND_CATEGORIES["transfert_hors_ue"] == TRANSFER_CATEGORIES
-    assert CLAUSE_CATEGORIES == TRANSFER_CATEGORIES + ("date_facture", "fin_de_mois")
+    assert CLAUSE_CATEGORIES == TRANSFER_CATEGORIES + (
+        "date_facture",
+        "fin_de_mois",
+        "facture_periodique",
+    )
 
 
 def test_valeurs_de_route_et_de_decision():

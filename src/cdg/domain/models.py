@@ -54,6 +54,7 @@ TRANSFER_CATEGORIES: tuple[str, ...] = get_args(TransferCategory)
 PaymentBasis = Literal[
     "date_facture",  # jours comptés à partir de la date d'émission de la facture
     "fin_de_mois",  # jours fin de mois
+    "facture_periodique",  # jours après une facture périodique (L441-10, I, 4e alinéa)
 ]
 PAYMENT_BASES: tuple[str, ...] = get_args(PaymentBasis)
 

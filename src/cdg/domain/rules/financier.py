@@ -4,7 +4,11 @@ from cdg.domain.config import DecisionConfig, FinancierRules
 from cdg.domain.models import AgentVerdict, Clause, RetrievalStatus
 from cdg.domain.rules._common import above, below, clause, verdict
 
-DELAY_BASIS_LABELS = {"date_facture": "date de facture", "fin_de_mois": "fin de mois"}
+DELAY_BASIS_LABELS = {
+    "date_facture": "date de facture",
+    "fin_de_mois": "fin de mois",
+    "facture_periodique": "après une facture périodique",
+}
 # délai supplétif, cité quand le contrat n'en stipule pas (version de L441-10 en vigueur du
 # 26/04/2019 au 01/01/2027) ; à revoir avec la version suivante du texte
 DEFAULT_DELAY_NOTE = (
@@ -23,10 +27,13 @@ def _payment_delay(delay: Clause, cfg: FinancierRules) -> tuple[list[float], lis
             "à renégocier"
         )
         return [cfg.payment_delay_score_penalty], [finding]
-    if delay.category == "date_facture":
-        limit = cfg.payment_delay_max_days_invoice
-    else:  # fin de mois, ou point de départ inconnu : le seuil le plus strict
-        limit = cfg.payment_delay_max_days_end_of_month
+    limits = {
+        "date_facture": cfg.payment_delay_max_days_invoice,
+        "fin_de_mois": cfg.payment_delay_max_days_end_of_month,
+        "facture_periodique": cfg.payment_delay_max_days_periodic_invoice,
+    }
+    # point de départ inconnu (impossible après vérification) : le seuil le plus strict
+    limit = limits.get(delay.category, min(limits.values()))
     if not above(delay.value, limit):
         return [], []
     label = DELAY_BASIS_LABELS.get(delay.category, "point de départ non précisé")

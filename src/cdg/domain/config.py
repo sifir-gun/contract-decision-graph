@@ -70,6 +70,7 @@ class FinancierRules(_Strict):
     # délai de paiement par l'acheteur (C. com., art. L441-10)
     payment_delay_max_days_invoice: Quantity  # à compter de la date de facture
     payment_delay_max_days_end_of_month: Quantity  # jours fin de mois
+    payment_delay_max_days_periodic_invoice: Quantity  # après une facture périodique
     payment_delay_score_penalty: Penalty
 
 

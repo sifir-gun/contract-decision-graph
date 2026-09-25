@@ -40,8 +40,9 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert (
         f.payment_delay_max_days_invoice,
         f.payment_delay_max_days_end_of_month,
+        f.payment_delay_max_days_periodic_invoice,
         f.payment_delay_score_penalty,
-    ) == (60, 45, 0.2)
+    ) == (60, 45, 45, 0.2)
     assert (o.commitment_max_months, o.commitment_score_penalty) == (36, 0.3)
     assert (o.notice_max_months, o.notice_score_penalty) == (6, 0.3)
     c = cfg.rules.conformite
@@ -138,6 +139,7 @@ _DELETE = object()
         ("rules.operationnel.notice_score_penalty", 1.5),
         ("rules.financier.execution_penalties_min_cap_pct", -5),
         ("rules.financier.payment_delay_max_days_invoice", -1),
+        ("rules.financier.payment_delay_max_days_periodic_invoice", _DELETE),
         ("rules.financier.payment_delay_score_penalty", 1.5),
         ("rules.financier.late_penalties_min_cap_pct", 5),  # ancienne clé refusée
         ("rules.operationnel", _DELETE),

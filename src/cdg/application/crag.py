@@ -69,7 +69,8 @@ _SUBJECTS = {
 
 # libellés des catégories dans les requêtes ; par défaut, le nom sans soulignés
 _CATEGORY_LABELS = {c: c.replace("_", " ") for c in CLAUSE_CATEGORIES} | {
-    "date_facture": "date de facture"
+    "date_facture": "date de facture",
+    "facture_periodique": "après une facture périodique",
 }
 
 

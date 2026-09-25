@@ -20,8 +20,7 @@ Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridiqu
 
 ## Comment le projet l'applique
 
-- Le projet pénalise un délai de paiement supérieur à 60 jours après la date de facture ou à 45 jours fin de mois, ainsi qu'un délai stipulé mais non chiffré, avec le constat « délai non conforme, à renégocier » : ces seuils, réglés dans la configuration, sont des choix de politique d'achat alignés sur les délais maximaux de l'article.
-- Le cas des factures périodiques n'est pas distingué par la règle.
+- Le projet pénalise un délai de paiement supérieur à 60 jours après la date de facture, à 45 jours fin de mois ou à 45 jours après une facture périodique, ainsi qu'un délai stipulé mais non chiffré, avec le constat « délai non conforme, à renégocier » : ces seuils, réglés dans la configuration, sont des choix de politique d'achat alignés sur les délais maximaux de l'article.
 - Un contrat qui ne stipule pas de délai de paiement n'est pas pénalisé ; le constat rappelle le délai de trente jours qui s'applique sauf dispositions contraires (source : code-commerce, art. L441-10, I).
 - Les pénalités de retard de paiement de cet article sont dues par l'acheteur qui paie en retard ; elles ne relèvent pas de la règle sur les pénalités d'exécution, dues par le fournisseur.
 - Après le 1er janvier 2027, cette version de l'article n'est plus retenue comme référence : l'analyse la signale comme expirée, et la fiche expire avec elle.

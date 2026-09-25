@@ -835,3 +835,7 @@ La série 1 (0/5, quota nul) n'entre pas dans la mesure : le vrai modèle n'a ja
 **Réingestion réelle** (modèle réel, hors ligne) : 67 extraits (17 insérés, 7 supprimés, 50 inchangés). Recherches de contrôle avec les requêtes initiales du CRAG : juridique → fiche responsabilité, L442-1, 1231-3 ; financier → fiche délais de paiement (fin 2027-01-01), fiche pénalités d'exécution, L441-10 ; conformité → fiches transferts et sous-traitance, RGPD art. 46 ; opérationnel → fiche durée et préavis, L442-1, 1211.
 
 **Observation** : le domaine financier porte désormais trois sujets dans une seule requête. Avec `crag.top_k` = 4, la fiche sur la révision des prix et L112-2 sortent des 4 premiers extraits, et l'art. 1231-5 n'y entre pas (sa fiche, si). À suivre dans les séries `llm` : relever `top_k` ou faire une requête par clause, si le juge manque de références.
+
+### J3 : délai de paiement, factures périodiques (décision du 25/09, point 3)
+
+Nouvelle catégorie `facture_periodique` pour `delai_paiement` : plafond de 45 jours après la facture (L441-10, I, 4e alinéa), réglé par `payment_delay_max_days_periodic_invoice`, même pénalité et même constat. Le prompt la place en premier : un délai sur facture périodique est classé ainsi, même s'il est compté « fin de mois ». Point de départ inconnu : le plus bas des trois seuils. Fiche `delais-paiement` mise à jour (application).

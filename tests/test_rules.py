@@ -264,13 +264,19 @@ def delay(value, basis="date_facture"):
         (46, "fin_de_mois", 0.8),
         (50, "date_facture", 1.0),  # 50 jours date de facture : conforme
         (50, "fin_de_mois", 0.8),  # 50 jours fin de mois : non conforme
+        (45, "facture_periodique", 1.0),
+        (46, "facture_periodique", 0.8),  # conforme en date de facture, pas en facture périodique
     ],
 )
 def test_financier_delai_de_paiement_selon_son_point_de_depart(value, basis, score):
     v = delay(value, basis)
     assert v.score == score and not v.hard_block
     if score < 1.0:
-        label = "fin de mois" if basis == "fin_de_mois" else "date de facture"
+        label = {
+            "date_facture": "date de facture",
+            "fin_de_mois": "fin de mois",
+            "facture_periodique": "après une facture périodique",
+        }[basis]
         limit = 60 if basis == "date_facture" else 45
         expected = (
             f"délai non conforme, à renégocier : {value} jours {label}, au-delà de {limit} jours"
@@ -307,3 +313,16 @@ def test_financier_seuils_du_delai_dans_la_configuration():
 def test_financier_cumul_des_deux_penalites():
     v = run("financier", penalites_execution=ABSENT, delai_paiement=90)
     assert v.score == 0.4 and len(v.findings) == 2
+
+
+def test_financier_seuil_des_factures_periodiques_dans_la_configuration():
+    config = config_with("financier", "payment_delay_max_days_periodic_invoice", 50)
+    assert (
+        run(
+            "financier",
+            config=config,
+            delai_paiement=50,
+            categories={"delai_paiement": "facture_periodique"},
+        ).score
+        == 1.0
+    )
