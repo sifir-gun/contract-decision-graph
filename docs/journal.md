@@ -862,3 +862,24 @@ Nouvelle catégorie `facture_periodique` pour `delai_paiement` : plafond de 45 j
 - **Un piège** : des pénalités de retard de paiement dues par l'acheteur (trois fois le taux d'intérêt légal, indemnité forfaitaire), qu'une extraction correcte ne prend ni pour des pénalités d'exécution ni pour un délai de paiement.
 - **Mesure séparée** : le test du critère 10 est paramétré par contrat (`valide`, `complet`) ; une ligne `LLM-SERIE` par contrat. 15 tests `llm` en tout.
 - **Vérifié sans réseau** : une extraction exacte simulée du contrat complet aboutit aux analystes au premier essai, sans écart de valeur ; le masquage des parties ne casse aucune citation.
+
+### J3 tâche 12 : diagnostic du quota après activation du paiement à l'usage, série 2
+
+**Diagnostic (25/09/2026, 12:52 UTC).** Le propriétaire du repo a activé le paiement à l'usage (limite de dépenses de 5 € par mois ; console : 20 000 tokens par minute et 1 requête par seconde pour `mistral-small-2603`). Un appel d'un token répond : HTTP 200. Les en-têtes de l'API annoncent 100 requêtes et 100 000 tokens par minute. **Option A : la configuration ne change pas.** Les calculs retiennent la limite la plus stricte, celle de la console.
+
+**Taille d'une extraction** (vrais prompts avec leur schéma, un seul token de sortie) : 1 535 tokens d'entrée pour le contrat valide, 1 706 pour le contrat complet. `max_tokens` n'est pas réservé : l'API ne compte que les tokens consommés (23 pour une réponse courte avec `max_tokens` = 4096). Une extraction coûte donc environ 2 100 à 2 400 tokens, bien sous la limite. Pour ne pas provoquer soi-même un 429 en enchaînant les essais, le critère 10 est cadencé : après un essai qui a consommé t tokens, attente de t × 60 / 20 000 s.
+
+**Série 2 : 2026-09-25, 12:53 à 12:55 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 15 réussites sur 15, sans relance, en 1 min 59 s.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 10, contrat valide | **5/5** | Taux d'aboutissement : **5/5**, tous au premier essai, 5 extractions exactes (pénalités d'exécution et délai de paiement déclarés absents). 2 063 à 2 080 tokens par essai. |
+| 10, contrat complet | **5/5** | Taux d'aboutissement : **5/5**, tous au premier essai, 5 extractions exactes, piège évité à chaque essai (les pénalités de retard de paiement de l'acheteur ne sont prises ni pour des pénalités d'exécution ni pour un délai de paiement). 2 356 à 2 365 tokens par essai. |
+| 3 | **5/5** | Financier : chacune des 3 clauses fait 2 passes, aucune référence, `INSUFFISANT`, puis `ESCALADE`. Témoin juridique `OK` : responsabilité de l'acheteur justifiée par la fiche, C. civ. 1231-3 et 1170 ; responsabilité du fournisseur par la fiche. Environ 10 200 tokens par essai (11 appels au modèle léger). |
+
+Consommation de la série : environ 22 000 tokens du modèle principal et 51 000 du modèle léger, moins de 0,02 €.
+
+**Observations.**
+- La requête par clause règle l'observation de la série 1 : le juge retient désormais les articles 1231-3 et 1170 pour la responsabilité de l'acheteur.
+- **La réécriture comprend « domaine : financier » comme « services financiers »** (« prestataire de services financiers », « contrat financier »). C'est sans effet sur le critère, mais la reformulation part hors sujet. Piste : nommer le domaine par ce qu'il couvre (« conditions financières du contrat ») dans la requête et dans le prompt de réécriture.
+- **Seuil du taux d'aboutissement** : à fixer par le propriétaire du repo, maintenant que la série 2 est faite.
