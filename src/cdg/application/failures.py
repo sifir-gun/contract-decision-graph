@@ -1,10 +1,7 @@
-"""Rapport d'échec de nœud et escalade, communs aux nœuds qui routent vers l'humain."""
+"""Escalade d'un nœud à plusieurs sorties après un échec de nœud : route vers l'humain."""
 
-from cdg.domain.state import NodeFailure
-
-
-def failure_report(failures: list[NodeFailure]) -> dict:
-    return {"stage": "noeuds", "failures": [f.model_dump() for f in failures]}
+from cdg.domain.decision import failure_report
+from cdg.domain.models import NodeFailure
 
 
 def escalate(failures: list[NodeFailure]) -> dict:

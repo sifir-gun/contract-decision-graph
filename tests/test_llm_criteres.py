@@ -19,8 +19,8 @@ from cdg.adapters.llm import build_provider
 from cdg.application import ingestion
 from cdg.application.deps import Deps
 from cdg.application.extraction import LLMExtractor
-from cdg.application.nodes.verify_extraction import problems_of
 from cdg.domain.config import load_config
+from cdg.domain.verification import problems_of
 from cdg.ports.retriever import Passage
 
 pytestmark = pytest.mark.llm

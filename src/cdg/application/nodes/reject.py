@@ -4,7 +4,7 @@
 car `Decision` n'a pas de valeur « invalide ».
 """
 
-from cdg.domain.state import ContractState
+from cdg.application.state import ContractState
 
 
 def reject(state: ContractState) -> dict:

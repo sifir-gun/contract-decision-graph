@@ -9,7 +9,7 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from cdg.domain.state import Domain
+from cdg.domain.models import Domain
 
 
 class Passage(BaseModel):

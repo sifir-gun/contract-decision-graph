@@ -8,7 +8,7 @@ from langgraph.types import Interrupt, Send
 from pydantic import BaseModel
 
 from cdg.adapters.langgraph.checkpointer import BlockedDeserialization, strict_serializer
-from cdg.domain.state import HumanDecision
+from cdg.domain.models import HumanDecision
 
 
 class Intrus(BaseModel):

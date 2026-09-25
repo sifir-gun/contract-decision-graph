@@ -23,7 +23,7 @@ from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application import crag
 from cdg.application.deps import Deps
 from cdg.domain.config import load_config
-from cdg.domain.state import DOMAINS
+from cdg.domain.models import DOMAINS
 from cdg.ports.llm import LLMOutputError
 
 CONFIG = load_config()

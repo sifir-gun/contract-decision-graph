@@ -10,7 +10,7 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from cdg.domain.state import Clause, Domain, RetrievalStatus, RetrievalTrace, Usage
+from cdg.domain.models import Clause, Domain, RetrievalStatus, RetrievalTrace, Usage
 
 
 class ExtractionResult(BaseModel):

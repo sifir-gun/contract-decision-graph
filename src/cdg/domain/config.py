@@ -6,8 +6,8 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from cdg.domain.models import Decision, Domain, TransferCategory
 from cdg.domain.numeric import rounded
-from cdg.domain.state import Decision, Domain, TransferCategory
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "decision.yaml"
 

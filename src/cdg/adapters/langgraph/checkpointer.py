@@ -15,7 +15,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
 
-from cdg.domain.state import (
+from cdg.domain.models import (
     AgentVerdict,
     Clause,
     HumanDecision,

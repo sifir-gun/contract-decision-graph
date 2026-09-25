@@ -1,8 +1,8 @@
 """Règles du domaine financier : révision de prix et pénalités de retard."""
 
 from cdg.domain.config import DecisionConfig
+from cdg.domain.models import AgentVerdict, Clause, RetrievalStatus
 from cdg.domain.rules._common import below, clause, verdict
-from cdg.domain.state import AgentVerdict, Clause, RetrievalStatus
 
 
 def financier(

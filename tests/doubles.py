@@ -3,7 +3,7 @@
 from datetime import date
 
 from cdg.application.deps import ExtractionResult, RetrievalResult
-from cdg.domain.state import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
+from cdg.domain.models import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
 from cdg.ports.retriever import Passage
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)

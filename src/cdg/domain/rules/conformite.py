@@ -1,8 +1,8 @@
 """Règles du domaine conformité : données personnelles et transferts hors UE (RGPD)."""
 
 from cdg.domain.config import DecisionConfig
+from cdg.domain.models import AgentVerdict, Clause, RetrievalStatus
 from cdg.domain.rules._common import clause, verdict
-from cdg.domain.state import AgentVerdict, Clause, RetrievalStatus
 
 
 def conformite(

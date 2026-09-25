@@ -5,8 +5,8 @@ import yaml
 from doubles import ABSENT, clauses
 
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
+from cdg.domain.models import DOMAINS, Clause
 from cdg.domain.rules import RULES
-from cdg.domain.state import DOMAINS, Clause
 
 CONFIG = load_config()
 

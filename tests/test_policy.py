@@ -7,7 +7,7 @@ from doubles import verdicts
 
 from cdg.domain import policy
 from cdg.domain.config import load_config
-from cdg.domain.state import HumanDecision
+from cdg.domain.models import HumanDecision
 
 CONFIG = load_config()
 BLOCKED = verdicts(juridique={"score": 0.5, "hard_block": True})

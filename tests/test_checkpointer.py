@@ -8,7 +8,7 @@ from langgraph.types import Command
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.application.deps import Deps
 from cdg.domain.config import load_config
-from cdg.domain.state import AgentVerdict, HumanDecision
+from cdg.domain.models import AgentVerdict, HumanDecision
 
 pytestmark = pytest.mark.pg
 

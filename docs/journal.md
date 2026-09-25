@@ -738,3 +738,17 @@ Refonte sans changement de comportement, décidée pour que le CRAG dépende d'u
 Ce n'est ni une erreur transitoire (aucune reprise n'y changerait rien) ni un défaut du code : le compte n'accorde aucun quota au modèle principal configuré. Correction soumise au propriétaire du repo : relever la limite de `mistral-small-2603` dans la console Mistral, ou changer `llm.models.mistral.main`. Série 2 du critère 10 ensuite.
 
 **Observation.** Le juge léger est prudent : sur le témoin juridique, il ne retient que la fiche, jamais les articles 1231-3 et 1170, pourtant liés à la responsabilité. Sans effet sur les critères, mais à suivre au J4 (qualité des références citées par `explain`).
+
+### J3 : rangement des couches (décision du 25/09, point 4)
+
+Sans changement de comportement : les tests existants ne changent que par leurs imports, plus 3 tests qui appellent directement la nouvelle API du domaine.
+- **`domain/state.py` scindé** : modèles métier (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`, `RetrievalTrace`, `NodeFailure`, types et constantes) dans `domain/models.py` ; `ContractState`, réducteurs, `Route` et `AnalystInput` dans `application/state.py`.
+- **Logique des nœuds sortie vers le domaine** :
+  - `domain/decision.py` : `aggregate`, `conflict`, `total_tokens`, `failure_report`, et `decide`, qui rend un `GateOutcome` (décision proposée, revue humaine ou non, marge, rapport d'échec ; décision finale sans revue humaine) ;
+  - `domain/verification.py` : `normalize`, `problems_of`, et `check_extraction`, qui rend `verified`, `retry` ou `escalate` avec son rapport ;
+  - `domain/input_checks.py` : mots-outils, `french_ratio`, et `rejection`, qui rend un motif de rejet ou `None`.
+  Les nœuds `decision_gate`, `verify_extraction` et `validate_input` ne gardent que l'adaptation état → domaine → état ; la route reste un concept du graphe, le domaine rend une issue.
+- **`domain/policy.build_request`** lit l'état comme un `Mapping` : le domaine n'importe plus `ContractState`.
+- **ADR 002** : nouvelles couches, et écarts assumés (`config.py` qui lit un fichier et porte des réglages techniques, `ingestion.py` qui lit le corpus sans port, `ChunkRow` dans le domaine faute de port d'écriture, `build_request` sur un `Mapping`).
+
+**Piège évité.** Un checkpoint enregistre le module de chaque objet sérialisé (`cdg.domain.state.Clause`, puis `cdg.domain.models.Clause`). Déplacer un modèle rend illisibles les threads écrits avant. Vérifié avant chacune des deux refontes : aucun thread en base. À retenir pour la suite : tout déplacement de modèle après le J4 exigera une migration des checkpoints, ou un alias de module.

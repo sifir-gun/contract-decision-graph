@@ -8,7 +8,7 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 
 from cdg.domain.corpus import ChunkRow
-from cdg.domain.state import Domain
+from cdg.domain.models import Domain
 from cdg.ports.embedder import Embedder
 from cdg.ports.retriever import Passage
 

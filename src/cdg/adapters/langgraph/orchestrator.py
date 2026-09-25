@@ -27,9 +27,10 @@ from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
+from cdg.application.state import AnalystInput, ContractState
 from cdg.domain import expiry, masking, policy
 from cdg.domain.config import AnalystRetry, DecisionConfig
-from cdg.domain.state import DOMAINS, AnalystInput, Clause, ContractState, Domain, NodeFailure
+from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.llm import LLMProvider
 from cdg.ports.retriever import Retriever
 

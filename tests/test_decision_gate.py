@@ -4,9 +4,10 @@ import pytest
 import yaml
 from doubles import usage, verdict, verdicts
 
-from cdg.application.nodes.decision_gate import aggregate, conflict, decision_gate, total_tokens
+from cdg.application.nodes.decision_gate import decision_gate
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.domain.state import DOMAINS, NodeFailure
+from cdg.domain.decision import aggregate, conflict, decide, total_tokens
+from cdg.domain.models import DOMAINS, NodeFailure
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
@@ -273,3 +274,13 @@ def test_analyste_en_echec_blocage_dur_en_revue_si_configure():
     out = gate_with_failure(three_verdicts(juridique={"hard_block": True}), config=config)
     assert (out["proposed_decision"], out["route"]) == ("NO_GO", "human_review")
     assert "final_decision" not in out
+
+
+# --- Domaine : proposition sans route ni état du graphe -------------------------------
+
+
+def test_decide_rend_une_proposition_que_le_noeud_traduit():
+    outcome = decide(verdicts(), [], [], CONFIG)
+    assert (outcome.proposed, outcome.human_review, outcome.final) == ("GO", False, "GO")
+    outcome = decide(verdicts(financier={"status": "INSUFFISANT"}), [], [], CONFIG)
+    assert (outcome.proposed, outcome.human_review, outcome.final) == ("ESCALADE", True, None)

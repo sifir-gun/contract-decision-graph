@@ -1,6 +1,6 @@
 """audit_seal : sérialisation canonique, SHA-256, chaînage. Scelle aussi les rejets."""
 
-from cdg.domain.state import ContractState
+from cdg.application.state import ContractState
 
 
 def audit_seal(state: ContractState) -> dict:

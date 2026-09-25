@@ -11,7 +11,8 @@ from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.domain.config import load_config
-from cdg.domain.state import REQUIRED_KINDS, AgentVerdict, RetrievalTrace
+from cdg.domain.input_checks import rejection
+from cdg.domain.models import REQUIRED_KINDS, AgentVerdict, RetrievalTrace
 
 CONFIG = load_config()
 
@@ -23,6 +24,11 @@ def test_validate_input_accepte_un_contrat_masque_en_francais():
     state = {"raw_text": CONTRACT_TEXT, "analysis_date": ANALYSIS_DATE}
     out = validate_input(state, decision_config=CONFIG)
     assert out == {"route": "extract_clauses", "extraction_attempts": 0}
+
+
+def test_domaine_entree_recevable_sans_motif():
+    assert rejection(CONTRACT_TEXT, ANALYSIS_DATE, CONFIG.input) is None
+    assert rejection("", ANALYSIS_DATE, CONFIG.input) == "texte du contrat vide"
 
 
 @pytest.mark.parametrize("analysis_date", [None, "2026-09-25"])

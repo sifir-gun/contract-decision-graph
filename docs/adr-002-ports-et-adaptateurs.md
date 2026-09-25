@@ -1,6 +1,6 @@
 # ADR-002 : ports et adaptateurs
 
-- **Statut** : accepté, le 25/09/2026 (J3, avant la tâche 9).
+- **Statut** : accepté, le 25/09/2026 (J3, avant la tâche 9) ; complété le même jour (rangement : modèles, état du graphe, logique des nœuds).
 - **Portée** : organisation de `src/cdg/` et règles de dépendance entre modules.
 
 ## Contexte
@@ -17,9 +17,9 @@ Architecture **inspirée de l'architecture hexagonale** (ports et adaptateurs), 
 
 | Couche | Contenu | Peut importer |
 | --- | --- | --- |
-| `domain/` | état, configuration, règles par domaine, politique d'arbitrage, expiration, masquage, partie pure du corpus (nettoyage, découpage, fiches), audit (J4) | rien d'autre que lui-même |
+| `domain/` | modèles métier (`models.py`), configuration, règles par domaine, décision du gate (`decision.py`), vérification de l'extraction (`verification.py`), contrôle de l'entrée (`input_checks.py`), politique d'arbitrage, expiration, masquage, partie pure du corpus (nettoyage, découpage, fiches), audit (J4) | rien d'autre que lui-même |
 | `ports/` | interfaces des dépendances externes et types échangés | `domain/` |
-| `application/` | nœuds du graphe, extraction, CRAG, ingestion, dépendances injectées (`Extractor`, `Crag`, `Deps`) | `domain/`, `ports/` |
+| `application/` | état du graphe (`state.py` : `ContractState`, réducteurs, route, entrée des analystes), nœuds, extraction, CRAG, ingestion, dépendances injectées (`Extractor`, `Crag`, `Deps`) | `domain/`, `ports/` |
 | `adapters/` | `langgraph/` (orchestrateur, checkpointer), `postgres/`, `llm/` (Mistral, Anthropic), `fastembed.py` | `domain/`, `ports/`, `application/`, `settings` ; jamais `cli`, ni une autre famille d'adaptateurs |
 | `cli.py` | racine de composition : lit `.env` et la configuration, instancie les adaptateurs, lance le graphe | tout |
 
@@ -48,10 +48,19 @@ C'est un choix, pas un oubli : LangGraph apporte les checkpoints par étape, la 
 - la décision reste dans le domaine (règles) et dans `decision_gate`, jamais dans le câblage ;
 - changer d'orchestrateur voudrait dire réécrire le câblage, pas le domaine ni l'application.
 
+Les nœuds ne gardent que l'adaptation état → domaine → état : ils lisent les clés de l'état, appellent une fonction du domaine (`decide`, `check_extraction`, `rejection`, règles), puis traduisent son résultat en clés d'état et en `route`. La route est un concept du graphe : le domaine rend une issue (« revue humaine », « nouvel essai »), jamais un nom de nœud.
+
 ## Autres choix
 
 - **Pas de port pour l'écriture du corpus.** L'ingestion est une commande d'administration : la CLI appelle directement l'adaptateur PostgreSQL. Un port s'ajouterait si un second magasin apparaissait.
 - **psycopg est aussi permis dans `adapters/langgraph/checkpointer.py`.** `PostgresSaver` exige une connexion psycopg : le checkpointer est l'adaptateur de LangGraph sur PostgreSQL.
+
+## Autres écarts assumés
+
+- **`domain/config.py` lit un fichier et porte des réglages techniques.** `load_config` lit `config/decision.yaml` sans port, et le modèle `DecisionConfig` contient, à côté des seuils et pénalités métier, des réglages d'adaptateurs : identifiants des modèles LLM, modèle et préfixes d'embedding, découpage du corpus, reprises. Raison : une seule configuration validée au démarrage et une seule empreinte (`config_hash`) scellée dans l'audit ; la scinder ferait deux sources de vérité pour le rejeu. Le domaine ne lit que ses propres sections.
+- **`application/ingestion.py` lit le corpus sans port.** Manifeste, textes publics et fiches sont des fichiers versionnés du dépôt, lus par une commande d'administration, comme la configuration ; le nettoyage et le découpage, eux, sont des fonctions pures du domaine. Un port s'ajouterait pour une source de corpus externe.
+- **`ChunkRow` est dans le domaine** (`domain/corpus.py`), faute de port d'écriture du corpus : c'est le seul endroit que l'application, qui construit les extraits, et l'adaptateur PostgreSQL, qui les écrit, peuvent tous deux importer.
+- **`domain/policy.build_request` lit l'état du contrat comme un `Mapping`.** Le domaine n'importe pas `ContractState` (application) ; il ne connaît que les clés qu'il lit pour construire la charge utile de la revue humaine.
 
 ## Alternatives écartées
 

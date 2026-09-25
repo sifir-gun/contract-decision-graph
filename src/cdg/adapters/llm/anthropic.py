@@ -9,7 +9,7 @@ import time
 from anthropic import Anthropic
 
 from cdg.domain.config import LLMConfig
-from cdg.domain.state import Usage
+from cdg.domain.models import Usage
 from cdg.ports.llm import LLMOutputError, SchemaT, Tier
 
 

@@ -25,7 +25,7 @@ KILLED_RUN = textwrap.dedent("""
     from cdg.adapters.postgres import conninfo
     from cdg.application.deps import Deps
     from cdg.domain.config import load_config
-    from cdg.domain.state import Clause
+    from cdg.domain.models import Clause
 
     settings.load_env()
     found = [Clause.model_validate(c) for c in json.load(open(clauses_path))]

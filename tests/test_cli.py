@@ -9,7 +9,7 @@ from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, HashEmbedder, claus
 
 from cdg import cli
 from cdg.application.deps import Deps
-from cdg.domain.state import REQUIRED_KINDS, Clause
+from cdg.domain.models import REQUIRED_KINDS, Clause
 
 
 def run_cli(capsys, *argv) -> tuple[int, dict]:

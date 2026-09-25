@@ -24,7 +24,7 @@ from cdg.application.deps import Deps
 from cdg.application.extraction import LLMExtractor
 from cdg.domain import expiry
 from cdg.domain.config import DecisionConfig, load_config
-from cdg.domain.state import Decision
+from cdg.domain.models import Decision
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
 LEGAL_TIMEZONE = ZoneInfo("Europe/Paris")

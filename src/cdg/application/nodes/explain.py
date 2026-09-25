@@ -1,6 +1,6 @@
 """explain : justification rédigée à partir du verdict figé."""
 
-from cdg.domain.state import ContractState
+from cdg.application.state import ContractState
 
 
 def explain(state: ContractState) -> dict:

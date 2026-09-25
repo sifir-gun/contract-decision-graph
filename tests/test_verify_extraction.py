@@ -3,9 +3,10 @@
 import pytest
 from doubles import ABSENT, CONTRACT_TEXT, clauses
 
-from cdg.application.nodes.verify_extraction import normalize, verify_extraction
+from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.domain.config import load_config
-from cdg.domain.state import Clause, NodeFailure
+from cdg.domain.models import Clause, NodeFailure
+from cdg.domain.verification import check_extraction, normalize
 
 CONFIG = load_config()
 
@@ -114,4 +115,17 @@ def test_extraction_en_echec_escalade_sans_verification():
         "route": "human_review",
         "proposed_decision": "ESCALADE",
         "failure_report": {"stage": "noeuds", "failures": [failure.model_dump()]},
+    }
+
+
+def test_domaine_trois_issues_de_la_verification():
+    assert check_extraction(CONTRACT_TEXT, clauses(), 1, 2).outcome == "verified"
+    retry = check_extraction(CONTRACT_TEXT, invented(), 1, 2)
+    assert retry.outcome == "retry" and retry.failure_report is None and retry.problems
+    final = check_extraction(CONTRACT_TEXT, invented(), 2, 2)
+    assert final.outcome == "escalate"
+    assert final.failure_report == {
+        "stage": "extraction",
+        "attempts": 2,
+        "problems": final.problems,
     }

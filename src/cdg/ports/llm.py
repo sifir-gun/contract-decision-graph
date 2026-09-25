@@ -7,7 +7,7 @@ from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from cdg.domain.state import Usage
+from cdg.domain.models import Usage
 
 Tier = Literal["main", "light"]
 SchemaT = TypeVar("SchemaT", bound=BaseModel)

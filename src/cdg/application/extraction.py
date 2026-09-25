@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from cdg.application.deps import ExtractionResult
-from cdg.domain.state import Clause, TransferCategory
+from cdg.domain.models import Clause, TransferCategory
 from cdg.ports.llm import LLMProvider
 
 PROMPTS = Path(__file__).parent / "prompts"

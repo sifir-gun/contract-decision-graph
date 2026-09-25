@@ -11,7 +11,7 @@ from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.adapters.langgraph.orchestrator import build_graph, route_after_verify
 from cdg.application.deps import Deps
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.domain.state import DOMAINS, HumanDecision
+from cdg.domain.models import DOMAINS, HumanDecision
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract

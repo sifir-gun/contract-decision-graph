@@ -175,7 +175,7 @@ def test_dependances_permises_non_signalees(tmp_path):
     root = _tree(
         tmp_path,
         {
-            "ports/x.py": "from cdg.domain.state import Usage",
+            "ports/x.py": "from cdg.domain.models import Usage",
             "application/x.py": "from cdg.ports.llm import LLMProvider\nfrom cdg.domain import corpus",
             "adapters/llm/x.py": "from cdg.application.deps import Deps\nfrom cdg import settings",
         },

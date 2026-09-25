@@ -1,7 +1,7 @@
 """extract_clauses : extraction structurée par l'extracteur injecté ; incrémente les essais."""
 
 from cdg.application.deps import ExtractionResult, Extractor
-from cdg.domain.state import ContractState
+from cdg.application.state import ContractState
 
 
 def extract_clauses(state: ContractState, extractor: Extractor) -> dict:

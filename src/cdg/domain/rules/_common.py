@@ -3,8 +3,8 @@
 from collections.abc import Callable
 
 from cdg.domain.config import DecisionConfig
+from cdg.domain.models import AgentVerdict, Clause, Domain, RetrievalStatus
 from cdg.domain.numeric import rounded
-from cdg.domain.state import AgentVerdict, Clause, Domain, RetrievalStatus
 
 RuleFn = Callable[[list[Clause], RetrievalStatus, DecisionConfig], AgentVerdict]
 

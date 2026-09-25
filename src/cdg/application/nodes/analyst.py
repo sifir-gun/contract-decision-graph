@@ -1,9 +1,10 @@
 """analyst : CRAG du domaine puis règles en Python pur. Reçoit un AnalystInput via Send."""
 
 from cdg.application.deps import Crag, RetrievalResult
+from cdg.application.state import AnalystInput
 from cdg.domain.config import DecisionConfig
+from cdg.domain.models import AgentVerdict
 from cdg.domain.rules import RULES
-from cdg.domain.state import AgentVerdict, AnalystInput
 
 
 def analyst(inp: AnalystInput, crag: Crag, decision_config: DecisionConfig) -> dict:

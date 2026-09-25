@@ -1,16 +1,21 @@
 """Politique d'arbitrage humain, lue depuis la configuration. Fonctions pures, sans LangGraph."""
 
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import ValidationError
 
 from cdg.domain.config import DecisionConfig
+from cdg.domain.models import AgentVerdict, HumanDecision
 from cdg.domain.numeric import rounded
-from cdg.domain.state import AgentVerdict, ContractState, HumanDecision
 
 
-def build_request(state: ContractState, config: DecisionConfig) -> dict:
-    """Charge utile exposée à l'humain ; le texte du contrat n'y figure pas."""
+def build_request(state: Mapping[str, Any], config: DecisionConfig) -> dict:
+    """Charge utile exposée à l'humain ; le texte du contrat n'y figure pas.
+
+    `state` : l'état du contrat, lu seulement ; le domaine n'en connaît pas la forme
+    (`application/state.py`), seulement les clés lues ici.
+    """
     margin = state.get("margin")
     return {
         "contract_id": state.get("contract_id"),

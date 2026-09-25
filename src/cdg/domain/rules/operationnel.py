@@ -1,8 +1,8 @@
 """Règles du domaine opérationnel : durée d'engagement et préavis de résiliation."""
 
 from cdg.domain.config import DecisionConfig
+from cdg.domain.models import AgentVerdict, Clause, RetrievalStatus
 from cdg.domain.rules._common import above, clause, verdict
-from cdg.domain.state import AgentVerdict, Clause, RetrievalStatus
 
 
 def operationnel(

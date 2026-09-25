@@ -14,7 +14,7 @@ from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application.deps import Deps
 from cdg.domain.config import load_config
-from cdg.domain.state import DOMAINS, NodeFailure
+from cdg.domain.models import DOMAINS, NodeFailure
 from cdg.ports.llm import LLMOutputError
 
 CONFIG = load_config()

@@ -89,7 +89,7 @@ Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate`
 
 ## Schéma d'état
 
-L'état global est un `TypedDict` ; les objets métier sont des modèles Pydantic validés à chaque frontière de nœud. Seuls `verdicts`, `usage` et `failures` (J3) ont un réducteur, pour que les 4 branches parallèles s'ajoutent sans s'écraser. `usage` alimente dès la phase 1 le coût par contrat et la latence par nœud.
+L'état global est un `TypedDict` (`application/state.py` : `ContractState`, réducteurs, `Route`, `AnalystInput`) ; les objets métier sont des modèles Pydantic (`domain/models.py`) validés à chaque frontière de nœud. Seuls `verdicts`, `usage` et `failures` (J3) ont un réducteur, pour que les 4 branches parallèles s'ajoutent sans s'écraser. `usage` alimente dès la phase 1 le coût par contrat et la latence par nœud.
 
 ```python
 import operator
@@ -202,81 +202,33 @@ Un nœud ne renvoie que les clés qu'il modifie. Un analyste renvoie `{"verdicts
 
 Quatre mécanismes portent la démonstration : `route` écrite dans l'état et lue par des arêtes conditionnelles pour tout le routage, `Send` pour le fan-out, `interrupt()` et `Command(resume=...)` pour l'humain, `PostgresSaver` pour la persistance. Les signatures ci-dessous sont indicatives : vérifier contre la documentation de la version installée.
 
-Nœuds purs, sans import de LangGraph :
+Nœuds purs, sans import de LangGraph. La logique vit dans le domaine ; un nœud ne fait qu'adapter l'état au domaine, puis le résultat à l'état (clés écrites, `route`). La route est un concept du graphe : le domaine rend une issue, jamais un nom de nœud.
+
+| Nœud (`application/nodes/`) | Logique (`domain/`) | Issue rendue par le domaine |
+| --- | --- | --- |
+| `validate_input` | `input_checks.rejection(texte, date d'analyse, limites)` | motif de rejet, ou `None` |
+| `verify_extraction` | `verification.check_extraction(texte, clauses, essais, essais max)` | `verified`, `retry` (problèmes), `escalate` (rapport d'échec) |
+| `decision_gate` | `decision.decide(verdicts, échecs, consommation, config)` | `GateOutcome` : décision proposée, revue humaine ou non, marge, rapport d'échec ; décision finale sans revue humaine |
+| `analyst` | `rules.RULES[domaine](clauses, statut du CRAG, config)` | `AgentVerdict` |
 
 ```python
-# src/cdg/application/nodes/validate_input.py
-def validate_input(state: ContractState) -> dict:
-    ok, reason = check_contract(state["raw_text"])
-    if ok:
-        return {"route": "extract_clauses", "extraction_attempts": 0}
-    return {"route": "reject", "reject_reason": reason}
+# src/cdg/domain/decision.py : Python pur, sans LLM ni état du graphe
+def decide(verdicts, failures, usage, config) -> GateOutcome: ...
 
 
-# src/cdg/application/nodes/verify_extraction.py
-def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict:
-    text = normalize(state["raw_text"])
-    problems = [
-        f"citation introuvable: {c.kind}"
-        for c in state["clauses"]
-        if c.present and normalize(c.quote) not in text
-    ]
-    found = {c.kind for c in state["clauses"]}
-    problems += [f"clause manquante: {k}" for k in REQUIRED_KINDS if k not in found]
-    if not problems:
-        return {"route": "analysts"}
-    if (
-        state["extraction_attempts"] < decision_config.extraction.max_attempts
-    ):  # 2 ; extract_clauses a incrémenté
-        return {"route": "extract_clauses", "extraction_feedback": problems}
-    return {
-        "route": "human_review",
-        "proposed_decision": "ESCALADE",
-        "failure_report": {
-            "stage": "extraction",
-            "attempts": state["extraction_attempts"],
-            "problems": problems,
-        },  # + « clause en double », « type inconnu »
-    }
-
-
-# src/cdg/application/nodes/decision_gate.py
+# src/cdg/application/nodes/decision_gate.py : adaptation état -> domaine -> état
 def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
-    config = decision_config  # « config » est réservé par LangGraph
-    d = aggregate(state["verdicts"], config)  # Python pur, sans LLM, valeurs arrondies
-    used = total_tokens(state.get("usage", []))  # tokens_in + tokens_out
-    limit = config.budget.max_tokens_per_contract
-    over = used > limit
-    budget_report = {"stage": "budget", "tokens": used, "limit": limit}
-    if d.hard_block:  # 1. l'issue la plus conservatrice l'emporte
-        if config.human_policy.hard_block_review:  #    NO_GO proposé, levée humaine possible
-            update = {"proposed_decision": "NO_GO", "margin": d.margin, "route": "human_review"}
-        else:  #    NO_GO établi, marge ignorée
-            update = {
-                "proposed_decision": "NO_GO",
-                "final_decision": "NO_GO",
-                "margin": d.margin,
-                "route": "explain",
-            }
-        if over:
-            update["failure_report"] = budget_report  #    dépassement tracé quand même
-        return update
-    if over:  # 2. budget
-        return {
-            "proposed_decision": "ESCALADE",
-            "margin": d.margin,
-            "failure_report": budget_report,
-            "route": "human_review",
-        }
-    # 3. INSUFFISANT, 4. conflit, 5. seuils : déjà ordonnés par aggregate
-    if d.decision == "ESCALADE" or d.margin < config.min_margin:
-        return {"proposed_decision": d.decision, "margin": d.margin, "route": "human_review"}
-    return {
-        "proposed_decision": d.decision,
-        "final_decision": d.decision,
-        "margin": d.margin,
-        "route": "explain",
+    outcome = decide(
+        state["verdicts"], state.get("failures", []), state.get("usage", []), decision_config
+    )
+    update = {
+        "proposed_decision": outcome.proposed,
+        "route": "human_review" if outcome.human_review else "explain",
     }
+    if outcome.final is not None:  # décision finale écrite seulement vers explain
+        update["final_decision"] = outcome.final
+    ...  # margin et failure_report s'ils existent
+    return update
 ```
 
 Adaptateurs et câblage, dans `orchestrator.py` uniquement :
@@ -571,10 +523,13 @@ contract-decision-graph/
 │   ├── cli.py                  # racine de composition : run, resume, history, expire, verify
 │   ├── settings.py             # .env (python-dotenv), variables obligatoires
 │   ├── domain/                 # règles pures : n'importe ni ports, ni application, ni adaptateurs
-│   │   ├── state.py            # schémas d'état et Pydantic
+│   │   ├── models.py           # modèles métier Pydantic (clauses, verdicts, décision humaine…)
 │   │   ├── config.py           # chargement et validation Pydantic de decision.yaml
 │   │   ├── numeric.py          # fonction d'arrondi unique (gate, sérialisation canonique)
 │   │   ├── rules/              # une fonction par domaine
+│   │   ├── decision.py         # décision du gate (ordre, agrégat, marge, budget)
+│   │   ├── verification.py     # vérification de l'extraction (citations, types)
+│   │   ├── input_checks.py     # contrôle de l'entrée (taille, langue, résidus, date)
 │   │   ├── policy.py           # arbitrage humain, lu depuis la config
 │   │   ├── expiry.py           # expire : sélection pure, décision système NO_GO
 │   │   ├── masking.py          # masquage des données personnelles avant le graphe
@@ -586,7 +541,9 @@ contract-decision-graph/
 │   │   ├── retriever.py        # Retriever, Passage
 │   │   └── audit_store.py      # AuditStore, implémenté au J4
 │   ├── application/            # orchestre le domaine à travers les ports, jamais un adaptateur
-│   │   ├── nodes/              # un fichier par nœud, fonctions pures
+│   │   ├── state.py            # état du graphe : ContractState, réducteurs, route, AnalystInput
+│   │   ├── nodes/              # un fichier par nœud : adaptation état -> domaine -> état
+│   │   ├── failures.py         # escalade d'un nœud à plusieurs sorties après un échec
 │   │   ├── deps.py             # dépendances injectées : Extractor, Crag, Deps (doublures en test)
 │   │   ├── extraction.py       # extraction LLM (modèle main), contrat délimité comme donnée
 │   │   ├── prompts/            # prompts système, sans règle de décision
@@ -686,6 +643,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **25 septembre 2026, J3** :
   - périmètre du corpus : un article est aussi admis s'il définit un terme utilisé par une règle (RGPD, art. 4) ;
   - sous-graphe CRAG compilé avec `checkpointer=False`, résumé du CRAG dans le verdict de l'analyste ;
+  - rangement, sans changement de comportement : `domain/state.py` scindé en `domain/models.py` (modèles métier) et `application/state.py` (état du graphe) ; logique de `decision_gate`, `verify_extraction` et `validate_input` sortie vers `domain/decision.py`, `domain/verification.py` et `domain/input_checks.py`, les nœuds ne gardant que l'adaptation ; écarts assumés documentés dans l'ADR 002 (`config.py`, `ingestion.py`, `ChunkRow`) ;
   - tests `llm` des critères 3 et 10 (tâche 12) : 5 essais chacun, une ligne `LLM-RESULT` par essai, séries consignées au journal ;
   - CLI sans le mode `stub-j2` (tâche 11) : dépendances réelles construites par `build_deps`, option `--analysis-date`, `analysis_date` dans le statut ; `stub_j2.py` supprimé ;
   - gardes d'échec de nœud (tâche 10) : `guard` sur chaque nœud sauf `human_review`, `NodeFailure` dans `failures` (réducteur), escalade par `verify_extraction` et `decision_gate`, arête `validate_input → human_review`, `RetryPolicy` sur les analystes avant la garde (section `analyst_retry`), échecs exposés par `thread_status` ; `decision_gate` : l'analyste en échec vient en 2ᵉ position, après le blocage dur ;

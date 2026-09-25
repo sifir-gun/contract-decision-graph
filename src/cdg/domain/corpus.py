@@ -18,7 +18,7 @@ from datetime import date
 
 from pydantic import BaseModel
 
-from cdg.domain.state import Domain
+from cdg.domain.models import Domain
 
 FICHE_DISCLAIMER = "Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique."
 

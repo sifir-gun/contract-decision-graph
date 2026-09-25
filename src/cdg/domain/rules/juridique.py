@@ -1,8 +1,8 @@
 """Règles du domaine juridique : responsabilités de l'acheteur et du fournisseur."""
 
 from cdg.domain.config import DecisionConfig
+from cdg.domain.models import AgentVerdict, Clause, RetrievalStatus
 from cdg.domain.rules._common import below, clause, verdict
-from cdg.domain.state import AgentVerdict, Clause, RetrievalStatus
 
 
 def juridique(

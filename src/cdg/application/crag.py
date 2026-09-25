@@ -20,7 +20,7 @@ from pydantic import BaseModel, StringConstraints
 
 from cdg.application.deps import RetrievalResult
 from cdg.domain.corpus import expired
-from cdg.domain.state import DOMAIN_KINDS, Clause, Domain, RetrievalTrace, Usage
+from cdg.domain.models import DOMAIN_KINDS, Clause, Domain, RetrievalTrace, Usage
 from cdg.ports.llm import LLMOutputError, LLMProvider
 from cdg.ports.retriever import Passage, Retriever
 

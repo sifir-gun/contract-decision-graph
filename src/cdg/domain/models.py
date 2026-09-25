@@ -1,14 +1,15 @@
-"""Schémas d'état du graphe et modèles métier, validés à chaque frontière de nœud."""
+"""Modèles métier, validés à chaque frontière de nœud.
 
-import operator
-from datetime import date
-from typing import Annotated, Literal, TypedDict, get_args
+La forme de l'état du graphe (réducteurs, route, entrée des analystes) est dans
+`application/state.py`.
+"""
+
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field, model_validator
 
 Domain = Literal["juridique", "financier", "conformite", "operationnel"]
 Decision = Literal["GO", "GO_RESERVES", "NO_GO", "ESCALADE"]
-Route = Literal["extract_clauses", "reject", "analysts", "human_review", "explain"]
 RetrievalStatus = Literal["OK", "INSUFFISANT"]
 
 DOMAINS: tuple[Domain, ...] = ("juridique", "financier", "conformite", "operationnel")
@@ -124,34 +125,3 @@ class Usage(BaseModel):
     tokens_in: int = Field(ge=0)
     tokens_out: int = Field(ge=0)
     latency_ms: int = Field(ge=0)
-
-
-class ContractState(TypedDict, total=False):
-    contract_id: str
-    raw_text: str
-    analysis_date: date  # versions des textes jugées à cette date ; fixée par run_contract
-    reject_reason: str | None
-    clauses: list[Clause]
-    extraction_attempts: int
-    extraction_feedback: list[str]
-    verdicts: Annotated[list[AgentVerdict], operator.add]
-    usage: Annotated[list[Usage], operator.add]
-    failures: Annotated[list[NodeFailure], operator.add]  # gardes d'échec de nœud
-    proposed_decision: Decision
-    margin: float
-    route: Route  # écrite par un nœud, lue par l'arête
-    failure_report: dict | None
-    human: HumanDecision | None
-    final_decision: (
-        Decision | None
-    )  # decision_gate (route explain) ou human_review ; None après reject
-    explanation: str
-    config_hash: str
-    decision_hash: str
-    chain_hash: str
-
-
-class AnalystInput(TypedDict):  # état privé reçu via Send
-    domain: Domain
-    clauses: list[Clause]
-    analysis_date: date

@@ -5,7 +5,7 @@ import time
 from mistralai.client import Mistral
 
 from cdg.domain.config import LLMConfig
-from cdg.domain.state import Usage
+from cdg.domain.models import Usage
 from cdg.ports.llm import LLMOutputError, SchemaT, Tier
 
 
