@@ -15,13 +15,16 @@ from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 from cdg.domain.models import DOMAINS, NodeFailure
-from cdg.ports.llm import LLMOutputError
+from cdg.ports.llm import LLMOutputError, LLMTransientError
 
 CONFIG = load_config()
 # reprises immédiates : les tests ne dorment pas
 FAST = CONFIG.model_copy(
     update={
-        "analyst_retry": CONFIG.analyst_retry.model_copy(update={"initial_interval_seconds": 0.0})
+        "analyst_retry": CONFIG.analyst_retry.model_copy(update={"initial_interval_seconds": 0.0}),
+        "extraction_retry": CONFIG.extraction_retry.model_copy(
+            update={"initial_interval_seconds": 0.0}
+        ),
     }
 )
 
@@ -213,3 +216,51 @@ def test_statut_expose_les_echecs():
             "domain": "financier",
         }
     ]
+
+
+# --- Extraction : reprise sur erreur passagère seulement (429, 5xx, délai dépassé) -------
+
+
+class FlakyExtractor(FixedExtractor):
+    """Extraction qui échoue d'abord selon une liste d'erreurs, la dernière persistant."""
+
+    def __init__(self, errors):
+        super().__init__(clauses())
+        self.errors = list(errors)
+
+    def __call__(self, raw_text, feedback):
+        if self.errors:
+            error = self.errors.pop(0) if len(self.errors) > 1 else self.errors[0]
+            if error is not None:
+                self.calls.append((raw_text, list(feedback)))
+                raise error
+        return super().__call__(raw_text, feedback)
+
+
+def test_extraction_erreur_passagere_reprise_avant_la_garde():
+    transient = LLMTransientError("mistral-small-2603 : erreur passagère (HTTP 429)")
+    extractor = FlakyExtractor([transient, transient, None])
+    values = run(deps(extractor=extractor)).values
+    assert CONFIG.extraction_retry.max_attempts == 3
+    assert len(extractor.calls) == 3  # deux échecs, puis la réussite
+    assert values.get("failures", []) == [] and len(values["verdicts"]) == 4
+
+
+def test_extraction_erreur_passagere_persistante_escalade_apres_les_reprises():
+    extractor = FlakyExtractor([LLMTransientError("HTTP 503")])
+    values = run(deps(extractor=extractor)).values
+    [failure] = values["failures"]
+    assert (failure.node, failure.error, failure.attempts) == (
+        "extract_clauses",
+        "LLMTransientError",
+        3,
+    )
+    assert len(extractor.calls) == 3 and values["proposed_decision"] == "ESCALADE"
+
+
+@pytest.mark.parametrize("error", [ConnectionError("réseau"), ValueError("bogue")])
+def test_extraction_autre_erreur_sans_reprise(error):
+    # seules les erreurs passagères du fournisseur sont reprises sur l'extraction
+    extractor = FlakyExtractor([error])
+    values = run(deps(extractor=extractor)).values
+    assert len(extractor.calls) == 1 and values["failures"][0].attempts == 1

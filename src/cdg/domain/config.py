@@ -129,8 +129,8 @@ class CorpusConfig(_Strict):
     chunk_max_words: Annotated[int, Field(gt=0)]  # e5 : 512 tokens au plus
 
 
-class AnalystRetry(_Strict):
-    """RetryPolicy des analystes, sur erreur transitoire, avant la garde d'échec."""
+class RetrySettings(_Strict):
+    """RetryPolicy d'un nœud (analystes, extraction), avant la garde d'échec."""
 
     max_attempts: Annotated[int, Field(gt=0)]  # tentatives, la première comprise
     initial_interval_seconds: Annotated[float, Field(ge=0.0)]
@@ -193,7 +193,8 @@ class DecisionConfig(_Strict):
     embedding: EmbeddingConfig
     corpus: CorpusConfig
     crag: CragConfig
-    analyst_retry: AnalystRetry
+    analyst_retry: RetrySettings
+    extraction_retry: RetrySettings
 
     def weight(self, domain: Domain) -> float:
         return getattr(self.weights, domain)

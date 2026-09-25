@@ -5,14 +5,18 @@ Faux clients imitant les réponses des SDK installés : aucun appel réseau.
 
 from types import SimpleNamespace
 
+import anthropic as anthropic_sdk
+import httpx
+import httpx2
 import pytest
+from mistralai.client import errors as mistral_errors
 from pydantic import BaseModel
 
 from cdg.adapters.llm import build_provider
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
 from cdg.domain.config import load_config
-from cdg.ports.llm import LLMOutputError
+from cdg.ports.llm import LLMOutputError, LLMTransientError
 from cdg.settings import SettingsError
 
 CONFIG = load_config()
@@ -143,3 +147,99 @@ def test_cle_d_api_absente_erreur_explicite(monkeypatch):
     llm = CONFIG.llm.model_copy(update={"provider": "anthropic"})
     with pytest.raises(SettingsError, match="ANTHROPIC_API_KEY"):
         build_provider(llm)
+
+
+# --- Erreurs passagères (429, 5xx, délai dépassé) : traduites pour la reprise ----------
+
+MISTRAL_REQUEST = httpx.Request("POST", "https://api.mistral.test/v1/chat/completions")
+ANTHROPIC_REQUEST = httpx2.Request("POST", "https://api.anthropic.test/v1/messages")
+
+
+def mistral_status(status: int, headers: dict | None = None):
+    response = httpx.Response(
+        status, headers=headers or {}, text='{"message":"x"}', request=MISTRAL_REQUEST
+    )
+    return mistral_errors.SDKError("API error occurred", response)
+
+
+def anthropic_status(cls, status: int):
+    response = httpx2.Response(status, text='{"message":"x"}', request=ANTHROPIC_REQUEST)
+    return cls("erreur", response=response, body=None)
+
+
+class RaisingChat:
+    def __init__(self, error):
+        self.error = error
+
+    def parse(self, **kwargs):
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "transient"),
+    [
+        (mistral_status(429), True),
+        (mistral_status(503), True),
+        (httpx.ReadTimeout("délai", request=MISTRAL_REQUEST), True),
+        (httpx.ConnectTimeout("délai", request=MISTRAL_REQUEST), True),
+        (mistral_status(400), False),
+        (mistral_status(401), False),
+        (httpx.ConnectError("refus", request=MISTRAL_REQUEST), False),
+    ],
+)
+def test_mistral_erreur_passagere_traduite(error, transient):
+    provider = MistralProvider(CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error)))
+    call = {"tier": "main", "system": "s", "user": "u", "schema": Answer, "node": "n"}
+    if transient:
+        with pytest.raises(LLMTransientError) as info:
+            provider.structured(**call)
+        assert info.value.__cause__ is error and "mistral-small-2603" in str(info.value)
+    else:
+        with pytest.raises(type(error)):
+            provider.structured(**call)
+
+
+def test_mistral_429_indique_la_limite_du_compte():
+    error = mistral_status(429, {"x-ratelimit-limit-req-minute": "0"})
+    provider = MistralProvider(CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error)))
+    with pytest.raises(LLMTransientError, match="limite du compte : 0 requête par minute"):
+        provider.structured(tier="main", system="s", user="u", schema=Answer, node="n")
+
+
+class RaisingMessages:
+    def __init__(self, error):
+        self.error = error
+
+    def parse(self, **kwargs):
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "transient"),
+    [
+        (anthropic_status(anthropic_sdk.RateLimitError, 429), True),
+        (anthropic_status(anthropic_sdk.InternalServerError, 500), True),
+        (anthropic_status(anthropic_sdk.APIStatusError, 529), True),  # surcharge
+        (anthropic_sdk.APITimeoutError(request=ANTHROPIC_REQUEST), True),
+        (anthropic_status(anthropic_sdk.BadRequestError, 400), False),
+        (anthropic_sdk.APIConnectionError(request=ANTHROPIC_REQUEST), False),
+    ],
+)
+def test_anthropic_erreur_passagere_traduite(error, transient):
+    client = SimpleNamespace(messages=RaisingMessages(error))
+    provider = AnthropicProvider(CONFIG.llm, client=client)
+    call = {"tier": "light", "system": "s", "user": "u", "schema": Answer, "node": "n"}
+    if transient:
+        with pytest.raises(LLMTransientError) as info:
+            provider.structured(**call)
+        assert info.value.__cause__ is error
+    else:
+        with pytest.raises(type(error)):
+            provider.structured(**call)
+
+
+def test_pas_de_reprise_cachee_dans_les_sdk():
+    # la reprise est réglée dans la configuration (RetryPolicy), jamais en double
+    assert AnthropicProvider(CONFIG.llm, api_key="test")._client.max_retries == 0
+    mistral_client = MistralProvider(CONFIG.llm, api_key="test")._client
+    assert mistral_client.sdk_configuration.retry_config is None

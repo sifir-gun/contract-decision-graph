@@ -29,9 +29,9 @@ from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.state import AnalystInput, ContractState
 from cdg.domain import expiry, masking, policy
-from cdg.domain.config import AnalystRetry, DecisionConfig
+from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
-from cdg.ports.llm import LLMProvider
+from cdg.ports.llm import LLMProvider, LLMTransientError
 from cdg.ports.retriever import Retriever
 
 
@@ -151,14 +151,24 @@ def guard(
     return node
 
 
-def retry_policy(settings: AnalystRetry) -> RetryPolicy:
+def retry_policy(
+    settings: RetrySettings, retry_on: Callable[[Exception], bool] | None = None
+) -> RetryPolicy:
+    """RetryPolicy réglée par la configuration ; `retry_on` par défaut : celui de LangGraph."""
+    options = {} if retry_on is None else {"retry_on": retry_on}
     return RetryPolicy(
         initial_interval=settings.initial_interval_seconds,
         backoff_factor=settings.backoff_factor,
         max_interval=settings.max_interval_seconds,
         max_attempts=settings.max_attempts,
         jitter=settings.jitter,
+        **options,
     )
+
+
+def transient(exc: Exception) -> bool:
+    """Erreur passagère du fournisseur LLM (429, 5xx, délai dépassé), traduite par l'adaptateur."""
+    return isinstance(exc, LLMTransientError)
 
 
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
@@ -170,6 +180,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     est escaladé par `verify_extraction`.
     """
     retry = retry_policy(config.analyst_retry)
+    extraction_retry = retry_policy(config.extraction_retry, retry_on=transient)
     builder = StateGraph(ContractState)
     builder.add_node(
         "validate_input",
@@ -179,7 +190,12 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     )
     builder.add_node(
         "extract_clauses",
-        guard("extract_clauses", partial(extract_clauses, extractor=deps.extractor)),
+        guard(
+            "extract_clauses",
+            partial(extract_clauses, extractor=deps.extractor),
+            retry=extraction_retry,
+        ),
+        retry_policy=extraction_retry,
     )
     builder.add_node(
         "verify_extraction",

@@ -108,3 +108,12 @@ analyst_retry:
   backoff_factor: 2.0
   max_interval_seconds: 10.0
   jitter: false
+
+# Reprise de l'extraction sur erreur passagère du fournisseur seulement : limite de débit
+# (429), erreur serveur (5xx), délai dépassé. Les SDK ne reprennent rien eux-mêmes.
+extraction_retry:
+  max_attempts: 3                 # tentatives, la première comprise
+  initial_interval_seconds: 2.0
+  backoff_factor: 2.0
+  max_interval_seconds: 20.0
+  jitter: false

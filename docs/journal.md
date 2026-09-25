@@ -752,3 +752,16 @@ Sans changement de comportement : les tests existants ne changent que par leurs 
 - **ADR 002** : nouvelles couches, et écarts assumés (`config.py` qui lit un fichier et porte des réglages techniques, `ingestion.py` qui lit le corpus sans port, `ChunkRow` dans le domaine faute de port d'écriture, `build_request` sur un `Mapping`).
 
 **Piège évité.** Un checkpoint enregistre le module de chaque objet sérialisé (`cdg.domain.state.Clause`, puis `cdg.domain.models.Clause`). Déplacer un modèle rend illisibles les threads écrits avant. Vérifié avant chacune des deux refontes : aucun thread en base. À retenir pour la suite : tout déplacement de modèle après le J4 exigera une migration des checkpoints, ou un alias de module.
+
+### J3 : reprise de l'extraction sur erreur passagère (décision du 25/09, point 3)
+
+- **Port** : `LLMTransientError` dans `ports/llm.py`, pour les erreurs passagères du fournisseur (429, 5xx, délai dépassé).
+- **Adaptateurs** : Mistral la lève sur `MistralError` de statut 429 ou 5xx, et sur un délai dépassé ; Anthropic sur `APIStatusError` de statut 429 ou 5xx (dont 529, surcharge), et sur `APITimeoutError`. L'erreur du SDK reste la cause (`from`). Pour un 429 Mistral, le message reprend la limite du compte lue dans `x-ratelimit-limit-req-minute` (« limite du compte : 0 requête par minute » : le cas de la série 1).
+- **Reprise** : `RetryPolicy` sur `extract_clauses` (section `extraction_retry` : 3 tentatives, 2 s, facteur 2, plafond 20 s, sans gigue), avec pour seul `retry_on` le test `isinstance(exc, LLMTransientError)`. La garde relance l'erreur tant qu'il reste des tentatives, comme pour les analystes. Une erreur non passagère (400, 401, connexion refusée, sortie non structurée) est consignée dès le premier essai. Le modèle de configuration `AnalystRetry` devient `RetrySettings`, commun aux deux sections.
+- **Pas de reprise cachée** : les SDK ne reprennent rien (Anthropic `max_retries=0`, au lieu de 2 par défaut ; Mistral `retry_config=None`, déjà sans reprise par défaut). Les reprises ne se règlent que dans la configuration.
+- **Tests** : traduction testée pour chaque statut et chaque SDK, sans réseau ; graphe : 2 erreurs passagères puis réussite (3 appels, aucun échec) ; erreur passagère persistante (3 tentatives, puis `ESCALADE`) ; `ConnectionError` et `ValueError` sans reprise.
+
+**Choix.**
+- **Connexion refusée non reprise.** Elle n'est pas dans la liste demandée (429, 5xx, délai dépassé), donc l'extraction part chez l'humain dès le premier essai. À élargir si les tests réels le justifient.
+- **Délai dépassé côté Mistral reconnu par sa classe.** Le SDK transmet l'exception httpx telle quelle. Importer httpx, dépendance du SDK mais pas du projet, reviendrait à s'appuyer sur une dépendance non déclarée : l'adaptateur reconnaît `httpx.TimeoutException` dans la hiérarchie de l'exception, par son nom et son module.
+- **Un 429 à quota nul est quand même repris.** Il est passager par son statut, mais permanent dans les faits : les 3 tentatives coûtent 6 s d'attente, puis l'échec est consigné avec la limite du compte dans le message.

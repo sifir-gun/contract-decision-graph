@@ -69,6 +69,13 @@ def test_configuration_du_projet_conforme_a_la_spec():
         "max_interval_seconds": 10.0,
         "jitter": False,
     }
+    assert cfg.extraction_retry.model_dump() == {
+        "max_attempts": 3,
+        "initial_interval_seconds": 2.0,
+        "backoff_factor": 2.0,
+        "max_interval_seconds": 20.0,
+        "jitter": False,
+    }
     assert cfg.embedding.model_dump() == {
         "model": "intfloat/multilingual-e5-large",
         "dimension": 1024,
@@ -155,6 +162,8 @@ _DELETE = object()
         ("analyst_retry.initial_interval_seconds", -1.0),
         ("analyst_retry.backoff_factor", 0.5),  # intervalle décroissant
         ("analyst_retry.jitter", "non"),
+        ("extraction_retry", _DELETE),
+        ("extraction_retry.max_attempts", 0),
     ],
 )
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):
