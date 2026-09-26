@@ -7,7 +7,7 @@ import pytest
 from doubles import HashEmbedder
 
 from cdg.application import ingestion
-from cdg.domain import corpus
+from cdg.domain import corpus, explanation
 from cdg.domain.config import load_config
 
 RAW = Path(__file__).resolve().parents[1] / "data" / "corpus" / "raw"
@@ -140,6 +140,22 @@ def test_articles_ingérés():
     assert "C. com., art. L441-10" in refs and "RGPD, art. 28" in refs
     assert "RGPD, art. 79" not in refs
     assert all(domains for _, domains in rows)
+
+
+def test_aucun_numero_d_article_commun_a_deux_sources():
+    # l'explication compare les articles cités par leur seul numéro normalisé
+    # (domain/explanation.py) : un numéro partagé par deux sources rendrait citable
+    # l'article d'une source quand seul celui de l'autre est retenu
+    sources: dict[str, set[str]] = {}
+    for article, _ in ingestion.articles():
+        [number] = explanation.articles(article.reference)
+        sources.setdefault(number, set()).add(article.source_id)
+    shared = {n: sorted(s) for n, s in sources.items() if len(s) > 1}
+    assert not shared, (
+        f"numéros d'articles communs à plusieurs sources : {shared}. Passer, dans "
+        "domain/explanation.py, à une comparaison des articles cités par source et "
+        "numéro, puis retirer ce test."
+    )
 
 
 def test_date_de_recuperation_propre_a_un_article():

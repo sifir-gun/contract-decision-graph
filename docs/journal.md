@@ -1360,3 +1360,10 @@ Décision du 26/09 : l'empreinte scellée est celle de la configuration qui a pr
 - sur le graphe : l'explication est scellée avec sa source, et `decision_hash` est identique, qu'elle vienne du LLM ou du gabarit. Pour une erreur passagère, deux tentatives du nœud puis le gabarit, ou l'acceptation ;
 - CLI : `resume` sans clé passe par le gabarit, avec clé par le LLM (doublure) ; `expire` passe par le gabarit même avec une clé ; `run` explique par le fournisseur de l'analyse ;
 - au total, 775 tests ; couverture de 98,15 %. Journal réel toujours vide, et aucune table jetable restante.
+
+### J4 tâche 5 (suite) : décisions du 26/09
+
+- **Validés** : `AgentVerdict.finding_kinds`, le garde-fou des clés d'API dans les tests, un gabarit sans relecteur ni motif humain, et deux des trois limites (libellés détectés par règles, consommation d'une tentative interrompue).
+- **Changement de configuration** : procédure d'exploitation ajoutée au README (« Modifier la configuration »). Les contrats suspendus se tranchent avant la modification. Après, `resume` les refuse : il faut les relancer sous un nouvel identifiant, ou les laisser expirer. Restaurer la configuration rouvre la reprise.
+- **Articles comparés par numéro** : `test_aucun_numero_d_article_commun_a_deux_sources` (`test_corpus.py`) échoue si un même numéro apparaît dans deux sources du corpus. Son message demande de passer à une comparaison par source et numéro dans `domain/explanation.py`. Vérifié par mutation : un « C. civ., art. 28 » ajouté au corpus le fait échouer.
+- **`explain` en réel** : dans la série du T8. On y mesure le taux d'explications acceptées sans gabarit, sans seuil pour l'instant, et on consigne ici les motifs de refus.

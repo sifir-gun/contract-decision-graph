@@ -49,6 +49,19 @@ uv run python -m cdg.cli verify --expect-head <empreinte> # échoue aussi si la 
 
 La sortie de `verify` donne la tête de chaîne (`tete`) : conservez-la hors de la base pour la comparer plus tard avec `--expect-head`.
 
+### Modifier la configuration
+
+L'empreinte de `config/decision.yaml` (validée, sous forme canonique) est posée dans l'état de chaque contrat au lancement de `run`, puis scellée : c'est elle qui a produit la décision, et le rejeu en dépend. Toute modification de la configuration, même d'un réglage étranger à la décision (explication, reprises), change cette empreinte. Avant de la modifier :
+
+1. Lister les contrats suspendus en attente d'une décision humaine : leur statut est `suspendu` (`history <thread_id>`, ou la sortie de `run`).
+2. Les trancher par `resume` tant que la configuration n'a pas changé.
+
+Après la modification, `resume` refuse un contrat suspendu sous l'ancienne configuration (erreur JSON, code 1, rien n'est repris ni scellé). Deux issues :
+- **le relancer** : `run` sur le même contrat avec un nouvel identifiant (`--contract-id`), sous la nouvelle configuration ; l'ancien thread reste suspendu ;
+- **le laisser expirer** : `expire` le clôt en `NO_GO` système et le scelle avec les deux empreintes (analyse et scellement) et le constat « configuration modifiée entre l'analyse et le scellement ».
+
+Restaurer l'ancienne configuration (même contenu validé) redonne la même empreinte et rouvre la reprise.
+
 ## Architecture
 
 Architecture inspirée de l'architecture hexagonale (ports et adaptateurs), dans une version pragmatique :
