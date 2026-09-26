@@ -30,9 +30,8 @@ QUOTA_HEADERS = (
 
 def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
     """Erreur du port qui remplace l'erreur du SDK, ou None si elle reste telle quelle."""
-    if isinstance(
-        exc, APITimeoutError
-    ):  # sous-classe d'APIConnectionError : avant elle
+    # sous-classe d'APIConnectionError : avant elle
+    if isinstance(exc, APITimeoutError):
         reason = "délai dépassé"
     elif isinstance(exc, APIConnectionError):
         reason = "connexion refusée ou impossible"
@@ -46,9 +45,8 @@ def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
                 f"changer de modèle dans config/decision.yaml ({node})"
             )
         reason = "HTTP 429"
-    elif (
-        isinstance(exc, APIStatusError) and exc.status_code >= 500
-    ):  # dont 529, surcharge
+    # dont 529, surcharge
+    elif isinstance(exc, APIStatusError) and exc.status_code >= 500:
         reason = f"HTTP {exc.status_code}"
     else:
         return None

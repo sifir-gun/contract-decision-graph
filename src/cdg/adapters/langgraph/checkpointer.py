@@ -122,9 +122,8 @@ def setup_database(admin_conninfo: str) -> None:
     with open_saver(admin_conninfo) as saver:
         saver.setup()
         conn = saver.conn
-        if not isinstance(
-            conn, Connection
-        ):  # open_saver passe une connexion, jamais un pool
+        # open_saver passe une connexion, jamais un pool
+        if not isinstance(conn, Connection):
             raise TypeError(f"connexion psycopg attendue, reçu {type(conn).__name__}")
         for statement in _CHECKPOINT_GRANTS:
             conn.execute(statement.format(role=sql.Identifier(APP_ROLE)))

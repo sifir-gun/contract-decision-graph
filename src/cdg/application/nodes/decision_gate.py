@@ -22,9 +22,8 @@ def decision_gate(
         "proposed_decision": outcome.proposed,
         "route": "human_review" if outcome.human_review else "explain",
     }
-    if (
-        outcome.final is not None
-    ):  # decision_gate n'écrit la décision finale que vers explain
+    # decision_gate n'écrit la décision finale que vers explain
+    if outcome.final is not None:
         update["final_decision"] = outcome.final
     if outcome.margin is not None:
         update["margin"] = outcome.margin

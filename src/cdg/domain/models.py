@@ -139,9 +139,8 @@ class HumanDecision(BaseModel):
     def _decision_systeme(self) -> "HumanDecision":
         system_reviewer = self.reviewer.startswith(SYSTEM_REVIEWER_PREFIX)
         if self.source == "systeme":
-            if (
-                self.decision != "NO_GO"
-            ):  # échec fermé : jamais d'approbation automatique
+            # échec fermé : jamais d'approbation automatique
+            if self.decision != "NO_GO":
                 raise ValueError("une décision système ne peut être que NO_GO")
             if not system_reviewer:
                 raise ValueError(

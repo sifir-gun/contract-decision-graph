@@ -79,9 +79,8 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
         human, error = policy.review(
             interrupt(request), state.get("verdicts", []), decision_config
         )
-        if (
-            human is not None
-        ):  # acceptée : policy.review ne rend alors aucun motif de refus
+        # acceptée : policy.review ne rend alors aucun motif de refus
+        if human is not None:
             return {"human": human, "final_decision": human.decision}
         request = {**request, "error": error}
 

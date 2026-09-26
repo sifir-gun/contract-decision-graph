@@ -244,9 +244,8 @@ def generate(state: CragState) -> dict[str, Any]:
     retained = list(dict.fromkeys(p.reference for p in valid))
     old: dict[str, date] = {}
     for p in relevant:
-        if p.valid_until is not None and expired(
-            p.valid_until, on
-        ):  # sans fin : jamais expiré
+        # sans fin : jamais expiré
+        if p.valid_until is not None and expired(p.valid_until, on):
             old.setdefault(p.reference, p.valid_until)
     findings = [
         f"référence expirée à la date d'analyse ({on.isoformat()}) : {reference}, "
