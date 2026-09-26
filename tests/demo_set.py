@@ -25,6 +25,7 @@ class DemoContract:
     expected: dict[str, Any]
     injected: str | None = None  # paragraphe injecté (contrat piégé du critère 9)
     personal_data: list[str] = field(default_factory=list)
+    realistic: bool = False  # rédigé de façon réaliste (J5), pas sans ambiguïté
 
     @property
     def rejected(self) -> bool:
@@ -63,6 +64,7 @@ def load() -> tuple[date, list[DemoContract]]:
             expected=spec["expected"],
             injected=spec.get("injected"),
             personal_data=[str(p) for p in spec.get("personal_data", [])],
+            realistic=spec.get("realistic", False),
         )
         for cid, spec in data["contracts"].items()
     ]

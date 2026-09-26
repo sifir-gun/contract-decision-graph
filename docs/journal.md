@@ -1633,3 +1633,40 @@ README, « Limites connues » (décision du 26/09) :
   - tests `llm` ;
   - `scripts/check.sh` avant chaque push.
 - **`docs/pr-j4.md`** : description de la PR 6, hors du dépôt (`.git/info/exclude`), comme les précédentes.
+
+## 2026-09-26 · J5
+
+### J5 : décisions du 26/09
+
+Objectif du jour : rendre le dépôt prêt à être public et lisible en quelques minutes par un recruteur technique. Décisions sur le plan :
+- **Licence** : AGPL-3.0 pour le code, les fiches et les contrats synthétiques. `data/corpus/raw/` garde ses licences d'origine, avec une exception écrite. Le README indique qu'une licence commerciale est possible sur demande.
+- **E-mail des commits** : l'historique est gardé tel quel ; les prochains commits utilisent l'adresse `noreply` de GitHub.
+- **Série réelle** : 5 essais par contrat du jeu ; invariant exigé à chaque essai (jamais de décision automatique plus favorable que la décision attendue) ; concordance et stabilité mesurées sans seuil ; un essai préalable, consigné et non compté ; la série 6 couvre toute la suite `llm`.
+- **Contrat réaliste** : revue humaine attendue, par la prudence sur des quantités non fixées puis le conflit entre domaines. Le README dira qu'un plafond flou donne un `NO_GO` prudent, pas une escalade, et qu'il n'existe pas encore de signal « clause ambiguë » (phase 2, dans la spec).
+- **Données fictives** : domaines réservés (RFC 2606) et numéros réservés par l'ARCEP, vérifiés sur arcep.fr ; l'IBAN d'exemple reste, avec une note.
+- **README** en français, avec un résumé de cinq lignes en anglais ; détail opérationnel dans `docs/exploitation.md` ; `CLAUDE.md` reste public.
+- **Pushes** sur `phase1-j5` après chaque tâche au vert, avec suivi de la CI.
+- **Liste de contrôle GitHub** pour le jour de la mise en public : activer l'application de la règle de protection de `main` (appliquée seulement sur un dépôt public), CodeQL, la détection de secrets et les alertes Dependabot.
+
+### J5 tâche 1 : contrat réaliste
+
+**Fait.** `demo-13-realiste-infogerance.txt` (contrat d'infogérance, environ 900 mots, synthétique et écrit de zéro), marqué `realistic` dans `attendus.yaml`. Rédigé comme un contrat réel, et non plus sans ambiguïté :
+- **informations dispersées** : le plafond de responsabilité du fournisseur est défini à l'article 1 (« 120 % des sommes facturées au Client au cours des douze mois qui précèdent le fait générateur ») ; l'article sur la responsabilité y renvoie, sans chiffre ;
+- **formulations indirectes** : les pénalités d'exécution s'appellent « réfaction » ; les données personnelles sont « l'annuaire des collaborateurs (nom, fonction, numéro de poste interne) », sans le terme juridique ; la révision est une indexation sur un indice défini en annexe ;
+- **quantités non fixées** : le contrat prend fin « à la réception définitive de la dernière tranche de migration prévue au Planning directeur » ; le préavis est « raisonnable, [...] ne peut être inférieur à un trimestre » ; une résiliation pour faute, « sans préavis, quinze jours après une mise en demeure », côtoie le préavis ordinaire ;
+- **bruit réaliste** : préambule, définitions, gouvernance, confidentialité, assurance, réversibilité, annexes.
+
+**Décision attendue** : durée et préavis présents mais non chiffrés, donc deux pénalités par prudence ; l'opérationnel tombe à 0,4, les trois autres domaines restent à 1,0, d'où un conflit et `ESCALADE`. La revue humaine tranche `GO_RESERVES` (durée et préavis à chiffrer par avenant). Si le modèle prête une valeur à ces clauses (« 3 mois » pour un trimestre), elle ne figure pas dans la citation : nouvelle extraction, puis escalade. Les deux chemins mènent à la revue humaine.
+
+**Tests** (`test_demo.py`) :
+- composition du jeu à 13 contrats (2 `ESCALADE`, 4 revues humaines) ; le contrat réaliste passe les contrôles de `verify_extraction`, ne déclenche aucune détection d'instruction, est scellé et vérifié avec le reste du jeu ;
+- formulations indirectes : jamais « pénalité », jamais « données personnelles », et pourtant les deux clauses sont présentes ; durée et préavis présents sans valeur ;
+- plafond du fournisseur défini dans un autre article que celui de la responsabilité ;
+- escalade par prudence : seules les règles « engagement non chiffré » et « préavis non chiffré » se déclenchent, conflit, revue humaine ;
+- **limite assumée, fixée par un test** : avec une seule quantité non fixée (durée chiffrée), l'opérationnel reste à 0,7, sans conflit, et le contrat sort en `GO` automatique, constat visible. Le système n'escalade que quand les imprécisions s'accumulent jusqu'au conflit ; il n'a pas de signal d'ambiguïté.
+
+**Pièges.**
+- **Chiffre entre parenthèses** : « quarante-cinq (45) jours » et « trois (3) mois », très courants dans les contrats français, ne sont pas lus par la cohérence entre valeur et citation (`verification.quantities`) : l'expression exige l'unité juste après le chiffre. Une extraction correcte de ces formulations serait refusée, puis escaladée. « dix pour cent (10 %) » passe, car l'unité est dans la parenthèse. Un nombre écrit seulement en lettres n'est pas lu non plus. Le contrat réaliste évite ces formulations pour les clauses chiffrées, faute de quoi sa décision attendue dépendrait de ce défaut ; signalé pour décision.
+- Toutes les lettres grecques étaient prises par les parties du jeu : les parties du contrat réaliste portent des noms d'étoiles.
+
+886 tests, couverture de 98,27 %.

@@ -1,11 +1,14 @@
-"""Jeu de démonstration (J4) : 10 contrats synthétiques et 2 contrats piégés.
+"""Jeu de démonstration (J4) : 10 contrats synthétiques et 2 contrats piégés, plus un
+contrat rédigé de façon réaliste (J5).
 
 - chaque citation attendue figure dans le texte masqué, et passe la vérification ;
 - chaque contrat donne sa décision attendue dans le graphe (extraction et CRAG en
   doublure), revue humaine comprise, et est scellé ; `verify` valide toute la chaîne ;
 - chaque règle du projet se déclenche dans au moins un contrat du jeu ;
 - pièges : paragraphe injecté (P1, critère 9 au T8), fausses pistes et données
-  personnelles fictives (P2).
+  personnelles fictives (P2) ;
+- contrat réaliste : formulations indirectes, informations dispersées, quantités non
+  fixées ; en cas de doute, revue humaine plutôt qu'une décision automatique.
 """
 
 import itertools
@@ -20,6 +23,7 @@ from doubles import (
     FixedExtractor,
     MemoryAuditStore,
     make_deps,
+    verdict,
 )
 from doubles import clauses as favorable
 from langgraph.checkpoint.memory import InMemorySaver
@@ -29,6 +33,7 @@ from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.domain import input_checks, masking, verification
 from cdg.domain.config import load_config
+from cdg.domain.decision import decide
 from cdg.domain.models import (
     DOMAINS,
     KIND_CATEGORIES,
@@ -41,6 +46,7 @@ CONFIG = load_config()
 ANALYSIS_DATE, CONTRACTS = load()
 BY_ID = {c.id: c for c in CONTRACTS}
 ANALYSED = [c for c in CONTRACTS if not c.rejected]
+REALISTIC = BY_ID["demo-13-realiste-infogerance"]
 
 
 def ids(contracts):
@@ -51,25 +57,28 @@ def ids(contracts):
 
 
 def test_composition_du_jeu():
-    assert len(CONTRACTS) == 12
+    assert len(CONTRACTS) == 13
     assert set(files().values()) == {p.name for p in DEMO.glob("*.txt")}
     proposed = Counter(c.expected.get("proposed_decision", "rejet") for c in CONTRACTS)
-    # GO dont un à marge faible et un piégé ; NO_GO dont le piégé à injection
+    # GO dont un à marge faible et un piégé ; NO_GO dont le piégé à injection ;
+    # ESCALADE dont le contrat réaliste
     assert proposed == {
         "GO": 4,
         "GO_RESERVES": 2,
         "NO_GO": 4,
-        "ESCALADE": 1,
+        "ESCALADE": 2,
         "rejet": 1,
     }
     assert [c.id for c in CONTRACTS if c.injected or c.personal_data] == [
         "demo-11-piege-injection",
         "demo-12-piege-fausses-pistes",
     ]
+    assert [c.id for c in CONTRACTS if c.realistic] == [REALISTIC.id]
     assert [c.id for c in CONTRACTS if c.human] == [
         "demo-03-go-logiciel",
         "demo-09-escalade-mobilier",
         "demo-11-piege-injection",  # tentative d'instruction : revue obligatoire
+        "demo-13-realiste-infogerance",
     ]
 
 
@@ -159,7 +168,7 @@ def test_tout_le_jeu_scelle_puis_verify_valide_la_chaine(audit_journal, capsys):
     out = json.loads(capsys.readouterr().out)
     assert (out["verify"], out["enregistrements"], out["tete"]) == (
         "ok",
-        12,
+        13,
         entries[-1].chain_hash,
     )
 
@@ -327,3 +336,83 @@ def test_p2_donnees_personnelles_fictives_masquees():
     leaked = [item for item in contract.personal_data if item in masked.text]
     assert not leaked
     assert masked.counts == {"EMAIL": 2, "IBAN": 1, "TELEPHONE": 2, "PARTIE": 4}
+
+
+# --- Contrat réaliste (J5) -------------------------------------------------------------------
+
+
+def by_kind(contract):
+    return {c.kind: c for c in contract.clauses}
+
+
+def gate(found):
+    """Décision du gate sur les seules règles (CRAG supposé fournir les références)."""
+    assessed = [RULES[d](found, CONFIG) for d in DOMAINS]
+    return decide(
+        [verdict(a.domain, score=a.score, hard_block=a.hard_block) for a in assessed],
+        [],
+        [],
+        CONFIG,
+    )
+
+
+def test_contrat_realiste_formulations_indirectes():
+    text, clauses = REALISTIC.text.casefold(), by_kind(REALISTIC)
+    # pénalités d'exécution appelées « réfaction », jamais « pénalités »
+    assert "pénalit" not in text
+    assert clauses["penalites_execution"].present
+    assert "réfaction" in clauses["penalites_execution"].quote
+    # données personnelles décrites sans le terme juridique
+    assert "données à caractère personnel" not in text
+    assert "données personnelles" not in text
+    assert clauses["donnees_personnelles"].present
+    # durée et préavis stipulés sans être fixés : présents, non chiffrés
+    for kind, marker in (
+        ("duree_engagement", "Planning directeur"),
+        ("preavis_resiliation", "trimestre"),
+    ):
+        assert (clauses[kind].present, clauses[kind].value) == (True, None), kind
+        assert marker in clauses[kind].quote, kind
+
+
+def test_contrat_realiste_plafond_du_fournisseur_defini_dans_un_autre_article():
+    supplier = by_kind(REALISTIC)["responsabilite_fournisseur"]
+    definitions, _, rest = REALISTIC.text.partition("Article 2 -")
+    assert supplier.quote in definitions and supplier.value == 120
+    # l'article sur la responsabilité renvoie à la définition, sans chiffre
+    assert "la responsabilité du Prestataire est limitée au Plafond" in rest
+
+
+def test_contrat_realiste_escalade_par_prudence_sur_les_quantites_non_fixees():
+    fired = sorted(name for f in findings_of(REALISTIC.clauses) for name in rules_of(f))
+    assert fired == ["engagement non chiffré", "préavis non chiffré"]
+    scores = {d: RULES[d](REALISTIC.clauses, CONFIG).score for d in DOMAINS}
+    assert scores == {
+        "juridique": 1.0,
+        "financier": 1.0,
+        "conformite": 1.0,
+        "operationnel": 0.4,
+    }
+    # conflit entre domaines : aucune décision automatique, revue humaine
+    outcome = gate(REALISTIC.clauses)
+    assert (outcome.proposed, outcome.human_review, outcome.final) == (
+        "ESCALADE",
+        True,
+        None,
+    )
+
+
+def test_contrat_realiste_une_seule_quantite_non_fixee_ne_suffit_pas_a_escalader():
+    # limite assumée : avec une durée chiffrée, seul le préavis est pénalisé,
+    # l'opérationnel reste à 0,7, sans conflit : GO automatique, constat visible
+    fixed = [
+        c.model_copy(update={"value": 24.0}) if c.kind == "duree_engagement" else c
+        for c in REALISTIC.clauses
+    ]
+    assert [rules_of(f) for f in findings_of(fixed)] == [["préavis non chiffré"]]
+    outcome = gate(fixed)
+    assert (outcome.proposed, outcome.human_review, outcome.final) == (
+        "GO",
+        False,
+        "GO",
+    )
