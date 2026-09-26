@@ -1897,3 +1897,9 @@ Stabilité : issue identique aux 5 essais pour les 13 contrats. Chaque essai est
 - **`NO_GO` sur blocage dur seulement** (demandé par la spec depuis le J1) : pire cumul 0,505, réserve de 0,005, choix de configuration.
 - Chiffres vérifiés sur les lignes `LLM-RESULT` de la série 7 (médianes par contrat de 0,8 s à 2,5 s pour l'étape des analystes ; répartition 25, 15, 10 et 5 essais pour un à quatre domaines appelés).
 - La spec renvoie à l'ADR (« Justification multi-agents ») ; le README le fera à la tâche 7.
+
+### J5 : catégorie sur une clause absente refusée (décision du 26/09, après la série 7)
+
+- **Constat de la série 7** : contrat 02, essai 5, clause de transfert déclarée absente, comme attendu, mais avec la catégorie `aucune_garantie`. La vérification ne refusait une catégorie que pour un type qui n'en porte pas ; les règles l'ignoraient.
+- **Contrôle** : une clause d'un type à catégorie, déclarée absente avec une catégorie, donne le problème « catégorie sur une clause absente » : nouvelle extraction avec retour ciblé, puis `ESCALADE`. Un problème de vérification plutôt qu'une validation du modèle `Clause` : une sortie refusée par Pydantic ferait échouer l'extraction entière, sans retour ciblé.
+- **Test** : rouge avant la correction, vert après ; la même clause absente sans catégorie reste acceptée. Aucune doublure ne met de catégorie sur une clause absente.

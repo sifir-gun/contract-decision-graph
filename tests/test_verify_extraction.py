@@ -662,3 +662,26 @@ def test_termes_de_categorie_valides_dans_la_configuration():
         ),
         "terme répété pour delai_paiement",
     )
+
+
+def test_categorie_sur_une_clause_absente_refusee():
+    # série 7, contrat 02, essai 5 : transfert déclaré absent avec aucune_garantie
+    items = [
+        Clause(
+            kind="transfert_hors_ue",
+            present=False,
+            quote="",
+            value=None,
+            category="aucune_garantie",
+        )
+        if c.kind == "transfert_hors_ue"
+        else c
+        for c in clauses()
+    ]
+    problem = "catégorie sur une clause absente: transfert_hors_ue"
+    assert verify(items, attempts=1)["extraction_feedback"] == [problem]
+    out = verify(items, attempts=2)
+    assert out["proposed_decision"] == "ESCALADE"
+    assert out["failure_report"]["problems"] == [problem]
+    # absente et sans catégorie : acceptée
+    assert verify(clauses(transfert_hors_ue=ABSENT)) == {"route": "analysts"}

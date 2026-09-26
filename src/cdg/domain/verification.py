@@ -277,6 +277,11 @@ def problems_of(
         for c in clauses
         if c.kind not in CATEGORY_KINDS and c.category is not None
     ]
+    problems += [  # J5, série 7 : une clause absente n'a pas de catégorie
+        f"catégorie sur une clause absente: {c.kind}"
+        for c in clauses
+        if c.kind in CATEGORY_KINDS and not c.present and c.category is not None
+    ]
     problems += [
         f"citation introuvable: {c.kind}"
         for c in clauses
