@@ -81,4 +81,5 @@ Le corpus (`data/corpus/`) réunit des textes publics (RGPD, Code de commerce, C
   - C. com., art. L441-1, L441-3, L441-4, L441-16 et L441-17 ;
   - C. civ., art. 759 ;
   - le règlement (UE) 2019/1150.
+- **Chaîne d'audit et troncature.** La chaîne détecte un enregistrement modifié, supprimé ou déplacé, mais pas la suppression des derniers : la tête restante reste une chaîne valide. `verify --expect-head <empreinte>` échoue si la tête diffère d'une empreinte conservée hors de la base. Un ancrage externe (horodatage certifié de la tête) est prévu en phase 2.
 - **Fiches de référence.** Ce sont des synthèses rédigées pour le projet, non constitutives d'un avis juridique. Chacune sépare « Ce que dit le texte », des paraphrases fidèles vérifiées mot à mot et sourcées, de « Comment le projet l'applique », les seuils du projet présentés comme des choix de politique d'achat. Les conséquences que seule la jurisprudence tire des textes (plafond et faute lourde, articulation des art. 1171 C. civ. et L442-1 C. com.) sont signalées comme hors corpus.

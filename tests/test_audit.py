@@ -438,3 +438,44 @@ def test_rejeu_sans_resume_du_crag_refuse():
     data["decision"]["verdicts"][0]["retrieval"] = None
     with pytest.raises(audit.ReplayError, match="sans résumé du CRAG"):
         audit.replay(data, CONFIG)
+
+
+# --- Partie décision : le fait, pas la mesure ; échecs rangés par domaine ------------------
+
+
+def failure(domain):
+    return NodeFailure(
+        node="analyst", error="ValueError", message="m", attempts=1, domain=domain
+    )
+
+
+def test_budget_depasse_meme_decision_hash_quelle_que_soit_la_consommation():
+    small = analysed(used=[usage(59_000, 2_000, node="extract_clauses")])
+    large = analysed(used=[usage(70_000, 5_000, node="extract_clauses")])
+    assert small["failure_report"]["tokens"] != large["failure_report"]["tokens"]
+    assert audit.decision_hash(dumped(small)) == audit.decision_hash(dumped(large))
+    r = record(large)
+    # le fait dans la partie décision, la mesure dans l'enregistrement scellé
+    assert r.decision.failure_report == {"stage": "budget", "limit": 60_000}
+    assert r.failure_report == {"stage": "budget", "tokens": 75_000, "limit": 60_000}
+
+
+def test_budget_depasse_avec_analyste_en_echec_sans_la_mesure():
+    state = analysed(
+        used=[usage(59_000, 2_000, node="extract_clauses")],
+        failures=[failure("financier")],
+    )
+    assert state["failure_report"]["budget"] == {"tokens": 61_000, "limit": 60_000}
+    assert record(state).decision.failure_report["budget"] == {"limit": 60_000}
+    assert replay(state).identical
+
+
+def test_echecs_d_analystes_ranges_par_domaine():
+    one = analysed(failures=[failure("conformite"), failure("financier")])
+    other = analysed(failures=[failure("financier"), failure("conformite")])
+    assert audit.decision_hash(dumped(one)) == audit.decision_hash(dumped(other))
+    report = record(one).decision.failure_report
+    assert [f["domain"] for f in report["failures"]] == ["financier", "conformite"]
+    # l'ordre de l'état reste celui de l'enregistrement scellé, hors decision_hash
+    assert [f.domain for f in record(one).failures] == ["conformite", "financier"]
+    assert replay(one).identical and replay(other).identical

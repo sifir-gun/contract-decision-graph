@@ -7,7 +7,9 @@ chaîne et insère ; l'horodatage vient de l'appelant.
   verdicts avec les résumés du CRAG, décisions proposée et finale, décision humaine,
   rapport d'échec, motif de rejet, date d'analyse, `config_hash`). Sans identifiants de
   contrat ni de thread, horodatage, consommation, explication ni modèles : mêmes clauses,
-  mêmes références et même configuration donnent la même empreinte (critère 6).
+  mêmes références et même configuration donnent la même empreinte (critère 6). Le
+  rapport d'échec y porte le fait (budget dépassé), pas la mesure (tokens), et ses
+  échecs de nœuds y sont rangés par domaine, comme les verdicts.
 - `chain_hash` : SHA-256 de `prev_hash` puis de l'enregistrement complet ; le premier
   maillon part de `GENESIS`.
 - `replay` : recalcule règles, justification et décision à partir de l'enregistrement
@@ -110,6 +112,33 @@ def chain_hash(record: Mapping[str, Any], prev_hash: str) -> str:
 # --- Enregistrement scellé ---------------------------------------------------------------
 
 
+def _failure_order(failure: Mapping[str, Any]) -> tuple[int, str, str, str]:
+    domain = failure.get("domain")
+    rank = DOMAINS.index(domain) if domain in DOMAINS else len(DOMAINS)
+    return (rank, failure["node"], failure["error"], failure["message"])
+
+
+def decision_report(report: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Rapport d'échec tel qu'il entre dans la partie décision : le fait, pas la mesure.
+
+    Le nombre de tokens d'un budget dépassé en sort : deux dépassements de consommations
+    différentes sont la même décision ; la mesure reste dans l'enregistrement scellé, hors
+    de `decision_hash`. Les échecs de nœuds sont rangés par domaine, comme les verdicts :
+    l'ordre d'arrivée des branches parallèles varie."""
+    if report is None:
+        return None
+    fact = dict(report)
+    if fact.get("stage") == "budget":
+        fact.pop("tokens", None)
+    budget = fact.get("budget")
+    if isinstance(budget, Mapping):
+        fact["budget"] = {k: v for k, v in budget.items() if k != "tokens"}
+    failures = fact.get("failures")
+    if isinstance(failures, list):
+        fact["failures"] = sorted(failures, key=_failure_order)
+    return fact
+
+
 class DecisionRecord(BaseModel):
     """Partie décision de l'enregistrement, seule hachée par `decision_hash`."""
 
@@ -145,6 +174,7 @@ class AuditRecord(BaseModel):
     contract_id: str
     thread_id: str
     decision: DecisionRecord
+    failure_report: dict[str, Any] | None  # complet, mesures comprises
     explanation: dict[str, Any] | None
     failures: list[NodeFailure]  # tous les échecs de nœud, dans l'ordre de l'état
     usage: list[Usage]
@@ -182,10 +212,11 @@ def build_record(
             margin=state.get("margin"),
             human=state.get("human"),
             final_decision=state.get("final_decision"),
-            failure_report=state.get("failure_report"),
+            failure_report=decision_report(state.get("failure_report")),
             reject_reason=state.get("reject_reason"),
             config_hash=config_hash,
         ),
+        failure_report=state.get("failure_report"),
         explanation=explanation,
         failures=state.get("failures", []),
         usage=state.get("usage", []),
@@ -343,7 +374,7 @@ def replay(record: Mapping[str, Any], config: DecisionConfig) -> ReplayReport:
                 "verdicts": verdicts,
                 "proposed_decision": outcome.proposed,
                 "margin": outcome.margin,
-                "failure_report": outcome.failure_report,
+                "failure_report": decision_report(outcome.failure_report),
                 "final_decision": final,
             }
         )

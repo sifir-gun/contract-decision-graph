@@ -1191,3 +1191,10 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 
 **Tests** (`test_audit.py`, 46) : forme canonique, périmètre de `decision_hash`, `config_hash`, formule des empreintes, vérification (modification dans ou hors de la partie décision, maillon supprimé, premier maillon hors genèse, colonnes incohérentes, enregistrement mal formé), rejeu (GO, pénalités, blocage, conflit, `INSUFFISANT` sur références figées, constats du CRAG, verdict falsifié, autre configuration, décision humaine, consommation d'après le gate, budget, analyste en échec, rejet, gate en échec). Au total, 652 tests ; couverture de 97,6 %, et `audit.py` à 100 %.
 
+### J4 tâche 1 (suite) : le fait plutôt que la mesure, échecs rangés par domaine
+
+- **Budget dépassé** : la partie décision porte le fait (`stage: budget`, avec le plafond), pas le nombre de tokens. Le rapport complet, mesure comprise, est scellé à part (`AuditRecord.failure_report`), hors de `decision_hash`. Deux dépassements de consommations différentes donnent donc le même `decision_hash` (test). Même règle quand le budget est dépassé avec un analyste en échec (`budget` sans `tokens`).
+- **Échecs d'analystes multiples** : dans la partie décision, ils sont rangés par domaine, comme les verdicts. L'ordre de l'état reste celui de l'enregistrement complet. Deux ordres d'arrivée donnent le même `decision_hash`, et le rejeu reste identique (tests).
+- **Mise en œuvre** : une seule fonction, `audit.decision_report`, sert au scellement et au rejeu : les deux restent alignés par construction.
+- **Troncature** : limite documentée dans la spec et le README. `verify --expect-head <empreinte>` arrive au T4 ; l'ancrage externe (horodatage certifié de la tête) est ajouté aux évolutions de la phase 2.
+

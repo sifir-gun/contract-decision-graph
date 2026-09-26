@@ -455,12 +455,12 @@ Scénarios de contrôle, tous les autres domaines à 1,0 :
 Scellement (`domain/audit.py`, J4), en fonctions pures : le magasin (port `AuditStore`) fournit la tête de chaîne et insère ; l'horodatage vient d'une horloge injectée.
 
 - **Enregistrement** (`AuditRecord`) : `contract_id`, `thread_id`, partie décision, explication (source LLM ou gabarit, motifs de refus), échecs de nœud, consommation par nœud, identifiants des modèles (`llm_provider`, `llm_main`, `llm_light`, `embedding`), horodatage avec fuseau.
-- **Partie décision** (`DecisionRecord`) : date d'analyse, clauses, verdicts dans l'ordre des domaines (résumés du CRAG compris), décision proposée, marge, décision humaine, décision finale, rapport d'échec, motif de rejet, `config_hash`. Pour un rejet ou une escalade avant les analystes, les clés absentes sont scellées vides ou nulles ; `reject_reason` et le rapport d'échec distinguent ces cas.
+- **Partie décision** (`DecisionRecord`) : date d'analyse, clauses, verdicts dans l'ordre des domaines (résumés du CRAG compris), décision proposée, marge, décision humaine, décision finale, rapport d'échec, motif de rejet, `config_hash`. Le rapport d'échec y porte le fait, pas la mesure : un budget dépassé y figure sans son nombre de tokens, qui reste dans l'enregistrement complet (`AuditRecord.failure_report`), et les échecs de nœuds y sont rangés par domaine, comme les verdicts. Pour un rejet ou une escalade avant les analystes, les clés absentes sont scellées vides ou nulles ; `reject_reason` et le rapport d'échec distinguent ces cas.
 - **Forme canonique** : JSON à clés triées, sans espaces, UTF-8, flottants par la fonction d'arrondi commune. Un type non pris en charge ou une clé non textuelle lèvent une erreur : pas de `default=str`, aucune conversion silencieuse.
 - **`decision_hash`** : SHA-256 de la seule partie décision. Ni identifiants de contrat ou de thread, ni horodatage, ni consommation, ni explication, ni modèles : mêmes clauses, mêmes références et même configuration donnent la même empreinte (critère 6).
 - **`chain_hash`** : SHA-256 de `prev_hash` puis de l'enregistrement complet. Le premier maillon part de 64 zéros (`GENESIS`).
 - **`config_hash`** : SHA-256 de la configuration validée, sous forme canonique ; un commentaire ou une mise en forme du fichier n'y change rien.
-- **Vérification** (`verify_chain`) : du plus ancien au plus récent, chaque maillon doit suivre le précédent ; `decision_hash`, `chain_hash`, `config_hash`, `contract_id` et `thread_id` sont recalculés ou comparés à partir de l'enregistrement stocké tel quel. Rend le premier maillon fautif et la raison. Une troncature de la fin du journal ne se voit pas par la chaîne seule.
+- **Vérification** (`verify_chain`) : du plus ancien au plus récent, chaque maillon doit suivre le précédent ; `decision_hash`, `chain_hash`, `config_hash`, `contract_id` et `thread_id` sont recalculés ou comparés à partir de l'enregistrement stocké tel quel. Rend le premier maillon fautif et la raison. Une troncature de la fin du journal ne se voit pas par la chaîne seule : `verify --expect-head <empreinte>` (J4) échoue si la tête diffère d'une empreinte conservée hors de la base ; un ancrage externe (horodatage certifié de la tête) est prévu en phase 2.
 - **Rejeu** (`replay`) : recalcule règles, justification et décision à partir de l'enregistrement scellé et des références figées (résumés du CRAG, constats du CRAG compris), sans LLM ni CRAG. La consommation et les échecs des nœuds d'après le gate (`explain`) sont écartés ; la décision humaine est reprise telle quelle. Une autre configuration que celle du scellement est refusée. Rien n'est recalculé pour un rejet, une escalade avant les analystes ou un gate en échec.
 
 ## Stockage PostgreSQL
@@ -634,7 +634,7 @@ Priorité si le temps manque : ne sacrifier ni J2, ni l'audit, ni le test d'inje
 
 ## Hors périmètre
 
-Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses qui ne correspondent à aucun type connu, signalées à l'humain comme « clause non couverte par les règles » (phase 2) ; API FastAPI, Helm, k3s (phase 3) ; Cloud Run et Terraform (phase 4, optionnelle). Pas d'interface graphique, pas de repli web dans le CRAG.
+Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses qui ne correspondent à aucun type connu, signalées à l'humain comme « clause non couverte par les règles » (phase 2), ancrage externe de la tête de la chaîne d'audit par un horodatage certifié (phase 2) ; API FastAPI, Helm, k3s (phase 3) ; Cloud Run et Terraform (phase 4, optionnelle). Pas d'interface graphique, pas de repli web dans le CRAG.
 
 ## Historique des révisions
 
@@ -713,7 +713,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - uv 0.12.19 sur le poste et dans la CI (auparavant 0.6.10), `uv.lock` vérifié valide avec cette version.
 - **26 septembre 2026, J4** :
   - décisions : rattachement déclaré des sources aux types de clause ; `decision_hash` sur la partie décision, rejeu à partir des références figées ; `config_hash` sur la configuration validée et canonique ; verrou consultatif, index uniques, premier `prev_hash` à 64 zéros ; horloge injectée ; explication par le LLM pour `run`, et pour `resume` si la clé est présente, gabarit sinon et toujours pour `expire`, source scellée, jamais bloquante ; reprise sur erreur passagère puis gabarit ; explication structurée par constat, puis synthèse ; composition du jeu de démonstration, chaque règle déclenchée au moins une fois ; critère 9 comparé à la version sans le paragraphe injecté ;
-  - scellement dans le domaine (`domain/audit.py`) : forme canonique, `decision_hash`, `chain_hash`, `config_hash`, `verify_chain`, `replay` ; `AuditEntry` passe du port au domaine (jamais dans l'état : aucune migration de checkpoints) ; constats du CRAG portés par `RetrievalTrace.findings`, `justify(évaluation, résumé)`.
+  - scellement dans le domaine (`domain/audit.py`) : forme canonique, `decision_hash`, `chain_hash`, `config_hash`, `verify_chain`, `replay` ; `AuditEntry` passe du port au domaine (jamais dans l'état : aucune migration de checkpoints) ; constats du CRAG portés par `RetrievalTrace.findings`, `justify(évaluation, résumé)` ;
+  - partie décision : le fait d'un budget dépassé sans le nombre de tokens, échecs de nœuds rangés par domaine ; troncature documentée, `verify --expect-head` (J4), ancrage externe en phase 2.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
