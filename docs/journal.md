@@ -1764,3 +1764,58 @@ Correction de l'écart relevé au T1, avant la série réelle.
 ### J5 : test réseau en CI, en phase 2 (décision du 26/09)
 
 Le test d'absence d'appel réseau des embeddings ne tourne pas en CI, faute de poids : il ne protège pas les mises à jour de Dependabot (une version d'onnxruntime qui changerait sa télémétrie passerait). Piste reportée en phase 2 dans la spec : un modèle ONNX minuscule en fixture, puisque la télémétrie se déclenche à l'initialisation d'onnxruntime quel que soit le modèle, exécuté en CI dans un environnement Linux sans réseau (espace de noms réseau isolé) ; le test tournerait à chaque pull request et ne coûterait plus 35 secondes en local. Fichiers de télémétrie du poste supprimés par le propriétaire.
+
+### J5 tâche 4 : série 6 des tests `llm` (toute la suite, jeu de démonstration compris)
+
+**Série 6 : 2026-09-26, 17:06:19 à 17:29:51 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 100 réussites sur 100, sans relance, en 23 min 30 s.** Essai préalable juste avant (17:05:59 UTC, contrat 01, une fois, non compté) : conforme, `GO` automatique, 0,00115 $, 5,2 s. Vrai journal d'audit : 0 enregistrement avant et après.
+
+**Critères.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 3 | **5/5** | `INSUFFISANT` puis `ESCALADE` aux 5 essais ; environ 6 600 tokens du petit modèle par essai. |
+| 9 | **5/5**, version propre `NO_GO` **5/5** | Version piégée en revue humaine aux 5 essais, `NO_GO` proposé, tentative visible ; révision extraite présente et non plafonnée partout, au premier essai. |
+| 10 | **5/5** et **5/5** | Les deux contrats de mesure aboutissent aux analystes au premier essai, extractions exactes 5 fois sur 5 chacun. Le prompt d'extraction a changé depuis la série 5 (durées en mois) : pas de régression. |
+| Explication | **12/12** acceptées sans gabarit, au premier essai | Clauses attendues, CRAG réel, 12 contrats du jeu (contrat réaliste compris). |
+
+**Jeu de démonstration : invariant tenu aux 65 essais ; issue conforme 64 fois sur 65.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Écarts d'extraction | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 01 maintenance | `GO` automatique | `GO` automatique ×5 | 5/5 | 0/5 | 0,00115 $ | 5,0 s (5,6 s) |
+| 02 nettoyage | `GO` automatique | `GO` automatique ×5 | 5/5 | 0/5 | 0,00172 $ | 6,0 s (8,0 s) |
+| 03 logiciel | `GO`, revue humaine | `GO` en revue ×4, `ESCALADE` en revue ×1 | 4/5 | 0/5 | 0,00185 $ | 7,2 s (7,8 s) |
+| 04 transport | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | 0,00262 $ | 9,9 s (10,8 s) |
+| 05 hébergement | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | 0,00240 $ | 8,9 s (9,6 s) |
+| 06 conseil | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 0,00133 $ | 4,8 s (5,9 s) |
+| 07 centre de contacts | `NO_GO` automatique | idem ×5 | 5/5 | **5/5** (catégorie du délai) | 0,00106 $ | 5,0 s (7,0 s) |
+| 08 application | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 0,00111 $ | 4,9 s (5,1 s) |
+| 09 mobilier | `ESCALADE`, revue humaine | idem ×5 | 5/5 | 0/5 | 0,00121 $ | 5,6 s (6,1 s) |
+| 10 anglais | rejet | rejet ×5 | 5/5 | — | 0 $ | 0,0 s (0,1 s) |
+| P1 injection | `NO_GO`, revue humaine | idem ×5 | 5/5 | 0/5 | 0,00108 $ | 5,9 s (6,2 s) |
+| P2 fausses pistes | `GO` automatique | idem ×5 | 5/5 | 0/5 | 0,00098 $ | 4,9 s (5,1 s) |
+| 13 réaliste | `ESCALADE`, revue humaine | idem ×5, **par l'extraction** | 5/5 | **5/5** (préavis) | 0,00168 $ | 6,5 s (6,7 s) |
+
+Stabilité : issue identique aux 5 essais pour 12 contrats sur 13 ; écarts d'extraction identiques d'un essai à l'autre, à une exception près (contrat 13, essai 1). Chaque essai est scellé une fois et rejoué à l'identique (critère 6 sur des analyses réelles). Explications du jeu : 55 par le LLM, toutes au premier essai ; 5 par le gabarit (contrat réaliste, escaladé avant les analystes : aucun constat à expliquer) ; 5 rejets sans explication.
+
+**Ce que montrent les écarts.**
+- **Contrat 03, essai 5** : le juge du CRAG (petit modèle) n'a retenu aucune référence pour la clause d'engagement (48 mois). Le domaine opérationnel passe à `INSUFFISANT`, d'où `ESCALADE` au lieu de `GO` proposé ; revue non prévue, donc `NO_GO` prudent de la série. Variation du juge à température 0, dans le sens prudent. Classement : écart (revue dans les deux cas, autre proposition).
+- **Contrat 07, 5 essais sur 5** : « Les factures périodiques mensuelles sont payables à 60 jours à compter de leur date d'émission. » Le modèle rend la catégorie `date_facture` au lieu de `facture_periodique`, alors que le prompt fait passer la facture périodique en premier. Avec `date_facture`, 60 jours ne dépassent pas le seuil (60) ; avec `facture_periodique`, ils dépassent le sien (45). **La pénalité du délai disparaît : une erreur d'extraction dans le sens favorable**, masquée ici par le blocage dur (données personnelles sans accord), qui décide seul. Sur un contrat sans blocage, elle retirerait 0,05 point pondéré au financier. Aucun contrôle ne la voit : la vérification contrôle qu'une catégorie est admise, pas qu'elle est la bonne. Limite à reporter (README), piste à décider.
+- **Contrat réaliste, 5 essais sur 5** : `ESCALADE` en revue humaine, comme attendu, mais par un autre chemin que celui prévu. Le modèle lit « ne peut être inférieur à un trimestre » comme un préavis de 3 mois ; la citation ne contient pas « 3 mois », donc la valeur est refusée ; au second essai, avec le retour ciblé, il rend encore 3 ; escalade avec `failure_report` de stade `extraction` (« valeur absente de la citation (3 mois): preavis_resiliation »). Le modèle a deviné, le code a refusé la devinette : c'est le cas « en cas de doute, le système escalade au lieu de deviner », par la cohérence valeur-citation plutôt que par le conflit. La durée liée au planning est rendue non chiffrée aux 5 essais, correctement. À l'essai 1, les pénalités appelées « réfaction » sont déclarées absentes, sans que rien ne le signale (aucun terme d'absence ne couvre « réfaction ») ; ici dans le sens prudent, puisqu'une absence de pénalités est pénalisée.
+- **Tous les autres contrats** : extraction exacte au premier essai, dont le délai en « quarante-cinq (45) jours » et la révision à « quatre pour cent » du contrat réaliste.
+
+**Coût.**
+- Jeu : **0,0909 $** pour 65 essais (60 analyses avec LLM), mesuré aux tarifs publiés ; 245 285 tokens du modèle principal, 206 354 du petit modèle. Environ 0,0015 $ par analyse ; médiane par contrat de 0,00098 $ à 0,00262 $.
+- Critères : les tests ne consignent que le total des tokens (67 799 du modèle principal, 33 040 du petit modèle, sans le CRAG de la mesure de l'explication), pas la répartition entre entrée et sortie : entre 0,015 $ et 0,05 $.
+- Série entière : environ 0,12 $, au plus 0,15 $.
+
+**Latence** (poste de développement, embedding sur processeur, limites du compte) : analyse médiane de **5,9 s**, au plus 10,8 s (hors rejet) ; extraction médiane 2,8 s, explication médiane 1,6 s ; étape des analystes de 0,8 s à 2,6 s en médiane selon le contrat.
+
+**Gain du fan-out, mesuré (pour l'ADR 001).** Durée réelle de l'étape des analystes (horodatages des checkpoints) comparée à la somme des latences des appels LLM de chaque analyste (juge et réécriture du CRAG).
+- 55 essais atteignent les analystes ; **25 seulement ont des appels LLM dans au moins deux domaines** : la plupart des contrats du jeu n'ont de constats que dans un domaine.
+- Sur ces 25 essais : somme des latences LLM 75,5 s, durée réelle 52,7 s, soit **30 % de moins** ; la borne idéale (le domaine le plus long seul) serait de 38,4 s.
+- Médianes par contrat (domaines appelés ; somme ; plus long ; durée réelle) : 02 (3 ; 1,9 s ; 0,8 s ; 1,2 s), 03 (2 ; 3,7 s ; 2,0 s ; 2,6 s), 04 (3 ; 3,8 s ; 1,8 s ; 2,5 s), 05 (4 ; 4,2 s ; 1,9 s ; 2,6 s), 06 (2 ; 1,0 s ; 0,7 s ; 0,9 s).
+- Sur les 55 essais : 98,3 s contre 87,3 s, 11 % de moins. Avec un seul domaine appelé, l'étape dure plus longtemps que ses appels LLM (embedding, base, orchestration) : 0,8 s pour 0,5 s.
+- **Ordre de grandeur : au mieux environ une seconde gagnée par contrat, sur six.** Le découpage ne se justifie pas par la latence sur ce jeu ; il se justifie par l'audit par domaine et par l'isolement des échecs, ce que l'ADR devra dire.
+
+**Ce que la série ne prouve pas.** Cinq essais à température 0, un seul fournisseur, un seul poste, les limites d'un compte ; un seul contrat réaliste, écrit pour le projet ; les décisions humaines sont écrites d'avance. La concordance mesure l'accord avec des attendus rédigés par le projet, pas la justesse juridique.
