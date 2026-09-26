@@ -516,6 +516,7 @@ contract-decision-graph/
 ├── CLAUDE.md
 ├── README.md
 ├── .env.example                # modèle des identifiants ; .env reste hors git
+├── .github/workflows/ci.yml    # CI : lint, tests pg compris ; tests llm exclus
 ├── docker-compose.yml          # postgres + pgvector
 ├── pyproject.toml
 ├── docs/
@@ -589,6 +590,15 @@ Comportement de la CLI (J3) : `cli.py` est la racine de composition.
 - la sortie de `run` et de `resume` expose aussi `failures` (gardes d'échec de nœud).
 
 Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si la base est arrêtée. On les exclut volontairement avec `-m "not pg"`, jamais par un saut silencieux. Ceux qui appellent le vrai modèle portent le marqueur `llm`. Ils sont exclus par défaut et comptés comme *deselected*, et ne tournent qu'avec l'option `--llm`. Un `-m` ne peut donc pas les activer par accident. Les critères 3, 9 et 10 y sont répétés 5 fois : 5 réussites sur 5 exigées, sans relance automatique, et chaque série est consignée au journal. Le critère 10 s'accompagne d'une mesure (J3), sur deux contrats de mesure mesurés séparément (un contrat valide où deux types sont absents, un contrat où les 10 types sont présents) : le nombre d'essais sur 5 qui aboutissent aux analystes avec toutes les citations vérifiées, pour qu'un système qui escaladerait toujours ne passe pas inaperçu. Taux consigné pour chaque série. Seuil (décision du 26/09, après la série 2) : au moins 4 essais sur 5 par contrat, vérifié par `test_10_taux_d_aboutissement_aux_analystes` ; l'invariant de sûreté reste exigé à chaque essai, 5 sur 5.
+
+## Intégration continue
+
+`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.6.10 avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
+- **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
+- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris.
+- **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
+- **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
+- **Pas de `.env`** : la CI ne définit que les variables de la base jetable. Un test qui dépend en silence de l'environnement du poste y échoue : on corrige le test, on ne l'exclut pas.
 
 ## Découpage en 4 à 5 jours
 
@@ -673,6 +683,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - règles avant le CRAG : les règles rendent un `Assessment` (constats rattachés à leur clause, avec leur effet) et ne lisent plus le statut de récupération ; CRAG sur les seules clauses qui portent un constat ; justification dans `domain/justification.py` : `INSUFFISANT` seulement si un constat qui bloque ou pénalise n'a aucune référence en vigueur, avec un constat qui nomme la clause ; constat d'information sans référence signalé, sans effet sur le statut ; `RetrievalResult` sans statut ni `evidence_ids` ; critère 3 : « constat sans référence » ;
   - CRAG : domaines nommés par ce qu'ils couvrent (`crag.DOMAIN_LABELS`) dans la requête et dans les messages du juge et de la réécriture ;
   - critère 10 : seuil du taux d'aboutissement aux analystes à 4 sur 5 par contrat de mesure, l'invariant de sûreté restant à 5 sur 5.
+  - intégration continue GitHub Actions (`.github/workflows/ci.yml`) : lint, puis toute la suite sur PostgreSQL + pgvector (image de `docker-compose.yml`), tests `llm` exclus ; badge dans le README.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

@@ -1,5 +1,7 @@
 # contract-decision-graph
 
+[![CI](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
+
 Graphe LangGraph qui rend un verdict go / no-go auditable sur des contrats fournisseurs. Le verdict est rendu par du code déterministe ; les LLM se limitent à l'extraction et à l'explication. Spécification : [docs/spec-phase1.md](docs/spec-phase1.md).
 
 Données uniquement synthétiques ou publiques.

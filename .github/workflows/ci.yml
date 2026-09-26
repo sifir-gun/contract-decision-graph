@@ -1,0 +1,85 @@
+# Intégration continue : lint, puis toute la suite de tests, tests pg compris, sur une base
+# PostgreSQL + pgvector jetable. Les tests llm (vrai modèle, payants) restent exclus : aucun
+# secret, aucun appel à un fournisseur LLM, aucun téléchargement du modèle d'embedding.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.6.10" # celle du poste de développement, qui a écrit uv.lock
+          python-version: "3.12"
+          enable-cache: true
+      - name: Dépendances de développement, strictement depuis uv.lock
+        run: uv sync --locked --only-group dev
+      - run: uv run --no-sync ruff format --check
+      - run: uv run --no-sync ruff check
+
+  tests:
+    name: tests (PostgreSQL + pgvector)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        # PostgreSQL 16.11 + pgvector 0.8.1 : même image et même empreinte que docker-compose.yml
+        image: pgvector/pgvector:pg16@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec
+        env:
+          POSTGRES_USER: cdg_admin
+          POSTGRES_PASSWORD: ci-admin
+          POSTGRES_DB: cdg
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U cdg_admin -d cdg"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      # base jetable, détruite avec le job : ces mots de passe ne protègent rien, ce ne sont
+      # pas des secrets
+      POSTGRES_USER: cdg_admin
+      POSTGRES_PASSWORD: ci-admin
+      POSTGRES_DB: cdg
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      APP_DB_PASSWORD: ci-app
+      LANGSMITH_TRACING: "false"
+      # garde-fou : un téléchargement Hugging Face échouerait au lieu de tirer 2,2 Go
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.6.10"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Dépendances, strictement depuis uv.lock
+        run: uv sync --locked
+      - name: Migrations, par le script d'init du dépôt exécuté dans le conteneur
+        # un conteneur de service démarre avant le checkout : il ne peut pas monter
+        # docker/initdb comme le fait docker-compose.yml
+        run: |
+          docker cp migrations "${{ job.services.postgres.id }}:/migrations"
+          docker exec -i -e APP_DB_PASSWORD "${{ job.services.postgres.id }}" \
+            bash -s < docker/initdb/00_migrate.sh
+      - name: setup-db (tables du checkpointer, droits d'app_role)
+        run: uv run --no-sync python -m cdg.cli setup-db
+      - name: Tests, tests pg compris (tests llm exclus par défaut)
+        run: uv run --no-sync pytest
