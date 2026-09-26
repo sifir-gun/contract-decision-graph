@@ -1739,3 +1739,24 @@ Correction de l'écart relevé au T1, avant la série réelle.
 - **15 exécutions** de la suite, avec la couverture, comme `check.sh`, sur le commit de la coupure (copie de travail séparée) : **code 0 aux 15**, 944 tests réussis à chaque fois, test réseau compris (vrais poids présents). Avant la coupure : 4 plantages sur 19 exécutions.
 - **Fichiers de télémétrie d'onnxruntime** (`~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime`) : aucune modification pendant ces 15 exécutions ; dernière écriture à 18:38:33, par le test réseau lancé en rouge, avant la correction.
 - **Rapports de plantage de macOS** : 15 nouveaux, un par exécution, tous du témoin du test réseau, tué volontairement par le bac à sable dans un `connect` Python (`EXC_CRASH`, `SIGKILL`). Aucun ne vient de la télémétrie. Effet de bord connu : chaque exécution locale de la suite laisse un rapport de ce type.
+
+### J5 tâche 3 : outil de mesure de la série réelle
+
+- **Série** (`tests/test_llm_jeu.py`, marqueurs `llm` et `pg`) : les 13 contrats du jeu, 5 essais chacun, dans l'ordre des essais (les 13 contrats pour l'essai 1, puis pour l'essai 2…). Extraction, CRAG (pgvector, e5 local, juge léger) et explication réels ; checkpoints en mémoire ; journal d'audit jetable par essai.
+- **Revue humaine** : si le contrat part en revue avec l'issue attendue, la décision humaine d'`attendus.yaml` est reprise ; avec une autre issue, `NO_GO` prudent (« revue non prévue par le jeu »). Le classement porte sur l'issue lue **avant** toute reprise : une décision humaine scriptée ne mesure pas le système.
+- **Classement** d'un essai (`serie.classify`) :
+  - `conforme` : même décision proposée, même passage ou non en revue ;
+  - `plus_favorable` : décision automatique plus favorable que la décision finale attendue. C'est l'invariant, exigé à chaque essai ;
+  - `plus_prudente` : revue là où une décision automatique était attendue, ou décision automatique moins favorable ;
+  - `ecart` : le reste, dont une revue attendue mais sautée à décision égale, ou une autre proposition en revue.
+- **Autres vérifications à chaque essai** : le contrat se termine, il est scellé une fois, et son rejeu (`audit.replay`) donne la même empreinte. C'est le critère 6 sur des analyses réelles.
+- **Mesures, sans seuil** :
+  - écarts d'extraction par clause par rapport aux clauses attendues ;
+  - essais d'extraction, problèmes de vérification, constats du contrat, statuts de récupération, source de l'explication ;
+  - tokens par modèle et coût aux tarifs publiés (`PRICES_USD_PER_MTOKEN`, relevés le 26/09 sur mistral.ai/pricing/api) ; hors de `decision.yaml`, car ce ne sont pas des réglages de l'analyse et ils en changeraient l'empreinte ; un modèle sans tarif lève une erreur ;
+  - durée totale ; latence des appels LLM par étape (extraction, explication, CRAG par domaine d'analyste) ; durée réelle de l'étape des analystes, entre les horodatages des checkpoints (`StateSnapshot.created_at`, horodatage du checkpoint, vérifié dans langgraph 1.2.12). La comparaison entre la somme des latences par analyste et cette durée alimentera l'ADR 001.
+- **Résumé** (`LLM-SERIE`, `serie.summarize`) : par contrat, classement, issues (stabilité), essais avec un écart d'extraction, coût médian, durée médiane et maximale ; au total, classement et coût.
+- **Essai préalable** (`test_essai_prealable_non_compte`, `-k prealable`) : le contrat 01, une fois, pour vérifier le banc (clé, base, corpus indexé, modèles). Consigné, jamais compté.
+- **Tests sans LLM** (`tests/test_serie.py`, 24 tests, en CI) : classement sur des issues de chaque sorte, écarts d'extraction, coût, tarif absent, latences, durée de l'étape des analystes, résumé. Vérifiés par mutation (une comparaison `>` changée en `>=` dans le classement, le tarif de sortie ignoré : échecs). Écrits avant le module, mais lancés après lui : ils ne pouvaient pas être rouges autrement qu'à l'import.
+- **Rangement** : la cadence (`Pacer`, limite de 20 000 tokens par minute du compte) passe dans `tests/serie.py`, partagée avec `test_llm_criteres.py`, sans changement de comportement.
+- **Coût estimé** de la série de clôture (toute la suite `llm`) : environ 0,20 $, au plus 0,40 $ ; environ une heure.

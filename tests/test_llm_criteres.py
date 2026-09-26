@@ -9,7 +9,6 @@ est mesurée sans seuil (taux d'explications acceptées sans gabarit, motifs de 
 """
 
 import json
-import time
 from pathlib import Path
 
 import pytest
@@ -24,6 +23,7 @@ from doubles import (
     make_deps,
 )
 from langgraph.checkpoint.memory import InMemorySaver
+from serie import ACCOUNT_TOKENS_PER_MINUTE, Pacer
 
 from cdg import settings
 from cdg.adapters import fastembed
@@ -115,27 +115,6 @@ CONTRACTS = {
 # seuil du taux d'aboutissement aux analystes, par contrat (décision du 26/09/2026) ;
 # l'invariant de sûreté, lui, reste exigé à chaque essai : 5 sur 5
 MIN_REACHED = 4
-
-# limite du compte pour le modèle principal (console Mistral, 25/09/2026) ; l'API ne compte
-# que les tokens consommés, max_tokens n'est pas réservé (mesuré le même jour)
-ACCOUNT_TOKENS_PER_MINUTE = 20_000
-
-
-class Pacer:
-    """Cadence des extractions : après un essai qui a consommé t tokens, attendre
-    t × 60 / limite secondes avant le suivant. Pas une relance : seulement un espacement,
-    pour ne pas provoquer soi-même un 429."""
-
-    def __init__(self, tokens_per_minute: int):
-        self.tokens_per_minute, self.next_at = tokens_per_minute, 0.0
-
-    def wait(self) -> None:
-        delay = self.next_at - time.monotonic()
-        if delay > 0:
-            time.sleep(delay)
-
-    def consumed(self, tokens: int) -> None:
-        self.next_at = time.monotonic() + tokens * 60 / self.tokens_per_minute
 
 
 @pytest.fixture(scope="module")
