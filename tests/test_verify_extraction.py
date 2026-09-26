@@ -287,6 +287,9 @@ def test_valeur_absente_de_la_citation_reextraction_puis_escalade():
         ),
         ("preavis_resiliation", "Préavis de trois mois.", 3.0),
         ("revision_prix", "Révision dans la limite de quatre pour cent par an.", 4.0),
+        # J5 : une durée en années est comptée en mois
+        ("duree_engagement", "Engagement de trois ans, reconductible.", 36.0),
+        ("preavis_resiliation", "Préavis de 1 an.", 12.0),
     ],
 )
 def test_valeur_et_unite_retrouvees_dans_la_citation(kind, quote, value):
@@ -308,6 +311,10 @@ def test_valeur_et_unite_retrouvees_dans_la_citation(kind, quote, value):
         # au-delà de cent, un nombre en lettres n'est pas lu : ni 120, ni 20
         ("duree_engagement", "Engagement de cent vingt mois.", 120.0, "mois"),
         ("duree_engagement", "Engagement de cent vingt mois.", 20.0, "mois"),
+        # « trois ans » vaut 36 mois, jamais 3
+        ("duree_engagement", "Engagement de trois ans.", 3.0, "mois"),
+        # semaines et jours pour une durée : non convertis (phase 2)
+        ("preavis_resiliation", "Préavis de six semaines.", 1.5, "mois"),
     ],
 )
 def test_autre_nombre_ou_autre_unite_refuses(kind, quote, value, unit):
@@ -352,6 +359,16 @@ def test_autre_nombre_ou_autre_unite_refuses(kind, quote, value, unit):
         ("un mois et quinze jours", {(1.0, "mois"), (15.0, "jours")}),
         ("aucun délai : zéro jour", {(0.0, "jours")}),
         ("Payables à Quarante‑Cinq Jours", {(45.0, "jours")}),  # casse, tiret
+        # années comptées en mois (x 12), en chiffres comme en lettres
+        ("conclu pour trois ans", {(36.0, "mois")}),
+        ("conclu pour 3 ans", {(36.0, "mois")}),
+        ("conclu pour trois (3) ans", {(36.0, "mois")}),
+        ("conclu pour une durée d'un an", {(12.0, "mois")}),
+        ("conclu pour deux années", {(24.0, "mois")}),
+        ("préavis de 1,5 an", {(18.0, "mois")}),
+        ("36 mois, soit trois ans", {(36.0, "mois")}),
+        ("révision de 4 % par an", {(4.0, "%")}),
+        ("10 % du montant annuel", {(10.0, "%")}),
     ],
 )
 def test_quantites_en_chiffres_ou_en_lettres(quote, expected):
@@ -379,6 +396,11 @@ def test_quantites_en_chiffres_ou_en_lettres(quote, expected):
         "mille trente jours",
         # fourchette : aucune lecture
         "entre trente et quarante jours",
+        # années : sans nombre, ou avec une demie qui n'est pas lue
+        "tous les ans",
+        "les années 2020",
+        "un an et demi",
+        "trois mois et demi",
     ],
 )
 def test_nombre_en_lettres_dans_un_autre_mot_ou_une_autre_expression_non_lu(quote):

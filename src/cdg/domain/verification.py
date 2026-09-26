@@ -39,11 +39,30 @@ VALUE_UNITS: dict[str, str] = {
     "duree_engagement": "mois",
     "preavis_resiliation": "mois",
 }
-_UNITS = r"(%|pour\s?cents?|jours?|mois)(?!\w)"
+# unité suivie d'une demie (« un an et demi ») : non lue, jamais lue en partie
+_UNITS = r"(%|pour\s?cents?|jours?|mois|ans?|années?)(?!\w)(?!\s+et\s+demie?\b)"
 # chiffres, seuls ou entre parenthèses après le nombre en lettres : « quarante-cinq (45)
 # jours » ; le chiffre fait foi
 _QUANTITY = re.compile(r"(?:\(\s*(\d+(?:[.,]\d+)?)\s*\)|(\d+(?:[.,]\d+)?))\s*" + _UNITS)
-_UNIT = {"%": "%", "jour": "jours", "jours": "jours", "mois": "mois"}
+# unité de la règle et facteur de conversion : une durée en années est comptée en mois
+# (J5) ; « pour cent » et ses variantes valent « % »
+_UNIT: dict[str, tuple[str, int]] = {
+    "%": ("%", 1),
+    "jour": ("jours", 1),
+    "jours": ("jours", 1),
+    "mois": ("mois", 1),
+    "an": ("mois", 12),
+    "ans": ("mois", 12),
+    "année": ("mois", 12),
+    "années": ("mois", 12),
+}
+_PERCENT = ("%", 1)
+
+
+def _quantity(number: float, unit: str) -> tuple[float, str]:
+    name, factor = _UNIT.get(unit, _PERCENT)
+    return rounded(number * factor), name
+
 
 # nombres écrits seulement en lettres, de zéro à cent (au-delà : non lus, limite
 # documentée), mots séparés par une espace après remplacement des traits d'union
@@ -113,19 +132,17 @@ def _extends_a_number(before: list[str]) -> bool:
 
 def quantities(quote: str) -> set[tuple[float, str]]:
     """Quantités d'une citation avec leur unité : « 1,5 % » donne (1.5, "%") ;
-    « quarante-cinq (45) jours » et « quarante-cinq jours » donnent (45.0, "jours")."""
+    « quarante-cinq (45) jours » et « quarante-cinq jours » donnent (45.0, "jours") ;
+    « trois ans » donne (36.0, "mois")."""
     text = folded(quote)
     found = {
-        (
-            rounded(float((in_parentheses or number).replace(",", "."))),
-            _UNIT.get(unit, "%"),
-        )
+        _quantity(float((in_parentheses or number).replace(",", ".")), unit)
         for in_parentheses, number, unit in _QUANTITY.findall(text)
     }
     words = re.sub(r"\s+", " ", text.replace("-", " "))
     for match in _SPELLED_QUANTITY.finditer(words):
         if not _extends_a_number(words[: match.start()].split()):
-            found.add((float(_SPELLED[match[1]]), _UNIT.get(match[2], "%")))
+            found.add(_quantity(float(_SPELLED[match[1]]), match[2]))
     return found
 
 

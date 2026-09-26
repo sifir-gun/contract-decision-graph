@@ -1725,3 +1725,17 @@ Correction de l'écart relevé au T1, avant la série réelle.
 - La demande parlait d'un blocage « au niveau des sockets » : le bac à sable agit sur l'appel système `connect` de tout le processus, code natif compris, ce qu'un blocage du module `socket` de Python ne ferait pas.
 
 **README** : section « Souveraineté : embeddings sans appel réseau ».
+
+### J5 : durées en années comptées en mois (décision du 26/09)
+
+- **Cohérence entre valeur et citation** (`verification.quantities`) : « an », « ans », « année », « années » sont lus et convertis en mois (x 12), en chiffres comme en lettres : « trois ans », « 3 ans », « trois (3) ans » donnent 36 mois, « 1,5 an » 18 mois. La table des unités porte désormais l'unité de la règle et un facteur de conversion.
+- **Demie** : une quantité suivie de « et demi » ou « et demie » n'est plus lue du tout (« un an et demi » donnait 12, « trois mois et demi » donnait 3) ; une valeur de 12 ou de 3 aurait passé à tort. Ajout non demandé, dans le sens prudent : la clause est redemandée, puis escaladée.
+- **Faux positifs testés** : « 4 % par an » ne donne que 4 % ; « montant annuel », « tous les ans », « les années 2020 » ne donnent rien.
+- **Prompt d'extraction** : durée et préavis s'expriment en mois, une durée en années se convertit (exemples « deux ans » donne 24, « un an » donne 12, choisis hors des seuils de la configuration, 36 et 6 mois, pour ne rien suggérer au modèle) ; la citation garde l'unité du contrat (« années » admis). Le prompt change : la série 6 le mesurera.
+- **Limites** (README, phase 2 dans la spec, « normalisation des unités ») : semaines et jours pour une durée ou un préavis comptés en mois ne sont pas convertis ; une durée composée (« trois ans et six mois ») n'est lue qu'en partie.
+
+### J5 : plantage à la sortie de pytest, mesure après la coupure de la télémétrie
+
+- **15 exécutions** de la suite, avec la couverture, comme `check.sh`, sur le commit de la coupure (copie de travail séparée) : **code 0 aux 15**, 944 tests réussis à chaque fois, test réseau compris (vrais poids présents). Avant la coupure : 4 plantages sur 19 exécutions.
+- **Fichiers de télémétrie d'onnxruntime** (`~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime`) : aucune modification pendant ces 15 exécutions ; dernière écriture à 18:38:33, par le test réseau lancé en rouge, avant la correction.
+- **Rapports de plantage de macOS** : 15 nouveaux, un par exécution, tous du témoin du test réseau, tué volontairement par le bac à sable dans un `connect` Python (`EXC_CRASH`, `SIGKILL`). Aucun ne vient de la télémétrie. Effet de bord connu : chaque exécution locale de la suite laisse un rapport de ce type.
