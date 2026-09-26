@@ -42,7 +42,8 @@ class ContractState(TypedDict, total=False):
         Decision | None
     )  # decision_gate (route explain) ou human_review ; None après reject
     explanation: str
-    config_hash: str
+    config_hash: str  # configuration de l'analyse, posée par run_contract (J4)
+    models: dict[str, str]  # modèles de l'analyse, posés par run_contract (J4)
     decision_hash: str
     chain_hash: str
 

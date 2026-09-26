@@ -142,6 +142,7 @@ def _run(args: argparse.Namespace) -> dict:
             raw_text,
             parties=args.party,
             analysis_date=args.analysis_date or today(),
+            config=config,
         )
 
 
@@ -152,8 +153,9 @@ def _resume(args: argparse.Namespace) -> dict:
         "reason": args.reason,
         "overrides_block": args.overrides_block,
     }
-    with _graph(load_config()) as graph:
-        return orchestrator.resume_thread(graph, args.thread_id, answer)
+    config = load_config()
+    with _graph(config) as graph:
+        return orchestrator.resume_thread(graph, args.thread_id, answer, config=config)
 
 
 def _history(args: argparse.Namespace) -> dict:

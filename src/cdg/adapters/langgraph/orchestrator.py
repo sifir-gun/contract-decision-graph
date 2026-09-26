@@ -31,7 +31,7 @@ from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.state import AnalystInput, ContractState
-from cdg.domain import expiry, masking, policy
+from cdg.domain import audit, expiry, masking, policy
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
@@ -393,13 +393,16 @@ def run_contract(
     parties: Sequence[str] = (),
     *,
     analysis_date: date,
+    config: DecisionConfig,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
 
     Le texte est masqué AVANT l'invocation : l'entrée du graphe est écrite dans le
     premier checkpoint, le texte original n'atteint donc jamais la base ni le LLM.
     `analysis_date` fixe la date à laquelle les versions des textes sont jugées ; elle est
-    écrite dans l'état, donc rejouable.
+    écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
+    produit la décision, et modèles) est posé dans l'état initial, avant tout nœud :
+    c'est lui qui est scellé.
     """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
@@ -412,14 +415,35 @@ def run_contract(
             "contract_id": contract_id,
             "raw_text": masked.text,
             "analysis_date": analysis_date,
+            **audit.analysis_context(config),
         },
         _thread(contract_id),
     )
     return {**thread_status(graph, contract_id), "masquage": masked.counts}
 
 
-def resume_thread(graph: CompiledStateGraph, thread_id: str, answer: dict) -> dict:
-    """Reprise par Command(resume=...) d'un thread en attente d'un humain."""
+def resume_thread(
+    graph: CompiledStateGraph, thread_id: str, answer: dict, *, config: DecisionConfig
+) -> dict:
+    """Reprise humaine par Command(resume=...) d'un thread en attente. Refusée avant toute
+    reprise si la configuration courante n'est pas celle de l'analyse : la décision a été
+    produite par l'autre."""
+    snapshot = _awaiting(graph, thread_id)
+    analysed_with, current = (
+        snapshot.values.get("config_hash"),
+        audit.config_hash(config),
+    )
+    if analysed_with != current:
+        raise ThreadError(
+            f"configuration modifiée depuis l'analyse du thread {thread_id} "
+            f"(analyse : {analysed_with}, courante : {current}) : reprise refusée. "
+            "Relancer l'analyse (run, avec un nouvel identifiant de contrat) ou "
+            "restaurer la configuration de l'analyse."
+        )
+    return _resume(graph, thread_id, answer)
+
+
+def _awaiting(graph: CompiledStateGraph, thread_id: str) -> StateSnapshot:
     snapshot = graph.get_state(_thread(thread_id))
     if not snapshot.values:
         raise ThreadError(f"thread inconnu : {thread_id}")
@@ -427,6 +451,11 @@ def resume_thread(graph: CompiledStateGraph, thread_id: str, answer: dict) -> di
         raise ThreadError(
             f"le thread {thread_id} n'est pas en attente d'une décision humaine"
         )
+    return snapshot
+
+
+def _resume(graph: CompiledStateGraph, thread_id: str, answer: dict) -> dict:
+    _awaiting(graph, thread_id)
     graph.invoke(Command(resume=answer), _thread(thread_id))
     return thread_status(graph, thread_id)
 
@@ -488,6 +517,8 @@ def expire_threads(
                 raise ThreadError(f"thread {thread_id} : checkpoint sans date")
             pending.append((thread_id, datetime.fromisoformat(snapshot.created_at)))
     return [
-        resume_thread(graph, thread_id, expiry.system_decision(now - since, older_than))
+        # expire continue même si la configuration a changé : NO_GO système, scellé avec
+        # les deux empreintes et le constat de configuration modifiée
+        _resume(graph, thread_id, expiry.system_decision(now - since, older_than))
         for thread_id, since in expiry.expired(pending, older_than, now)
     ]

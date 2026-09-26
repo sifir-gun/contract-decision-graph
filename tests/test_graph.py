@@ -11,6 +11,7 @@ from doubles import (
     FakeLLM,
     FixedExtractor,
     clauses,
+    context,
     make_deps,
 )
 from langgraph.checkpoint.memory import InMemorySaver
@@ -42,6 +43,7 @@ def run(raw_text=CONTRACT_TEXT, **kwargs):
             "contract_id": "c-synth-001",
             "raw_text": raw_text,
             "analysis_date": ANALYSIS_DATE,
+            **context(),
         }
     )
     return out, extractor, crag
@@ -54,6 +56,7 @@ def updates(raw_text=CONTRACT_TEXT, **kwargs) -> list[tuple[str, dict]]:
             "contract_id": "c-synth-001",
             "raw_text": raw_text,
             "analysis_date": ANALYSIS_DATE,
+            **context(),
         },
         stream_mode="updates",
     )
@@ -150,6 +153,7 @@ def start(clause_overrides=None, empty=(), crag_tokens=0, config=CONFIG):
             "contract_id": "c-synth-001",
             "raw_text": CONTRACT_TEXT,
             "analysis_date": ANALYSIS_DATE,
+            **context(config),
         },
         THREAD,
     )
@@ -340,6 +344,7 @@ def test_run_contract_masque_avant_le_graphe():
         CONTRACT_TEXT + PII,
         parties=["Acme Industrie"],
         analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
     )
     assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
     raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
@@ -364,6 +369,7 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
         CONTRACT_TEXT + PII,
         parties=["Acme Industrie"],
         analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
     )
     [call] = llm.calls
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
@@ -393,7 +399,7 @@ def with_invented_quote():
 def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
     graph, llm = extraction_graph([with_invented_quote(), with_invented_quote()])
     status = orchestrator.run_contract(
-        graph, "c-10", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+        graph, "c-10", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
     )
     assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
     assert status["failure_report"] == {
@@ -411,6 +417,6 @@ def test_10_citation_corrigee_au_second_essai():
     good = {"clauses": [c.model_dump() for c in clauses()]}
     graph, llm = extraction_graph([with_invented_quote(), good])
     status = orchestrator.run_contract(
-        graph, "c-10b", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+        graph, "c-10b", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
     )
     assert len(llm.calls) == 2 and len(status["verdicts"]) == 4

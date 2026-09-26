@@ -4,7 +4,8 @@ l'état. Scelle aussi les rejets et les escalades.
 Le calcul reste dans le domaine (`domain/audit.py`) ; le journal passe par le port
 `AuditStore`, qui fournit la tête de chaîne et insère. Rejoué après un arrêt, le nœud rend
 l'enregistrement déjà scellé (même thread, même décision) : un seul enregistrement par
-contrat.
+contrat. L'empreinte scellée est celle de l'analyse (état initial, `run_contract`) ; celle
+de la configuration du processus qui scelle l'accompagne.
 """
 
 from typing import Any
@@ -26,8 +27,7 @@ def audit_seal(
     record = audit.build_record(
         state,
         thread_id=thread_id,
-        config_hash=audit.config_hash(decision_config),
-        models=audit.models_of(decision_config),
+        sealing_config_hash=audit.config_hash(decision_config),
         sealed_at=clock(),
     )
     stored = audit_store.append(lambda head: audit.seal(record, head))

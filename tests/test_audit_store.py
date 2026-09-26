@@ -32,10 +32,13 @@ SEALED_AT = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)
 def record(contract_id, reason="texte trop court", sealed_at=SEALED_AT):
     """Enregistrement minimal : un rejet, scellé comme les autres."""
     return audit.build_record(
-        {"contract_id": contract_id, "reject_reason": reason},
+        {
+            "contract_id": contract_id,
+            **audit.analysis_context(CONFIG),
+            "reject_reason": reason,
+        },
         thread_id=contract_id,
-        config_hash=audit.config_hash(CONFIG),
-        models=audit.models_of(CONFIG),
+        sealing_config_hash=audit.config_hash(CONFIG),
         sealed_at=sealed_at,
     )
 

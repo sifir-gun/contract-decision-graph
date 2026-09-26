@@ -184,7 +184,9 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(
     pace.wait()
     graph = compiled(make_deps(LLMExtractor(llm)))
     thread = f"llm-10-{contract}-{run}"
-    orchestrator.run_contract(graph, thread, text, parties, analysis_date=ANALYSIS_DATE)
+    orchestrator.run_contract(
+        graph, thread, text, parties, analysis_date=ANALYSIS_DATE, config=CONFIG
+    )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     failures = values.get("failures", [])
     if failures:
@@ -318,7 +320,9 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
     # extraction en doublure (citations de CONTRACT_TEXT) : seul le CRAG appelle le modèle
     graph = compiled(make_deps(FixedExtractor(clauses(**FLAGGED_3)), crag))
     thread = f"llm-3-{run}"
-    orchestrator.run_contract(graph, thread, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
+    orchestrator.run_contract(
+        graph, thread, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+    )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     by_domain = {v.domain: v for v in values["verdicts"]}
 

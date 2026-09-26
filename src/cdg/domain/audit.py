@@ -42,6 +42,7 @@ from cdg.domain.numeric import rounded
 from cdg.domain.rules import RULES
 
 GENESIS = "0" * 64  # prev_hash du premier maillon
+CONFIG_CHANGED = "configuration modifiée entre l'analyse et le scellement"
 _HASH = re.compile(r"[0-9a-f]{64}")
 
 # nœuds exécutés après decision_gate : leur consommation et leurs échecs n'ont pas pesé
@@ -97,6 +98,13 @@ def models_of(config: DecisionConfig) -> dict[str, str]:
         "llm_light": config.llm.model("light"),
         "embedding": config.embedding.model,
     }
+
+
+def analysis_context(config: DecisionConfig) -> dict[str, Any]:
+    """Contexte d'analyse, placé dans l'état initial par `run_contract` avant tout nœud :
+    empreinte de la configuration qui produira la décision, et modèles qui analyseront.
+    C'est lui qui est scellé, même si un autre processus scelle."""
+    return {"config_hash": config_hash(config), "models": models_of(config)}
 
 
 def decision_hash(record: Mapping[str, Any]) -> str:
@@ -173,8 +181,10 @@ class AuditRecord(BaseModel):
 
     contract_id: str
     thread_id: str
-    decision: DecisionRecord
+    decision: DecisionRecord  # config_hash : celui de l'analyse
     failure_report: dict[str, Any] | None  # complet, mesures comprises
+    sealing_config_hash: str  # configuration du processus qui scelle
+    sealing_findings: list[str]  # constats du scellement (configuration modifiée…)
     explanation: dict[str, Any] | None
     failures: list[NodeFailure]  # tous les échecs de nœud, dans l'ordre de l'état
     usage: list[Usage]
@@ -193,13 +203,21 @@ def build_record(
     state: Mapping[str, Any],
     *,
     thread_id: str,
-    config_hash: str,
-    models: dict[str, str],
+    sealing_config_hash: str,
     sealed_at: datetime,
     explanation: dict[str, Any] | None = None,
 ) -> AuditRecord:
     """Enregistrement d'un contrat à partir de son état final. Une clé absente de l'état
-    (rejet, escalade avant les analystes) est scellée vide ou nulle."""
+    (rejet, escalade avant les analystes) est scellée vide ou nulle ; le contexte
+    d'analyse (config_hash, modèles), lui, est exigé. Une configuration de scellement
+    différente de celle de l'analyse est scellée aussi, avec un constat."""
+    missing = [k for k in ("config_hash", "models") if k not in state]
+    if missing:
+        raise ValueError(
+            f"contexte d'analyse absent de l'état ({', '.join(missing)}) : un contrat "
+            "se lance par run_contract, qui le pose avant tout nœud"
+        )
+    analysed_with = state["config_hash"]
     by_domain = {v.domain: v for v in state.get("verdicts", [])}
     return AuditRecord(
         contract_id=state["contract_id"],
@@ -214,13 +232,17 @@ def build_record(
             final_decision=state.get("final_decision"),
             failure_report=decision_report(state.get("failure_report")),
             reject_reason=state.get("reject_reason"),
-            config_hash=config_hash,
+            config_hash=analysed_with,
         ),
         failure_report=state.get("failure_report"),
+        sealing_config_hash=sealing_config_hash,
+        sealing_findings=[]
+        if sealing_config_hash == analysed_with
+        else [CONFIG_CHANGED],
         explanation=explanation,
         failures=state.get("failures", []),
         usage=state.get("usage", []),
-        models=models,
+        models=state["models"],
         sealed_at=sealed_at,
     )
 

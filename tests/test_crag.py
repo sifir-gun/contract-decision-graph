@@ -16,6 +16,7 @@ from doubles import (
     FakeRetriever,
     FixedExtractor,
     clauses,
+    context,
     make_deps,
     passage,
 )
@@ -411,6 +412,7 @@ def _invoke(graph, contract_id):
             "contract_id": contract_id,
             "raw_text": CONTRACT_TEXT,
             "analysis_date": ANALYSIS_DATE,
+            **context(),
         },
         thread,
     )

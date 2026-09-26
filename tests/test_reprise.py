@@ -34,7 +34,11 @@ KILLED_RUN = textwrap.dedent("""
     deps = make_deps(FixedExtractor(found), FakeCrag(empty={"financier"}))
     with orchestrator.open_graph(load_config(), deps, conninfo.app_conninfo()) as graph:
         status = orchestrator.run_contract(
-            graph, thread_id, open(text).read(), analysis_date=date(2026, 9, 25)
+            graph,
+            thread_id,
+            open(text).read(),
+            analysis_date=date(2026, 9, 25),
+            config=load_config(),
         )
         print(json.dumps(status["statut"]), flush=True)
         os.kill(os.getpid(), signal.SIGKILL)

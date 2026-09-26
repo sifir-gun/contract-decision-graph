@@ -85,8 +85,11 @@ def traced(domain, found, refs=("réf",), findings=()):
     return justify(assessment, trace)
 
 
-def analysed(contract_id="c-1", refs=("réf",), used=None, failures=(), **overrides):
-    """État d'un contrat passé par les analystes et le gate, sans revue humaine."""
+def analysed(
+    contract_id="c-1", refs=("réf",), used=None, failures=(), config=CONFIG, **overrides
+):
+    """État d'un contrat passé par les analystes et le gate, sans revue humaine ; le
+    contexte d'analyse (config_hash, modèles) est celui que pose run_contract."""
     found = clauses(**overrides)
     verdicts = [traced(d, found, refs) for d in DOMAINS if d not in _failed(failures)]
     used = used or [
@@ -96,6 +99,7 @@ def analysed(contract_id="c-1", refs=("réf",), used=None, failures=(), **overri
     outcome = decide(verdicts, list(failures), used, CONFIG)
     return {
         "contract_id": contract_id,
+        **audit.analysis_context(config),
         "analysis_date": ANALYSIS_DATE,
         "clauses": found,
         "verdicts": verdicts,
@@ -115,11 +119,11 @@ def _failed(failures):
 
 
 def record(state, thread_id=None, sealed_at=SEALED_AT, explanation=None, config=CONFIG):
+    """Scellement par un processus dont la configuration est `config`."""
     return audit.build_record(
         state,
         thread_id=thread_id or state["contract_id"],
-        config_hash=audit.config_hash(config),
-        models=audit.models_of(config),
+        sealing_config_hash=audit.config_hash(config),
         sealed_at=sealed_at,
         explanation=explanation,
     )
@@ -167,7 +171,7 @@ def test_decision_hash_suit_les_references_figees_et_la_configuration():
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
     data["min_margin"] = 0.06
     other_config = DecisionConfig.model_validate(data)
-    state = analysed(penalites_execution=ABSENT)
+    state = analysed(penalites_execution=ABSENT, config=other_config)
     assert audit.decision_hash(dumped(state, config=other_config)) != base
 
 
@@ -184,7 +188,50 @@ def test_modeles_et_config_hash_dans_l_enregistrement():
         "llm_light": CONFIG.llm.model("light"),
         "embedding": CONFIG.embedding.model,
     }
-    assert r.decision.config_hash == audit.config_hash(CONFIG)
+    assert r.decision.config_hash == r.sealing_config_hash == audit.config_hash(CONFIG)
+    assert r.sealing_findings == []
+
+
+def other_config():
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data["min_margin"] = 0.06
+    return DecisionConfig.model_validate(data)
+
+
+def test_empreinte_d_analyse_scellee_meme_si_le_scellement_differe():
+    state = analysed()  # analysé avec CONFIG
+    changed = record(state, config=other_config())  # scellé par un autre processus
+    assert changed.decision.config_hash == audit.config_hash(CONFIG)
+    assert changed.sealing_config_hash == audit.config_hash(other_config())
+    assert changed.sealing_findings == [audit.CONFIG_CHANGED]
+    assert audit.CONFIG_CHANGED == (
+        "configuration modifiée entre l'analyse et le scellement"
+    )
+    # la partie décision ne dépend pas du processus qui scelle
+    assert audit.decision_hash(changed.model_dump(mode="json")) == audit.decision_hash(
+        dumped(state)
+    )
+
+
+def test_modeles_de_l_analyse_scelles():
+    state = {**analysed(), "models": {"llm_main": "modele-de-l-analyse"}}
+    assert record(state, config=other_config()).models == {
+        "llm_main": "modele-de-l-analyse"
+    }
+
+
+@pytest.mark.parametrize("missing", ["config_hash", "models"])
+def test_contexte_d_analyse_absent_refuse(missing):
+    state = {k: v for k, v in analysed().items() if k != missing}
+    with pytest.raises(ValueError, match="run_contract"):
+        record(state)
+
+
+def test_rejeu_sur_l_empreinte_d_analyse():
+    data = dumped(analysed(), config=other_config())  # scellé sous une autre config
+    assert audit.replay(data, CONFIG).identical
+    with pytest.raises(audit.ReplayError, match="configuration"):
+        audit.replay(data, other_config())
 
 
 # --- config_hash : configuration validée, sous forme canonique -------------------------
@@ -408,6 +455,7 @@ def test_rejeu_analyste_en_echec():
 def test_rejeu_rien_a_recalculer_pour_un_rejet():
     state = {
         "contract_id": "c-r",
+        **audit.analysis_context(CONFIG),
         "analysis_date": ANALYSIS_DATE,
         "reject_reason": "texte trop court",
         "verdicts": [],

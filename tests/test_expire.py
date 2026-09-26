@@ -26,7 +26,7 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 
 def suspend(graph, thread_id: str) -> datetime:
     status = orchestrator.run_contract(
-        graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+        graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
     )
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
@@ -80,7 +80,7 @@ def test_thread_termine_jamais_repris(pg, thread_id):
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         assert (
             orchestrator.run_contract(
-                g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+                g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
             )["statut"]
             == "termine"
         )
@@ -93,7 +93,10 @@ def test_thread_termine_jamais_repris(pg, thread_id):
 def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
     since = suspend(graph, thread_id)
     refused = orchestrator.resume_thread(
-        graph, thread_id, {"decision": "ESCALADE", "reviewer": "r", "reason": "m"}
+        graph,
+        thread_id,
+        {"decision": "ESCALADE", "reviewer": "r", "reason": "m"},
+        config=CONFIG,
     )
     assert refused["statut"] == "suspendu"
     [status] = orchestrator.expire_threads(

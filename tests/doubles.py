@@ -3,7 +3,9 @@
 from datetime import UTC, date, datetime
 
 from cdg.application.deps import Deps, ExtractionResult, RetrievalResult
+from cdg.domain import audit
 from cdg.domain.audit import StoredAuditEntry
+from cdg.domain.config import load_config
 from cdg.domain.models import (
     DOMAINS,
     REQUIRED_KINDS,
@@ -296,3 +298,9 @@ def make_deps(extractor=None, crag=None, audit_store=None, clock=fixed_clock) ->
         audit_store=audit_store if audit_store is not None else MemoryAuditStore(),
         clock=clock,
     )
+
+
+def context(config=None) -> dict:
+    """Contexte d'analyse (config_hash, modèles), tel que run_contract le pose dans l'état
+    initial : à joindre à toute entrée passée directement au graphe."""
+    return audit.analysis_context(config if config is not None else load_config())

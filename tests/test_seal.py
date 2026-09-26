@@ -4,6 +4,7 @@ rien n'est scellé pendant une suspension ; critères 6 (rejeu), 11 (expiration)
 
 from datetime import datetime, timedelta
 
+import pytest
 import yaml
 from doubles import (
     ABSENT,
@@ -14,6 +15,7 @@ from doubles import (
     FixedExtractor,
     MemoryAuditStore,
     clauses,
+    context,
     make_deps,
 )
 from langgraph.checkpoint.memory import InMemorySaver
@@ -32,16 +34,23 @@ def thread(cid):
     return {"configurable": {"thread_id": cid}}
 
 
-def compiled(store, extractor=None, crag=None, config=CONFIG, checkpointer=True):
+def compiled(
+    store, extractor=None, crag=None, config=CONFIG, checkpointer=True, saver=None
+):
     graph = orchestrator.build_graph(config, make_deps(extractor, crag, store))
     if not checkpointer:
         return graph.compile()
-    return graph.compile(checkpointer=InMemorySaver(serde=strict_serializer()))
+    return graph.compile(checkpointer=saver or InMemorySaver(serde=strict_serializer()))
 
 
-def invoke(graph, cid, text=CONTRACT_TEXT):
+def invoke(graph, cid, text=CONTRACT_TEXT, config=CONFIG):
     graph.invoke(
-        {"contract_id": cid, "raw_text": text, "analysis_date": ANALYSIS_DATE},
+        {
+            "contract_id": cid,
+            "raw_text": text,
+            "analysis_date": ANALYSIS_DATE,
+            **context(config),
+        },
         thread(cid),
     )
     return graph.get_state(thread(cid)).values
@@ -139,6 +148,7 @@ def test_sans_checkpointer_le_contrat_tient_lieu_de_thread():
             "contract_id": "c-sans",
             "raw_text": CONTRACT_TEXT,
             "analysis_date": ANALYSIS_DATE,
+            **context(),
         }
     )
     [entry] = store.entries()
@@ -153,6 +163,7 @@ def test_thread_distinct_du_contrat_scelle_avec_son_thread():
             "contract_id": "c-x",
             "raw_text": CONTRACT_TEXT,
             "analysis_date": ANALYSIS_DATE,
+            **context(),
         },
         thread("fil-x"),
     )
@@ -225,7 +236,7 @@ def test_12_levee_de_blocage_scellee_avec_son_motif():
     graph = compiled(
         store, FixedExtractor(clauses(responsabilite_acheteur=None)), config=config
     )
-    assert invoke(graph, "c-levee")["proposed_decision"] == "NO_GO"
+    assert invoke(graph, "c-levee", config=config)["proposed_decision"] == "NO_GO"
     override = {
         "decision": "GO",
         "reviewer": "direction-achats",
@@ -249,3 +260,73 @@ def test_journal_verifie_apres_plusieurs_parcours():
         compiled(store, FixedExtractor(clauses(responsabilite_acheteur=None))), "c-nogo"
     )
     assert audit.verify_chain(store.entries()).ok and len(store.entries()) == 3
+
+
+# --- Empreinte scellée : celle de la configuration qui a produit la décision --------------
+
+LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
+
+
+def changed_config():
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data["budget"]["max_tokens_per_contract"] += 1
+    return DecisionConfig.model_validate(data)
+
+
+def test_run_contract_pose_l_empreinte_d_analyse_scellee():
+    store = MemoryAuditStore()
+    graph = compiled(store)
+    status = orchestrator.run_contract(
+        graph, "c-run", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+    )
+    [entry] = store.entries()
+    assert status["config_hash"] == entry.config_hash == audit.config_hash(CONFIG)
+    assert entry.record["sealing_config_hash"] == audit.config_hash(CONFIG)
+    assert entry.record["sealing_findings"] == []
+    assert entry.record["models"] == audit.models_of(CONFIG)
+
+
+def test_resume_refuse_si_la_configuration_a_change_avant_toute_reprise():
+    store = MemoryAuditStore()
+    graph = compiled(store, FixedExtractor(clauses(**LOW_MARGIN)))
+    orchestrator.run_contract(
+        graph, "c-conf", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+    )
+    with pytest.raises(orchestrator.ThreadError) as refused:
+        orchestrator.resume_thread(graph, "c-conf", HUMAN, config=changed_config())
+    message = str(refused.value)
+    assert "configuration modifiée" in message
+    assert "relancer l'analyse" in message.lower()
+    assert "restaurer la configuration" in message
+    assert orchestrator.thread_status(graph, "c-conf")["statut"] == "suspendu"
+    assert store.entries() == []  # rien de repris, rien de scellé
+    # avec la configuration de l'analyse, la reprise passe
+    orchestrator.resume_thread(graph, "c-conf", HUMAN, config=CONFIG)
+    assert len(store.entries()) == 1
+
+
+def test_expire_continue_et_scelle_les_deux_empreintes_avec_le_constat():
+    store, saver = MemoryAuditStore(), InMemorySaver(serde=strict_serializer())
+    analysed_by = compiled(store, FixedExtractor(clauses(**LOW_MARGIN)), saver=saver)
+    orchestrator.run_contract(
+        analysed_by, "c-exp2", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+    )
+    # expire lancé par un processus dont la configuration a changé depuis l'analyse
+    other = changed_config()
+    expired_by = compiled(store, saver=saver, config=other)
+    since = datetime.fromisoformat(expired_by.get_state(thread("c-exp2")).created_at)
+    [status] = orchestrator.expire_threads(
+        expired_by,
+        timedelta(hours=24),
+        now=since + timedelta(hours=25),
+        thread_ids={"c-exp2"},
+    )
+    assert status["final_decision"] == "NO_GO"
+    [entry] = store.entries()
+    assert entry.config_hash == audit.config_hash(CONFIG)  # celle de l'analyse
+    assert entry.record["sealing_config_hash"] == audit.config_hash(other)
+    assert entry.record["sealing_findings"] == [audit.CONFIG_CHANGED]
+    # le rejeu utilise l'empreinte d'analyse
+    assert audit.replay(entry.record, CONFIG).identical
+    with pytest.raises(audit.ReplayError):
+        audit.replay(entry.record, other)

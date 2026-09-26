@@ -1281,3 +1281,22 @@ Validé à deux conditions, chacune testée (`test_audit_store.py`) :
 - **Critère 5** : la reprise après `SIGKILL` scelle une fois, dans le processus de reprise.
 - Au total : 690 tests ; couverture de 97,8 %.
 
+### J4 tâche 3 (suite) : empreinte d'analyse scellée
+
+Décision du 26/09 : l'empreinte scellée est celle de la configuration qui a produit la décision, pas celle du processus qui scelle (le choix de T3 est remplacé).
+- **`run_contract`** reçoit la configuration, et place dans l'état initial son empreinte et les identifiants des modèles (`audit.analysis_context`), avant tout nœud : aucun nœud ne peut échouer avant qu'ils existent. Les modèles scellés sont ainsi ceux de l'analyse, même sous une autre configuration.
+- **Scellement** :
+  - la partie décision porte l'empreinte d'analyse ;
+  - l'enregistrement ajoute `sealing_config_hash`, l'empreinte du processus qui scelle, et `sealing_findings` ;
+  - un état sans contexte d'analyse (graphe invoqué sans `run_contract`) ne se scelle pas : erreur explicite, consignée par la garde.
+- **`resume`** : si la configuration courante a une autre empreinte que l'état, la reprise est refusée avant toute reprise (`ThreadError`, JSON, code 1). Le message propose de relancer l'analyse (`run`, nouvel identifiant) ou de restaurer la configuration.
+- **`expire`** continue (`NO_GO` système). Il scelle les deux empreintes, avec le constat « configuration modifiée entre l'analyse et le scellement ». `expire_threads` reprend donc sans le contrôle de `resume_thread`, par la même reprise interne `_resume`.
+- **Rejeu** : il se fait toujours sur l'empreinte d'analyse ; la configuration du scellement est refusée si elle diffère.
+
+**Tests.**
+- **Domaine** : empreinte d'analyse scellée même si le scellement diffère (la partie décision ne change pas) ; modèles de l'analyse scellés ; contexte absent refusé ; rejeu sur l'empreinte d'analyse.
+- **Graphe** : `run_contract` pose l'empreinte scellée ; `resume` refusé sous une autre configuration, sans rien reprendre ni sceller, puis accepté avec la bonne ; `expire` lancé par un processus à configuration modifiée, qui scelle les deux empreintes et le constat, avec un rejeu identique sur l'empreinte d'analyse et refusé sur l'autre.
+- **CLI** : `resume` avec une configuration modifiée, erreur JSON et journal vide.
+- **Entrées** : toutes les entrées passées directement au graphe dans les tests portent le contexte d'analyse (`doubles.context`).
+- Au total, 699 tests ; couverture de 97,9 %. Journal réel toujours vide après la suite.
+

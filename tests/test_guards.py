@@ -12,6 +12,7 @@ from doubles import (
     FakeCrag,
     FixedExtractor,
     clauses,
+    context,
     make_deps,
 )
 from langgraph.checkpoint.memory import InMemorySaver
@@ -68,6 +69,7 @@ def run(deps, config=FAST, contract_id="c-garde"):
             "contract_id": contract_id,
             "raw_text": CONTRACT_TEXT,
             "analysis_date": ANALYSIS_DATE,
+            **context(config),
         },
         thread,
     )
@@ -227,7 +229,12 @@ def test_rejet_en_panne_echec_trace(monkeypatch):
     monkeypatch.setattr(orchestrator, "reject", broken)
     graph = orchestrator.build_graph(FAST, deps()).compile()
     out = graph.invoke(
-        {"contract_id": "c", "raw_text": "  ", "analysis_date": ANALYSIS_DATE}
+        {
+            "contract_id": "c",
+            "raw_text": "  ",
+            "analysis_date": ANALYSIS_DATE,
+            **context(FAST),
+        }
     )
     assert [f.node for f in out["failures"]] == ["reject"]
 
@@ -252,7 +259,7 @@ def test_statut_expose_les_echecs():
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
     status = orchestrator.run_contract(
-        graph, "c-statut", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+        graph, "c-statut", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=FAST
     )
     assert status["statut"] == "suspendu"
     assert status["failures"] == [

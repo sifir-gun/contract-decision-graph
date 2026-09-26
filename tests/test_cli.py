@@ -16,6 +16,7 @@ from doubles import (
 
 from cdg import cli
 from cdg.application.deps import Deps
+from cdg.domain.config import load_config
 from cdg.domain.models import REQUIRED_KINDS, Clause
 
 
@@ -424,3 +425,28 @@ def test_ingest_indexe_le_corpus_puis_rejouable(pg, capsys, monkeypatch, tmp_pat
             conn.execute(
                 "DELETE FROM rag_chunks WHERE embedding_model = %s", (embedder.model,)
             )
+
+
+@pytest.mark.pg
+def test_resume_refuse_si_la_configuration_a_change(
+    pg, thread_id, contract, analysis, audit_journal, capsys, monkeypatch
+):
+    analysis(*INSUFFICIENT)
+    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    changed = load_config().model_copy(update={"min_margin": 0.06})
+    monkeypatch.setattr(cli, "load_config", lambda: changed)
+    code, err = run_cli(
+        capsys,
+        "resume",
+        thread_id,
+        "--decision",
+        "NO_GO",
+        "--reviewer",
+        "r",
+        "--reason",
+        "m",
+    )
+    assert (code, err["erreur"]) == (1, "ThreadError")
+    assert "relancer l'analyse" in err["detail"].lower()
+    assert "restaurer la configuration" in err["detail"]
+    assert audit_journal.entries() == []  # rien de repris, rien de scellé

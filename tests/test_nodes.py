@@ -9,6 +9,7 @@ from doubles import (
     FixedExtractor,
     MemoryAuditStore,
     clauses,
+    context,
     fixed_clock,
 )
 
@@ -235,7 +236,9 @@ def seal(state, store, thread_id="c-1"):
 
 def test_audit_seal_ecrit_les_empreintes_du_journal():
     store = MemoryAuditStore()
-    out = seal({"contract_id": "c-1", "reject_reason": "texte vide"}, store)
+    out = seal(
+        {"contract_id": "c-1", "reject_reason": "texte vide", **context()}, store
+    )
     [entry] = store.entries()
     assert out == {
         "config_hash": entry.config_hash,
@@ -247,6 +250,6 @@ def test_audit_seal_ecrit_les_empreintes_du_journal():
 
 def test_audit_seal_rejoue_rend_l_enregistrement_existant():
     store = MemoryAuditStore()
-    state = {"contract_id": "c-1", "reject_reason": "texte vide"}
+    state = {"contract_id": "c-1", "reject_reason": "texte vide", **context()}
     assert seal(state, store) == seal(state, store)
     assert len(store.entries()) == 1
