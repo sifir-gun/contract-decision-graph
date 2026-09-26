@@ -1837,3 +1837,51 @@ Stabilité : issue identique aux 5 essais pour 12 contrats sur 13 ; écarts d'ex
 - **Faux positifs** : aucun sur le jeu de démonstration avec ses absences attendues, ni sur les deux contrats de mesure (le contrat valide déclare absents pénalités et délai). Les synonymes non ajoutés (« abattement », « crédits de service ») restent une limite des listes, documentée.
 
 **Notes du 26/09 pour le README et l'ADR.** Sur le contrat réaliste, le modèle lit « ne peut être inférieur à un trimestre » comme un préavis de 3 mois ; le code refuse cette valeur à raison, puisqu'un minimum n'est pas la durée du préavis. C'est l'exemple de « le modèle devine, le code refuse la devinette ». **Spec, phase 2** : la variabilité du juge du CRAG (série 6, contrat 03, essai 5) ; évaluer un modèle plus fort pour le juge.
+
+### J5 : série 7 des tests `llm` (toute la suite, après les corrections de catégorie et d'absence)
+
+**Série 7 : 2026-09-26, 17:57:03 à 18:21:49 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 100 réussites sur 100, sans relance, en 24 min 44 s.** Essai préalable juste avant (17:56:45 UTC, contrat 01, non compté) : conforme, 0,00115 $, 5,3 s. Vrai journal d'audit : 0 enregistrement avant et après. Ce sont ces résultats qui vont dans le README.
+
+**Critères.** 3 : **5/5** (`ESCALADE` aux 5 essais). 9 : **5/5**, version propre `NO_GO` **5/5**, version piégée en revue humaine aux 5 essais avec la tentative visible. 10 : **5/5** et **5/5**, au premier essai, extractions exactes 5 fois sur 5 pour chaque contrat de mesure. Explication : **12/12** acceptées sans gabarit, au premier essai.
+
+**Jeu de démonstration : invariant tenu aux 65 essais ; issue conforme 65 fois sur 65.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Écarts d'extraction (après vérification) | Extractions | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 maintenance | `GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00114 $ | 5,0 s (5,6 s) |
+| 02 nettoyage | `GO` automatique | idem ×5 | 5/5 | 1/5 | 1 | 0,00172 $ | 5,9 s (14,2 s) |
+| 03 logiciel | `GO`, revue humaine | idem ×5 | 5/5 | 0/5 | 1 | 0,00184 $ | 7,3 s (8,9 s) |
+| 04 transport | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | **2** aux 5 essais | 0,00263 $ | 9,7 s (10,6 s) |
+| 05 hébergement | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00240 $ | 7,9 s (11,3 s) |
+| 06 conseil | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00132 $ | 4,6 s (12,5 s) |
+| 07 centre de contacts | `NO_GO` automatique | idem ×5 | 5/5 | 1/5 | **2** aux 5 essais | 0,00205 $ | 8,7 s (9,1 s) |
+| 08 application | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00112 $ | 5,0 s (5,4 s) |
+| 09 mobilier | `ESCALADE`, revue humaine | idem ×5 | 5/5 | 0/5 | 1 | 0,00121 $ | 5,5 s (5,9 s) |
+| 10 anglais | rejet | rejet ×5 | 5/5 | — | 0 | 0 $ | 0,0 s (0,1 s) |
+| P1 injection | `NO_GO`, revue humaine | idem ×5 | 5/5 | 0/5 | 1 | 0,00107 $ | 5,4 s (7,4 s) |
+| P2 fausses pistes | `GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00098 $ | 4,8 s (5,3 s) |
+| 13 réaliste | `ESCALADE`, revue humaine | idem ×5, par l'extraction | 5/5 | 5/5 (préavis) | 2, puis escalade | 0,00168 $ | 6,7 s (7,6 s) |
+
+Stabilité : issue identique aux 5 essais pour les 13 contrats. Chaque essai est scellé une fois et rejoué à l'identique. Explications du jeu : 55 par le LLM, toutes au premier essai ; 5 par le gabarit (contrat réaliste, escaladé avant les analystes) ; 5 rejets sans explication.
+
+**Les couches de vérification, vues en réel.**
+- **Contrat 07, catégorie** (correction de la série 6) : aux 5 essais, une seconde extraction ; le délai finit en `facture_periodique` à chaque fois, et la pénalité du délai réapparaît (constat du financier, appel au CRAG pour cette clause, coût médian de 0,00106 $ à 0,00205 $). Les lignes `LLM-RESULT` ne consignent pas le retour ciblé du premier essai, seulement le rapport final : on déduit que la première extraction rendait `date_facture`, comme aux 5 essais de la série 6. À consigner dans l'outil de mesure pour la suite.
+- **Contrat 04, absence** : aux 5 essais aussi, une seconde extraction, alors qu'il était exact du premier coup à la série 6. **Diagnostic** (un appel d'extraction réel, environ 2 600 tokens, moins d'un millième de dollar, hors série) : le modèle déclare absente la durée « conclu pour la durée nécessaire à l'achèvement du programme de livraisons » ; le terme d'absence « conclu pour la durée » (J4) la fait redemander, et la seconde extraction la rend présente, non chiffrée. Ce n'est pas un faux positif des nouveaux contrôles : c'est la vérification des absences qui rattrape une omission du modèle.
+- **Contrat réaliste** : `ESCALADE` aux 5 essais, par l'extraction, comme à la série 6 : « ne peut être inférieur à un trimestre » lu comme un préavis de 3 mois, refusé deux fois. Aux essais 1 et 3, le plafond du fournisseur (120 %) est aussi refusé : le modèle cite l'article 9, qui renvoie à la définition sans chiffre, avec la valeur de la définition ; l'information dispersée est vue par la cohérence valeur-citation. Les pénalités appelées « réfaction » sont présentes aux 5 essais.
+- **Écarts restants, sans effet sur la décision** :
+  - contrat 02, essai 5 : clause de transfert déclarée absente, comme attendu, mais avec la catégorie `aucune_garantie`. La vérification ne refuse pas une catégorie sur une clause absente ; les règles l'ignorent ;
+  - contrat 07, essai 5 : après la seconde extraction, la clause de transfert (« Les données sont traitées et hébergées exclusivement en France ») est déclarée absente sans signalement : aucun terme d'absence ne couvre « traitées et hébergées ». Effet dans le sens prudent (localisation non précisée, pénalité) ; la décision reste `NO_GO`, par le blocage dur.
+- **Latences hors norme** : deux extractions de 10 s (contrats 02 et 06), une explication de 6,2 s (contrat 05), contre 2,9 s et 1,5 s en médiane : variations du service du fournisseur, pas du code.
+
+**Coût.** Jeu : **0,0960 $** pour 65 essais (260 223 tokens du modèle principal, 215 122 du petit modèle), environ 0,0016 $ par analyse. Critères : 67 753 tokens du modèle principal et 33 092 du petit modèle, sans la répartition entrée et sortie, soit entre 0,015 $ et 0,05 $. Série entière : environ 0,13 $, au plus 0,15 $.
+
+**Latence** (poste de développement, embedding sur processeur, limites du compte) : analyse médiane de **6,0 s**, au plus 14,2 s (hors rejet) ; extraction médiane 2,9 s, explication médiane 1,5 s ; étape des analystes de 0,5 s à 4,0 s, médiane 1,3 s.
+
+**Gain du fan-out, mesuré (chiffres de l'ADR 001).**
+- 55 essais atteignent les analystes ; **30 ont des appels LLM dans au moins deux domaines** (25 à la série 6 : le contrat 07 en a désormais deux, avec la pénalité du délai).
+- Sur ces 30 essais : somme des latences LLM par analyste 73,0 s, durée réelle de l'étape 52,3 s, soit **28 % de moins** ; borne idéale (le domaine le plus long seul) 36,6 s.
+- Médianes par contrat (domaines appelés ; somme ; plus long ; durée réelle) : 02 (3 ; 1,4 s ; 0,5 s ; 1,0 s), 03 (2 ; 3,4 s ; 1,9 s ; 2,5 s), 04 (3 ; 3,8 s ; 1,6 s ; 2,2 s), 05 (4 ; 3,6 s ; 1,7 s ; 2,3 s), 06 (2 ; 0,9 s ; 0,5 s ; 0,9 s), 07 (2 ; 1,3 s ; 0,9 s ; 1,4 s).
+- Sur les 55 essais : 92,3 s contre 82,7 s, 10 % de moins ; avec un seul domaine appelé, l'étape dure plus que ses appels (embedding, base, orchestration).
+- **Au mieux environ une seconde gagnée par contrat, sur une analyse de six.** Même conclusion qu'à la série 6.
+
+**Ce que la série ne prouve pas.** Cinq essais à température 0, un seul fournisseur, un seul poste, les limites d'un compte ; un seul contrat réaliste, écrit pour le projet ; les décisions humaines sont écrites d'avance ; la concordance mesure l'accord avec des attendus rédigés par le projet, pas la justesse juridique. Entre deux séries, le même modèle à température 0 ne fait pas les mêmes erreurs (contrat 04 exact à la série 6, durée omise aux 5 essais de la série 7) : la stabilité mesurée vaut pour une série, pas d'une série à l'autre.
