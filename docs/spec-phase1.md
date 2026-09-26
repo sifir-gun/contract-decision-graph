@@ -23,7 +23,7 @@ Ce que la phase 1 doit démontrer, et rien de plus :
 
 ## Justification multi-agents
 
-Le fan-out à 4 analystes se défend sur l'audit par domaine, et un peu sur la latence, pas sur la qualité : voir `docs/adr-001-fan-out.md` (J5), qui le dit explicitement, avec le gain de latence mesuré à la série 7 (au mieux une seconde par contrat, sur six).
+Le fan-out à 4 analystes se défend sur l'audit par domaine, et un peu sur la latence, pas sur la qualité : voir `docs/adr-001-fan-out.md` (J5), qui le dit explicitement, avec le gain de latence mesuré à la série 8 (au mieux une seconde par contrat, sur six).
 
 - **Mur concret** : parallélisme réel, les 4 recherches CRAG sont indépendantes ; spécialisation réelle, chaque domaine a ses règles et son corpus filtré. Pas de débordement de contexte : un agent unique avec 4 appels RAG séquentiels ferait probablement aussi bien en qualité.
 - **Pattern retenu** : Fan-out / Fan-in avec gate déterministe, plus un vérificateur sur l'extraction. Écartés : Supervisor piloté par LLM (routage fixe connu d'avance, un routeur LLM ajoute coût et surface d'attaque sans gain), Debate et Council par vote (les analystes ne répondent pas à la même question).

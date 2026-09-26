@@ -1,6 +1,6 @@
 # ADR-001 : fan-out vers quatre analystes, décision déterministe
 
-- **Statut** : accepté. Décidé avant le J1 (spec du 23/09/2026, « Justification multi-agents ») ; rédigé le 26/09/2026 (J5), avec les mesures de la série 7 (`docs/journal.md`).
+- **Statut** : accepté. Décidé avant le J1 (spec du 23/09/2026, « Justification multi-agents ») ; rédigé le 26/09/2026 (J5), avec les mesures de la série 8 (`docs/journal.md`).
 - **Portée** : découpage de l'analyse d'un contrat en analystes, pattern d'orchestration, place des LLM, règle qui rend `NO_GO`.
 
 ## Contexte
@@ -30,20 +30,20 @@ validate_input → extract_clauses ⇄ verify_extraction → Send ×4 → analys
 Il se justifie par deux choses :
 
 1. **L'audit par domaine.** Chaque domaine rend son verdict, scellé avec ses constats rattachés à leur clause, ses références retenues et le résumé de sa recherche (requêtes, passes, références expirées). Le corpus est filtré par domaine et par clause : le juge ne peut pas retenir une source d'un autre domaine. Un échec touche un domaine, pas l'analyse : l'analyste en échec est repris (`RetryPolicy`), puis consigné, les autres verdicts sont conservés par le checkpointer, et le gate escalade. Le rejeu recalcule chaque domaine à partir des références figées.
-2. **La latence**, mais peu, comme le mesure la série 7.
+2. **La latence**, mais peu, comme le mesure la série 8.
 
-### Gain de latence mesuré (série 7, 65 essais sur le jeu de démonstration)
+### Gain de latence mesuré (série 8, 65 essais sur le jeu de démonstration)
 
 Durée réelle de l'étape des analystes, entre les horodatages des checkpoints, comparée à la somme des latences des appels LLM de chaque analyste :
 
 | Essais | Somme des latences LLM par analyste | Domaine le plus long seul (borne idéale) | Durée réelle de l'étape | Écart |
 | --- | --- | --- | --- | --- |
-| 30 essais avec des appels LLM dans au moins deux domaines | 73,0 s | 36,6 s | 52,3 s | **28 % de moins** |
-| Les 55 essais qui atteignent les analystes | 92,3 s | — | 82,7 s | 10 % de moins |
+| 29 essais avec des appels LLM dans au moins deux domaines | 71,3 s | 35,8 s | 53,0 s | **26 % de moins** |
+| Les 54 essais qui atteignent les analystes | 91,4 s | — | 86,1 s | 6 % de moins |
 
-- Par contrat, en médiane : de 0,8 s à 2,5 s pour l'étape des analystes, sur une analyse médiane de 6,0 s (extraction 2,9 s, explication 1,5 s).
-- 25 essais sur 55 n'appellent le LLM que dans un seul domaine, 15 dans deux, 10 dans trois, 5 dans quatre : sur ce jeu, un contrat n'a le plus souvent de constats que dans un ou deux domaines. Avec un seul domaine appelé, il n'y a rien à paralléliser, et l'étape dure même plus longtemps que ses appels (embedding, base, orchestration).
-- **Ordre de grandeur : au mieux une seconde gagnée par contrat, sur six.** La série 6 donnait le même résultat (30 % de moins sur 25 essais).
+- Par contrat, en médiane : de 0,9 s à 2,4 s pour l'étape des analystes, sur une analyse médiane de 6,1 s (extraction 3,0 s, explication 1,6 s).
+- 25 essais sur 54 n'appellent le LLM que dans un seul domaine, 14 dans deux, 10 dans trois, 5 dans quatre : sur ce jeu, un contrat n'a le plus souvent de constats que dans un ou deux domaines. Avec un seul domaine appelé, il n'y a rien à paralléliser, et l'étape dure même plus longtemps que ses appels (embedding, base, orchestration).
+- **Ordre de grandeur : au mieux une seconde gagnée par contrat, sur six.** Les séries 6 et 7 donnaient le même ordre de grandeur (30 % et 28 % de moins sur les essais à plusieurs domaines).
 
 Le gain croîtrait avec des contrats qui déclenchent des constats dans plusieurs domaines à la fois, ou avec un juge plus lent. Il ne suffit pas, seul, à justifier le découpage.
 
@@ -54,6 +54,8 @@ Les quatre analystes lisent la même extraction. Une erreur ou une injection à 
 La série 4 (J4) l'a montré : une consigne glissée dans un contrat faisait **omettre** au modèle une clause bloquante, sans rien citer de faux ; les quatre analystes suivaient, et le contrat sortait en `GO`. Cinq couches se complètent depuis : prompt d'extraction, vérification par code, détection d'instructions, règles, revue humaine. Aucune ne suffit seule.
 
 Sur le contrat réaliste du jeu, le modèle lit « ne peut être inférieur à un trimestre » comme un préavis de 3 mois. Le code refuse cette valeur, absente de la citation, à raison : un minimum n'est pas la durée du préavis. Le modèle la rend encore au second essai, et le contrat part en revue humaine. **Le modèle devine, le code refuse la devinette.**
+
+D'une série à l'autre, le même modèle, à température 0, ne commet pas les mêmes erreurs : le contrat 04, extrait sans faute à la série 6, voit sa durée omise aux 5 premiers essais des séries 7 et 8, rattrapée à chaque fois par la vérification des absences. La sûreté repose sur les contrôles par code, pas sur la régularité du modèle.
 
 ## Alternatives écartées
 

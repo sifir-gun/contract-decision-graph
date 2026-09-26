@@ -1962,3 +1962,7 @@ Stabilité : issue identique aux 5 essais pour 12 contrats sur 13. Chaque essai 
 - **Au mieux environ une seconde gagnée par contrat, sur six** ; séries 6, 7 et 8 concordantes (30 %, 28 %, 26 % de moins sur les essais à plusieurs domaines).
 
 **Ce que la série ne prouve pas.** Cinq essais à température 0, un seul fournisseur, un seul poste, les limites d'un compte ; un seul contrat réaliste, écrit pour le projet ; les décisions humaines sont écrites d'avance ; la concordance mesure l'accord avec des attendus rédigés par le projet, pas la justesse juridique. D'une série à l'autre, le même modèle à température 0 ne commet pas les mêmes erreurs : c'est pourquoi la sûreté repose sur les contrôles par code, et non sur la régularité du modèle.
+
+### J5 : ADR 001, chiffres de la série 8
+
+Tableau et texte du gain de latence mis à jour avec la série 8 : 29 essais à plusieurs domaines, 53,0 s contre 71,3 s (26 % de moins, borne idéale 35,8 s) ; 54 essais, 6 % de moins ; étape des analystes de 0,9 s à 2,4 s en médiane par contrat ; analyse médiane de 6,1 s. Conclusion inchangée : au mieux une seconde par contrat, sur six ; séries 6 et 7 citées pour l'ordre de grandeur. Ajout : d'une série à l'autre, le même modèle à température 0 ne commet pas les mêmes erreurs (contrat 04) ; la sûreté repose sur les contrôles par code. La spec renvoie aux chiffres de la série 8.
