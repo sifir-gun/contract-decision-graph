@@ -613,7 +613,7 @@ Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si
 
 ## Intégration continue
 
-`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request, plus un audit hebdomadaire. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.6.10 avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
+`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request, plus un audit hebdomadaire. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.12.19 (la version du poste de développement) avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
 - **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
 - **Job `types`** : mypy, configuré dans `pyproject.toml` : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`, plugin pydantic. Tout le projet est installé : mypy lit les types des bibliothèques.
 - **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`). Il tourne aussi chaque lundi à 7 h 17 (heure de Paris) sur `main`, seul job de ce déclenchement planifié : une faille publiée entre deux commits est vue sans attendre le suivant. GitHub désactive un déclenchement planifié après 60 jours sans activité sur un dépôt public.
@@ -715,7 +715,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - longueur de ligne à 88 (valeur par défaut de Ruff et de Black) : reformatage dans un commit à part, listé dans `.git-blame-ignore-revs` ;
   - audit des dépendances aussi planifié, chaque lundi sur `main` (décision du 26/09) ;
   - `types-PyYAML` en dépendance de développement ; plus d'exception mypy sur `yaml` ;
-  - image PostgreSQL + pgvector hors de Dependabot, mise à jour manuelle ; test d'égalité des empreintes entre `docker-compose.yml` et le workflow.
+  - image PostgreSQL + pgvector hors de Dependabot, mise à jour manuelle ; test d'égalité des empreintes entre `docker-compose.yml` et le workflow ;
+  - uv 0.12.19 sur le poste et dans la CI (auparavant 0.6.10), `uv.lock` vérifié valide avec cette version.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

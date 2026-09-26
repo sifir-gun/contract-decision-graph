@@ -45,7 +45,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 
 ## Intégration continue
 
-`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request, plus un audit hebdomadaire. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.6.10 avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
+`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request, plus un audit hebdomadaire. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.12.19 (la version du poste de développement) avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
 - **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
 - **Job `types`** : mypy, configuré dans `pyproject.toml` : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`, plugin pydantic. Tout le projet est installé : mypy lit les types des bibliothèques.
 - **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`). Il tourne aussi chaque lundi à 7 h 17 (heure de Paris) sur `main`, seul job de ce déclenchement planifié : une faille publiée entre deux commits est vue sans attendre le suivant. GitHub désactive un déclenchement planifié après 60 jours sans activité sur un dépôt public.

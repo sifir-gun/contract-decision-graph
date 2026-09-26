@@ -1140,3 +1140,13 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 - **Cause non établie.** Piste : une bibliothèque native dont les fils d'exécution survivent à l'arrêt de l'interpréteur ; onnxruntime, chargé par `test_poids_absents_erreur_explicite_sans_telechargement`, serait le premier suspect. À suivre si cela se reproduit.
 - **Erreur de méthode** : le commit `67f09ac` a été fait sur une commande qui masquait le code de sortie de pytest (`| tail -1`). La suite a été vérifiée verte juste après. Désormais, le code de sortie est lu séparément.
 
+### uv 0.12.19 : poste et CI
+
+- **Poste** : mis à jour par le propriétaire du repo (`~/.pyenv/versions/3.11.7/bin/python -m pip install --upgrade "uv==0.12.19"`). `uv --version` donne 0.12.19.
+- **`uv.lock` vérifié avec 0.12.19**, avant l'épinglage :
+  - `uv lock --check` passe ;
+  - `uv lock` sans changement ne réécrit pas le fichier, qui reste en révision 1, donc aucun diff ;
+  - `uv sync --locked` passe, puis toutes les vérifications de la CI : ruff, mypy, 605 tests avec une couverture de 96,81 %, `uv export` et pip-audit sans faille connue.
+- **Compatibilité avec Dependabot (uv 0.11)**, testée sur une copie du dépôt : une mise à jour faite par uv 0.12.19 (`ruff` 0.16.8 → 0.16.9) réécrit le lock en révision 3, et uv 0.11.33 le relit (`uv lock --check`, `uv sync --locked`). Dans l'autre sens, uv 0.11 écrit aussi la révision 3 (essai précédent), que lit uv 0.12.
+- **Épinglage** : `version: "0.12.19"` dans les quatre jobs du workflow ; CLAUDE.md et la spec sont mis à jour.
+
