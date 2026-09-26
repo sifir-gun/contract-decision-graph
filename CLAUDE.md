@@ -41,6 +41,15 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `uv run ruff check` : lint (jeu de règles par défaut de ruff 0.16) ; doit passer avant chaque commit
 - `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify)
 
+## Intégration continue
+
+`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.6.10 avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
+- **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
+- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris.
+- **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
+- **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
+- **Pas de `.env`** : la CI ne définit que les variables de la base jetable. Un test qui dépend en silence de l'environnement du poste y échoue : on corrige le test, on ne l'exclut pas.
+
 ## Stack
 
 Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, mistralai, anthropic, fastembed, pytest, ruff (dev), Docker Compose.

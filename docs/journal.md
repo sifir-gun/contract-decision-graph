@@ -940,3 +940,45 @@ La mesure « avant » précède aussi les libellés de domaine : les deux change
 - **Stabilité** : quatre essais sur cinq donnent des reformulations identiques mot pour mot (température 0) ; l'essai 3 varie légèrement.
 - **Témoin juridique** : pour le plafond du fournisseur, le juge ne retient que la fiche, pas les articles 1231-3 ni 1170, comme en série 2 pour cette clause.
 
+### Décision du 26/09 : constat d'information
+
+- **Traitement validé** : un constat d'information (délai supplétif de L441-10, transfert encadré par une garantie) est recherché ; sans référence, il est signalé (« information seule, sans effet sur le statut ») et ne rend jamais le domaine `INSUFFISANT`.
+- **Noté pour le J4** : le juge léger rattache l'art. 28 du RGPD à la clause de transfert, un rattachement lâche. C'est à surveiller pour `explain`, qui ne doit citer que des références pertinentes.
+
+### Test d'`ingest` : environnement déclaré par le test
+
+- **Symptôme** : en environnement de CI simulé (arbre de travail propre, sans `.env`), `test_ingest_indexe_le_corpus_puis_rejouable` échoue : `SettingsError`, `EMBEDDING_CACHE_DIR` absent. Il passe sur le poste de développement.
+- **Cause** : la commande `ingest` lit `EMBEDDING_CACHE_DIR` avant de construire l'embedder. Le test remplaçait l'embedder par une doublure, mais la variable venait en silence du `.env` du poste. C'est une dépendance cachée du test, pas un défaut de l'application : la variable absente produit bien une erreur explicite.
+- **Correction** : le test déclare lui-même `EMBEDDING_CACHE_DIR` (dossier temporaire) et vérifie que la commande le transmet à la fabrique de l'embedder. La CI ne définit pas cette variable : un autre test qui en dépendrait en silence échouerait aussi.
+
+### Intégration continue GitHub Actions (branche `ci`)
+
+**Fait.** `.github/workflows/ci.yml`, sur push vers `main` et sur chaque pull request, avec deux jobs sur `ubuntu-24.04` :
+- **`lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé (`uv sync --locked --only-group dev`, puis `uv run --no-sync`). Aucune dépendance lourde n'est installée.
+- **`tests`** :
+  - service PostgreSQL : image de `docker-compose.yml`, même empreinte ;
+  - migrations par le script du dépôt, `docker/initdb/00_migrate.sh`, copié et exécuté dans le conteneur ;
+  - `setup-db`, puis `uv run --no-sync pytest`, tests `pg` compris, tests `llm` exclus par défaut.
+- Badge en tête du README ; section « Intégration continue » dans CLAUDE.md et dans la spec.
+
+**Choix.**
+- **Actions épinglées par empreinte de commit**, version en commentaire : `actions/checkout` v7.0.1 et `astral-sh/setup-uv` v10.2.0, dernières versions publiées, vérifiées par l'API GitHub le 26/09. Une étiquette de version peut être déplacée, une empreinte non.
+- **Entrées vérifiées** dans les `action.yml` à ces empreintes : `persist-credentials`, `version`, `python-version`, `enable-cache`.
+- **uv 0.6.10**, la version du poste de développement, qui a écrit `uv.lock` (révision 1) : `--locked` juge le lock avec le même outil.
+- **Migrations** : un conteneur de service démarre avant le checkout, il ne peut donc pas monter `docker/initdb` comme `docker-compose.yml`. Le script est exécuté tel quel dans le conteneur (`docker cp`, puis `docker exec … bash -s`), par le socket local, comme à l'initialisation d'un volume vide.
+- **Mots de passe de la base en clair dans le workflow** : la base est jetable, détruite avec le job, et joignable seulement depuis le runner. Ce ne sont pas des secrets. Aucune clé d'API.
+- **`HF_HUB_OFFLINE=1`** : garde-fou, un téléchargement du modèle d'embedding échouerait au lieu de tirer 2,2 Go.
+- **`EMBEDDING_CACHE_DIR` volontairement absent**, ainsi que tout ce qui vient d'un `.env`, pour que les dépendances cachées à l'environnement du poste se voient.
+- **`timeout-minutes`** : 10 pour le lint, 20 pour les tests.
+
+**Vérifié avant de pousser**, par une simulation locale de la CI :
+- un arbre de travail propre, sans `.env` ni poids du modèle, et `env -i` avec les seules variables du workflow ;
+- une base jetable, même image et même empreinte, migrée par le même `docker cp` et `docker exec`.
+
+Résultats :
+- premier passage : 580 réussites, 1 échec, dû à la dépendance cachée du test d'`ingest` (entrée précédente) ;
+- après la correction du test : 581 réussites ;
+- lint : dans un environnement neuf avec le seul groupe `dev`, `ruff format --check` et `ruff check` passent.
+
+La simulation tourne sur macOS : un écart propre à Linux ne peut se voir que sur GitHub.
+
