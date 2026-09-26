@@ -927,3 +927,16 @@ Consommation de la série : environ 22 000 tokens du modèle principal et 51 000
 
 La mesure « avant » précède aussi les libellés de domaine : les deux changements jouent sur les références retenues, pas sur le nombre de clauses recherchées. Sur le contrat complet, le juge retient l'art. 28 et la fiche sur la sous-traitance pour la clause de transfert, un rattachement lâche.
 
+### J3 tâche 12 : série 3 des tests `llm`, critère 3 seul (CRAG modifié)
+
+**Série 3 : 2026-09-26, 03:54:45 à 03:55:00 UTC, fournisseur Mistral, `light` = `ministral-8b-2512` (seul modèle appelé : l'extraction est en doublure). 5 réussites sur 5, sans relance, en 15 s.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 3 | **5/5** | Financier : seules les deux clauses qui portent un constat sont recherchées (pénalités d'exécution absentes, délai de 90 jours date de facture), la révision de prix ne l'est pas. Chacune fait 2 passes, aucune référence, d'où `INSUFFISANT` avec un constat par clause, puis `ESCALADE`. Témoin juridique `OK` : plafond fournisseur à 50 %, justifié par la fiche sur les plafonds de responsabilité. Environ 6 600 tokens par essai (7 appels au modèle léger), contre 10 200 en série 2. |
+
+**Observations.**
+- **Réécriture dans le sujet** : avec les libellés de domaine, plus aucune dérive vers « services financiers ». Reformulations obtenues : « sanctions contractuelles pour retard ou inexécution par le fournisseur… » et « modalités de règlement contractuel : échéance de paiement à la charge de l'acquéreur… ».
+- **Stabilité** : quatre essais sur cinq donnent des reformulations identiques mot pour mot (température 0) ; l'essai 3 varie légèrement.
+- **Témoin juridique** : pour le plafond du fournisseur, le juge ne retient que la fiche, pas les articles 1231-3 ni 1170, comme en série 2 pour cette clause.
+
