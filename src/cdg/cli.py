@@ -23,7 +23,7 @@ from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.application import ingestion
 from cdg.application.deps import Deps
 from cdg.application.extraction import LLMExtractor
-from cdg.domain import expiry
+from cdg.domain import audit, expiry
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
 from cdg.ports.audit_store import AuditStore
@@ -158,6 +158,35 @@ def _resume(args: argparse.Namespace) -> dict:
         return orchestrator.resume_thread(graph, args.thread_id, answer, config=config)
 
 
+class ChaineRompue(Exception):
+    """Journal d'audit non conforme : code 1, avec le rapport de vérification."""
+
+    def __init__(self, report: audit.ChainReport):
+        super().__init__(report.reason)
+        self.payload = {
+            "enregistrements": report.count,
+            "maillon_fautif": report.broken_id,
+            "raison": report.reason,
+            "tete": report.head,
+        }
+
+
+def _verify(args: argparse.Namespace) -> dict:
+    """Vérifie la chaîne du journal d'audit (rôle applicatif, lecture seule)."""
+    report = audit.verify_chain(open_audit_store().entries(), args.expect_head)
+    if not report.ok:
+        raise ChaineRompue(report)
+    return {"verify": "ok", "enregistrements": report.count, "tete": report.head}
+
+
+def _head(value: str) -> str:
+    if not audit.is_hash(value):
+        raise argparse.ArgumentTypeError(
+            f"empreinte invalide : {value!r} (64 caractères hexadécimaux minuscules)"
+        )
+    return value
+
+
 def _history(args: argparse.Namespace) -> dict:
     with _graph(load_config()) as graph:
         checkpoints = orchestrator.thread_history(graph, args.thread_id)
@@ -249,6 +278,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     expire.add_argument("--older-than", required=True, help="délai : 24h, 30m, 2d…")
     expire.set_defaults(handler=_expire)
+
+    verify = sub.add_parser(
+        "verify",
+        help="vérifie la chaîne du journal d'audit (lecture seule) ; code 1 et premier "
+        "maillon fautif si un enregistrement a été modifié, supprimé ou déplacé",
+    )
+    verify.add_argument(
+        "--expect-head",
+        type=_head,
+        help="empreinte de la tête de chaîne conservée hors de la base : échoue si la "
+        "tête diffère (fin du journal tronquée)",
+    )
+    verify.set_defaults(handler=_verify)
     return parser
 
 
@@ -260,12 +302,11 @@ def main(argv: list[str] | None = None) -> int:
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
-        print(
-            json.dumps(
-                {"erreur": type(exc).__name__, "detail": str(exc)}, ensure_ascii=False
-            ),
-            file=sys.stderr,
-        )
+        error = {"erreur": type(exc).__name__, "detail": str(exc)}
+        payload = getattr(exc, "payload", None)  # rapport structuré, s'il y en a un
+        if isinstance(payload, dict):
+            error |= payload
+        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0

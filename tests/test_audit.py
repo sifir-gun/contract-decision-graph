@@ -527,3 +527,34 @@ def test_echecs_d_analystes_ranges_par_domaine():
     # l'ordre de l'état reste celui de l'enregistrement scellé, hors decision_hash
     assert [f.domain for f in record(one).failures] == ["conformite", "financier"]
     assert replay(one).identical and replay(other).identical
+
+
+# --- Tête de chaîne : troncature détectée par une empreinte conservée ailleurs -------------
+
+
+def test_tete_de_chaine_et_journal_vide():
+    entries = chain()
+    assert audit.verify_chain(entries).head == entries[-1].chain_hash
+    assert audit.verify_chain([]).head == audit.GENESIS
+
+
+def test_tete_attendue_conforme():
+    entries = chain()
+    report = audit.verify_chain(entries, expect_head=entries[-1].chain_hash)
+    assert report.ok and report.broken_id is None
+
+
+def test_troncature_invisible_sans_tete_attendue_detectee_avec():
+    entries = chain()
+    truncated = entries[:-1]  # dernier maillon supprimé : la chaîne restante est valide
+    assert audit.verify_chain(truncated).ok
+    report = audit.verify_chain(truncated, expect_head=entries[-1].chain_hash)
+    assert (report.ok, report.broken_id) == (False, None)
+    assert "tête de chaîne" in report.reason
+    assert entries[-1].chain_hash in report.reason
+
+
+def test_tete_attendue_sur_une_chaine_rompue_signale_d_abord_le_maillon():
+    entries = chain()
+    report = audit.verify_chain([entries[0], entries[2]], expect_head="0" * 64)
+    assert (report.ok, report.broken_id) == (False, 3)

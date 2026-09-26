@@ -36,6 +36,17 @@ Les commits de reformatage massif (passage à 88 colonnes) sont listés dans `.g
 git config blame.ignoreRevsFile .git-blame-ignore-revs
 ```
 
+### Vérifier le journal d'audit
+
+Chaque contrat terminé (y compris un rejet ou une décision humaine) est scellé dans `audit_decisions`, chaîné au précédent. `verify` recalcule toute la chaîne :
+
+```bash
+uv run python -m cdg.cli verify                           # code 1 et premier maillon fautif si le journal a été modifié
+uv run python -m cdg.cli verify --expect-head <empreinte> # échoue aussi si la fin du journal a été tronquée
+```
+
+La sortie de `verify` donne la tête de chaîne (`tete`) : conservez-la hors de la base pour la comparer plus tard avec `--expect-head`.
+
 ## Architecture
 
 Architecture inspirée de l'architecture hexagonale (ports et adaptateurs), dans une version pragmatique :

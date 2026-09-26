@@ -1300,3 +1300,25 @@ Décision du 26/09 : l'empreinte scellée est celle de la configuration qui a pr
 - **Entrées** : toutes les entrées passées directement au graphe dans les tests portent le contexte d'analyse (`doubles.context`).
 - Au total, 699 tests ; couverture de 97,9 %. Journal réel toujours vide après la suite.
 
+### J4 tâche 4 : commande `verify`, critère 8
+
+**Fait.**
+- **Domaine** : `verify_chain(entries, expect_head=None)` rend aussi la tête de chaîne (`GENESIS` pour un journal vide). Une tête attendue différente est un défaut, sans maillon fautif (troncature). Elle n'est comparée qu'à une chaîne intacte : un maillon rompu est signalé d'abord. `audit.is_hash` valide une empreinte.
+- **CLI `verify [--expect-head <empreinte>]`**, avec le rôle applicatif, en lecture seule :
+  - chaîne intacte : JSON (`verify: ok`, nombre d'enregistrements, tête), code 0 ;
+  - chaîne rompue : `ChaineRompue`, code 1, avec le premier maillon fautif, la raison, le nombre d'enregistrements et la tête ;
+  - `--expect-head` invalide : refusé par argparse (code 2), comme `--analysis-date`.
+- **`cli.main`** : une exception qui porte un rapport structuré (`payload`) l'ajoute au JSON d'erreur. Les autres erreurs gardent la forme `erreur` et `detail`.
+- **README** : section « Vérifier le journal d'audit », qui explique quoi faire de la tête de chaîne.
+
+**Critère 8** (`test_verify.py`, PostgreSQL, journal jetable, deux contrats scellés par la CLI) :
+- l'administrateur change la décision d'un enregistrement (`jsonb_set`) : `verify` échoue sur ce maillon, raison `decision_hash` ;
+- il efface la consommation (hors de la partie décision) : échec, raison `chain_hash` ;
+- il supprime le premier maillon : échec sur le suivant.
+
+**Troncature** : supprimer le dernier maillon laisse `verify` au vert, c'est la limite documentée. Avec la tête conservée avant la suppression, `--expect-head` fait échouer la vérification.
+
+**Piège.** `psycopg.sql.SQL(...).format` interprète les accolades d'un littéral SQL, comme le chemin `'{decision,final_decision}'` de `jsonb_set`, comme des emplacements : `KeyError`. Il faut les doubler (`'{{…}}'`).
+
+**Tests** : 713 ; couverture de 97,9 %. Journal réel toujours vide, et aucune table jetable restante.
+

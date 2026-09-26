@@ -80,6 +80,11 @@ def canonical(obj: Any) -> bytes:
     ).encode()
 
 
+def is_hash(value: str) -> bool:
+    """Empreinte SHA-256 en hexadécimal minuscule, 64 caractères."""
+    return _HASH.fullmatch(value) is not None
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -267,7 +272,7 @@ class StoredAuditEntry(AuditEntry):
 def seal(record: AuditRecord, prev_hash: str | None) -> AuditEntry:
     """Scelle un enregistrement à la suite de `prev_hash` (None : journal vide)."""
     prev = GENESIS if prev_hash is None else prev_hash
-    if not _HASH.fullmatch(prev):
+    if not is_hash(prev):
         raise ValueError(f"prev_hash invalide : {prev!r} (64 caractères hexadécimaux)")
     data = record.model_dump(mode="json")
     return AuditEntry(
@@ -288,6 +293,7 @@ def seal(record: AuditRecord, prev_hash: str | None) -> AuditEntry:
 class ChainReport:
     ok: bool
     count: int
+    head: str  # chain_hash du dernier maillon ; GENESIS pour un journal vide
     broken_id: int | None = None  # premier enregistrement fautif
     reason: str | None = None
 
@@ -320,18 +326,27 @@ def _fault(entry: StoredAuditEntry, expected_prev: str) -> str | None:
     return None
 
 
-def verify_chain(entries: Sequence[StoredAuditEntry]) -> ChainReport:
+def verify_chain(
+    entries: Sequence[StoredAuditEntry], expect_head: str | None = None
+) -> ChainReport:
     """Vérifie le journal, du plus ancien au plus récent ; s'arrête au premier défaut.
 
-    Une troncature de la fin du journal ne se voit pas ici : il faudrait comparer la tête
-    à une empreinte conservée ailleurs."""
-    expected = GENESIS
+    La chaîne seule ne voit pas une troncature de la fin du journal : la tête restante
+    reste valide. `expect_head`, une tête conservée hors de la base, la détecte ; elle
+    n'est comparée qu'à une chaîne intacte (défaut sans maillon fautif)."""
+    head = GENESIS
     for entry in entries:
-        reason = _fault(entry, expected)
+        reason = _fault(entry, head)
         if reason is not None:
-            return ChainReport(False, len(entries), broken_id=entry.id, reason=reason)
-        expected = entry.chain_hash
-    return ChainReport(True, len(entries))
+            return ChainReport(False, len(entries), head, entry.id, reason)
+        head = entry.chain_hash
+    if expect_head is not None and head != expect_head:
+        reason = (
+            f"tête de chaîne {head} : attendue {expect_head} (fin du journal tronquée, "
+            "ou autre journal)"
+        )
+        return ChainReport(False, len(entries), head, None, reason)
+    return ChainReport(True, len(entries), head)
 
 
 # --- Rejeu --------------------------------------------------------------------------------

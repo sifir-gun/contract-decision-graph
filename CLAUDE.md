@@ -42,6 +42,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `uv run ruff check` : lint (jeu de règles par défaut de ruff 0.16) ; doit passer avant chaque commit
 - `uv run mypy` : vérification des types (strict sur `domain/`, `ports/`, `application/`) ; doit passer avant chaque commit
 - `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify)
+- `uv run python -m cdg.cli verify [--expect-head <empreinte>]` : vérifie la chaîne du journal d'audit ; code 1 et premier maillon fautif si elle est rompue
 
 ## Intégration continue
 
