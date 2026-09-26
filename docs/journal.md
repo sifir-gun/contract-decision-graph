@@ -1086,3 +1086,11 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 - **Condition** : l'empreinte doit rester dans l'historique de `main`. C'est le cas avec une fusion par commit de fusion, la pratique du dépôt. Un *squash* la ferait disparaître.
 - **Sortie de ruff laissée telle quelle** : dans 8 cas, un commentaire de fin de ligne est rejeté après la parenthèse fermante d'une condition (`):  # …`). La lecture en souffre un peu. Un commit à part, non fait ici, pourrait remonter ces commentaires sur leur propre ligne.
 
+### Décisions du 26/09 sur la qualité
+
+- **Badge de couverture** : statique, conservé.
+- **Écart de comportement de la PR `ci-qualite`, validé** : sur des cas qui ne se produisent pas dans l'usage actuel, les erreurs du projet remplacent les erreurs Python génériques :
+  - `LLMOutputError` au lieu d'`AttributeError` pour une réponse Mistral sans message ;
+  - `EmbeddingError` qui cite `EMBEDDING_CACHE_DIR` ;
+  - `RagStoreError`, `ThreadError`, `RuntimeError` et `TypeError` explicites dans les adaptateurs.
+- **Commentaires rejetés par ruff** (`8fbe5b6`) : les 8 commentaires placés après une parenthèse fermante sont remontés sur leur propre ligne, texte inchangé.
