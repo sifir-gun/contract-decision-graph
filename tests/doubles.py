@@ -1,8 +1,8 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
-from cdg.application.deps import ExtractionResult, RetrievalResult
+from cdg.application.deps import Deps, ExtractionResult, RetrievalResult
 from cdg.domain.audit import StoredAuditEntry
 from cdg.domain.models import (
     DOMAINS,
@@ -278,3 +278,21 @@ class MemoryAuditStore:
 
     def entries(self) -> list[StoredAuditEntry]:
         return list(self.stored)
+
+
+# horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre
+FIXED_NOW = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)
+
+
+def fixed_clock() -> datetime:
+    return FIXED_NOW
+
+
+def make_deps(extractor=None, crag=None, audit_store=None, clock=fixed_clock) -> Deps:
+    """Dépendances de test : doublures, journal d'audit en mémoire, horloge fixe."""
+    return Deps(
+        extractor=extractor if extractor is not None else FixedExtractor(clauses()),
+        crag=crag if crag is not None else FakeCrag(),
+        audit_store=audit_store if audit_store is not None else MemoryAuditStore(),
+        clock=clock,
+    )

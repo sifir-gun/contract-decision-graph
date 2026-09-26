@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointMetadata
+from langgraph.config import get_config
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -225,6 +226,14 @@ def analyst_retryable(exc: Exception) -> bool:
     return not isinstance(exc, LLMQuotaError) and retries(_LANGGRAPH_DEFAULT, exc)
 
 
+def current_thread(state: ContractState) -> str:
+    """Thread LangGraph de l'exécution en cours, scellé avec le contrat. Sans checkpointer
+    (graphe de test), il n'y a pas de thread : l'identifiant du contrat en tient lieu,
+    comme dans `run_contract`, où un contrat est un thread."""
+    thread = get_config().get("configurable", {}).get("thread_id")
+    return state["contract_id"] if thread is None else str(thread)
+
+
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     """Câble les 9 nœuds, dépendances liées et gardes d'échec ; graphe non compilé.
 
@@ -283,7 +292,19 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     )
     builder.add_node("human_review", partial(human_review, decision_config=config))
     builder.add_node("explain", guard("explain", explain))
-    builder.add_node("audit_seal", guard("audit_seal", audit_seal))
+    builder.add_node(
+        "audit_seal",
+        guard(
+            "audit_seal",
+            lambda state: audit_seal(
+                state,
+                audit_store=deps.audit_store,
+                clock=deps.clock,
+                decision_config=config,
+                thread_id=current_thread(state),
+            ),
+        ),
+    )
     builder.add_node("reject", guard("reject", reject))
 
     builder.add_edge(START, "validate_input")
@@ -354,6 +375,9 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "failure_report": values.get("failure_report"),
         "failures": [f.model_dump() for f in values.get("failures", [])],
         "reject_reason": values.get("reject_reason"),
+        "config_hash": values.get("config_hash"),
+        "decision_hash": values.get("decision_hash"),
+        "chain_hash": values.get("chain_hash"),
         "human": human.model_dump() if human else None,
         "verdicts": [
             v.model_dump(exclude={"evidence_ids"}) for v in values.get("verdicts", [])

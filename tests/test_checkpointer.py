@@ -2,7 +2,13 @@
 
 import psycopg
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import (
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FixedExtractor,
+    clauses,
+    make_deps,
+)
 from langgraph.types import Command
 
 from cdg.adapters.langgraph import checkpointer, orchestrator
@@ -34,7 +40,7 @@ def grants(pg, table: str) -> set[str]:
 
 
 def deps() -> Deps:
-    return Deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)), crag=FakeCrag())
+    return make_deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)))
 
 
 def thread(tid: str) -> dict:

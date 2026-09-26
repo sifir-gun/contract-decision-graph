@@ -1243,3 +1243,41 @@ Validé à deux conditions, chacune testée (`test_audit_store.py`) :
 
 **Phase 2** (spec) : une base de test séparée de la base de développement, pour que les tests ne partagent jamais la base du vrai journal.
 
+### J4 tâche 3 : `audit_seal` et câblage
+
+**Fait.**
+- **`Deps`** porte le journal (`AuditStore`) et l'horloge (`Clock`). Les tests passent par `doubles.make_deps` : journal en mémoire, horloge fixe.
+- **Nœud `audit_seal`** : construit l'enregistrement (`audit.build_record`), le fait sceller et ajouter par le port, puis écrit `config_hash`, `decision_hash` et `chain_hash` dans l'état. Rejoué, il rend l'enregistrement déjà scellé.
+- **Orchestrateur** : `current_thread` lit le thread de l'exécution (`get_config()`, vérifié dans langgraph 1.2.12). `thread_status` expose les trois empreintes.
+- **`reject`** n'écrit rien de plus : `reject_reason` suffit au scellement, qui distingue un rejet par ce motif, et non par des listes vides (piège noté au J1).
+- **CLI** :
+  - `open_audit_store()` : journal réel, rôle applicatif ;
+  - `now()` : heure UTC ;
+  - `build_deps` pour `run` ;
+  - `review_deps(config)`, qui remplace la constante `REVIEW_DEPS`, pour `resume`, `history` et `expire` ; toujours sans extraction ni CRAG, donc sans clé.
+
+**Choix.**
+- **`config_hash`** : celui du processus qui scelle. Pour un contrat repris, c'est la configuration de `resume` ou d'`expire`. Si elle a changé depuis `run`, le rejeu le signale (configuration refusée ou décision recalculée différente), jamais un faux accord. Écrire l'empreinte dans l'état dès `validate_input` aurait laissé sans empreinte un contrat dont ce nœud échoue.
+- **Thread d'un graphe sans checkpointer** (graphes de test) : il n'y a pas de thread, l'identifiant du contrat en tient lieu, comme dans `run_contract`. En production, la CLI a toujours un checkpointer.
+
+**Aucun test n'écrit dans le vrai journal.**
+- Une fixture active partout remplace `cli.open_audit_store` par un journal qui refuse toute écriture.
+- La fixture `audit_journal` le redirige vers un journal jetable ; la fixture `analysis` de `test_cli` la demande quand la CLI lance le graphe.
+- La reprise du critère 5, lancée par la CLI dans un nouveau processus, reçoit son journal jetable d'un petit script de test : le nom de table ne passe jamais par la CLI.
+- Vérifié après la suite complète : `audit_decisions` compte 0 enregistrement dans la base de développement, et il ne reste aucune table jetable.
+
+**Tests.**
+- **`test_seal.py`** (14 tests) :
+  - un enregistrement par fin de parcours : GO, NO_GO, rejet, escalade puis humain, extraction en échec puis humain ;
+  - rien de scellé pendant une suspension ;
+  - graphe sans checkpointer ; thread distinct du contrat ;
+  - critère 6 sur le graphe : deux contrats aux mêmes clauses, même `decision_hash`, chaînes distinctes, rejeu identique ;
+  - critère 11 : expiration scellée (`systeme:expire`, motif « timeout ») ;
+  - critère 12 : levée de blocage scellée (`overrides_block`, motif, `config_hash` de la configuration de test) ;
+  - chaîne vérifiée après trois parcours.
+- **Nœud** : empreintes rendues et ajout rejoué idempotent (`test_nodes`).
+- **Garde** : `audit_seal` en échec est consigné, l'exécution va à son terme (`test_guards`).
+- **CLI** : `run` scelle, et sa sortie porte les empreintes ; `resume` scelle après la suspension.
+- **Critère 5** : la reprise après `SIGKILL` scelle une fois, dans le processus de reprise.
+- Au total : 690 tests ; couverture de 97,8 %.
+

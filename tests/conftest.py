@@ -10,9 +10,10 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from cdg import settings
+from cdg import cli, settings
 from cdg.adapters.langgraph import checkpointer
 from cdg.adapters.postgres import conninfo, migrations, rag_store
+from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.domain.config import load_config
 
 
@@ -97,3 +98,31 @@ def journal(pg) -> str:
     yield name
     with psycopg.connect(pg.admin, autocommit=True) as conn:
         conn.execute(sql.SQL("DROP TABLE {}").format(table))
+
+
+class ForbiddenAuditStore:
+    """Journal réel de la CLI pendant les tests : toute écriture ou lecture échoue. Un
+    test qui scelle par la CLI demande la fixture `audit_journal` (journal jetable)."""
+
+    def append(self, seal):
+        raise AssertionError(
+            "un test ne scelle jamais dans le vrai journal : fixture audit_journal"
+        )
+
+    def entries(self):
+        raise AssertionError(
+            "un test ne lit jamais le vrai journal : fixture audit_journal"
+        )
+
+
+@pytest.fixture(autouse=True)
+def _journal_reel_interdit(monkeypatch):
+    monkeypatch.setattr(cli, "open_audit_store", ForbiddenAuditStore)
+
+
+@pytest.fixture
+def audit_journal(pg, journal, monkeypatch) -> PostgresAuditStore:
+    """La CLI scelle dans un journal jetable (même structure, mêmes droits)."""
+    store = PostgresAuditStore(pg.app, table=journal)
+    monkeypatch.setattr(cli, "open_audit_store", lambda: store)
+    return store

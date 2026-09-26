@@ -16,6 +16,7 @@ from doubles import (
     FakeRetriever,
     FixedExtractor,
     clauses,
+    make_deps,
     passage,
 )
 from langgraph.checkpoint.memory import InMemorySaver
@@ -23,7 +24,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application import crag
-from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 from cdg.domain.models import DOMAIN_KINDS, DOMAINS, ClauseRetrieval
 from cdg.ports.llm import LLMOutputError
@@ -395,7 +395,7 @@ def test_sous_graphe_top_k_de_la_configuration_par_requete():
 
 
 def _graph(retriever, llm, found=None):
-    deps = Deps(
+    deps = make_deps(
         extractor=FixedExtractor(found or clauses(**PENALIZED)),
         crag=orchestrator.crag_runner(retriever, llm, CONFIG),
     )

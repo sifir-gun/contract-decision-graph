@@ -66,13 +66,24 @@ INSUFFICIENT = (FixedExtractor(clauses(penalites_execution=ABSENT)), {"financier
 
 
 @pytest.fixture
-def analysis(monkeypatch):
-    """Remplace les dépendances réelles (LLM, embedding, corpus) par des doublures."""
+def analysis(monkeypatch, request):
+    """Remplace les dépendances réelles (LLM, embedding, corpus) par des doublures ; la
+    CLI scelle dans un journal jetable (fixture `audit_journal`, demandée à l'appel)."""
 
     def use(extractor=None, empty=()):
         extractor = extractor or FixedExtractor(clauses())
         crag = FakeCrag(empty)
-        monkeypatch.setattr(cli, "build_deps", lambda config: Deps(extractor, crag))
+
+        def build(config):
+            request.getfixturevalue("audit_journal")
+            return Deps(
+                extractor=extractor,
+                crag=crag,
+                audit_store=cli.open_audit_store(),
+                clock=cli.now,
+            )
+
+        monkeypatch.setattr(cli, "build_deps", build)
         return extractor, crag
 
     return use
@@ -101,10 +112,22 @@ def test_run_insuffisant_suspend_en_escalade(pg, thread_id, contract, analysis, 
 
 
 @pytest.mark.pg
-def test_run_favorable_termine_en_go(pg, thread_id, contract, analysis, capsys):
+def test_run_favorable_termine_en_go(
+    pg, thread_id, contract, analysis, audit_journal, capsys
+):
     extractor, crag = analysis()
     code, out = run_cli(capsys, "run", contract, "--contract-id", thread_id)
     assert (code, out["statut"], out["final_decision"]) == (0, "termine", "GO")
+    # scellé dans le journal (jetable), empreintes exposées par la sortie
+    [entry] = audit_journal.entries()
+    assert (entry.thread_id, entry.record["decision"]["final_decision"]) == (
+        thread_id,
+        "GO",
+    )
+    assert (out["decision_hash"], out["chain_hash"]) == (
+        entry.decision_hash,
+        entry.chain_hash,
+    )
     assert len(extractor.calls) == 1 and sorted(crag.calls) == sorted(
         ["juridique", "financier", "conformite", "operationnel"]
     )
@@ -173,7 +196,9 @@ def test_run_date_d_analyse_invalide(contract, capsys):
 
 
 @pytest.mark.pg
-def test_resume_finalise_puis_history(pg, thread_id, contract, analysis, capsys):
+def test_resume_finalise_puis_history(
+    pg, thread_id, contract, analysis, audit_journal, capsys
+):
     analysis(*INSUFFICIENT)
     run_cli(capsys, "run", contract, "--contract-id", thread_id)
     code, out = run_cli(
@@ -189,6 +214,9 @@ def test_resume_finalise_puis_history(pg, thread_id, contract, analysis, capsys)
     )
     assert (code, out["statut"], out["final_decision"]) == (0, "termine", "NO_GO")
     assert out["human"]["reviewer"] == "relecteur-synth"
+    # rien de scellé pendant la suspension, un enregistrement après la reprise
+    [entry] = audit_journal.entries()
+    assert entry.record["decision"]["human"]["reviewer"] == "relecteur-synth"
 
     code, out = run_cli(capsys, "history", thread_id)
     steps = out["checkpoints"]

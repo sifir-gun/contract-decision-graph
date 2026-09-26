@@ -75,7 +75,7 @@ Chaque analyste applique d'abord ses règles en Python pur, puis appelle le sous
 | decision_gate | Budget, blocages durs, agrégation pondérée, marge au seuil ; écrit `route` (`explain` ou `human_review`) | Non |
 | human_review | Adaptateur dans `orchestrator.py` : `interrupt()`, attend la décision humaine, la fait contrôler par `policy.py` | Non |
 | explain | Rédige la justification à partir du verdict figé | Oui |
-| audit_seal | Sérialisation canonique, SHA-256, chaînage | Non |
+| audit_seal | Scelle le contrat (forme canonique, SHA-256, chaînage : `domain/audit.py`) dans le journal par le port `AuditStore`, puis écrit `config_hash`, `decision_hash` et `chain_hash` dans l'état ; rejoué après un arrêt, rend l'enregistrement existant (J4) | Non |
 | reject | Verdict d'invalidité explicite : `reject_reason` renseigné, `final_decision` reste `None` (pas de valeur « invalide » dans `Decision`) ; mène à `audit_seal`, car un rejet est scellé comme le reste | Non |
 
 Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate` si les documents passent, sinon `rewrite` et nouvelle passe (2 au maximum), sinon la clause reste sans référence ; le statut du domaine est déduit par la justification. Pas de repli web en phase 1. `application/crag.py` contient les fonctions pures (`retrieve`, `grade`, `rewrite`, `generate`), qui passent par les ports `Retriever` et `LLMProvider` ; le sous-graphe est compilé dans `adapters/langgraph/orchestrator.py`, seul paquet à importer LangGraph (J3). Détail (J3) :
@@ -607,6 +607,13 @@ Comportement de la CLI (J3) : `cli.py` est la racine de composition.
 - `resume`, `history` et `expire` ne repassent ni par l'extraction ni par le CRAG : aucune clé d'API ni aucun modèle ne sont exigés, et un appel échouerait explicitement ;
 - la sortie de `run` et de `resume` expose aussi `failures` (gardes d'échec de nœud).
 
+Comportement de la CLI (J4) :
+- `run`, `resume` et `expire` scellent chaque contrat terminé dans le journal réel (`open_audit_store`, rôle applicatif) ; leur sortie expose `config_hash`, `decision_hash` et `chain_hash`. `resume` et `expire` passent par `review_deps` : ni extraction ni CRAG, toujours aucune clé d'API exigée ;
+- horloge des scellements : `now()`, heure UTC avec fuseau ;
+- le thread scellé est celui de l'exécution LangGraph (`current_thread`) ; un graphe sans checkpointer (tests) n'a pas de thread, l'identifiant du contrat en tient lieu, comme dans `run_contract` ;
+- `config_hash` est celui de la configuration du processus qui scelle : `run`, ou `resume` et `expire` pour un contrat repris. Si la configuration a changé entre les deux, le rejeu le signale : configuration refusée, ou décision recalculée différente, jamais un faux accord ;
+- tests : un journal jetable par test (fixture `audit_journal`) ; hors de cette fixture, le journal de la CLI refuse toute écriture ; la reprise du critère 5, lancée par la CLI dans un nouveau processus, reçoit son journal jetable du code de test.
+
 Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si la base est arrêtée. On les exclut volontairement avec `-m "not pg"`, jamais par un saut silencieux. Ceux qui appellent le vrai modèle portent le marqueur `llm`. Ils sont exclus par défaut et comptés comme *deselected*, et ne tournent qu'avec l'option `--llm`. Un `-m` ne peut donc pas les activer par accident. Les critères 3, 9 et 10 y sont répétés 5 fois : 5 réussites sur 5 exigées, sans relance automatique, et chaque série est consignée au journal. Le critère 10 s'accompagne d'une mesure (J3), sur deux contrats de mesure mesurés séparément (un contrat valide où deux types sont absents, un contrat où les 10 types sont présents) : le nombre d'essais sur 5 qui aboutissent aux analystes avec toutes les citations vérifiées, pour qu'un système qui escaladerait toujours ne passe pas inaperçu. Taux consigné pour chaque série. Seuil (décision du 26/09, après la série 2) : au moins 4 essais sur 5 par contrat, vérifié par `test_10_taux_d_aboutissement_aux_analystes` ; l'invariant de sûreté reste exigé à chaque essai, 5 sur 5.
 
 ## Intégration continue
@@ -720,7 +727,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - scellement dans le domaine (`domain/audit.py`) : forme canonique, `decision_hash`, `chain_hash`, `config_hash`, `verify_chain`, `replay` ; `AuditEntry` passe du port au domaine (jamais dans l'état : aucune migration de checkpoints) ; constats du CRAG portés par `RetrievalTrace.findings`, `justify(évaluation, résumé)` ;
   - partie décision : le fait d'un budget dépassé sans le nombre de tokens, échecs de nœuds rangés par domaine ; troncature documentée, `verify --expect-head` (J4), ancrage externe en phase 2 ;
   - journal d'audit PostgreSQL : migration `004` (index uniques `thread_id`, `prev_hash`), adaptateur sous verrou consultatif de transaction, ajout rejoué idempotent, `AuditStoreError` pour une autre décision ; `setup-db` applique les migrations idempotentes (`migrations.py`) et contrôle la dimension (`rag_store.check_dimension`) ;
-  - nom de table réservé aux tests : seulement par `sql.Identifier`, ni CLI ni configuration (tests) ; base de test séparée prévue en phase 2.
+  - nom de table réservé aux tests : seulement par `sql.Identifier`, ni CLI ni configuration (tests) ; base de test séparée prévue en phase 2 ;
+  - `audit_seal` câblé : un enregistrement par fin de parcours (GO, NO_GO, rejet, escalade puis humain, extraction en échec, expiration, levée de blocage), rien pendant une suspension ; `Deps` porte le journal et l'horloge ; empreintes dans l'état et dans `thread_status` ; `reject` n'écrit rien de plus que `reject_reason`.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

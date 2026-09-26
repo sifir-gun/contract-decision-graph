@@ -19,12 +19,14 @@ from cdg.adapters import fastembed
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.llm import build_provider
 from cdg.adapters.postgres import conninfo, migrations, rag_store
+from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.application import ingestion
 from cdg.application.deps import Deps
 from cdg.application.extraction import LLMExtractor
 from cdg.domain import expiry
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
+from cdg.ports.audit_store import AuditStore
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
 LEGAL_TIMEZONE = ZoneInfo("Europe/Paris")
@@ -34,8 +36,20 @@ def today() -> date:
     return datetime.now(LEGAL_TIMEZONE).date()
 
 
+def open_audit_store() -> AuditStore:
+    """Journal d'audit réel, avec le rôle applicatif. Les tests le remplacent par un
+    journal jetable : aucune option de la CLI ni de la configuration n'en change la table."""
+    return PostgresAuditStore(conninfo.app_conninfo())
+
+
+def now() -> datetime:
+    """Horloge des scellements : heure UTC, avec fuseau."""
+    return datetime.now(UTC)
+
+
 def build_deps(config: DecisionConfig) -> Deps:
-    """Dépendances réelles d'une analyse : fournisseur LLM, embedding local, corpus.
+    """Dépendances réelles d'une analyse : fournisseur LLM, embedding local, corpus,
+    journal d'audit.
 
     Le fournisseur d'abord : une clé d'API absente échoue avant tout chargement de
     modèle et avant la création du thread.
@@ -48,6 +62,8 @@ def build_deps(config: DecisionConfig) -> Deps:
     return Deps(
         extractor=LLMExtractor(llm),
         crag=orchestrator.crag_runner(retriever, llm, config),
+        audit_store=open_audit_store(),
+        clock=now,
     )
 
 
@@ -60,9 +76,16 @@ def _not_needed(what: str):
     return fail
 
 
-# resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
-# aucun modèle chargé, aucune clé d'API exigée. Un appel échouerait explicitement.
-REVIEW_DEPS = Deps(extractor=_not_needed("extraction"), crag=_not_needed("CRAG"))
+def review_deps(config: DecisionConfig) -> Deps:
+    """resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
+    aucun modèle chargé, aucune clé d'API exigée, un appel échouerait explicitement. Le
+    contrat repris est scellé dans le journal réel."""
+    return Deps(
+        extractor=_not_needed("extraction"),
+        crag=_not_needed("CRAG"),
+        audit_store=open_audit_store(),
+        clock=now,
+    )
 
 
 def _setup_db(args: argparse.Namespace) -> dict:
@@ -102,7 +125,8 @@ def _ingest(args: argparse.Namespace) -> dict:
     return {"ingest": "ok", "model": embedder.model, **summary}
 
 
-def _graph(config: DecisionConfig, deps: Deps = REVIEW_DEPS):
+def _graph(config: DecisionConfig, deps: Deps | None = None):
+    deps = review_deps(config) if deps is None else deps
     return orchestrator.open_graph(config, deps, conninfo.app_conninfo())
 
 

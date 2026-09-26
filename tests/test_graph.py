@@ -11,6 +11,7 @@ from doubles import (
     FakeLLM,
     FixedExtractor,
     clauses,
+    make_deps,
 )
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Send
@@ -18,7 +19,6 @@ from langgraph.types import Command, Send
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.adapters.langgraph.orchestrator import build_graph, route_after_verify
-from cdg.application.deps import Deps
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.models import DOMAINS, HumanDecision
 
@@ -31,7 +31,7 @@ def make(clause_overrides=None, empty=(), crag_tokens=0):
         clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100
     )
     crag = FakeCrag(empty, tokens_in=crag_tokens)
-    graph = build_graph(CONFIG, Deps(extractor=extractor, crag=crag)).compile()
+    graph = build_graph(CONFIG, make_deps(extractor, crag)).compile()
     return graph, extractor, crag
 
 
@@ -142,7 +142,7 @@ def start(clause_overrides=None, empty=(), crag_tokens=0, config=CONFIG):
         clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100
     )
     crag = FakeCrag(empty, tokens_in=crag_tokens)
-    graph = build_graph(config, Deps(extractor=extractor, crag=crag)).compile(
+    graph = build_graph(config, make_deps(extractor, crag)).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
     out = graph.invoke(
@@ -331,7 +331,7 @@ PII = "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89, société Acme Indust
 
 def test_run_contract_masque_avant_le_graphe():
     extractor = FixedExtractor(clauses())
-    graph = build_graph(CONFIG, Deps(extractor=extractor, crag=FakeCrag())).compile(
+    graph = build_graph(CONFIG, make_deps(extractor)).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
     status = orchestrator.run_contract(
@@ -355,9 +355,9 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
     from cdg.application.extraction import LLMExtractor
 
     llm = FakeLLM({"extract_clauses": {"clauses": [c.model_dump() for c in clauses()]}})
-    graph = build_graph(
-        CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())
-    ).compile(checkpointer=InMemorySaver(serde=strict_serializer()))
+    graph = build_graph(CONFIG, make_deps(LLMExtractor(llm))).compile(
+        checkpointer=InMemorySaver(serde=strict_serializer())
+    )
     orchestrator.run_contract(
         graph,
         "c-llm",
@@ -378,9 +378,9 @@ def extraction_graph(answers):
     from cdg.application.extraction import LLMExtractor
 
     llm = FakeLLM({"extract_clauses": answers})
-    graph = build_graph(
-        CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())
-    ).compile(checkpointer=InMemorySaver(serde=strict_serializer()))
+    graph = build_graph(CONFIG, make_deps(LLMExtractor(llm))).compile(
+        checkpointer=InMemorySaver(serde=strict_serializer())
+    )
     return graph, llm
 
 

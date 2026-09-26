@@ -18,6 +18,7 @@ from doubles import (
     FakeCrag,
     FixedExtractor,
     clauses,
+    make_deps,
 )
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -181,7 +182,7 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(
     puis ESCALADE avec rapport d'échec. L'issue de chaque essai entre dans la mesure."""
     text, parties, expected = CONTRACTS[contract]
     pace.wait()
-    graph = compiled(Deps(extractor=LLMExtractor(llm), crag=FakeCrag()))
+    graph = compiled(make_deps(LLMExtractor(llm)))
     thread = f"llm-10-{contract}-{run}"
     orchestrator.run_contract(graph, thread, text, parties, analysis_date=ANALYSIS_DATE)
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
@@ -315,7 +316,7 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
         }
     )
     # extraction en doublure (citations de CONTRACT_TEXT) : seul le CRAG appelle le modèle
-    graph = compiled(Deps(extractor=FixedExtractor(clauses(**FLAGGED_3)), crag=crag))
+    graph = compiled(make_deps(FixedExtractor(clauses(**FLAGGED_3)), crag))
     thread = f"llm-3-{run}"
     orchestrator.run_contract(graph, thread, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
     values = graph.get_state({"configurable": {"thread_id": thread}}).values

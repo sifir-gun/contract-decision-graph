@@ -7,7 +7,9 @@ from doubles import (
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
+    MemoryAuditStore,
     clauses,
+    fixed_clock,
 )
 
 from cdg.application.deps import RetrievalResult
@@ -17,6 +19,7 @@ from cdg.application.nodes.explain import explain
 from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
+from cdg.domain import audit
 from cdg.domain.config import load_config
 from cdg.domain.input_checks import rejection
 from cdg.domain.models import (
@@ -211,6 +214,39 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
 # --- bouchons -------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("node", [explain, audit_seal, reject])
+@pytest.mark.parametrize("node", [explain, reject])
 def test_bouchons_ne_modifient_rien(node):
+    # reject : rien à écrire, reject_reason (validate_input) suffit au scellement
     assert node({"reject_reason": "texte du contrat vide"}) == {}
+
+
+# --- audit_seal ----------------------------------------------------------------------
+
+
+def seal(state, store, thread_id="c-1"):
+    return audit_seal(
+        state,
+        audit_store=store,
+        clock=fixed_clock,
+        decision_config=CONFIG,
+        thread_id=thread_id,
+    )
+
+
+def test_audit_seal_ecrit_les_empreintes_du_journal():
+    store = MemoryAuditStore()
+    out = seal({"contract_id": "c-1", "reject_reason": "texte vide"}, store)
+    [entry] = store.entries()
+    assert out == {
+        "config_hash": entry.config_hash,
+        "decision_hash": entry.decision_hash,
+        "chain_hash": entry.chain_hash,
+    }
+    assert entry.config_hash == audit.config_hash(CONFIG)
+
+
+def test_audit_seal_rejoue_rend_l_enregistrement_existant():
+    store = MemoryAuditStore()
+    state = {"contract_id": "c-1", "reject_reason": "texte vide"}
+    assert seal(state, store) == seal(state, store)
+    assert len(store.entries()) == 1

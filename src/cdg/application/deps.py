@@ -1,16 +1,20 @@
-"""Dépendances injectées dans les nœuds : extracteur et CRAG. Doublures dans les tests.
+"""Dépendances injectées dans les nœuds : extracteur, CRAG, journal d'audit, horloge.
+Doublures dans les tests.
 
-Ce ne sont pas des dépendances externes : elles passent elles-mêmes par les ports
-(`ports.llm`, `ports.retriever`).
+L'extracteur et le CRAG ne sont pas des dépendances externes : ils passent eux-mêmes par
+les ports (`ports.llm`, `ports.retriever`). Le journal est le port `AuditStore` ; l'horloge
+est injectée pour que l'horodatage scellé soit déterministe en test.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 from pydantic import BaseModel
 
 from cdg.domain.models import Clause, Domain, RetrievalTrace, Usage
+from cdg.ports.audit_store import AuditStore
 
 
 class ExtractionResult(BaseModel):
@@ -38,7 +42,12 @@ class Crag(Protocol):
     ) -> RetrievalResult: ...
 
 
+Clock = Callable[[], datetime]  # heure avec fuseau, pour l'horodatage scellé
+
+
 @dataclass(frozen=True)
 class Deps:
     extractor: Extractor
     crag: Crag
+    audit_store: AuditStore
+    clock: Clock

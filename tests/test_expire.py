@@ -4,11 +4,16 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import (
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FixedExtractor,
+    clauses,
+    make_deps,
+)
 
 from cdg import cli
 from cdg.adapters.langgraph import orchestrator
-from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 
 pytestmark = pytest.mark.pg
@@ -31,7 +36,7 @@ def suspend(graph, thread_id: str) -> datetime:
 
 @pytest.fixture
 def graph(pg):
-    deps = Deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)), crag=FakeCrag())
+    deps = make_deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)))
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         yield g
 
@@ -71,7 +76,7 @@ def test_thread_recent_non_expire(graph, thread_id):
 
 
 def test_thread_termine_jamais_repris(pg, thread_id):
-    deps = Deps(extractor=FixedExtractor(clauses()), crag=FakeCrag())  # GO direct
+    deps = make_deps()  # GO direct
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         assert (
             orchestrator.run_contract(

@@ -6,7 +6,14 @@ l'humain. Les erreurs transitoires d'un analyste sont d'abord reprises par Retry
 """
 
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import (
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FakeCrag,
+    FixedExtractor,
+    clauses,
+    make_deps,
+)
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
 from langgraph.pregel._retry import _should_retry_on  # règle de référence
@@ -14,7 +21,6 @@ from langgraph.types import RetryPolicy
 
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
-from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 from cdg.domain.models import DOMAINS, NodeFailure
 from cdg.ports.llm import LLMOutputError, LLMQuotaError, LLMTransientError
@@ -68,10 +74,8 @@ def run(deps, config=FAST, contract_id="c-garde"):
     return graph.get_state(thread)
 
 
-def deps(crag=None, extractor=None):
-    return Deps(
-        extractor=extractor or FixedExtractor(clauses()), crag=crag or FakeCrag()
-    )
+def deps(crag=None, extractor=None, audit_store=None):
+    return make_deps(extractor, crag, audit_store)
 
 
 # --- Analystes : un en panne, les 3 autres verdicts gardés, escalade ----------------------
@@ -364,3 +368,21 @@ def test_regle_de_reprise_identique_a_celle_de_langgraph(retry_on, exc):
 def test_regle_de_reprise_classe_hors_exception_refusee():
     with pytest.raises(TypeError, match="classe d'exception attendue"):
         orchestrator.retries(RetryPolicy(retry_on=dict), ValueError())
+
+
+# --- audit_seal en échec : consigné, l'exécution va à son terme ---------------------------
+
+
+class BrokenStore:
+    def append(self, seal):
+        raise ConnectionError("base injoignable")
+
+    def entries(self):
+        return []
+
+
+def test_audit_seal_en_echec_consigne_sans_empreinte():
+    values = run(deps(audit_store=BrokenStore())).values
+    [failure] = values["failures"]
+    assert (failure.node, failure.error) == ("audit_seal", "ConnectionError")
+    assert values["final_decision"] == "GO" and "chain_hash" not in values
