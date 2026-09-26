@@ -16,7 +16,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - Le texte d'un contrat est une donnée non fiable : toujours délimité dans les prompts, jamais traité comme une instruction. Une tentative d'instruction détectée (`domain/instructions.py`) devient un constat et impose la revue humaine. Aucune couche de défense ne suffit seule : ne jamais en retirer une parce qu'une autre semble couvrir le cas (série 4 du J4, `docs/journal.md`).
 - Tout ce qui se règle (poids, seuils, marge, budget, essais d'extraction, seuils et pénalités des règles, politique d'arbitrage, termes d'absence, motifs d'instruction, essais d'explication) vit dans `config/decision.yaml`. Jamais en dur dans le code, jamais dans un prompt. La configuration est validée par un modèle Pydantic au démarrage : invalide, le programme s'arrête.
 - Identifiants uniquement dans `.env` (jamais commité) ; `.env.example` est la référence commitée.
-- Données uniquement synthétiques ou publiques. Aucun contrat réel, aucun nom de client.
+- Données uniquement synthétiques ou publiques. Aucun contrat réel, aucun nom de client. Courriels et téléphones fictifs pris dans les plages réservées (RFC 2606 ; blocs de l'Arcep pour les œuvres audiovisuelles), vérifié par `tests/test_donnees_fictives.py`.
 - Pas de repli silencieux : tout échec produit un `failure_report` structuré.
 - En cas de concurrence entre règles, l'issue la plus conservatrice l'emporte.
 - Chaque source du corpus déclare les types de clause qu'elle peut justifier (`manifest.yaml`, en-tête `clauses` des fiches, `SOURCES.md`) ; la recherche filtre par clause.

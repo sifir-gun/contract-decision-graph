@@ -330,7 +330,7 @@ def test_aretes_du_graphe_conformes_a_la_spec():
 
 # --- Masquage avant le graphe : le texte original n'entre jamais dans l'état -------------
 
-PII = "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89, société Acme Industrie.\n"
+PII = "Contact : jeanne.martin@example.com, 01 99 00 45 67, société Acme Industrie.\n"
 
 
 def test_run_contract_masque_avant_le_graphe():
@@ -349,7 +349,7 @@ def test_run_contract_masque_avant_le_graphe():
     assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
     raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
     assert "[EMAIL]" in raw and "[TELEPHONE]" in raw and "[PARTIE_1]" in raw
-    for original in ("jeanne.martin@exemple.fr", "01 23 45 67 89", "Acme Industrie"):
+    for original in ("jeanne.martin@example.com", "01 99 00 45 67", "Acme Industrie"):
         assert original not in raw
     # l'extracteur ne reçoit que le texte masqué
     [(received, _)] = extractor.calls
@@ -373,7 +373,7 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
     )
     [call] = llm.calls
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
-    for original in ("jeanne.martin@exemple.fr", "01 23 45 67 89", "Acme Industrie"):
+    for original in ("jeanne.martin@example.com", "01 99 00 45 67", "Acme Industrie"):
         assert original not in call["user"] and original not in call["system"]
 
 

@@ -8,9 +8,9 @@ from cdg.domain import masking
 @pytest.mark.parametrize(
     "text,placeholder",
     [
-        ("Écrire à jeanne.martin@exemple.fr pour toute question.", "[EMAIL]"),
+        ("Écrire à jeanne.martin@example.com pour toute question.", "[EMAIL]"),
         (
-            "Joindre le service au 01 23 45 67 89 ou au +33 6 12 34 56 78.",
+            "Joindre le service au 01 99 00 45 67 ou au +33 6 39 98 56 78.",
             "[TELEPHONE]",
         ),
         ("Paiement sur le compte FR76 3000 6000 0112 3456 7890 189.", "[IBAN]"),
@@ -53,17 +53,17 @@ def test_partie_masquee_seulement_en_mot_entier():
 
 
 def test_comptes_par_type():
-    result = masking.mask("a@b.fr, c@d.fr, 01 23 45 67 89")
+    result = masking.mask("a@b.example, c@d.example, 01 99 00 45 67")
     assert result.counts == {"EMAIL": 2, "TELEPHONE": 1}
 
 
 def test_masquage_idempotent():
-    once = masking.mask("x@y.fr, 01 23 45 67 89").text
+    once = masking.mask("x@y.example, 01 99 00 45 67").text
     assert masking.mask(once).text == once
 
 
 def test_residus_detectes():
-    assert masking.residual_pii("contact : x@y.fr, 01 23 45 67 89") == [
+    assert masking.residual_pii("contact : x@y.example, 01 99 00 45 67") == [
         "EMAIL",
         "TELEPHONE",
     ]

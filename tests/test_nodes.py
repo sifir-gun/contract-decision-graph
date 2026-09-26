@@ -83,7 +83,7 @@ def test_validate_input_rejette_un_texte_qui_n_est_pas_en_francais():
 
 
 def test_validate_input_rejette_un_texte_non_masque():
-    text = CONTRACT_TEXT + "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89.\n"
+    text = CONTRACT_TEXT + "Contact : jeanne.martin@example.com, 01 99 00 45 67.\n"
     out = validate_input({"raw_text": text}, decision_config=CONFIG)
     assert out["route"] == "reject"
     assert out["reject_reason"] == "texte non masqué : EMAIL, TELEPHONE"

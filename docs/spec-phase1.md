@@ -778,7 +778,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - contrat réaliste dans le jeu de démonstration (T1) : 13 contrats ; revue humaine attendue par prudence sur des quantités non fixées, puis conflit ; limite fixée par un test : une seule quantité non fixée donne une pénalité, pas une escalade ;
   - cohérence entre valeur et citation (décision du 26/09) : un chiffre entre parenthèses suivi de l'unité est lu (« quarante-cinq (45) jours », « trois (3) mois », « dix (10) % ») ; un nombre écrit seulement en lettres aussi, de zéro à cent, traits d'union ou non, avec ou sans « et » (« quatre-vingt-dix », « vingt et un », « soixante-onze ») ; un nombre en lettres qui prolonge un autre nombre n'est pas lu (« cent vingt jours » ne donne jamais 20) ; au-delà de cent, limite documentée : la valeur est refusée, puis la clause escaladée ;
   - normalisation des textes : le trait d'union typographique (U+2010), vers lequel NFKC ramène le tiret insécable, est unifié avec « - » ;
-  - signal « clause ambiguë » de l'extraction en phase 2.
+  - signal « clause ambiguë » de l'extraction en phase 2 ;
+  - données fictives réservées (T2) : courriels sur des domaines de la RFC 2606, téléphones dans les blocs que l'Arcep réserve aux œuvres audiovisuelles, vérifiés par `tests/test_donnees_fictives.py` ; l'IBAN d'exemple de P2 reste, avec une note.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

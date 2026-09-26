@@ -483,12 +483,17 @@ contracts:
     file: demo-12-piege-fausses-pistes.txt
     # personnes fictives : leurs noms sont masqués comme des parties
     parties: [Psi Équipements Synthétique, Oméga Laboratoires Synthétiques, Camille Exemple, Dominique Fictif]
-    # données personnelles fictives, absentes du texte masqué
+    # données personnelles fictives, absentes du texte masqué (J5) : courriels sur des
+    # domaines réservés par la RFC 2606, téléphones dans les blocs que l'Arcep réserve aux
+    # œuvres audiovisuelles (tests/test_donnees_fictives.py). L'IBAN est un exemple de forme
+    # valide, pour exercer le masquage ; son numéro de compte est une suite de chiffres
+    # (« 12345678901 »). Il n'a été vérifié auprès d'aucune banque. Conservé par décision
+    # du 26/09.
     personal_data:
-      - camille.exemple@acheteur-synthetique.fr
-      - dominique.fictif@prestataire-synthetique.fr
-      - 01 23 45 67 89
-      - 06 12 34 56 78
+      - camille.exemple@acheteur.example
+      - dominique.fictif@prestataire.example
+      - 01 99 00 45 67
+      - 06 39 98 56 78
       - FR76 3000 6000 0112 3456 7890 189
       - Camille Exemple
       - Dominique Fictif

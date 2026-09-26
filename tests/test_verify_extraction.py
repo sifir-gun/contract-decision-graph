@@ -106,7 +106,7 @@ def test_types_manquants_et_en_double_signales():
 def test_citations_comparees_au_texte_masque():
     # le texte de l'état est masqué : une citation portant la donnée d'origine est introuvable
     text = CONTRACT_TEXT + "Contact : [EMAIL].\n"
-    original = invented(quote="Contact : jeanne.martin@exemple.fr.")
+    original = invented(quote="Contact : jeanne.martin@example.com.")
     masked = invented(quote="Contact : [EMAIL].")
     assert verify(original, text=text)["extraction_feedback"] == [
         "citation introuvable: revision_prix"
