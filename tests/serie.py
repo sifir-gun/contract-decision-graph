@@ -177,6 +177,24 @@ def analysts_wall_ms(steps: list[tuple[str, tuple[str, ...]]]) -> int | None:
     return None
 
 
+def extraction_refusals(
+    steps: list[tuple[tuple[str, ...], list[str] | None]],
+    failure_report: dict[str, Any] | None,
+) -> list[list[str]]:
+    """Motifs de refus de chaque extraction refusée, dans l'ordre : le retour ciblé posé
+    avant chaque nouvelle extraction, puis les problèmes du dernier essai s'il a été
+    escaladé. `steps` : (nœuds suivants, retour ciblé dans l'état), dans l'ordre
+    chronologique des checkpoints."""
+    refusals = [
+        feedback
+        for following, feedback in steps
+        if "extract_clauses" in following and feedback
+    ]
+    if failure_report and failure_report.get("stage") == "extraction":
+        refusals.append(failure_report["problems"])
+    return refusals
+
+
 def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
     """Résumé d'une série : par contrat, classement, issues (stabilité), essais avec un
     écart d'extraction, coût et durée ; au total, classement et coût."""
@@ -190,6 +208,9 @@ def summarize(lines: list[dict[str, Any]]) -> dict[str, Any]:
             "issues": dict(Counter(r["issue"] for r in runs)),
             "essais_avec_ecart_d_extraction": sum(
                 bool(r["ecarts_extraction"]) for r in runs
+            ),
+            "extractions_refusees": sum(
+                len(r.get("refus_extraction", [])) for r in runs
             ),
             "cout_median_usd": median(r["cout_usd"] for r in runs),
             "duree_mediane_s": median(r["duree_ms"] for r in runs) / 1000,

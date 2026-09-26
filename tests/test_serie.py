@@ -12,6 +12,7 @@ from serie import (
     clause_gaps,
     cost_usd,
     describe,
+    extraction_refusals,
     outcome_of,
     step_latencies,
     summarize,
@@ -185,13 +186,39 @@ def test_duree_de_l_etape_des_analystes():
     assert analysts_wall_ms(steps[:3] + [steps[3][:1] + (("human_review",),)]) is None
 
 
-def line(contract, run, label, issue, cost, duration_ms, gaps=()):
+CATEGORY = "catégorie contredite par la citation (« factures périodiques » : …)"
+VALUE = "valeur absente de la citation (3 mois): preavis_resiliation"
+
+
+def test_motifs_de_refus_de_chaque_extraction_refusee():
+    # (nœuds suivants, retour ciblé dans l'état), dans l'ordre chronologique
+    steps = [
+        (("validate_input",), None),
+        (("extract_clauses",), None),
+        (("verify_extraction",), None),
+        (("extract_clauses",), [CATEGORY]),  # première extraction refusée
+        (("verify_extraction",), [CATEGORY]),
+        (("analyst", "analyst", "analyst", "analyst"), [CATEGORY]),
+    ]
+    assert extraction_refusals(steps, None) == [[CATEGORY]]
+    # la seconde refusée aussi, puis escaladée : ses motifs sont dans le rapport
+    report = {"stage": "extraction", "attempts": 2, "problems": [VALUE]}
+    escalated = [*steps[:5], (("human_review",), [CATEGORY])]
+    assert extraction_refusals(escalated, report) == [[CATEGORY], [VALUE]]
+    # aucune extraction refusée
+    assert extraction_refusals(steps[:3] + [(("analyst",), None)], None) == []
+    # un échec de nœud n'est pas un refus d'extraction
+    assert extraction_refusals(steps[:3], {"stage": "noeuds", "failures": []}) == []
+
+
+def line(contract, run, label, issue, cost, duration_ms, gaps=(), refusals=()):
     return {
         "contrat": contract,
         "essai": run,
         "classement": label,
         "issue": issue,
         "ecarts_extraction": list(gaps),
+        "refus_extraction": list(refusals),
         "cout_usd": cost,
         "duree_ms": duration_ms,
     }
@@ -200,7 +227,15 @@ def line(contract, run, label, issue, cost, duration_ms, gaps=()):
 def test_resume_de_la_serie():
     lines = [
         line("demo-01", 1, "conforme", "GO, automatique", 0.002, 20_000),
-        line("demo-01", 2, "conforme", "GO, automatique", 0.003, 22_000),
+        line(
+            "demo-01",
+            2,
+            "conforme",
+            "GO, automatique",
+            0.003,
+            22_000,
+            refusals=[[VALUE]],
+        ),
         line(
             "demo-01",
             3,
@@ -218,6 +253,7 @@ def test_resume_de_la_serie():
         "classement": {"conforme": 2, "plus_prudente": 1},
         "issues": {"GO, automatique": 2, "ESCALADE, revue humaine": 1},
         "essais_avec_ecart_d_extraction": 1,
+        "extractions_refusees": 1,
         "cout_median_usd": 0.003,
         "duree_mediane_s": 22.0,
         "duree_max_s": 30.0,

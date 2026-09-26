@@ -29,6 +29,7 @@ from serie import (
     cost_usd,
     describe,
     expected_outcome,
+    extraction_refusals,
     outcome_of,
     step_latencies,
     summarize,
@@ -113,15 +114,16 @@ def analyse(llm, crag, store, contract, thread):
     duration_ms = round((time.monotonic() - start) * 1000)
     config = {"configurable": {"thread_id": thread}}
     values = graph.get_state(config).values
-    history = reversed(list(graph.get_state_history(config)))
+    history = list(reversed(list(graph.get_state_history(config))))
     steps = [(s.created_at, s.next) for s in history]
-    return outcome, human, status, values, steps, duration_ms
+    feedback = [(s.next, s.values.get("extraction_feedback")) for s in history]
+    return outcome, human, status, values, steps, feedback, duration_ms
 
 
 def measure(llm, crag, pace, store, contract, run) -> dict:
     pace.wait()
     thread = f"llm-jeu-{contract.id}-{run}"
-    outcome, human, status, values, steps, duration_ms = analyse(
+    outcome, human, status, values, steps, feedback, duration_ms = analyse(
         llm, crag, store, contract, thread
     )
     usage = values.get("usage", [])
@@ -140,7 +142,8 @@ def measure(llm, crag, pace, store, contract, run) -> dict:
         "finale": status["final_decision"],
         "essais_extraction": values.get("extraction_attempts", 0),
         "echec": report.get("stage"),
-        "problemes_extraction": report.get("problems", []),
+        # motifs de refus de chaque extraction refusée, dans l'ordre (J5, série 7)
+        "refus_extraction": extraction_refusals(feedback, report or None),
         "constats_contrat": values.get("input_findings", []),
         "statuts": {v.domain: v.retrieval_status for v in values.get("verdicts", [])},
         "ecarts_extraction": clause_gaps(values.get("clauses", []), contract.clauses),
