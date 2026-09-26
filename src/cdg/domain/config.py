@@ -1,5 +1,6 @@
 """Chargement et validation de config/decision.yaml. Invalide : ConfigError, arrêt au démarrage."""
 
+import re
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
@@ -162,6 +163,17 @@ class InputConfig(_Strict):
     max_chars: Annotated[int, Field(gt=0)]
     min_words: Annotated[int, Field(gt=0)]  # en dessous, la langue n'est pas vérifiable
     min_french_ratio: Unit  # part minimale de mots-outils français
+    # détection d'instructions adressées à l'outil (expressions régulières, casse ignorée)
+    instruction_patterns: Annotated[list[Term], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _motifs_valides(self) -> "InputConfig":
+        for pattern in self.instruction_patterns:
+            try:
+                re.compile(pattern, re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(f"motif d'instruction invalide {pattern!r} : {exc}")
+        return self
 
 
 class EmbeddingConfig(_Strict):

@@ -69,6 +69,7 @@ def test_composition_du_jeu():
     assert [c.id for c in CONTRACTS if c.human] == [
         "demo-03-go-logiciel",
         "demo-09-escalade-mobilier",
+        "demo-11-piege-injection",  # tentative d'instruction : revue obligatoire
     ]
 
 

@@ -8,8 +8,6 @@ redemandée : une absence ne laisse aucune citation à vérifier (attaque par om
 série 4 du J4). Sinon : nouvel essai avec retour ciblé, puis ESCALADE après le dernier.
 """
 
-import re
-import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -22,34 +20,7 @@ from cdg.domain.models import (
     Clause,
     category_required,
 )
-
-# typographie équivalente : apostrophes, guillemets, tirets, espaces insécables
-_TYPOGRAPHY = str.maketrans(
-    {
-        "’": "'",
-        "‘": "'",
-        "ʼ": "'",
-        "«": '"',
-        "»": '"',
-        "“": '"',
-        "”": '"',
-        "„": '"',
-        "–": "-",
-        "—": "-",
-        "‑": "-",
-    }
-)
-
-
-def normalize(text: str) -> str:
-    """NFKC, typographie unifiée, espaces réduits ; la casse est conservée."""
-    text = unicodedata.normalize("NFKC", text).translate(_TYPOGRAPHY)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def folded(text: str) -> str:
-    """Forme de comparaison des termes : normalisée, sans casse."""
-    return normalize(text).casefold()
+from cdg.domain.text import folded, normalize
 
 
 def mentioned_absences(

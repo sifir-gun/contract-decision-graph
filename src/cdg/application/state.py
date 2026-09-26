@@ -28,6 +28,8 @@ class ContractState(TypedDict, total=False):
         date  # versions des textes jugées à cette date ; fixée par run_contract
     )
     reject_reason: str | None
+    # constats du contrat lui-même (tentative d'instruction), écrits par validate_input
+    input_findings: list[str]
     clauses: list[Clause]
     extraction_attempts: int
     extraction_feedback: list[str]

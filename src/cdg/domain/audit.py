@@ -5,7 +5,7 @@ chaîne et insère ; l'horodatage vient de l'appelant.
 
 - `decision_hash` : empreinte de la seule partie décision de l'enregistrement (clauses,
   verdicts avec les résumés du CRAG, décisions proposée et finale, décision humaine,
-  rapport d'échec, motif de rejet, date d'analyse, `config_hash`). Sans identifiants de
+  rapport d'échec, motif de rejet, date d'analyse, `config_hash`, constats du contrat). Sans identifiants de
   contrat ni de thread, horodatage, consommation, explication ni modèles : mêmes clauses,
   mêmes références et même configuration donnent la même empreinte (critère 6). Le
   rapport d'échec y porte le fait (budget dépassé), pas la mesure (tokens), et ses
@@ -168,6 +168,9 @@ class DecisionRecord(BaseModel):
     failure_report: dict[str, Any] | None
     reject_reason: str | None
     config_hash: str
+    # constats du contrat (tentative d'instruction, J4) : ils imposent la revue humaine ;
+    # le texte n'est pas scellé, le rejeu les reprend tels quels
+    input_findings: list[str] = []
 
     @field_validator("verdicts")
     @classmethod
@@ -238,6 +241,7 @@ def build_record(
             failure_report=decision_report(state.get("failure_report")),
             reject_reason=state.get("reject_reason"),
             config_hash=analysed_with,
+            input_findings=state.get("input_findings", []),
         ),
         failure_report=state.get("failure_report"),
         sealing_config_hash=sealing_config_hash,
@@ -404,7 +408,9 @@ def replay(record: Mapping[str, Any], config: DecisionConfig) -> ReplayReport:
             verdicts.append(
                 justify(RULES[v.domain](sealed.clauses, config), v.retrieval)
             )
-        outcome = decide(verdicts, failures, usage, config)
+        outcome = decide(
+            verdicts, failures, usage, config, input_findings=sealed.input_findings
+        )
         final = sealed.human.decision if sealed.human is not None else outcome.final
         replayed = sealed.model_copy(
             update={

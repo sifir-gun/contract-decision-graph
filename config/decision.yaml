@@ -136,6 +136,23 @@ input:
   max_chars: 200000        # au-delà : rejet
   min_words: 30            # en dessous : langue non vérifiable, rejet
   min_french_ratio: 0.15   # part minimale de mots-outils français parmi les mots
+  # Détection d'instructions (J4) : motifs (expressions régulières, casse ignorée, sur le
+  # texte masqué normalisé, ligne par ligne) d'un passage qui s'adresse à l'outil, à une IA
+  # ou à un analyste, qui demande d'ignorer des règles ou de conclure une décision. Une
+  # ligne qui en contient un devient un constat « tentative d'instruction détectée » et
+  # impose la revue humaine, même en cas de blocage dur. Se contourne par paraphrase : une
+  # couche de défense parmi d'autres.
+  instruction_patterns:
+    # demande d'ignorer des règles ou des consignes, en tête de phrase (impératif)
+    - '(?:^|[.:;!?]\s+)(?:ignore|ignorez|oublie|oubliez)\s+(?:les|toutes\s+les|tous\s+les|la|le|ces|vos|tes)\b[^.\n]{0,60}\b(?:règles?|consignes?|instructions?|critères?)\b'
+    - '\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|the\s+|your\s+)?(?:previous\s+|prior\s+|above\s+)?(?:rules|instructions|guidelines)\b'
+    # consignes adressées à l'outil, à une IA, à un modèle ou à un analyste
+    - '\b(?:consignes?|instructions?|note|message)\s+(?:pour|à|au|aux|à\s+l''attention\s+de|destinée?s?\s+à)\s+(?:l''|le\s+|la\s+|les\s+|un\s+|une\s+)?(?:outil|intelligence\s+artificielle|ia|modèle|assistant|analyste|lecteur\s+automatique)s?\b'
+    - '\bà\s+l''attention\s+(?:de\s+l''|du\s+|des\s+)(?:outil|ia|intelligence\s+artificielle|modèle|assistant|analyste)s?\b'
+    - '\b(?:en\s+tant\s+qu''|tu\s+es|vous\s+êtes|you\s+are)\s*(?:un|une|an?)?\s*(?:ia|intelligence\s+artificielle|assistant|modèle\s+de\s+langage|ai|language\s+model)\b'
+    # demande de conclure une décision (libellés du projet, en majuscules)
+    - '\b(?:conclus|concluez|conclure\s+à|rends|rendez|retiens|retenez|donne|donnez)\b[^.\n]{0,40}(?-i:\b(?:NO[\s_-]?GO|GO[\s_-]?RESERVES|GO)\b)'
+    - '\bne\s+(?:signale|signalez)\s+(?:aucun|aucune|rien)\b'
 
 # LLM : extraction et explication (modèle principal), juge CRAG (modèle léger). Clés d'API
 # dans .env.

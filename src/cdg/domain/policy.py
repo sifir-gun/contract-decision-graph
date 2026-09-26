@@ -22,6 +22,8 @@ def build_request(state: Mapping[str, Any], config: DecisionConfig) -> dict[str,
         "proposed_decision": state.get("proposed_decision"),
         "margin": None if margin is None else rounded(margin),
         "failure_report": state.get("failure_report"),
+        # tentative d'instruction détectée dans le contrat : visible par l'humain
+        "input_findings": list(state.get("input_findings", [])),
         "verdicts": [
             {
                 "domain": v.domain,

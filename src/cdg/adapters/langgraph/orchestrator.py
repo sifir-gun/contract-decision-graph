@@ -408,6 +408,7 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "failure_report": values.get("failure_report"),
         "failures": [f.model_dump() for f in values.get("failures", [])],
         "reject_reason": values.get("reject_reason"),
+        "input_findings": values.get("input_findings", []),
         "config_hash": values.get("config_hash"),
         "decision_hash": values.get("decision_hash"),
         "chain_hash": values.get("chain_hash"),

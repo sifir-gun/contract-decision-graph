@@ -17,6 +17,7 @@ def decision_gate(
         state.get("failures", []),
         state.get("usage", []),
         decision_config,
+        input_findings=state.get("input_findings", []),
     )
     update: dict[str, Any] = {
         "proposed_decision": outcome.proposed,

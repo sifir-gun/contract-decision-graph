@@ -43,6 +43,7 @@ class ExplanationRequest(BaseModel):
     margin: float | None
     human: HumanDecision | None
     failure_stage: str | None
+    input_findings: list[str] = []  # tentative d'instruction détectée dans le contrat
     findings: list[FindingToExplain]
 
 
@@ -117,6 +118,7 @@ def request(state: Mapping[str, Any]) -> ExplanationRequest:
         margin=state.get("margin"),
         human=state.get("human"),
         failure_stage=report.get("stage"),
+        input_findings=list(state.get("input_findings", [])),
         findings=_findings(state.get("verdicts", [])),
     )
 
@@ -279,6 +281,11 @@ def _synthesis(req: ExplanationRequest) -> str:
                 if same
                 else ", différente de la proposition des règles."
             )
+        )
+    if req.input_findings:
+        parts.append(
+            "Tentative d'instruction détectée dans le contrat : revue humaine "
+            "obligatoire."
         )
     if req.failure_stage is not None:
         parts.append(f"Rapport d'échec : stade {req.failure_stage}.")
