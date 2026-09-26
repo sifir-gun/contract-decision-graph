@@ -34,6 +34,8 @@ extraction:
       - l'acheteur répond
       - responsabilité du client
       - le client répond
+      - le client ne répond
+      - l'acheteur ne répond
     responsabilite_fournisseur:
       - responsabilité du prestataire
       - responsabilité du fournisseur
@@ -49,6 +51,9 @@ extraction:
       - peut être révisé
       - peuvent être révisés
       - indexation
+      - prix sont indexés
+      - tarifs sont indexés
+      - prix indexés
     penalites_execution:
       - pénalités d'exécution
       - clause pénale
@@ -56,6 +61,8 @@ extraction:
       - donne lieu à des pénalités
       - pénalités de retard de livraison
       - pénalités de retard d'exécution
+      - réfaction
+      - refaction
     delai_paiement:
       - payables à
       - payable à
@@ -74,6 +81,13 @@ extraction:
     donnees_personnelles:
       - données à caractère personnel
       - données personnelles
+      - annuaire
+      - noms et prénoms
+      - nom et prénom
+      - adresse électronique
+      - adresses électroniques
+      - données des utilisateurs
+      - données des salariés
     accord_traitement_donnees:
       - accord de traitement
       - accord de sous-traitance

@@ -38,6 +38,7 @@ from cdg.domain.models import (
     DOMAINS,
     KIND_CATEGORIES,
     REQUIRED_KINDS,
+    Clause,
     category_required,
 )
 from cdg.domain.rules import RULES
@@ -425,3 +426,24 @@ def test_contrat_realiste_une_seule_quantite_non_fixee_ne_suffit_pas_a_escalader
         False,
         "GO",
     )
+
+
+@pytest.mark.parametrize("kind", REQUIRED_KINDS)
+def test_contrat_realiste_chaque_clause_declaree_absente_est_redemandee(kind):
+    # formulations indirectes (« réfaction », « annuaire des collaborateurs », « prix
+    # sont indexés », « le Client ne répond que ») : une omission ne passe pas en silence
+    masked = masking.mask(REALISTIC.text, REALISTIC.parties).text
+    dropped = [
+        Clause(kind=kind, present=False, quote="", value=None) if c.kind == kind else c
+        for c in REALISTIC.clauses
+    ]
+    problems = verification.problems_of(
+        masked,
+        dropped,
+        absence_terms=CONFIG.extraction.absence_terms,
+        category_terms=CONFIG.extraction.category_terms,
+        instruction_patterns=CONFIG.input.instruction_patterns,
+    )
+    assert [p for p in problems if p.startswith("clause déclarée absente")] == [
+        next(p for p in problems if p.endswith(f": {kind}"))
+    ], problems
