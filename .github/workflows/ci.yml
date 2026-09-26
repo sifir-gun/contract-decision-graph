@@ -7,6 +7,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # audit hebdomadaire de main : une faille publiée entre deux commits est vue sans
+  # attendre le suivant ; lint, types et tests ne tournent pas sur ce déclenchement
+  schedule:
+    - cron: "17 7 * * 1" # lundi 7 h 17, après Dependabot, hors du début d'heure chargé
+      timezone: "Europe/Paris"
 
 permissions:
   contents: read
@@ -14,6 +19,7 @@ permissions:
 jobs:
   lint:
     name: lint (ruff)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -22,7 +28,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.6.10" # celle du poste de développement, qui a écrit uv.lock
+          version: "0.12.19" # celle du poste de développement ; uv.lock vérifié avec elle
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances de développement, strictement depuis uv.lock
@@ -30,8 +36,55 @@ jobs:
       - run: uv run --no-sync ruff format --check
       - run: uv run --no-sync ruff check
 
+  types:
+    name: types (mypy)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Dépendances, strictement depuis uv.lock (mypy lit les types des bibliothèques)
+        run: uv sync --locked
+      - name: mypy, strict sur domain/, ports/ et application/ (configuration dans pyproject.toml)
+        run: uv run --no-sync mypy
+
+  audit:
+    name: audit (pip-audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+          enable-cache: true
+      - name: pip-audit, strictement depuis uv.lock (groupe audit)
+        run: uv sync --locked --only-group audit
+      - name: Dépendances de uv.lock, tous groupes, figées avec leurs empreintes
+        # pip-audit 2.10 ne lit pas uv.lock : export au format requirements, sans le projet
+        run: >-
+          uv export --locked --all-groups --no-emit-project --format requirements-txt
+          --output-file "$RUNNER_TEMP/requirements-audit.txt"
+      - name: Audit, échec sur toute faille connue (code de sortie 1)
+        # --require-hashes et --disable-pip : aucune résolution, les versions de uv.lock
+        # telles quelles ; --strict : un paquet introuvable fait aussi échouer l'audit
+        run: >-
+          uv run --no-sync pip-audit --require-hashes --disable-pip --strict
+          --requirement "$RUNNER_TEMP/requirements-audit.txt"
+
   tests:
     name: tests (PostgreSQL + pgvector)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -67,7 +120,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.6.10"
+          version: "0.12.19"
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock
@@ -81,5 +134,6 @@ jobs:
             bash -s < docker/initdb/00_migrate.sh
       - name: setup-db (tables du checkpointer, droits d'app_role)
         run: uv run --no-sync python -m cdg.cli setup-db
-      - name: Tests, tests pg compris (tests llm exclus par défaut)
-        run: uv run --no-sync pytest
+      - name: Tests, tests pg compris (tests llm exclus par défaut), couverture et seuil
+        # seuil : fail_under de [tool.coverage.report], lu par pytest-cov
+        run: uv run --no-sync pytest --cov --cov-report=term

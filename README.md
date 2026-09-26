@@ -1,6 +1,7 @@
 # contract-decision-graph
 
 [![CI](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
+[![couverture minimale](https://img.shields.io/badge/couverture-%E2%89%A5%2096%20%25-brightgreen)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
 
 Graphe LangGraph qui rend un verdict go / no-go auditable sur des contrats fournisseurs. Le verdict est rendu par du code déterministe ; les LLM se limitent à l'extraction et à l'explication. Spécification : [docs/spec-phase1.md](docs/spec-phase1.md).
 
@@ -26,6 +27,14 @@ uv run python -m cdg.cli resume <thread_id> --decision NO_GO --reviewer … --re
 ```
 
 `run` rend un statut JSON : décision proposée ou finale, verdicts par domaine avec le résumé du CRAG, rapport d'échec le cas échéant. Une revue humaine suspend le thread jusqu'à `resume`. `--analysis-date AAAA-MM-JJ` juge les versions des textes à une autre date que celle du jour.
+
+### Historique et `git blame`
+
+Les commits de reformatage massif (passage à 88 colonnes) sont listés dans `.git-blame-ignore-revs`. GitHub les ignore d'office dans sa vue *blame* ; en local, une commande par clone suffit :
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
 
 ## Architecture
 

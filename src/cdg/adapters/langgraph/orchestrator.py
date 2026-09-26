@@ -7,8 +7,10 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, Protocol
 
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointMetadata
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -54,7 +56,11 @@ def route_after_verify(state: ContractState) -> str | list[Send]:
         return [
             Send(
                 "analyst",
-                {"domain": d, "clauses": state["clauses"], "analysis_date": state["analysis_date"]},
+                {
+                    "domain": d,
+                    "clauses": state["clauses"],
+                    "analysis_date": state["analysis_date"],
+                },
             )
             for d in DOMAINS
         ]
@@ -70,8 +76,11 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
     """
     request = policy.build_request(state, decision_config)
     while True:
-        human, error = policy.review(interrupt(request), state.get("verdicts", []), decision_config)
-        if error is None:
+        human, error = policy.review(
+            interrupt(request), state.get("verdicts", []), decision_config
+        )
+        # acceptée : policy.review ne rend alors aucun motif de refus
+        if human is not None:
             return {"human": human, "final_decision": human.decision}
         request = {**request, "error": error}
 
@@ -89,7 +98,9 @@ def build_crag_graph(
     builder.add_node(
         "retrieve", partial(crag.retrieve, retriever=retriever, top_k=config.crag.top_k)
     )
-    builder.add_node("grade", partial(crag.grade, llm=llm, max_passes=config.crag.max_passes))
+    builder.add_node(
+        "grade", partial(crag.grade, llm=llm, max_passes=config.crag.max_passes)
+    )
     builder.add_node("rewrite", partial(crag.rewrite, llm=llm))
     builder.add_node("generate", crag.generate)
     builder.add_edge(START, "retrieve")
@@ -104,7 +115,9 @@ def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) 
     """CRAG injecté dans les analystes : le sous-graphe compilé, une fois par type de clause."""
     graph = build_crag_graph(retriever, llm, config)
 
-    def run(domain: Domain, clauses: list[Clause], analysis_date: date) -> RetrievalResult:
+    def run(
+        domain: Domain, clauses: list[Clause], analysis_date: date
+    ) -> RetrievalResult:
         return crag.per_clause(
             domain, clauses, analysis_date, lambda state: graph.invoke(state)["result"]
         )
@@ -112,13 +125,33 @@ def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) 
     return run
 
 
+class Node(Protocol):
+    """Nœud gardé, tel que l'attend `StateGraph.add_node`."""
+
+    def __call__(self, state: Any) -> dict[str, Any]: ...
+
+
+def retries(policy: RetryPolicy, exc: Exception) -> bool:
+    """La RetryPolicy reprendrait-elle cette erreur ? Même règle que LangGraph 1.2.12
+    (`pregel/_retry.py`, `_should_retry_on`) : `retry_on` est une liste ou une classe
+    d'exceptions, ou un prédicat."""
+    retry_on = policy.retry_on
+    if isinstance(retry_on, Sequence):
+        return isinstance(exc, tuple(retry_on))
+    if isinstance(retry_on, type):
+        if issubclass(retry_on, Exception):
+            return isinstance(exc, retry_on)
+        raise TypeError(f"retry_on : classe d'exception attendue, reçu {retry_on!r}")
+    return bool(retry_on(exc))
+
+
 def guard(
     name: str,
-    fn: Callable[[Any], dict],
+    fn: Callable[[Any], dict[str, Any]],
     *,
     retry: RetryPolicy | None = None,
-    on_failure: Callable[[list[NodeFailure]], dict] | None = None,
-) -> Callable[[Any], dict]:
+    on_failure: Callable[[list[NodeFailure]], dict[str, Any]] | None = None,
+) -> Node:
     """Garde d'échec de nœud : une exception devient un `NodeFailure` dans `failures`.
 
     - le contrôle de LangGraph (interruption, commande) passe au travers ;
@@ -128,15 +161,24 @@ def guard(
       l'humain), à partir de tous les échecs connus.
     """
 
-    def node(state: Any) -> dict:
+    def node(state: Any) -> dict[str, Any]:
         try:
             return fn(state)
         except GraphBubbleUp:
             raise
         except Exception as exc:
-            attempt = get_runtime().execution_info.node_attempt  # 1 à la première
+            info = get_runtime().execution_info
+            if info is None:  # renseigné par LangGraph pendant l'exécution d'un nœud
+                raise RuntimeError(
+                    f"garde {name} : hors d'une exécution de nœud"
+                ) from exc
+            attempt = info.node_attempt  # 1 à la première
             # retry_on : prédicat par défaut de RetryPolicy (erreurs réseau, 5xx...)
-            if retry is not None and retry.retry_on(exc) and attempt < retry.max_attempts:
+            if (
+                retry is not None
+                and retries(retry, exc)
+                and attempt < retry.max_attempts
+            ):
                 raise
             failure = NodeFailure(
                 node=name,
@@ -145,7 +187,7 @@ def guard(
                 attempts=attempt,
                 domain=state.get("domain"),  # analyste seulement
             )
-            update: dict = {"failures": [failure]}
+            update: dict[str, Any] = {"failures": [failure]}
             if on_failure is not None:
                 update |= on_failure([*state.get("failures", []), failure])
             return update
@@ -174,13 +216,13 @@ def transient(exc: Exception) -> bool:
     return isinstance(exc, LLMTransientError)
 
 
-_LANGGRAPH_RETRY_ON = RetryPolicy().retry_on  # prédicat par défaut de LangGraph
+_LANGGRAPH_DEFAULT = RetryPolicy()  # prédicat par défaut de LangGraph
 
 
 def analyst_retryable(exc: Exception) -> bool:
     """Prédicat par défaut de LangGraph (réseau, 5xx, erreurs hors bogues…), sauf le quota
     nul, qui n'est jamais passager."""
-    return not isinstance(exc, LLMQuotaError) and _LANGGRAPH_RETRY_ON(exc)
+    return not isinstance(exc, LLMQuotaError) and retries(_LANGGRAPH_DEFAULT, exc)
 
 
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
@@ -197,7 +239,9 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     builder.add_node(
         "validate_input",
         guard(
-            "validate_input", partial(validate_input, decision_config=config), on_failure=escalate
+            "validate_input",
+            partial(validate_input, decision_config=config),
+            on_failure=escalate,
         ),
     )
     builder.add_node(
@@ -221,13 +265,21 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     # (voir docs/journal.md)
     builder.add_node(
         "analyst",
-        guard("analyst", partial(analyst, crag=deps.crag, decision_config=config), retry=retry),
+        guard(
+            "analyst",
+            partial(analyst, crag=deps.crag, decision_config=config),
+            retry=retry,
+        ),
         input_schema=AnalystInput,
         retry_policy=retry,
     )
     builder.add_node(
         "decision_gate",
-        guard("decision_gate", partial(decision_gate, decision_config=config), on_failure=escalate),
+        guard(
+            "decision_gate",
+            partial(decision_gate, decision_config=config),
+            on_failure=escalate,
+        ),
     )
     builder.add_node("human_review", partial(human_review, decision_config=config))
     builder.add_node("explain", guard("explain", explain))
@@ -240,10 +292,14 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     )
     builder.add_edge("extract_clauses", "verify_extraction")
     builder.add_conditional_edges(
-        "verify_extraction", route_after_verify, ["extract_clauses", "analyst", "human_review"]
+        "verify_extraction",
+        route_after_verify,
+        ["extract_clauses", "analyst", "human_review"],
     )
     builder.add_edge("analyst", "decision_gate")
-    builder.add_conditional_edges("decision_gate", read_route, ["human_review", "explain"])
+    builder.add_conditional_edges(
+        "decision_gate", read_route, ["human_review", "explain"]
+    )
     builder.add_edge("human_review", "explain")
     builder.add_edge("explain", "audit_seal")
     builder.add_edge("reject", "audit_seal")  # un rejet est scellé aussi
@@ -252,7 +308,9 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
 
 
 @contextmanager
-def open_graph(config: DecisionConfig, deps: Deps, conninfo: str) -> Iterator[CompiledStateGraph]:
+def open_graph(
+    config: DecisionConfig, deps: Deps, conninfo: str
+) -> Iterator[CompiledStateGraph]:
     """Graphe compilé avec le checkpointer PostgreSQL et le sérialiseur strict."""
     with checkpointer.open_saver(conninfo) as saver:
         yield build_graph(config, deps).compile(checkpointer=saver)
@@ -265,14 +323,16 @@ class ThreadError(Exception):
     """Thread inconnu, déjà existant, ou pas en attente d'une décision humaine."""
 
 
-def _thread(thread_id: str) -> dict:
+def _thread(thread_id: str) -> RunnableConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
 def _awaits_human(snapshot: StateSnapshot) -> bool:
     # pas snapshot.next : après une réponse refusée, human_review s'interrompt
     # de nouveau mais langgraph 1.2.12 ne la compte plus dans `next`
-    return any(task.name == "human_review" and task.interrupts for task in snapshot.tasks)
+    return any(
+        task.name == "human_review" and task.interrupts for task in snapshot.tasks
+    )
 
 
 def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
@@ -284,7 +344,9 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
     return {
         "thread_id": thread_id,
         "analysis_date": values.get("analysis_date"),
-        "statut": ("suspendu" if pending else "en_cours" if snapshot.next else "termine"),
+        "statut": (
+            "suspendu" if pending else "en_cours" if snapshot.next else "termine"
+        ),
         "route": values.get("route"),
         "proposed_decision": values.get("proposed_decision"),
         "final_decision": values.get("final_decision"),
@@ -293,7 +355,9 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "failures": [f.model_dump() for f in values.get("failures", [])],
         "reject_reason": values.get("reject_reason"),
         "human": human.model_dump() if human else None,
-        "verdicts": [v.model_dump(exclude={"evidence_ids"}) for v in values.get("verdicts", [])],
+        "verdicts": [
+            v.model_dump(exclude={"evidence_ids"}) for v in values.get("verdicts", [])
+        ],
         "demande": pending[0] if pending else None,
     }
 
@@ -320,7 +384,11 @@ def run_contract(
         )
     masked = masking.mask(raw_text, parties)
     graph.invoke(
-        {"contract_id": contract_id, "raw_text": masked.text, "analysis_date": analysis_date},
+        {
+            "contract_id": contract_id,
+            "raw_text": masked.text,
+            "analysis_date": analysis_date,
+        },
         _thread(contract_id),
     )
     return {**thread_status(graph, contract_id), "masquage": masked.counts}
@@ -332,7 +400,9 @@ def resume_thread(graph: CompiledStateGraph, thread_id: str, answer: dict) -> di
     if not snapshot.values:
         raise ThreadError(f"thread inconnu : {thread_id}")
     if not _awaits_human(snapshot):
-        raise ThreadError(f"le thread {thread_id} n'est pas en attente d'une décision humaine")
+        raise ThreadError(
+            f"le thread {thread_id} n'est pas en attente d'une décision humaine"
+        )
     graph.invoke(Command(resume=answer), _thread(thread_id))
     return thread_status(graph, thread_id)
 
@@ -345,8 +415,8 @@ def thread_history(graph: CompiledStateGraph, thread_id: str) -> list[dict]:
     return [
         {
             "checkpoint_id": snap.config["configurable"]["checkpoint_id"],
-            "step": snap.metadata.get("step"),
-            "source": snap.metadata.get("source"),
+            "step": _metadata(snap).get("step"),
+            "source": _metadata(snap).get("source"),
             "created_at": snap.created_at,
             "next": list(snap.next),
             "route": snap.values.get("route"),
@@ -355,6 +425,12 @@ def thread_history(graph: CompiledStateGraph, thread_id: str) -> list[dict]:
         }
         for snap in reversed(history)
     ]
+
+
+def _metadata(snapshot: StateSnapshot) -> CheckpointMetadata:
+    if snapshot.metadata is None:  # écrites par le checkpointer à chaque étape
+        raise ThreadError(f"checkpoint sans métadonnées : {snapshot.config}")
+    return snapshot.metadata
 
 
 def expire_threads(
@@ -370,9 +446,12 @@ def expire_threads(
     """
     # list() garde le verrou (non réentrant) du checkpointer tant que le
     # générateur n'est pas épuisé : collecter d'abord, interroger ensuite
+    saver = graph.checkpointer
+    if not isinstance(saver, BaseCheckpointSaver):
+        raise ThreadError("expire exige un graphe compilé avec un checkpointer")
     found = {
         checkpoint.config["configurable"]["thread_id"]
-        for checkpoint in graph.checkpointer.list(None)
+        for checkpoint in saver.list(None)
     }
     if thread_ids is not None:
         found &= thread_ids
@@ -381,6 +460,8 @@ def expire_threads(
         snapshot = graph.get_state(_thread(thread_id))
         if _awaits_human(snapshot):
             # dernier checkpoint = suspension : l'attente ne bouge plus ensuite
+            if snapshot.created_at is None:  # daté par le checkpointer
+                raise ThreadError(f"thread {thread_id} : checkpoint sans date")
             pending.append((thread_id, datetime.fromisoformat(snapshot.created_at)))
     return [
         resume_thread(graph, thread_id, expiry.system_decision(now - since, older_than))

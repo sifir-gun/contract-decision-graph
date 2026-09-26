@@ -107,7 +107,11 @@ def verdicts(**by_domain) -> list[AgentVerdict]:
 
 def usage(tokens_in=0, tokens_out=0, node="double") -> Usage:
     return Usage(
-        node=node, model="double", tokens_in=tokens_in, tokens_out=tokens_out, latency_ms=0
+        node=node,
+        model="double",
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        latency_ms=0,
     )
 
 
@@ -134,7 +138,9 @@ class FakeCrag:
         self.calls: list[str] = []
         self.kinds: dict[str, list[str]] = {}  # clauses reçues, par domaine
 
-    def __call__(self, domain, clauses: list[Clause], analysis_date: date) -> RetrievalResult:
+    def __call__(
+        self, domain, clauses: list[Clause], analysis_date: date
+    ) -> RetrievalResult:
         self.calls.append(domain)
         self.kinds[domain] = [c.kind for c in clauses]
         retained = [] if domain in self.empty else [f"{domain}-ref-1"]
@@ -150,7 +156,9 @@ class FakeCrag:
                 for c in clauses
             ]
         )
-        return RetrievalResult(trace=trace, usage=[usage(*self.tokens, node=f"crag:{domain}")])
+        return RetrievalResult(
+            trace=trace, usage=[usage(*self.tokens, node=f"crag:{domain}")]
+        )
 
 
 class FakeLLM:
@@ -165,7 +173,13 @@ class FakeLLM:
 
     def structured(self, *, tier, system, user, schema, node):
         self.calls.append(
-            {"tier": tier, "system": system, "user": user, "schema": schema, "node": node}
+            {
+                "tier": tier,
+                "system": system,
+                "user": user,
+                "schema": schema,
+                "node": node,
+            }
         )
         # réponse du nœud exact, sinon du préfixe : « crag_grade:financier » vaut pour
         # « crag_grade:financier:revision_prix » et les autres clauses du domaine
@@ -211,7 +225,9 @@ class HashEmbedder:
         return self._vector(text)
 
 
-def passage(reference: str, domain="financier", valid_until=None, text=None, id=1) -> Passage:
+def passage(
+    reference: str, domain="financier", valid_until=None, text=None, id=1
+) -> Passage:
     return Passage(
         id=id,
         domain=domain,

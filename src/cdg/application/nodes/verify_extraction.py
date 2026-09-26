@@ -4,13 +4,17 @@
 retour ciblé, human_review (ESCALADE) après le dernier essai ou si l'extraction a échoué.
 """
 
+from typing import Any
+
 from cdg.application.failures import escalate
 from cdg.application.state import ContractState
 from cdg.domain.config import DecisionConfig
 from cdg.domain.verification import check_extraction
 
 
-def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict:
+def verify_extraction(
+    state: ContractState, decision_config: DecisionConfig
+) -> dict[str, Any]:
     failures = state.get("failures", [])
     if failures:  # extraction en échec (garde de l'orchestrateur) : rien à vérifier
         return escalate(failures)

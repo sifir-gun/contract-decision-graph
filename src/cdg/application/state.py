@@ -5,7 +5,7 @@ Les objets qu'il transporte sont les modèles métier de `domain/models.py`.
 
 import operator
 from datetime import date
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from cdg.domain.models import (
     AgentVerdict,
@@ -23,7 +23,9 @@ Route = Literal["extract_clauses", "reject", "analysts", "human_review", "explai
 class ContractState(TypedDict, total=False):
     contract_id: str
     raw_text: str
-    analysis_date: date  # versions des textes jugées à cette date ; fixée par run_contract
+    analysis_date: (
+        date  # versions des textes jugées à cette date ; fixée par run_contract
+    )
     reject_reason: str | None
     clauses: list[Clause]
     extraction_attempts: int
@@ -34,7 +36,7 @@ class ContractState(TypedDict, total=False):
     proposed_decision: Decision
     margin: float
     route: Route  # écrite par un nœud, lue par l'arête
-    failure_report: dict | None
+    failure_report: dict[str, Any] | None
     human: HumanDecision | None
     final_decision: (
         Decision | None

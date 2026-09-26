@@ -32,7 +32,9 @@ def conformite(clauses: list[Clause], config: DecisionConfig) -> Assessment:
                 "sur des clauses contractuelles ad hoc, sans mention d'autorisation "
                 "(art. 46, par. 3, a) RGPD)"
             )
-            findings.append(penalize(kind, text, cfg.transfer_authorization_score_penalty))
+            findings.append(
+                penalize(kind, text, cfg.transfer_authorization_score_penalty)
+            )
         elif transfert.category != "sans_transfert":
             text = "blocage : transfert hors UE annoncé sans garantie reconnue (art. 44 à 46 RGPD)"
             findings.append(block(kind, text))

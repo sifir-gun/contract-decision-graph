@@ -19,12 +19,16 @@ class EmbeddingError(Exception):
     """Poids absents, ou vecteur d'une dimension inattendue."""
 
 
-def _snapshot(config: EmbeddingConfig, cache_dir: Path, *, local_files_only: bool) -> Path:
+def _snapshot(
+    config: EmbeddingConfig, cache_dir: Path, *, local_files_only: bool
+) -> Path:
     from fastembed import TextEmbedding
 
     description = TextEmbedding._get_model_description(config.model)
     return Path(
-        TextEmbedding.download_model(description, str(cache_dir), local_files_only=local_files_only)
+        TextEmbedding.download_model(
+            description, str(cache_dir), local_files_only=local_files_only
+        )
     )
 
 
@@ -45,7 +49,9 @@ def materialize(snapshot: Path, flat: Path) -> None:
             target.unlink()
         try:
             os.link(real, target)
-        except OSError as exc:  # autre système de fichiers : pas de copie silencieuse de 2 Go
+        except (
+            OSError
+        ) as exc:  # autre système de fichiers : pas de copie silencieuse de 2 Go
             raise EmbeddingError(
                 f"lien physique impossible vers {real} : EMBEDDING_CACHE_DIR doit être sur "
                 "un seul système de fichiers"
@@ -72,11 +78,17 @@ def fetch_model(config: EmbeddingConfig, cache_dir: Path) -> None:
 
 
 class FastembedEmbedder:
-    def __init__(self, config: EmbeddingConfig, cache_dir: Path | None = None, *, model=None):
+    def __init__(
+        self, config: EmbeddingConfig, cache_dir: Path | None = None, *, model=None
+    ):
         self.model = config.model
         self.dimension = config.dimension
         self._config = config
         if model is None:
+            if cache_dir is None:
+                raise EmbeddingError(
+                    f"poids de {config.model} : dossier du cache non indiqué (EMBEDDING_CACHE_DIR)"
+                )
             try:
                 model = _load(config, cache_dir, local_files_only=True)
             except Exception as exc:

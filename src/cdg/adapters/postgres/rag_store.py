@@ -14,7 +14,9 @@ from cdg.ports.retriever import Passage
 
 MIGRATIONS = Path(__file__).resolve().parents[4] / "migrations"
 # 001 exige la variable psql `app_password` : appliquée seulement par l'init Docker
-RAG_MIGRATIONS = sorted(p for p in MIGRATIONS.glob("0*.sql") if not p.name.startswith("001_"))
+RAG_MIGRATIONS = sorted(
+    p for p in MIGRATIONS.glob("0*.sql") if not p.name.startswith("001_")
+)
 
 
 class RagStoreError(Exception):
@@ -28,13 +30,19 @@ def column_dimension(conninfo: str) -> int:
             "SELECT atttypmod FROM pg_attribute "
             "WHERE attrelid = 'rag_chunks'::regclass AND attname = 'embedding'"
         ).fetchone()
+    if row is None:  # créée par la migration 002 : son absence est une erreur explicite
+        raise RagStoreError(
+            "colonne rag_chunks.embedding introuvable : lancer setup-db"
+        )
     return row[0]
 
 
 def setup(admin_conninfo: str, dimension: int) -> None:
     """Applique les migrations du corpus (002, 003…, idempotentes), puis vérifie la dimension."""
     with psycopg.connect(admin_conninfo, autocommit=True) as conn:
-        for migration in RAG_MIGRATIONS:  # plusieurs commandes par fichier, sans paramètre
+        for (
+            migration
+        ) in RAG_MIGRATIONS:  # plusieurs commandes par fichier, sans paramètre
             conn.execute(migration.read_text(encoding="utf-8"))
     actual = column_dimension(admin_conninfo)
     if actual != dimension:
@@ -144,13 +152,17 @@ def sync(admin_conninfo: str, rows: list[ChunkRow], model: str) -> dict:
     deleted = 0
     with psycopg.connect(admin_conninfo) as conn:
         existing = conn.execute(
-            "SELECT id, source_id, domain, content_hash, " + ", ".join(_METADATA) + " FROM"
+            "SELECT id, source_id, domain, content_hash, "
+            + ", ".join(_METADATA)
+            + " FROM"
             " rag_chunks WHERE embedding_model = %s",
             (model,),
         ).fetchall()
         stale = [r[0] for r in existing if tuple(r[2:]) not in wanted.get(r[1], set())]
         if stale:
-            deleted = conn.execute("DELETE FROM rag_chunks WHERE id = ANY(%s)", (stale,)).rowcount
+            deleted = conn.execute(
+                "DELETE FROM rag_chunks WHERE id = ANY(%s)", (stale,)
+            ).rowcount
     inserted = insert(admin_conninfo, rows)
     return {
         "inserted": inserted,

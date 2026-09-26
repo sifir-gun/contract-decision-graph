@@ -14,11 +14,23 @@ pytestmark = pytest.mark.pg
 EMBEDDER = HashEmbedder()
 SOURCE = "test-retrieval"
 CHUNKS = [
-    ("conformite", "RGPD, art. 28", "Le sous-traitant agit sur instruction documentée."),
+    (
+        "conformite",
+        "RGPD, art. 28",
+        "Le sous-traitant agit sur instruction documentée.",
+    ),
     ("conformite", "RGPD, art. 32", "Sécurité du traitement et mesures techniques."),
-    ("financier", "C. com., art. L441-10", "Pénalités de retard et indemnité forfaitaire."),
+    (
+        "financier",
+        "C. com., art. L441-10",
+        "Pénalités de retard et indemnité forfaitaire.",
+    ),
     # très proche de la requête, mais d'un autre domaine : ne doit jamais sortir
-    ("financier", "piège", "Le sous-traitant agit sur instruction documentée du responsable."),
+    (
+        "financier",
+        "piège",
+        "Le sous-traitant agit sur instruction documentée du responsable.",
+    ),
 ]
 
 VALID_UNTIL = date(2027, 1, 1)
@@ -70,12 +82,17 @@ def test_filtre_par_domaine_avant_la_recherche(pg, corpus):
 
 def test_k_resultats_au_plus(pg, corpus):
     query = EMBEDDER.embed_query("sécurité")
-    assert len(rag_store.search(pg.app, "conformite", query, k=1, model=EMBEDDER.model)) == 1
+    assert (
+        len(rag_store.search(pg.app, "conformite", query, k=1, model=EMBEDDER.model))
+        == 1
+    )
 
 
 def test_seul_le_modele_d_embedding_courant_est_interroge(pg, corpus):
     query = EMBEDDER.embed_query("sous-traitant")
-    assert rag_store.search(pg.app, "conformite", query, k=5, model="autre-modele") == []
+    assert (
+        rag_store.search(pg.app, "conformite", query, k=5, model="autre-modele") == []
+    )
 
 
 def test_recherche_rend_fin_de_validite_et_note(pg, corpus):
@@ -84,7 +101,10 @@ def test_recherche_rend_fin_de_validite_et_note(pg, corpus):
     by_reference = {c.reference: c for c in found}
     l441 = by_reference["C. com., art. L441-10"]
     assert (l441.valid_until, l441.note) == (VALID_UNTIL, NOTE)
-    assert (by_reference["piège"].valid_until, by_reference["piège"].note) == (None, None)
+    assert (by_reference["piège"].valid_until, by_reference["piège"].note) == (
+        None,
+        None,
+    )
 
 
 def test_adaptateur_du_port_retriever_requete_en_texte(pg, corpus):
@@ -92,7 +112,9 @@ def test_adaptateur_du_port_retriever_requete_en_texte(pg, corpus):
     retriever = rag_store.PgvectorRetriever(pg.app, embedder)
     found = retriever.search("conformite", "sous-traitant instruction documentée", k=5)
     assert [p.reference for p in found] == ["RGPD, art. 28", "RGPD, art. 32"]
-    assert embedder.calls == ["sous-traitant instruction documentée"]  # vecteur par l'Embedder
+    assert embedder.calls == [
+        "sous-traitant instruction documentée"
+    ]  # vecteur par l'Embedder
 
 
 def test_adaptateur_du_port_filtre_sur_son_modele(pg, corpus):

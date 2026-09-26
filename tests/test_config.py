@@ -7,7 +7,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cdg.domain.config import DEFAULT_CONFIG_PATH, ConfigError, DecisionConfig, load_config
+from cdg.domain.config import (
+    DEFAULT_CONFIG_PATH,
+    ConfigError,
+    DecisionConfig,
+    load_config,
+)
 
 
 @pytest.fixture
@@ -36,7 +41,10 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert cfg.extraction.max_attempts == 2
     j, f, o = cfg.rules.juridique, cfg.rules.financier, cfg.rules.operationnel
     assert (j.supplier_cap_min_pct, j.supplier_cap_score_penalty) == (100, 0.5)
-    assert (f.execution_penalties_min_cap_pct, f.execution_penalties_score_penalty) == (5, 0.4)
+    assert (f.execution_penalties_min_cap_pct, f.execution_penalties_score_penalty) == (
+        5,
+        0.4,
+    )
     assert (
         f.payment_delay_max_days_invoice,
         f.payment_delay_max_days_end_of_month,
@@ -146,7 +154,10 @@ _DELETE = object()
         ("human_policy", _DELETE),
         ("human_policy.allowed_decisions", []),
         ("human_policy.allowed_decisions", ["GO", "GO_RESERVES"]),  # NO_GO requis
-        ("human_policy.allowed_decisions", ["GO", "NO_GO", "ESCALADE"]),  # l'humain tranche
+        (
+            "human_policy.allowed_decisions",
+            ["GO", "NO_GO", "ESCALADE"],
+        ),  # l'humain tranche
         ("human_policy.allowed_decisions", ["GO", "NO_GO", "NO_GO"]),  # doublon
         ("human_policy.allowed_decisions", ["GO", "NO_GO", "PEUT_ETRE"]),
         ("human_policy.allow_block_override", "oui"),  # mode strict
@@ -161,11 +172,17 @@ _DELETE = object()
         ("llm.timeout_seconds", 0),
         ("embedding.dimension", 0),
         ("rules.conformite.transfer_safeguards", []),
-        ("rules.conformite.transfer_safeguards", ["aucune_garantie"]),  # pas une garantie
+        (
+            "rules.conformite.transfer_safeguards",
+            ["aucune_garantie"],
+        ),  # pas une garantie
         ("rules.conformite.transfer_safeguards", ["sans_transfert"]),
         ("rules.conformite.transfer_safeguards", ["certification", "certification"]),
         ("rules.conformite.unlocated_data_score_penalty", 1.5),
-        ("rules.conformite.transfer_authorization_to_verify", ["certification"]),  # déjà garantie
+        (
+            "rules.conformite.transfer_authorization_to_verify",
+            ["certification"],
+        ),  # déjà garantie
         ("rules.conformite.transfer_authorization_to_verify", ["aucune_garantie"]),
         ("rules.conformite.transfer_authorization_score_penalty", 1.5),
         ("rules.conformite.transfer_authorization_score_penalty", _DELETE),

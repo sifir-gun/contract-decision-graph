@@ -15,7 +15,9 @@ def output_of(items):
 
 
 def extractor(answer=None, token="a1b2c3d4"):
-    llm = FakeLLM({"extract_clauses": answer or output_of(clauses())}, tokens=(900, 300))
+    llm = FakeLLM(
+        {"extract_clauses": answer or output_of(clauses())}, tokens=(900, 300)
+    )
     return LLMExtractor(llm, boundary=lambda: token), llm
 
 
@@ -65,13 +67,26 @@ def test_clauses_et_consommation_rendues():
     result = ext(CONTRACT_TEXT, [])
     assert result.clauses == clauses()
     [usage] = result.usage
-    assert (usage.node, usage.tokens_in, usage.tokens_out) == ("extract_clauses", 900, 300)
+    assert (usage.node, usage.tokens_in, usage.tokens_out) == (
+        "extract_clauses",
+        900,
+        300,
+    )
 
 
 def test_type_de_clause_inconnu_refuse_par_le_schema():
     with pytest.raises(ValidationError):
         ExtractionOutput.model_validate(
-            {"clauses": [{"kind": "clause_inventee", "present": False, "quote": "", "value": None}]}
+            {
+                "clauses": [
+                    {
+                        "kind": "clause_inventee",
+                        "present": False,
+                        "quote": "",
+                        "value": None,
+                    }
+                ]
+            }
         )
 
 

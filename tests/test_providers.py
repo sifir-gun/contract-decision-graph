@@ -30,17 +30,20 @@ OK = Answer(verdict="ok")
 
 
 class FakeMistralChat:
-    def __init__(self, parsed=OK, usage=(120, 30)):
+    def __init__(self, parsed=OK, usage=(120, 30), without_message=False):
         self.parsed, self.usage, self.calls = parsed, usage, []
+        self.without_message = without_message
 
     def parse(self, response_format, **kwargs):
         self.calls.append({"response_format": response_format, **kwargs})
         usage = (
             None
             if self.usage is None
-            else SimpleNamespace(prompt_tokens=self.usage[0], completion_tokens=self.usage[1])
+            else SimpleNamespace(
+                prompt_tokens=self.usage[0], completion_tokens=self.usage[1]
+            )
         )
-        message = SimpleNamespace(parsed=self.parsed)
+        message = None if self.without_message else SimpleNamespace(parsed=self.parsed)
         return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
 
 
@@ -53,7 +56,9 @@ class FakeAnthropicMessages:
         usage = (
             None
             if self.usage is None
-            else SimpleNamespace(input_tokens=self.usage[0], output_tokens=self.usage[1])
+            else SimpleNamespace(
+                input_tokens=self.usage[0], output_tokens=self.usage[1]
+            )
         )
         return SimpleNamespace(parsed_output=self.parsed, usage=usage)
 
@@ -65,7 +70,9 @@ def mistral(**kwargs):
 
 def anthropic(**kwargs):
     messages = FakeAnthropicMessages(**kwargs)
-    return AnthropicProvider(CONFIG.llm, client=SimpleNamespace(messages=messages)), messages
+    return AnthropicProvider(
+        CONFIG.llm, client=SimpleNamespace(messages=messages)
+    ), messages
 
 
 # --- Mistral ------------------------------------------------------------------------
@@ -82,7 +89,9 @@ def test_mistral_modele_selon_le_niveau(tier, model):
     assert answer == Answer(verdict="ok")
     [call] = chat.calls
     assert call["model"] == model and call["response_format"] is Answer
-    assert call["temperature"] == 0 and call["max_tokens"] == CONFIG.llm.max_output_tokens
+    assert (
+        call["temperature"] == 0 and call["max_tokens"] == CONFIG.llm.max_output_tokens
+    )
     assert call["messages"] == [
         {"role": "system", "content": "S"},
         {"role": "user", "content": "U"},
@@ -118,8 +127,12 @@ def test_anthropic_modele_et_sortie_structuree():
     )
     assert answer == Answer(verdict="ok")
     [call] = messages.calls
-    assert call["model"] == "claude-haiku-4-5-20251001" and call["output_format"] is Answer
-    assert call["system"] == "S" and call["messages"] == [{"role": "user", "content": "U"}]
+    assert (
+        call["model"] == "claude-haiku-4-5-20251001" and call["output_format"] is Answer
+    )
+    assert call["system"] == "S" and call["messages"] == [
+        {"role": "user", "content": "U"}
+    ]
     assert "temperature" not in call  # absent de messages.parse dans anthropic 1.8.0
     assert (usage.model, usage.tokens_in, usage.tokens_out) == (
         "claude-haiku-4-5-20251001",
@@ -163,7 +176,9 @@ def mistral_status(status: int, headers: dict | None = None):
 
 
 def anthropic_status(cls, status: int):
-    response = httpx2.Response(status, text='{"message":"x"}', request=ANTHROPIC_REQUEST)
+    response = httpx2.Response(
+        status, text='{"message":"x"}', request=ANTHROPIC_REQUEST
+    )
     return cls("erreur", response=response, body=None)
 
 
@@ -184,11 +199,16 @@ class RaisingChat:
         (httpx.ConnectTimeout("délai", request=MISTRAL_REQUEST), True),
         (mistral_status(400), False),
         (mistral_status(401), False),
-        (httpx.ConnectError("refus", request=MISTRAL_REQUEST), True),  # décision du 25/09
+        (
+            httpx.ConnectError("refus", request=MISTRAL_REQUEST),
+            True,
+        ),  # décision du 25/09
     ],
 )
 def test_mistral_erreur_passagere_traduite(error, transient):
-    provider = MistralProvider(CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error)))
+    provider = MistralProvider(
+        CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error))
+    )
     call = {"tier": "main", "system": "s", "user": "u", "schema": Answer, "node": "n"}
     if transient:
         with pytest.raises(LLMTransientError) as info:
@@ -201,8 +221,12 @@ def test_mistral_erreur_passagere_traduite(error, transient):
 
 def test_mistral_429_indique_la_limite_du_compte():
     error = mistral_status(429, {"x-ratelimit-limit-req-minute": "188"})
-    provider = MistralProvider(CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error)))
-    with pytest.raises(LLMTransientError, match="limite du compte : 188 requêtes par minute"):
+    provider = MistralProvider(
+        CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error))
+    )
+    with pytest.raises(
+        LLMTransientError, match="limite du compte : 188 requêtes par minute"
+    ):
         provider.structured(tier="main", system="s", user="u", schema=Answer, node="n")
 
 
@@ -218,10 +242,14 @@ def test_mistral_429_indique_la_limite_du_compte():
 )
 def test_mistral_quota_nul_erreur_non_passagere(headers):
     error = mistral_status(429, headers)
-    provider = MistralProvider(CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error)))
+    provider = MistralProvider(
+        CONFIG.llm, client=SimpleNamespace(chat=RaisingChat(error))
+    )
     with pytest.raises(LLMQuotaError, match="vérifier l'offre du compte") as info:
         provider.structured(tier="main", system="s", user="u", schema=Answer, node="n")
-    assert not isinstance(info.value, LLMTransientError) and info.value.__cause__ is error
+    assert (
+        not isinstance(info.value, LLMTransientError) and info.value.__cause__ is error
+    )
     assert "mistral-small-2603" in str(info.value) and "= 0" in str(info.value)
 
 
@@ -241,7 +269,10 @@ class RaisingMessages:
         (anthropic_status(anthropic_sdk.APIStatusError, 529), True),  # surcharge
         (anthropic_sdk.APITimeoutError(request=ANTHROPIC_REQUEST), True),
         (anthropic_status(anthropic_sdk.BadRequestError, 400), False),
-        (anthropic_sdk.APIConnectionError(request=ANTHROPIC_REQUEST), True),  # décision du 25/09
+        (
+            anthropic_sdk.APIConnectionError(request=ANTHROPIC_REQUEST),
+            True,
+        ),  # décision du 25/09
     ],
 )
 def test_anthropic_erreur_passagere_traduite(error, transient):
@@ -293,3 +324,10 @@ def test_anthropic_429_avec_limite_non_nulle_reste_passager():
     )
     with pytest.raises(LLMTransientError):
         provider.structured(tier="light", system="s", user="u", schema=Answer, node="n")
+
+
+def test_mistral_choix_sans_message_erreur_du_port():
+    # le SDK type message comme optionnel : sans lui, erreur du port, pas AttributeError
+    provider, _ = mistral(without_message=True)
+    with pytest.raises(LLMOutputError, match="réponse vide ou non structurée"):
+        provider.structured(tier="main", system="s", user="u", schema=Answer, node="n")

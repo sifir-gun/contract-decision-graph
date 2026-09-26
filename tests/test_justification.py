@@ -23,7 +23,9 @@ def assess(domain, **overrides):
 def trace(**retained) -> RetrievalTrace:
     return RetrievalTrace(
         clauses=[
-            ClauseRetrieval(kind=kind, queries=["q"], passes=1, retained=refs, expired=[])
+            ClauseRetrieval(
+                kind=kind, queries=["q"], passes=1, retained=refs, expired=[]
+            )
             for kind, refs in retained.items()
         ]
     )
@@ -51,7 +53,11 @@ def test_penalite_justifiee():
 
 
 def test_penalite_sans_reference_rend_le_domaine_insuffisant_en_nommant_la_clause():
-    v = justify(assess("financier", penalites_execution=ABSENT), trace(penalites_execution=[]), [])
+    v = justify(
+        assess("financier", penalites_execution=ABSENT),
+        trace(penalites_execution=[]),
+        [],
+    )
     assert v.retrieval_status == "INSUFFISANT" and v.evidence_ids == []
     assert v.findings[-1] == lacking("penalites_execution")
     assert v.score == 0.6  # le statut ne touche pas le score

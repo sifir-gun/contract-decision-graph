@@ -10,7 +10,10 @@ from contextlib import contextmanager
 from typing import Any
 
 from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
+from langgraph.checkpoint.serde.event_hooks import (
+    SerdeEvent,
+    register_serde_event_listener,
+)
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
@@ -47,7 +50,7 @@ class BlockedDeserialization(Exception):
     """Type hors liste autorisée rencontré en relisant un checkpoint."""
 
 
-def _collect_serde_event(event: dict) -> None:
+def _collect_serde_event(event: SerdeEvent) -> None:
     # appelé dans le fil qui désérialise ; les exceptions d'un écouteur sont
     # avalées par LangGraph, d'où la collecte puis la levée après lecture
     events = getattr(_serde_watch, "events", None)
@@ -63,13 +66,18 @@ class StrictSerializer(JsonPlusSerializer):
 
     def loads_typed(self, data: tuple[str, bytes]) -> Any:
         previous = getattr(_serde_watch, "events", None)
-        _serde_watch.events = events = []
+        events: list[SerdeEvent] = []
+        _serde_watch.events = events
         try:
             value = super().loads_typed(data)
         finally:
             _serde_watch.events = previous
         blocked = sorted(
-            {f"{e['module']}.{e['name']}" for e in events if e["kind"] in _BLOCKED_KINDS}
+            {
+                f"{e['module']}.{e['name']}"
+                for e in events
+                if e["kind"] in _BLOCKED_KINDS
+            }
         )
         if blocked:
             raise BlockedDeserialization(
@@ -113,8 +121,12 @@ def setup_database(admin_conninfo: str) -> None:
     """Tables du checkpointer (droits administrateur), puis droits d'app_role."""
     with open_saver(admin_conninfo) as saver:
         saver.setup()
+        conn = saver.conn
+        # open_saver passe une connexion, jamais un pool
+        if not isinstance(conn, Connection):
+            raise TypeError(f"connexion psycopg attendue, reçu {type(conn).__name__}")
         for statement in _CHECKPOINT_GRANTS:
-            saver.conn.execute(statement.format(role=sql.Identifier(APP_ROLE)))
+            conn.execute(statement.format(role=sql.Identifier(APP_ROLE)))
 
 
 def delete_thread(conninfo: str, thread_id: str) -> None:

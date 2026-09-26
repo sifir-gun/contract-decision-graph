@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -41,7 +42,9 @@ def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[s
         source = manifest.sources[source_id]
         article = parsers[source["format"]]((RAW / path).read_text(encoding="utf-8"))
         if article.article != number:
-            raise ValueError(f"{path} : titre « Article {article.article} », attendu {number}")
+            raise ValueError(
+                f"{path} : titre « Article {article.article} », attendu {number}"
+            )
         yield (
             replace(
                 article,
@@ -62,7 +65,12 @@ def load_fiches(directory: Path = FICHES) -> list[Fiche]:
         _, front, body = path.read_text(encoding="utf-8").split("---\n", 2)
         meta = yaml.safe_load(front)
         fiches.append(
-            Fiche(id=meta["id"], title=meta["titre"], domains=meta["domaines"], body=body.strip())
+            Fiche(
+                id=meta["id"],
+                title=meta["titre"],
+                domains=meta["domaines"],
+                body=body.strip(),
+            )
         )
     return fiches
 
@@ -77,13 +85,17 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
     le texte stocké reste celui de l'article, cité tel quel. Une fiche prend la plus proche
     des fins de validité des articles qu'elle cite : elle les paraphrase, elle expire avec.
     """
-    pending: list[tuple[dict, str, list[str]]] = []
+    pending: list[tuple[dict[str, Any], str, list[str]]] = []
     validity: dict[tuple[str, str], date | None] = {}
     for article, domains in articles():
         validity[(article.source_id, article.article)] = article.valid_until
-        header = article.reference + (f" — {article.heading}" if article.heading else "")
+        header = article.reference + (
+            f" — {article.heading}" if article.heading else ""
+        )
         amendment = (
-            f"{article.amendment[0]} : {article.amendment[1]}" if article.amendment else None
+            f"{article.amendment[0]} : {article.amendment[1]}"
+            if article.amendment
+            else None
         )
         for index, text in enumerate(chunk(article.text, max_words)):
             meta = {
@@ -102,7 +114,7 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
     for fiche in load_fiches():
         reference = f"Fiche projet : {fiche.title}"
         cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
-        ends = [validity[c] for c in cited if validity[c] is not None]
+        ends = [end for c in cited if (end := validity[c]) is not None]
         for index, text in enumerate(chunk(fiche.body, max_words)):
             meta = {
                 "source_id": fiche.id,
@@ -114,7 +126,15 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
             pending.append((meta, f"{reference}\n{text}", fiche.domains))
     vectors = embedder.embed_passages([embedded for _, embedded, _ in pending])
     return [
-        ChunkRow(domain=domain, embedding_model=embedder.model, embedding=vector, **meta)
+        # domaines lus dans le manifeste et les fiches : validés par ChunkRow
+        ChunkRow.model_validate(
+            {
+                "domain": domain,
+                "embedding_model": embedder.model,
+                "embedding": vector,
+                **meta,
+            }
+        )
         for (meta, _, domains), vector in zip(pending, vectors, strict=True)
         for domain in domains
     ]

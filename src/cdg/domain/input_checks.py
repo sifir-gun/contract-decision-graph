@@ -86,9 +86,7 @@ def rejection(text: str, analysis_date: object, limits: InputConfig) -> str | No
         return f"texte trop long : {len(text)} caractères, maximum {limits.max_chars}"
     words, ratio = french_ratio(text)
     if words < limits.min_words:
-        return (
-            f"texte trop court pour vérifier la langue : {words} mots, minimum {limits.min_words}"
-        )
+        return f"texte trop court pour vérifier la langue : {words} mots, minimum {limits.min_words}"
     if rounded(ratio) < rounded(limits.min_french_ratio):
         return (
             f"langue non reconnue comme français : part de mots-outils "

@@ -5,7 +5,14 @@ from datetime import date
 
 import psycopg
 import pytest
-from doubles import ABSENT, CONTRACT_TEXT, FakeCrag, FixedExtractor, HashEmbedder, clauses
+from doubles import (
+    ABSENT,
+    CONTRACT_TEXT,
+    FakeCrag,
+    FixedExtractor,
+    HashEmbedder,
+    clauses,
+)
 
 from cdg import cli
 from cdg.application.deps import Deps
@@ -115,7 +122,13 @@ def test_run_masque_les_parties_declarees(pg, thread_id, tmp_path, analysis, cap
     path = tmp_path / "c.txt"
     path.write_text(CONTRACT_TEXT + "Signé par Acme Industrie.\n", encoding="utf-8")
     code, out = run_cli(
-        capsys, "run", str(path), "--contract-id", thread_id, "--party", "Acme Industrie"
+        capsys,
+        "run",
+        str(path),
+        "--contract-id",
+        thread_id,
+        "--party",
+        "Acme Industrie",
     )
     assert code == 0 and out["masquage"] == {"PARTIE": 1}
     assert "Acme" not in extractor.calls[0][0]
@@ -125,7 +138,13 @@ def test_run_masque_les_parties_declarees(pg, thread_id, tmp_path, analysis, cap
 def test_run_date_d_analyse(pg, thread_id, contract, analysis, capsys):
     analysis()
     code, out = run_cli(
-        capsys, "run", contract, "--contract-id", thread_id, "--analysis-date", "2027-02-01"
+        capsys,
+        "run",
+        contract,
+        "--contract-id",
+        thread_id,
+        "--analysis-date",
+        "2027-02-01",
     )
     assert code == 0 and out["analysis_date"] == "2027-02-01"
 
@@ -169,12 +188,16 @@ def test_resume_finalise_puis_history(pg, thread_id, contract, analysis, capsys)
     steps = out["checkpoints"]
     assert code == 0
     assert steps[0]["source"] == "input" and steps[-1]["next"] == []
-    assert [s["step"] for s in steps] == sorted(s["step"] for s in steps)  # chronologique
+    assert [s["step"] for s in steps] == sorted(
+        s["step"] for s in steps
+    )  # chronologique
     assert steps[-1]["final_decision"] == "NO_GO"
 
 
 @pytest.mark.pg
-def test_resume_n_appelle_ni_llm_ni_corpus(pg, thread_id, contract, analysis, capsys, monkeypatch):
+def test_resume_n_appelle_ni_llm_ni_corpus(
+    pg, thread_id, contract, analysis, capsys, monkeypatch
+):
     analysis(*INSUFFICIENT)
     run_cli(capsys, "run", contract, "--contract-id", thread_id)
 
@@ -183,13 +206,23 @@ def test_resume_n_appelle_ni_llm_ni_corpus(pg, thread_id, contract, analysis, ca
 
     monkeypatch.setattr(cli, "build_deps", forbidden)
     code, out = run_cli(
-        capsys, "resume", thread_id, "--decision", "NO_GO", "--reviewer", "r", "--reason", "m"
+        capsys,
+        "resume",
+        thread_id,
+        "--decision",
+        "NO_GO",
+        "--reviewer",
+        "r",
+        "--reason",
+        "m",
     )
     assert (code, out["final_decision"]) == (0, "NO_GO")
 
 
 @pytest.mark.pg
-def test_resume_refuse_reste_suspendu_avec_le_motif(pg, thread_id, contract, analysis, capsys):
+def test_resume_refuse_reste_suspendu_avec_le_motif(
+    pg, thread_id, contract, analysis, capsys
+):
     analysis(*INSUFFICIENT)
     run_cli(capsys, "run", contract, "--contract-id", thread_id)
     code, out = run_cli(
@@ -223,7 +256,15 @@ def test_resume_refuse_reste_suspendu_avec_le_motif(pg, thread_id, contract, ana
 @pytest.mark.pg
 def test_resume_thread_inconnu(pg, thread_id, capsys):
     code, err = run_cli(
-        capsys, "resume", thread_id, "--decision", "NO_GO", "--reviewer", "r", "--reason", "m"
+        capsys,
+        "resume",
+        thread_id,
+        "--decision",
+        "NO_GO",
+        "--reviewer",
+        "r",
+        "--reason",
+        "m",
     )
     assert code == 1 and "inconnu" in err["detail"]
 
@@ -233,7 +274,15 @@ def test_resume_thread_termine_refuse(pg, thread_id, contract, analysis, capsys)
     analysis(FixedExtractor(clauses(responsabilite_acheteur=None)))
     run_cli(capsys, "run", contract, "--contract-id", thread_id)
     code, err = run_cli(
-        capsys, "resume", thread_id, "--decision", "GO", "--reviewer", "r", "--reason", "m"
+        capsys,
+        "resume",
+        thread_id,
+        "--decision",
+        "GO",
+        "--reviewer",
+        "r",
+        "--reason",
+        "m",
     )
     assert code == 1 and "attente" in err["detail"]
 
@@ -253,11 +302,17 @@ def test_run_contrat_absent(tmp_path, analysis, capsys):
 
 
 @pytest.mark.pg
-def test_run_sans_cle_d_api_erreur_avant_tout_thread(pg, thread_id, contract, capsys, monkeypatch):
+def test_run_sans_cle_d_api_erreur_avant_tout_thread(
+    pg, thread_id, contract, capsys, monkeypatch
+):
     # variable exportée vide : .env ne la remplace pas (override=False)
     monkeypatch.setenv("MISTRAL_API_KEY", "")
     code, err = run_cli(capsys, "run", contract, "--contract-id", thread_id)
-    assert code == 1 and err["erreur"] == "SettingsError" and "MISTRAL_API_KEY" in err["detail"]
+    assert (
+        code == 1
+        and err["erreur"] == "SettingsError"
+        and "MISTRAL_API_KEY" in err["detail"]
+    )
     code, err = run_cli(capsys, "history", thread_id)  # aucun thread créé
     assert code == 1 and "inconnu" in err["detail"]
 
@@ -291,7 +346,15 @@ def test_echec_de_noeud_escalade_avec_rapport_puis_resume(
     code, history = run_cli(capsys, "history", thread_id)
     assert code == 0 and history["checkpoints"][-1]["next"] == ["human_review"]
     code, out = run_cli(
-        capsys, "resume", thread_id, "--decision", "NO_GO", "--reviewer", "r", "--reason", "m"
+        capsys,
+        "resume",
+        thread_id,
+        "--decision",
+        "NO_GO",
+        "--reviewer",
+        "r",
+        "--reason",
+        "m",
     )
     assert code == 0 and out["final_decision"] == "NO_GO"
 
@@ -324,4 +387,6 @@ def test_ingest_indexe_le_corpus_puis_rejouable(pg, capsys, monkeypatch, tmp_pat
         )
     finally:
         with psycopg.connect(pg.admin) as conn:
-            conn.execute("DELETE FROM rag_chunks WHERE embedding_model = %s", (embedder.model,))
+            conn.execute(
+                "DELETE FROM rag_chunks WHERE embedding_model = %s", (embedder.model,)
+            )

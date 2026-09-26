@@ -176,7 +176,9 @@ class Usage(BaseModel):
 class ContractState(TypedDict, total=False):
     contract_id: str
     raw_text: str
-    analysis_date: date  # versions des textes jugées à cette date (J3) ; fixée par run_contract
+    analysis_date: (
+        date  # versions des textes jugées à cette date (J3) ; fixée par run_contract
+    )
     reject_reason: str | None
     clauses: list[Clause]
     extraction_attempts: int
@@ -227,7 +229,10 @@ def decide(verdicts, failures, usage, config) -> GateOutcome: ...
 # src/cdg/application/nodes/decision_gate.py : adaptation état -> domaine -> état
 def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
     outcome = decide(
-        state["verdicts"], state.get("failures", []), state.get("usage", []), decision_config
+        state["verdicts"],
+        state.get("failures", []),
+        state.get("usage", []),
+        decision_config,
     )
     update = {
         "proposed_decision": outcome.proposed,
@@ -254,7 +259,9 @@ def read_route(state: ContractState) -> str:
 
 def route_after_verify(state: ContractState):
     if state["route"] == "analysts":  # décision lue dans l'état
-        return [Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS]
+        return [
+            Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS
+        ]
     return state["route"]
 
 
@@ -263,13 +270,17 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
     request = policy.build_request(state, decision_config)
     while True:
         # review : validation Pydantic de la réponse brute, puis politique versionnée
-        human, error = policy.review(interrupt(request), state.get("verdicts", []), decision_config)
+        human, error = policy.review(
+            interrupt(request), state.get("verdicts", []), decision_config
+        )
         if error is None:
             return {"human": human, "final_decision": human.decision}
         request = {**request, "error": error}  # mal formée ou refusée : redemandée
 
 
-def build_graph(config: DecisionConfig, deps: Deps):  # les tests injectent des doublures
+def build_graph(
+    config: DecisionConfig, deps: Deps
+):  # les tests injectent des doublures
     builder = StateGraph(ContractState)
     ...  # add_node des 9 nœuds, dépendances liées
     builder.add_edge(START, "validate_input")
@@ -278,10 +289,14 @@ def build_graph(config: DecisionConfig, deps: Deps):  # les tests injectent des 
     )  # human_review : garde d'échec (J3)
     builder.add_edge("extract_clauses", "verify_extraction")
     builder.add_conditional_edges(
-        "verify_extraction", route_after_verify, ["extract_clauses", "analyst", "human_review"]
+        "verify_extraction",
+        route_after_verify,
+        ["extract_clauses", "analyst", "human_review"],
     )
     builder.add_edge("analyst", "decision_gate")
-    builder.add_conditional_edges("decision_gate", read_route, ["human_review", "explain"])
+    builder.add_conditional_edges(
+        "decision_gate", read_route, ["human_review", "explain"]
+    )
     builder.add_edge("human_review", "explain")
     builder.add_edge("explain", "audit_seal")
     builder.add_edge("audit_seal", END)
@@ -314,7 +329,9 @@ with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
         run_config,
     )
 
-    history = list(graph.get_state_history(run_config))  # tous les checkpoints du thread
+    history = list(
+        graph.get_state_history(run_config)
+    )  # tous les checkpoints du thread
 ```
 
 Points à maîtriser :
@@ -509,14 +526,17 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `ruff` (dev, line-length 100), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `pytest-cov`, `ruff` (line-length 88), `mypy` et `types-PyYAML` (dev), `pip-audit` (groupe `audit`), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/
 ├── CLAUDE.md
 ├── README.md
 ├── .env.example                # modèle des identifiants ; .env reste hors git
-├── .github/workflows/ci.yml    # CI : lint, tests pg compris ; tests llm exclus
+├── .git-blame-ignore-revs      # commits de reformatage massif, ignorés par git blame
+├── .github/
+│   ├── workflows/ci.yml        # CI : lint, types, audit, tests pg compris ; tests llm exclus
+│   └── dependabot.yml          # mises à jour hebdomadaires : uv, actions GitHub
 ├── docker-compose.yml          # postgres + pgvector
 ├── pyproject.toml
 ├── docs/
@@ -593,9 +613,13 @@ Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si
 
 ## Intégration continue
 
-`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.6.10 avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
+`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request, plus un audit hebdomadaire. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.12.19 (la version du poste de développement) avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
 - **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
-- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris.
+- **Job `types`** : mypy, configuré dans `pyproject.toml` : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`, plugin pydantic. Tout le projet est installé : mypy lit les types des bibliothèques.
+- **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`). Il tourne aussi chaque lundi à 7 h 17 (heure de Paris) sur `main`, seul job de ce déclenchement planifié : une faille publiée entre deux commits est vue sans attendre le suivant. GitHub désactive un déclenchement planifié après 60 jours sans activité sur un dépôt public.
+- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris, avec la couverture (`pytest --cov`, lignes et branches) : le job échoue sous le seuil `fail_under` de `pyproject.toml` (96 %, pour 96,81 % mesurés le 26/09). Le badge de couverture du README est statique et affiche ce seuil ; `tests/test_couverture.py` échoue s'il en diverge.
+- **Dependabot** (`.github/dependabot.yml`) : chaque lundi à 6 h (heure de Paris), pull requests de mise à jour des dépendances Python (`uv.lock`) et des actions GitHub (empreintes et commentaires de version). Chacune passe par la CI.
+- **Image PostgreSQL + pgvector** : hors de Dependabot, sa mise à jour reste manuelle et délibérée. `tests/test_ci.py` échoue si elle n'est pas figée par empreinte, ou si l'empreinte diffère entre `docker-compose.yml` et le workflow.
 - **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
 - **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
 - **Pas de `.env`** : la CI ne définit que les variables de la base jetable. Un test qui dépend en silence de l'environnement du poste y échoue : on corrige le test, on ne l'exclut pas.
@@ -682,8 +706,17 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **26 septembre 2026, J3** :
   - règles avant le CRAG : les règles rendent un `Assessment` (constats rattachés à leur clause, avec leur effet) et ne lisent plus le statut de récupération ; CRAG sur les seules clauses qui portent un constat ; justification dans `domain/justification.py` : `INSUFFISANT` seulement si un constat qui bloque ou pénalise n'a aucune référence en vigueur, avec un constat qui nomme la clause ; constat d'information sans référence signalé, sans effet sur le statut ; `RetrievalResult` sans statut ni `evidence_ids` ; critère 3 : « constat sans référence » ;
   - CRAG : domaines nommés par ce qu'ils couvrent (`crag.DOMAIN_LABELS`) dans la requête et dans les messages du juge et de la réécriture ;
-  - critère 10 : seuil du taux d'aboutissement aux analystes à 4 sur 5 par contrat de mesure, l'invariant de sûreté restant à 5 sur 5.
-  - intégration continue GitHub Actions (`.github/workflows/ci.yml`) : lint, puis toute la suite sur PostgreSQL + pgvector (image de `docker-compose.yml`), tests `llm` exclus ; badge dans le README.
+  - critère 10 : seuil du taux d'aboutissement aux analystes à 4 sur 5 par contrat de mesure, l'invariant de sûreté restant à 5 sur 5 ;
+  - intégration continue GitHub Actions (`.github/workflows/ci.yml`) : lint, puis toute la suite sur PostgreSQL + pgvector (image de `docker-compose.yml`), tests `llm` exclus ; badge dans le README ;
+  - vérification des types par mypy (job `types`) : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py` ;
+  - audit de sécurité des dépendances de `uv.lock` par pip-audit (job `audit`), échec sur toute faille connue ;
+  - Dependabot : mises à jour hebdomadaires des dépendances Python (`uv`) et des actions GitHub ;
+  - couverture par pytest-cov (lignes et branches), seuil de 96 % en CI pour 96,81 % mesurés, badge statique du seuil dans le README ;
+  - longueur de ligne à 88 (valeur par défaut de Ruff et de Black) : reformatage dans un commit à part, listé dans `.git-blame-ignore-revs` ;
+  - audit des dépendances aussi planifié, chaque lundi sur `main` (décision du 26/09) ;
+  - `types-PyYAML` en dépendance de développement ; plus d'exception mypy sur `yaml` ;
+  - image PostgreSQL + pgvector hors de Dependabot, mise à jour manuelle ; test d'égalité des empreintes entre `docker-compose.yml` et le workflow ;
+  - uv 0.12.19 sur le poste et dans la CI (auparavant 0.6.10), `uv.lock` vérifié valide avec cette version.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

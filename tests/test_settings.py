@@ -70,8 +70,12 @@ def test_chaines_de_connexion_admin_et_app_role(clean_env, tmp_path):
     )
 
 
-@pytest.mark.parametrize("missing", ["POSTGRES_PORT", "POSTGRES_PASSWORD", "APP_DB_PASSWORD"])
+@pytest.mark.parametrize(
+    "missing", ["POSTGRES_PORT", "POSTGRES_PASSWORD", "APP_DB_PASSWORD"]
+)
 def test_variable_manquante_leve_une_erreur_explicite(clean_env, tmp_path, missing):
-    settings.load_env(_env_file(tmp_path, **{k: v for k, v in FULL.items() if k != missing}))
+    settings.load_env(
+        _env_file(tmp_path, **{k: v for k, v in FULL.items() if k != missing})
+    )
     with pytest.raises(settings.SettingsError, match=missing):
         conninfo.admin_conninfo() if missing != "APP_DB_PASSWORD" else conninfo.app_conninfo()

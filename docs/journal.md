@@ -982,3 +982,171 @@ Résultats :
 
 La simulation tourne sur macOS : un écart propre à Linux ne peut se voir que sur GitHub.
 
+## 2026-09-26 · CI, qualité (branche `ci-qualite`)
+
+### Vérification des types : mypy
+
+**Choix de mypy plutôt que pyright.**
+- **Installation figée** : mypy est un paquet Python pur (compilé par mypyc), figé dans `uv.lock` comme le reste. Le paquet PyPI de pyright, lui, cherche Node.js, le télécharge au besoin, puis installe le paquet npm de pyright à la première exécution (documentation du paquet sur PyPI) : ce téléchargement échappe à `uv.lock`, en CI comme en local.
+- **Pydantic** : son plugin mypy officiel type les `__init__` synthétisés (`init_typed`, `init_forbid_extra`, lus dans la documentation de pydantic).
+- **Limite de mypy** : `strict` ne se règle que globalement (documentation de mypy 2.3.1). Les options qu'il active (liste de `mypy --help`) sont donc reprises une à une pour `cdg.domain.*`, `cdg.ports.*` et `cdg.application.*`. Deux d'entre elles ne se règlent que globalement : `warn_redundant_casts` et `extra_checks`. Elles valent donc aussi pour `adapters/` et `cli.py`, au-delà du mode de base.
+
+**Erreurs trouvées** : 74 dans 26 fichiers.
+- 42 dans les couches strictes : 28 paramètres génériques manquants (`dict` au lieu de `dict[str, Any]`, `re.Match` sans type), des annotations manquantes, et quelques valeurs `None` que mypy ne pouvait pas exclure (catégorie d'une clause, fin de validité d'un extrait).
+- 32 dans les adaptateurs, dont 25 dans l'orchestrateur :
+  - typage de LangGraph (nœuds gardés, `RunnableConfig`) ;
+  - valeurs `None` que LangGraph, psycopg ou le SDK Mistral déclarent possibles.
+
+Toutes sont corrigées sans `# type: ignore` et sans changer le comportement nominal. Un seul `cast` : la clé du fournisseur dans `LLMConfig.model`, où un fournisseur inconnu lève toujours `KeyError`.
+
+**Chemins d'erreur rendus explicites.** Chacun échouait avant par une erreur Python générique, sur un cas qui ne se produit pas dans l'usage actuel :
+- `MistralProvider` : un choix sans message (le SDK le type optionnel) lève `LLMOutputError` au lieu d'`AttributeError` (testé) ;
+- `FastembedEmbedder` sans modèle injecté ni dossier de cache : `EmbeddingError` qui cite `EMBEDDING_CACHE_DIR`, au lieu d'un `EmbeddingError` citant « None » (testé) ;
+- `rag_store.column_dimension` : colonne absente, `RagStoreError` ;
+- orchestrateur :
+  - garde hors d'une exécution de nœud : `RuntimeError` ;
+  - `expire` sur un graphe sans checkpointer : `ThreadError` ;
+  - checkpoint sans métadonnées ou sans date : `ThreadError` ;
+- `setup_database` : `TypeError` si le checkpointer tenait un pool au lieu d'une connexion.
+
+**Écart réel trouvé par le typage : la règle de reprise de la garde.**
+- La garde appelait `retry.retry_on(exc)`, alors que LangGraph accepte aussi une classe ou une liste d'exceptions, qu'il ne faut pas appeler. Nos politiques passent toujours un prédicat, donc rien ne cassait.
+- `orchestrator.retries` reprend la règle de LangGraph (`pregel/_retry.py`, `_should_retry_on`). Un test la compare à la fonction de LangGraph sur 16 combinaisons : politique × erreur.
+
+**Autres points.**
+- `langchain_core` (pour `RunnableConfig`) est importé dans `adapters/langgraph/` : ajouté à la liste des bibliothèques confinées du test d'isolation.
+- **PyYAML sans annotations** : `ignore_missing_imports` pour `yaml`. `yaml.safe_load` rend `Any` de toute façon. Les stubs de typeshed (`types-PyYAML`) seraient une dépendance de plus : non ajoutés sans accord.
+- **Domaines d'un extrait** : lus dans le manifeste et les fiches, ils sont validés par `ChunkRow.model_validate` au lieu du constructeur typé (même validation pydantic).
+- **Job `types`** dans la CI : tout le projet est installé, car mypy lit les types des bibliothèques.
+
+### Audit de sécurité des dépendances : pip-audit
+
+**Outil** : pip-audit 2.10.1, dernière version publiée, maintenue par la PyPA. Son README a été lu à cette étiquette.
+- **Pas de lecture de `uv.lock`** : `--locked` ne lit que `pyproject.toml` et `pylock.*.toml`. La voie documentée pour un projet déjà résolu est un fichier de requirements entièrement figé, avec les empreintes : `--require-hashes`, plus `--disable-pip`, qui évite toute résolution par pip.
+- **Codes de sortie documentés** : 0 sans faille connue, 1 si au moins une faille est trouvée. Le code de sortie ne peut pas être supprimé.
+- **Base consultée** : par défaut, les vulnérabilités publiées par l'API JSON de PyPI.
+
+**Mise en œuvre.**
+- Nouveau groupe de dépendances `audit` (`pip-audit`), figé dans `uv.lock` et installé seul dans le job (`uv sync --locked --only-group audit`) : ni le projet ni ses dépendances n'y sont installés.
+- `uv export --locked --all-groups --no-emit-project` : tous les groupes, sans le projet lui-même, qui n'est pas publié. Le résultat compte 104 paquets, avec leurs empreintes.
+- `pip-audit --require-hashes --disable-pip --strict` : `--strict` fait aussi échouer l'audit si un paquet est introuvable, plutôt que de le passer sous silence.
+
+**Vérifié** :
+- sur `uv.lock` : « No known vulnerabilities found », code 0 ;
+- sur `requests==2.19.1` : failles listées avec leur version corrigée, code 1.
+
+**Limite** : l'audit tourne sur chaque pull request et chaque push vers `main`. Une faille publiée entre deux commits n'est vue qu'au suivant. Un déclenchement planifié le couvrirait (non ajouté, à décider).
+
+### Dependabot
+
+**Fait.** `.github/dependabot.yml`, deux écosystèmes :
+- **`uv`** : `pyproject.toml` et `uv.lock` ;
+- **`github-actions`** : `.github/workflows`.
+
+Réglages communs : chaque semaine, le lundi à 6 h, heure de Paris ; préfixes de commit « Dépendances : » et « CI : ».
+
+**Vérifié dans la documentation de GitHub** (source du dépôt `github/docs`) :
+- `uv` est un écosystème pris en charge, mis à jour par Dependabot avec uv v0.11, mises à jour de sécurité comprises ;
+- pour `github-actions`, `directory: "/"` couvre `.github/workflows` ;
+- `day`, `time` et `timezone` valent pour un intervalle hebdomadaire ;
+- un préfixe terminé par une espace évite le deux-points ajouté.
+
+**Compatibilité de `uv.lock`.** Dependabot réécrit le lock avec uv 0.11, alors que le poste et la CI sont en uv 0.6.10. Essai sur une copie du dépôt :
+- uv 0.11.33 met à jour `ruff` et réécrit le lock en révision 3 ;
+- uv 0.6.10 le relit : `uv lock --check`, puis `uv sync --locked` passent.
+
+Les pull requests de Dependabot ne casseront donc pas la CI pour une question de version d'uv. Aligner uv (poste, CI) sur une version récente reste à décider : Dependabot ne met pas à jour la version d'uv fixée dans le workflow, qui est une entrée d'action et non une dépendance.
+
+**Non couvert** : l'image PostgreSQL + pgvector, figée par empreinte dans `docker-compose.yml` et dans le workflow. Dependabot sait mettre à jour `docker-compose.yml`, mais pas l'image d'un conteneur de service : les deux empreintes divergeraient. Hors demande, à décider.
+
+### Couverture : pytest-cov
+
+**Fait.**
+- pytest-cov 7.1.0 (coverage.py 7.16.1) en dépendance de développement.
+- `[tool.coverage.run]` : `source = ["cdg"]`, `branch = true`. `[tool.coverage.report]` : `fail_under`, `show_missing`.
+- Le job `tests` lance `pytest --cov --cov-report=term`.
+- `.coverage` est ajouté au `.gitignore`.
+
+**Seuil.** La couverture mesurée est de **96,81 %**, en lignes et en branches, tests PostgreSQL compris (1 721 instructions, 350 branches). Le seuil est fixé à **96 %**, l'entier juste en dessous. Il vit dans `pyproject.toml` et non dans la ligne de commande : sans `--cov-fail-under`, pytest-cov lit `fail_under` dans la configuration de coverage.py. Ce n'est pas dit dans sa documentation, mais c'est vérifié dans le code installé, `pytest_cov/plugin.py`, ligne 270.
+
+**Parties les moins couvertes** :
+- `ports/audit_store.py` (0 %) : le port du J4, pas encore utilisé ;
+- `adapters/llm/__init__.py` (84 %) ;
+- `adapters/fastembed.py` (87 %) : chargement réel des poids ;
+- `cli.py` (91 %).
+
+**Badge.** Un badge dynamique demande un service tiers (Codecov, Coveralls : compte, application GitHub, parfois jeton) ou un droit d'écriture pour la CI (publication du badge) ; ces choix reviennent au propriétaire du repo. Le badge est donc statique (shields.io, format lu dans sa documentation) et affiche le seuil appliqué par la CI, « ≥ 96 % », pas la valeur mesurée. `tests/test_couverture.py` échoue si le badge et `fail_under` divergent.
+
+### Longueur de ligne à 88
+
+- **`pyproject.toml`** : `line-length = 88`, la valeur par défaut de Ruff et de Black.
+- **Commit à part, `f6f65eb`** (« style: longueur de ligne à 88 ») : réglage, `ruff format` et `ruff check --fix` sur tout le projet, rien d'autre. 60 fichiers reformatés, dont les blocs Python de la spec : ruff formate aussi le Markdown. `ruff check --fix` n'a rien changé, car ses règles par défaut n'incluent pas la longueur de ligne (E501).
+- **Vérifié après le reformatage** : ruff, mypy, 603 tests, couverture inchangée (96,81 %).
+- **`.git-blame-ignore-revs`**, à la racine, format lu dans la documentation de GitHub. GitHub l'applique d'office à sa vue *blame*. En local, il faut `git config blame.ignoreRevsFile .git-blame-ignore-revs` (option lue dans `git help config`), indiqué dans le README.
+- **Condition** : l'empreinte doit rester dans l'historique de `main`. C'est le cas avec une fusion par commit de fusion, la pratique du dépôt. Un *squash* la ferait disparaître.
+- **Sortie de ruff laissée telle quelle** : dans 8 cas, un commentaire de fin de ligne est rejeté après la parenthèse fermante d'une condition (`):  # …`). La lecture en souffre un peu. Un commit à part, non fait ici, pourrait remonter ces commentaires sur leur propre ligne.
+
+### Décisions du 26/09 sur la qualité
+
+- **Badge de couverture** : statique, conservé.
+- **Écart de comportement de la PR `ci-qualite`, validé** : sur des cas qui ne se produisent pas dans l'usage actuel, les erreurs du projet remplacent les erreurs Python génériques :
+  - `LLMOutputError` au lieu d'`AttributeError` pour une réponse Mistral sans message ;
+  - `EmbeddingError` qui cite `EMBEDDING_CACHE_DIR` ;
+  - `RagStoreError`, `ThreadError`, `RuntimeError` et `TypeError` explicites dans les adaptateurs.
+- **Commentaires rejetés par ruff** (`8fbe5b6`) : les 8 commentaires placés après une parenthèse fermante sont remontés sur leur propre ligne, texte inchangé.
+
+### Audit planifié
+
+- `schedule` dans `ci.yml` : chaque lundi à 7 h 17, heure de Paris. C'est après Dependabot (6 h), et hors du début d'heure, que GitHub signale comme chargé.
+- Syntaxe `cron` et `timezone` lue dans la source de la documentation de GitHub. Un déclenchement planifié tourne sur le dernier commit de la branche par défaut.
+- Seul `audit` tourne sur ce déclenchement : `lint`, `types` et `tests` portent `if: github.event_name != 'schedule'`. Le job d'audit reste défini une seule fois.
+- Un échec planifié rend rouge le badge CI de `main` : une faille connue y est alors présente.
+- **Limite documentée** : sur un dépôt public, GitHub désactive un déclenchement planifié après 60 jours sans activité.
+
+### types-PyYAML
+
+- **`types-PyYAML`** (stubs de typeshed, 6.0.12.20260906) ajouté en dépendance de développement (décision du 26/09).
+- **Exception mypy retirée** : `ignore_missing_imports` sur `yaml`. mypy ne signale aucune nouvelle erreur, car `yaml.safe_load` est typé comme rendant `Any`, et ce qu'il rend est validé par pydantic.
+- **Vérifié que les stubs sont lus**, sur un fichier d'essai hors du dépôt : `yaml.safe_load(1)` est refusé par mypy (`arg-type`, type attendu `str | bytes | SupportsRead[…]`). Contrôle sans les stubs : mypy s'arrête à `import-untyped`. Une première tentative par `mypy -c` n'avait pas tourné, car `files` dans `pyproject.toml` l'interdit.
+
+### Image PostgreSQL : même empreinte en local et en CI
+
+- **Décision du 26/09** : pas de Dependabot sur l'image. Sa mise à jour reste manuelle et délibérée.
+- **`tests/test_ci.py`** lit `docker-compose.yml` et le workflow, puis vérifie deux choses :
+  - chaque image est figée par empreinte (`nom@sha256:` suivi de 64 caractères hexadécimaux) ;
+  - l'empreinte et le nom de l'image sont les mêmes dans les deux fichiers.
+- **Vérifié** : un seul caractère changé dans l'empreinte du workflow fait échouer le test, avec les deux empreintes dans le message. Le workflow est ensuite restauré à l'identique.
+
+### Incident Cursor : `.vscode/` et le commit `6f44be2`
+
+- **`6f44be2`** (« chore(ide): interpréteur Python du .venv pour l'IDE et Pylint », 23/09 17:24, ajoute `.vscode/settings.json`) existe dans la base d'objets locale. Aucune branche ne le contient, ni locale, ni distante (`git branch -a --contains`).
+- **Il ne tient qu'au reflog local**, tout comme son parent `bd05d45`. GitHub ne le connaît pas (API : « No commit found »). Il disparaîtra au prochain `git gc`, une fois l'entrée du reflog expirée (30 jours par défaut, `gc.reflogExpireUnreachable` non réglé).
+- **Le même changement a été refait** en `f6dfdf8`, puis retiré par `0a58fc1` (« chore : retire .vscode du dépôt »). Les deux sont dans l'historique de `main`, ce que montre `git log --all --full-history -- .vscode`. Sans `--full-history`, la simplification de l'historique les masque derrière le commit de fusion du J2. Le fichier ne contenait que les chemins de l'interpréteur (`${workspaceFolder}/.venv/bin/python`), aucune donnée personnelle.
+- **Aucune branche à supprimer.** `.vscode/` est dans `.gitignore`, et `git ls-files .vscode` ne liste rien.
+- **Branches restantes** : `ci` et `phase1-j3` (locales et distantes) sont fusionnées dans `main`. Elles ne sont pas concernées par l'incident et n'ont pas été touchées.
+
+### uv sur le poste de développement
+
+- **Installation** : `which -a uv` ne donne que le shim de pyenv (`~/.pyenv/shims/uv`). `pyenv which uv` donne `~/.pyenv/versions/3.11.7/bin/uv` : uv 0.6.10 installé **par pip** (`INSTALLER` = `pip`) dans le Python 3.11.7 global de pyenv. Il n'y en a aucune autre installation (Homebrew, conda, pipx, `~/.local/bin`, `~/.cargo/bin`).
+- **Pourquoi `uv self update` ne fait rien** : la documentation d'uv (« Upgrading uv ») indique qu'installé par un autre moyen que l'installateur autonome, uv désactive la mise à jour par lui-même ; il faut passer par le gestionnaire qui l'a installé.
+- **Commande** : `~/.pyenv/versions/3.11.7/bin/python -m pip install --upgrade "uv==0.12.19"`. La version 0.12.19 est la dernière publiée sur PyPI, le 25/09. L'interpréteur est désigné explicitement pour viser celui qui porte uv, quel que soit le Python actif de pyenv.
+- **D'ici là**, la CI garde uv 0.6.10.
+- **Ensuite** : épingler la nouvelle version dans la CI et la documentation, après avoir vérifié que `uv.lock` reste valide. À vérifier aussi : Dependabot met à jour le lock avec uv 0.11 (sa documentation). Un lock réécrit par uv 0.12 doit rester lisible par lui.
+
+### Observation : plantage natif intermittent à la sortie de pytest (macOS)
+
+- **Une fois**, sur une douzaine d'exécutions locales de la suite, le processus s'est terminé par `libc++abi: terminating due to uncaught exception of type std::__1::system_error: recursive_mutex lock failed: Invalid argument`. C'était après le résumé des tests, tous réussis.
+- **Pas reproduit** en 6 exécutions suivantes (605 réussites, code 0 à chaque fois), et jamais vu dans la CI (Linux).
+- **Cause non établie.** Piste : une bibliothèque native dont les fils d'exécution survivent à l'arrêt de l'interpréteur ; onnxruntime, chargé par `test_poids_absents_erreur_explicite_sans_telechargement`, serait le premier suspect. À suivre si cela se reproduit.
+- **Erreur de méthode** : le commit `67f09ac` a été fait sur une commande qui masquait le code de sortie de pytest (`| tail -1`). La suite a été vérifiée verte juste après. Désormais, le code de sortie est lu séparément.
+
+### uv 0.12.19 : poste et CI
+
+- **Poste** : mis à jour par le propriétaire du repo (`~/.pyenv/versions/3.11.7/bin/python -m pip install --upgrade "uv==0.12.19"`). `uv --version` donne 0.12.19.
+- **`uv.lock` vérifié avec 0.12.19**, avant l'épinglage :
+  - `uv lock --check` passe ;
+  - `uv lock` sans changement ne réécrit pas le fichier, qui reste en révision 1, donc aucun diff ;
+  - `uv sync --locked` passe, puis toutes les vérifications de la CI : ruff, mypy, 605 tests avec une couverture de 96,81 %, `uv export` et pip-audit sans faille connue.
+- **Compatibilité avec Dependabot (uv 0.11)**, testée sur une copie du dépôt : une mise à jour faite par uv 0.12.19 (`ruff` 0.16.8 → 0.16.9) réécrit le lock en révision 3, et uv 0.11.33 le relit (`uv lock --check`, `uv sync --locked`). Dans l'autre sens, uv 0.11 écrit aussi la révision 3 (essai précédent), que lit uv 0.12.
+- **Épinglage** : `version: "0.12.19"` dans les quatre jobs du workflow ; CLAUDE.md et la spec sont mis à jour.
+

@@ -36,20 +36,26 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `uv sync` : installe les dépendances
 - `uv run python -m cdg.cli setup-db` : tables du checkpointer et droits d'app_role (une fois, après `docker compose up -d`)
 - `uv run pytest` : lance les tests (ceux marqués `pg` exigent PostgreSQL ; `-m "not pg"` pour les exclure volontairement)
+- `uv run pytest --cov` : tests avec couverture (lignes et branches) ; échoue sous le seuil `fail_under` de `pyproject.toml`
 - `uv run pytest --llm -m llm` : tests avec le vrai modèle (payants, 5 réussites sur 5, résultat consigné au journal)
-- `uv run ruff format` : formate le code (line-length 100)
+- `uv run ruff format` : formate le code (line-length 88, valeur par défaut de Ruff et de Black) ; un reformatage massif va dans son propre commit, ajouté à `.git-blame-ignore-revs`
 - `uv run ruff check` : lint (jeu de règles par défaut de ruff 0.16) ; doit passer avant chaque commit
+- `uv run mypy` : vérification des types (strict sur `domain/`, `ports/`, `application/`) ; doit passer avant chaque commit
 - `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify)
 
 ## Intégration continue
 
-`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.6.10 avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
+`.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request, plus un audit hebdomadaire. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.12.19 (la version du poste de développement) avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
 - **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
-- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris.
+- **Job `types`** : mypy, configuré dans `pyproject.toml` : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`, plugin pydantic. Tout le projet est installé : mypy lit les types des bibliothèques.
+- **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`). Il tourne aussi chaque lundi à 7 h 17 (heure de Paris) sur `main`, seul job de ce déclenchement planifié : une faille publiée entre deux commits est vue sans attendre le suivant. GitHub désactive un déclenchement planifié après 60 jours sans activité sur un dépôt public.
+- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris, avec la couverture (`pytest --cov`, lignes et branches) : le job échoue sous le seuil `fail_under` de `pyproject.toml` (96 %, pour 96,81 % mesurés le 26/09). Le badge de couverture du README est statique et affiche ce seuil ; `tests/test_couverture.py` échoue s'il en diverge.
+- **Dependabot** (`.github/dependabot.yml`) : chaque lundi à 6 h (heure de Paris), pull requests de mise à jour des dépendances Python (`uv.lock`) et des actions GitHub (empreintes et commentaires de version). Chacune passe par la CI.
+- **Image PostgreSQL + pgvector** : hors de Dependabot, sa mise à jour reste manuelle et délibérée. `tests/test_ci.py` échoue si elle n'est pas figée par empreinte, ou si l'empreinte diffère entre `docker-compose.yml` et le workflow.
 - **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
 - **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
 - **Pas de `.env`** : la CI ne définit que les variables de la base jetable. Un test qui dépend en silence de l'environnement du poste y échoue : on corrige le test, on ne l'exclut pas.
 
 ## Stack
 
-Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, mistralai, anthropic, fastembed, pytest, ruff (dev), Docker Compose.
+Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, mistralai, anthropic, fastembed, pytest, pytest-cov, ruff, mypy et types-PyYAML (dev), pip-audit (groupe audit), Docker Compose.

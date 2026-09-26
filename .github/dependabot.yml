@@ -1,0 +1,23 @@
+# Mises à jour hebdomadaires : dépendances Python (uv.lock) et actions GitHub des workflows.
+# Chaque pull request de Dependabot passe par la CI (lint, types, audit, tests).
+version: 2
+updates:
+  - package-ecosystem: "uv" # pyproject.toml et uv.lock
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    commit-message:
+      prefix: "Dépendances : " # l'espace final évite le deux-points ajouté par Dependabot
+
+  - package-ecosystem: "github-actions" # .github/workflows ; empreintes et commentaires de version
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    commit-message:
+      prefix: "CI : "

@@ -103,9 +103,13 @@ def test_conformite_donnees_sans_accord_de_traitement_bloque():
     assert v.score == 1.0
 
 
-@pytest.mark.parametrize("donnees,accord", [(None, None), (ABSENT, ABSENT), (ABSENT, None)])
+@pytest.mark.parametrize(
+    "donnees,accord", [(None, None), (ABSENT, ABSENT), (ABSENT, None)]
+)
 def test_conformite_sans_blocage(donnees, accord):
-    v = run("conformite", donnees_personnelles=donnees, accord_traitement_donnees=accord)
+    v = run(
+        "conformite", donnees_personnelles=donnees, accord_traitement_donnees=accord
+    )
     assert not v.hard_block
 
 
@@ -130,7 +134,9 @@ def test_transfert_encadre_ou_absent_sans_penalite(category):
 
 
 def test_clauses_ad_hoc_sans_autorisation_penalite_et_constat():
-    v = run("conformite", categories={"transfert_hors_ue": "clauses_contractuelles_ad_hoc"})
+    v = run(
+        "conformite", categories={"transfert_hors_ue": "clauses_contractuelles_ad_hoc"}
+    )
     assert (v.hard_block, v.score) == (False, 0.7)
     expected = (
         "autorisation de l'autorité de contrôle à vérifier : transfert hors UE fondé sur des "
@@ -144,7 +150,9 @@ def test_categories_a_verifier_lues_dans_la_configuration():
     data["rules"]["conformite"]["transfer_authorization_to_verify"] = []
     cfg = DecisionConfig.model_validate(data)
     v = run(
-        "conformite", config=cfg, categories={"transfert_hors_ue": "clauses_contractuelles_ad_hoc"}
+        "conformite",
+        config=cfg,
+        categories={"transfert_hors_ue": "clauses_contractuelles_ad_hoc"},
     )
     assert v.hard_block  # ni garantie reconnue, ni catégorie à vérifier : prudence
 
@@ -218,9 +226,17 @@ def test_seuils_lus_dans_la_configuration():
 
 def test_score_borne_a_zero():
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
-    data["rules"]["operationnel"] |= {"commitment_score_penalty": 0.8, "notice_score_penalty": 0.8}
+    data["rules"]["operationnel"] |= {
+        "commitment_score_penalty": 0.8,
+        "notice_score_penalty": 0.8,
+    }
     cfg = DecisionConfig.model_validate(data)
-    assert run("operationnel", config=cfg, duree_engagement=48, preavis_resiliation=12).score == 0.0
+    assert (
+        run(
+            "operationnel", config=cfg, duree_engagement=48, preavis_resiliation=12
+        ).score
+        == 0.0
+    )
 
 
 @pytest.mark.parametrize("domain", DOMAINS)
@@ -231,7 +247,9 @@ def test_clause_attendue_manquante_leve_une_erreur(domain):
 
 
 def test_clause_en_double_leve_une_erreur():
-    doubled = clauses() + [Clause(kind="revision_prix", present=True, quote="bis", value=1.0)]
+    doubled = clauses() + [
+        Clause(kind="revision_prix", present=True, quote="bis", value=1.0)
+    ]
     with pytest.raises(ValueError, match="revision_prix"):
         RULES["financier"](doubled, CONFIG)
 
@@ -262,7 +280,11 @@ def delay(value, basis="date_facture"):
         (50, "date_facture", 1.0),  # 50 jours date de facture : conforme
         (50, "fin_de_mois", 0.8),  # 50 jours fin de mois : non conforme
         (45, "facture_periodique", 1.0),
-        (46, "facture_periodique", 0.8),  # conforme en date de facture, pas en facture périodique
+        (
+            46,
+            "facture_periodique",
+            0.8,
+        ),  # conforme en date de facture, pas en facture périodique
     ],
 )
 def test_financier_delai_de_paiement_selon_son_point_de_depart(value, basis, score):
@@ -275,9 +297,7 @@ def test_financier_delai_de_paiement_selon_son_point_de_depart(value, basis, sco
             "facture_periodique": "après une facture périodique",
         }[basis]
         limit = 60 if basis == "date_facture" else 45
-        expected = (
-            f"délai non conforme, à renégocier : {value} jours {label}, au-delà de {limit} jours"
-        )
+        expected = f"délai non conforme, à renégocier : {value} jours {label}, au-delà de {limit} jours"
         assert texts(v) == [expected]
 
 
@@ -344,7 +364,12 @@ def test_financier_seuil_des_factures_periodiques_dans_la_configuration():
             [("responsabilite_fournisseur", "penalite")],
         ),
         ("financier", {"revision_prix": None}, {}, [("revision_prix", "blocage")]),
-        ("financier", {"penalites_execution": ABSENT}, {}, [("penalites_execution", "penalite")]),
+        (
+            "financier",
+            {"penalites_execution": ABSENT},
+            {},
+            [("penalites_execution", "penalite")],
+        ),
         ("financier", {"delai_paiement": 90}, {}, [("delai_paiement", "penalite")]),
         (
             "financier",
@@ -352,7 +377,12 @@ def test_financier_seuil_des_factures_periodiques_dans_la_configuration():
             {"delai_paiement": None},
             [("delai_paiement", "penalite")],
         ),
-        ("financier", {"delai_paiement": ABSENT}, {}, [("delai_paiement", "information")]),
+        (
+            "financier",
+            {"delai_paiement": ABSENT},
+            {},
+            [("delai_paiement", "information")],
+        ),
         (
             "conformite",
             {"accord_traitement_donnees": ABSENT},
@@ -377,9 +407,24 @@ def test_financier_seuil_des_factures_periodiques_dans_la_configuration():
             {"transfert_hors_ue": "aucune_garantie"},
             [("transfert_hors_ue", "blocage")],
         ),
-        ("conformite", {"transfert_hors_ue": ABSENT}, {}, [("transfert_hors_ue", "penalite")]),
-        ("operationnel", {"duree_engagement": 48}, {}, [("duree_engagement", "penalite")]),
-        ("operationnel", {"preavis_resiliation": None}, {}, [("preavis_resiliation", "penalite")]),
+        (
+            "conformite",
+            {"transfert_hors_ue": ABSENT},
+            {},
+            [("transfert_hors_ue", "penalite")],
+        ),
+        (
+            "operationnel",
+            {"duree_engagement": 48},
+            {},
+            [("duree_engagement", "penalite")],
+        ),
+        (
+            "operationnel",
+            {"preavis_resiliation": None},
+            {},
+            [("preavis_resiliation", "penalite")],
+        ),
     ],
 )
 def test_chaque_constat_rattache_a_sa_clause_avec_son_effet(
@@ -392,7 +437,9 @@ def test_chaque_constat_rattache_a_sa_clause_avec_son_effet(
 def test_clauses_a_justifier_et_clauses_qui_exigent_une_reference():
     v = run("financier", penalites_execution=ABSENT, delai_paiement=ABSENT)
     assert v.kinds_to_justify() == ["penalites_execution", "delai_paiement"]
-    assert v.kinds_requiring_reference() == ["penalites_execution"]  # le délai informe seulement
+    assert v.kinds_requiring_reference() == [
+        "penalites_execution"
+    ]  # le délai informe seulement
 
 
 def test_clause_a_justifier_une_seule_fois():

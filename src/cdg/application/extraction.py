@@ -55,7 +55,8 @@ class LLMExtractor:
 
     def _token(self, raw_text: str) -> str:
         token = self._boundary()
-        while token in raw_text:  # un jeton déjà présent dans le texte serait falsifiable
+        # un jeton déjà présent dans le texte serait falsifiable
+        while token in raw_text:
             token = self._boundary()
         return token
 

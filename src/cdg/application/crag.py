@@ -22,7 +22,7 @@ les résultats.
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, StringConstraints
 
@@ -81,7 +81,11 @@ _SUBJECTS = {
     "duree_engagement": ("durée d'engagement", "mois", "non chiffrée"),
     "preavis_resiliation": ("préavis de résiliation", "mois", "non chiffré"),
     "donnees_personnelles": ("traitement de données à caractère personnel", None, None),
-    "accord_traitement_donnees": ("accord de sous-traitance des données personnelles", None, None),
+    "accord_traitement_donnees": (
+        "accord de sous-traitance des données personnelles",
+        None,
+        None,
+    ),
     "transfert_hors_ue": (
         "transfert de données personnelles hors de l'Union européenne",
         None,
@@ -133,7 +137,12 @@ def _describe(clause: Clause) -> str:
         detail = "clause absente"
     elif clause.value is None:
         # catégorie seule (transfert), sinon sens d'une valeur nulle
-        detail = _CATEGORY_LABELS.get(clause.category) or none_label or "clause présente"
+        category = (
+            _CATEGORY_LABELS.get(clause.category)
+            if clause.category is not None
+            else None
+        )
+        detail = category or none_label or "clause présente"
     else:
         detail = f"{clause.value:g} {unit}"
         if clause.category is not None:  # point de départ d'un délai de paiement
@@ -159,7 +168,7 @@ def start(domain: Domain, clause: Clause, analysis_date: date) -> CragState:
     }
 
 
-def retrieve(state: CragState, retriever: Retriever, top_k: int) -> dict:
+def retrieve(state: CragState, retriever: Retriever, top_k: int) -> dict[str, Any]:
     docs = retriever.search(state["domain"], state["query"], k=top_k)
     return {
         "docs": docs,
@@ -183,7 +192,7 @@ def _node(state: CragState, step: str) -> str:
     return f"crag_{step}:{state['domain']}:{state['clause'].kind}"
 
 
-def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
+def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict[str, Any]:
     """Juge de pertinence (modèle léger) ; sans extrait, aucun appel au juge."""
     docs, usage, relevant = state["docs"], state["usage"], []
     if docs:
@@ -195,7 +204,9 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
             node=_node(state, "grade"),
         )
         numbers = output.relevant
-        if len(set(numbers)) != len(numbers) or not all(1 <= n <= len(docs) for n in numbers):
+        if len(set(numbers)) != len(numbers) or not all(
+            1 <= n <= len(docs) for n in numbers
+        ):
             raise LLMOutputError(
                 f"juge CRAG ({state['domain']}, {state['clause'].kind}) : numéro d'extrait "
                 "invalide ou répété : "
@@ -207,7 +218,7 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
     return {"relevant": relevant, "route": route, "usage": usage}
 
 
-def rewrite(state: CragState, llm: LLMProvider) -> dict:
+def rewrite(state: CragState, llm: LLMProvider) -> dict[str, Any]:
     """Nouvelle requête (modèle léger), à partir des seules requêtes déjà essayées."""
     tried = "\n".join(f"- {q}" for q in state["queries"])
     subject, label = _SUBJECTS[state["clause"].kind][0], DOMAIN_LABELS[state["domain"]]
@@ -221,15 +232,20 @@ def rewrite(state: CragState, llm: LLMProvider) -> dict:
     return {"query": output.query, "usage": [*state["usage"], used]}
 
 
-def generate(state: CragState) -> dict:
+def generate(state: CragState) -> dict[str, Any]:
     """Références retenues pour la clause, sans LLM ; les versions expirées sont signalées,
     jamais retenues."""
-    on, relevant, kind = state["analysis_date"], state.get("relevant", []), state["clause"].kind
+    on, relevant, kind = (
+        state["analysis_date"],
+        state.get("relevant", []),
+        state["clause"].kind,
+    )
     valid = [p for p in relevant if not expired(p.valid_until, on)]
     retained = list(dict.fromkeys(p.reference for p in valid))
     old: dict[str, date] = {}
     for p in relevant:
-        if expired(p.valid_until, on):
+        # sans fin : jamais expiré
+        if p.valid_until is not None and expired(p.valid_until, on):
             old.setdefault(p.reference, p.valid_until)
     findings = [
         f"référence expirée à la date d'analyse ({on.isoformat()}) : {reference}, "
@@ -248,7 +264,9 @@ def generate(state: CragState) -> dict:
         retained=retained,
         expired=list(old),
     )
-    return {"result": ClauseResult(trace=trace, findings=findings, usage=state["usage"])}
+    return {
+        "result": ClauseResult(trace=trace, findings=findings, usage=state["usage"])
+    }
 
 
 def combine(results: list[ClauseResult]) -> RetrievalResult:
@@ -270,5 +288,7 @@ def per_clause(
     Une clause hors du domaine ou répétée est une erreur explicite."""
     kinds = [c.kind for c in clauses]
     if len(set(kinds)) != len(kinds) or not set(kinds) <= set(DOMAIN_KINDS[domain]):
-        raise ValueError(f"CRAG {domain} : clauses hors du domaine ou répétées : {kinds}")
+        raise ValueError(
+            f"CRAG {domain} : clauses hors du domaine ou répétées : {kinds}"
+        )
     return combine([run_clause(start(domain, c, analysis_date)) for c in clauses])

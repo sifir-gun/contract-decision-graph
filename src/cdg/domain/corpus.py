@@ -15,12 +15,15 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from pydantic import BaseModel
 
 from cdg.domain.models import Domain
 
-FICHE_DISCLAIMER = "Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique."
+FICHE_DISCLAIMER = (
+    "Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique."
+)
 
 _MONTHS = {
     m: i
@@ -43,7 +46,9 @@ _MONTHS = {
     )
 }
 _DATE = r"(\d{1,2}(?:er)? [a-zéû]+ \d{4})"
-_VERSION = re.compile(rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE})$")
+_VERSION = re.compile(
+    rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE})$"
+)
 _AMENDMENT = re.compile(r"^(Modifié par|Création) (.+)$")
 _NOTE = re.compile(r"^Conformément (?:à|aux?) ")
 _INTERFACE = ("Voir les versions", "Comparer les versions", "Textes liés")
@@ -69,7 +74,9 @@ class Article:
     text: str
     valid_from: date | None = None
     valid_until: date | None = None
-    amendment: tuple[str, str] | None = None  # (modification | création, texte modificateur)
+    amendment: tuple[str, str] | None = (
+        None  # (modification | création, texte modificateur)
+    )
     note: str | None = None
     source_id: str = ""
     reference: str = ""
@@ -143,8 +150,12 @@ def chunk(text: str, max_words: int) -> list[str]:
             continue
         for sentence in re.split(r"(?<=[.;:])\s+", paragraph):
             words = sentence.split()
-            pieces += [" ".join(words[i : i + max_words]) for i in range(0, len(words), max_words)]
-    chunks, current = [], []
+            pieces += [
+                " ".join(words[i : i + max_words])
+                for i in range(0, len(words), max_words)
+            ]
+    chunks: list[str] = []
+    current: list[str] = []
     for piece in pieces:
         if current and len(" ".join(current + [piece]).split()) > max_words:
             chunks.append("\n\n".join(current))
@@ -160,7 +171,7 @@ def chunk(text: str, max_words: int) -> list[str]:
 
 @dataclass(frozen=True)
 class Manifest:
-    sources: dict
+    sources: dict[str, Any]
 
     def files(self) -> list[tuple[str, tuple[str, str]]]:
         return [
@@ -214,12 +225,16 @@ def fiche_sections(body: str) -> dict[str, list[str]]:
 def claim_lines(body: str) -> list[str]:
     """Lignes d'affirmation : tout sauf l'avertissement, les titres et les lignes vides."""
     return [
-        line for line in body.splitlines()[1:] if line.strip() and not line.lstrip().startswith("#")
+        line
+        for line in body.splitlines()[1:]
+        if line.strip() and not line.lstrip().startswith("#")
     ]
 
 
 def citations(line: str) -> list[tuple[str, str]]:
-    return [(m[1], m[2]) for block in _CITATION.findall(line) for m in _ONE.finditer(block)]
+    return [
+        (m[1], m[2]) for block in _CITATION.findall(line) for m in _ONE.finditer(block)
+    ]
 
 
 # --- Extrait à ingérer -------------------------------------------------------------------

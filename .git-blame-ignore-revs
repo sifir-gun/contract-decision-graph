@@ -1,0 +1,7 @@
+# Commits de reformatage massif, ignorés par git blame (GitHub les ignore d'office).
+# Localement : git config blame.ignoreRevsFile .git-blame-ignore-revs
+# Une empreinte complète par ligne ; ce fichier suppose une fusion par commit de fusion,
+# qui conserve ces empreintes dans l'historique de main.
+
+# style: longueur de ligne à 88 (ruff format et ruff check --fix sur tout le projet)
+f6f65eb1ba1441fd40300b9a667d1b99f9fa5e3a

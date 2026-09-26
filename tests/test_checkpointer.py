@@ -16,7 +16,11 @@ CONFIG = load_config()
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 # juridique 0,5 et opérationnel 0,7 : score 0,79, marge 0,04 < 0,05
 LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
-VALID = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "marge trop faible"}
+VALID = {
+    "decision": "NO_GO",
+    "reviewer": "relecteur-synth",
+    "reason": "marge trop faible",
+}
 
 
 def grants(pg, table: str) -> set[str]:
@@ -64,11 +68,18 @@ def test_setup_database_idempotent(pg):
 def test_4_cycle_complet_run_interrupt_resume_avec_app_role(pg, thread_id):
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
         out = graph.invoke(
-            {"contract_id": thread_id, "raw_text": CONTRACT_TEXT, "analysis_date": ANALYSIS_DATE},
+            {
+                "contract_id": thread_id,
+                "raw_text": CONTRACT_TEXT,
+                "analysis_date": ANALYSIS_DATE,
+            },
             thread(thread_id),
         )
         [pending] = out["__interrupt__"]
-        assert (pending.value["proposed_decision"], pending.value["margin"]) == ("GO", 0.04)
+        assert (pending.value["proposed_decision"], pending.value["margin"]) == (
+            "GO",
+            0.04,
+        )
 
     # nouvelle connexion : l'état suspendu est relu depuis PostgreSQL
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
@@ -84,7 +95,11 @@ def test_4_cycle_complet_run_interrupt_resume_avec_app_role(pg, thread_id):
 def test_app_role_ne_peut_pas_supprimer_un_thread(pg, thread_id):
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
         graph.invoke(
-            {"contract_id": thread_id, "raw_text": CONTRACT_TEXT, "analysis_date": ANALYSIS_DATE},
+            {
+                "contract_id": thread_id,
+                "raw_text": CONTRACT_TEXT,
+                "analysis_date": ANALYSIS_DATE,
+            },
             thread(thread_id),
         )
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -94,7 +109,9 @@ def test_app_role_ne_peut_pas_supprimer_un_thread(pg, thread_id):
 def test_texte_original_jamais_ecrit_en_base(pg, thread_id):
     original = CONTRACT_TEXT + "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89.\n"
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
-        orchestrator.run_contract(graph, thread_id, original, analysis_date=ANALYSIS_DATE)
+        orchestrator.run_contract(
+            graph, thread_id, original, analysis_date=ANALYSIS_DATE
+        )
     # colonnes binaires des writes et des blobs, JSON des checkpoints
     columns = {
         "checkpoint_blobs": "blob",

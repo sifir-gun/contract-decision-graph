@@ -9,6 +9,8 @@ import pytest
 from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
+from langgraph.pregel._retry import _should_retry_on  # règle de référence
+from langgraph.types import RetryPolicy
 
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
@@ -21,7 +23,9 @@ CONFIG = load_config()
 # reprises immédiates : les tests ne dorment pas
 FAST = CONFIG.model_copy(
     update={
-        "analyst_retry": CONFIG.analyst_retry.model_copy(update={"initial_interval_seconds": 0.0}),
+        "analyst_retry": CONFIG.analyst_retry.model_copy(
+            update={"initial_interval_seconds": 0.0}
+        ),
         "extraction_retry": CONFIG.extraction_retry.model_copy(
             update={"initial_interval_seconds": 0.0}
         ),
@@ -39,7 +43,9 @@ class FlakyCrag(FakeCrag):
     def __call__(self, domain, clauses, analysis_date):
         pending = self.errors.get(domain, [])
         if pending:
-            error = pending.pop(0) if len(pending) > 1 else pending[0]  # la dernière persiste
+            error = (
+                pending.pop(0) if len(pending) > 1 else pending[0]
+            )  # la dernière persiste
             if error is not None:
                 self.calls.append(domain)
                 raise error
@@ -52,14 +58,20 @@ def run(deps, config=FAST, contract_id="c-garde"):
     )
     thread = {"configurable": {"thread_id": contract_id}}
     graph.invoke(
-        {"contract_id": contract_id, "raw_text": CONTRACT_TEXT, "analysis_date": ANALYSIS_DATE},
+        {
+            "contract_id": contract_id,
+            "raw_text": CONTRACT_TEXT,
+            "analysis_date": ANALYSIS_DATE,
+        },
         thread,
     )
     return graph.get_state(thread)
 
 
 def deps(crag=None, extractor=None):
-    return Deps(extractor=extractor or FixedExtractor(clauses()), crag=crag or FakeCrag())
+    return Deps(
+        extractor=extractor or FixedExtractor(clauses()), crag=crag or FakeCrag()
+    )
 
 
 # --- Analystes : un en panne, les 3 autres verdicts gardés, escalade ----------------------
@@ -69,20 +81,34 @@ def test_un_analyste_en_panne_escalade_et_les_trois_autres_verdicts_sont_gardes(
     crag = FlakyCrag({"financier": [ValueError("index corrompu")]})
     snapshot = run(deps(crag))
     values = snapshot.values
-    assert sorted(v.domain for v in values["verdicts"]) == sorted(set(DOMAINS) - {"financier"})
+    assert sorted(v.domain for v in values["verdicts"]) == sorted(
+        set(DOMAINS) - {"financier"}
+    )
     [failure] = values["failures"]
     assert failure == NodeFailure(
-        node="analyst", domain="financier", error="ValueError", message="index corrompu", attempts=1
+        node="analyst",
+        domain="financier",
+        error="ValueError",
+        message="index corrompu",
+        attempts=1,
     )
-    assert (values["proposed_decision"], values["route"]) == ("ESCALADE", "human_review")
-    assert values["failure_report"] == {"stage": "noeuds", "failures": [failure.model_dump()]}
+    assert (values["proposed_decision"], values["route"]) == (
+        "ESCALADE",
+        "human_review",
+    )
+    assert values["failure_report"] == {
+        "stage": "noeuds",
+        "failures": [failure.model_dump()],
+    }
     assert values.get("final_decision") is None
     [pending] = snapshot.interrupts  # l'humain voit le rapport d'échec
     assert pending.value["failure_report"]["failures"][0]["domain"] == "financier"
 
 
 def test_erreur_transitoire_reprise_par_retry_policy_avant_la_garde():
-    crag = FlakyCrag({"financier": [ConnectionError("réseau"), ConnectionError("réseau"), None]})
+    crag = FlakyCrag(
+        {"financier": [ConnectionError("réseau"), ConnectionError("réseau"), None]}
+    )
     values = run(deps(crag)).values
     assert CONFIG.analyst_retry.max_attempts == 3
     assert crag.calls.count("financier") == 3  # deux échecs, puis la réussite
@@ -94,7 +120,11 @@ def test_erreur_transitoire_persistante_garde_apres_les_reprises():
     crag = FlakyCrag({"conformite": [ConnectionError("réseau")]})
     values = run(deps(crag)).values
     [failure] = values["failures"]
-    assert (failure.domain, failure.error, failure.attempts) == ("conformite", "ConnectionError", 3)
+    assert (failure.domain, failure.error, failure.attempts) == (
+        "conformite",
+        "ConnectionError",
+        3,
+    )
     assert crag.calls.count("conformite") == 3
     assert values["proposed_decision"] == "ESCALADE"
 
@@ -107,7 +137,9 @@ def test_erreur_non_transitoire_sans_reprise():
 
 
 def test_deux_analystes_en_panne_deux_echecs_cumules():
-    crag = FlakyCrag({"juridique": [ValueError("a")], "operationnel": [ValueError("b")]})
+    crag = FlakyCrag(
+        {"juridique": [ValueError("a")], "operationnel": [ValueError("b")]}
+    )
     values = run(deps(crag)).values
     assert sorted(f.domain for f in values["failures"]) == ["juridique", "operationnel"]
     assert len(values["verdicts"]) == 2
@@ -116,7 +148,9 @@ def test_deux_analystes_en_panne_deux_echecs_cumules():
 def test_blocage_dur_etabli_malgre_un_analyste_en_panne():
     # juridique bloque ; le financier en panne n'y change rien : NO_GO, rapport d'échec tracé
     crag = FlakyCrag({"financier": [ValueError("panne")]})
-    values = run(deps(crag, FixedExtractor(clauses(responsabilite_acheteur=None)))).values
+    values = run(
+        deps(crag, FixedExtractor(clauses(responsabilite_acheteur=None)))
+    ).values
     assert (values["proposed_decision"], values["final_decision"]) == ("NO_GO", "NO_GO")
     assert values["failure_report"]["stage"] == "noeuds"
     assert "margin" not in values  # agrégat incalculable sans les 4 verdicts
@@ -137,14 +171,19 @@ def test_extraction_en_panne_escalade_sans_analyste():
     [failure] = values["failures"]
     assert (failure.node, failure.error) == ("extract_clauses", "LLMOutputError")
     assert len(extractor.calls) == 1  # pas de reprise sur l'extraction
-    assert (values["proposed_decision"], values["route"]) == ("ESCALADE", "human_review")
+    assert (values["proposed_decision"], values["route"]) == (
+        "ESCALADE",
+        "human_review",
+    )
     assert crag.calls == [] and values["verdicts"] == []
 
 
 # --- Nœuds à plusieurs sorties : route vers l'humain ------------------------------------
 
 
-@pytest.mark.parametrize("node", ["validate_input", "verify_extraction", "decision_gate"])
+@pytest.mark.parametrize(
+    "node", ["validate_input", "verify_extraction", "decision_gate"]
+)
 def test_noeud_a_route_en_panne_escalade_vers_l_humain(monkeypatch, node):
     def broken(state, decision_config):
         raise RuntimeError(f"panne de {node}")
@@ -153,7 +192,10 @@ def test_noeud_a_route_en_panne_escalade_vers_l_humain(monkeypatch, node):
     snapshot = run(deps())
     values = snapshot.values
     assert [(f.node, f.error) for f in values["failures"]] == [(node, "RuntimeError")]
-    assert (values["proposed_decision"], values["route"]) == ("ESCALADE", "human_review")
+    assert (values["proposed_decision"], values["route"]) == (
+        "ESCALADE",
+        "human_review",
+    )
     assert values["failure_report"]["failures"][0]["message"] == f"panne de {node}"
     assert snapshot.next == ("human_review",)
 
@@ -180,7 +222,9 @@ def test_rejet_en_panne_echec_trace(monkeypatch):
 
     monkeypatch.setattr(orchestrator, "reject", broken)
     graph = orchestrator.build_graph(FAST, deps()).compile()
-    out = graph.invoke({"contract_id": "c", "raw_text": "  ", "analysis_date": ANALYSIS_DATE})
+    out = graph.invoke(
+        {"contract_id": "c", "raw_text": "  ", "analysis_date": ANALYSIS_DATE}
+    )
     assert [f.node for f in out["failures"]] == ["reject"]
 
 
@@ -274,7 +318,9 @@ def test_extraction_autre_erreur_sans_reprise(error):
 
 
 def test_quota_nul_consigne_des_la_premiere_tentative():
-    extractor = FlakyExtractor([LLMQuotaError("quota nul : vérifier l'offre du compte")])
+    extractor = FlakyExtractor(
+        [LLMQuotaError("quota nul : vérifier l'offre du compte")]
+    )
     values = run(deps(extractor=extractor)).values
     [failure] = values["failures"]
     assert (failure.node, failure.error, failure.attempts) == (
@@ -292,3 +338,29 @@ def test_quota_nul_jamais_repris_sur_un_analyste():
     values = run(deps(crag)).values
     assert crag.calls.count("financier") == 1
     assert values["failures"][0].attempts == 1
+
+
+# --- Règle de reprise de la garde : celle de LangGraph -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "retry_on",
+    [
+        ValueError,  # une classe
+        (ValueError, KeyError),  # une liste de classes
+        lambda exc: isinstance(exc, KeyError),  # un prédicat
+        RetryPolicy().retry_on,  # le prédicat par défaut de LangGraph
+    ],
+)
+@pytest.mark.parametrize(
+    "exc", [ValueError("v"), KeyError("k"), ConnectionError("c"), LLMQuotaError("q")]
+)
+def test_regle_de_reprise_identique_a_celle_de_langgraph(retry_on, exc):
+    # la garde décide comme la RetryPolicy : sinon elle consignerait trop tôt, ou jamais
+    policy = RetryPolicy(retry_on=retry_on)
+    assert orchestrator.retries(policy, exc) == _should_retry_on(policy, exc)
+
+
+def test_regle_de_reprise_classe_hors_exception_refusee():
+    with pytest.raises(TypeError, match="classe d'exception attendue"):
+        orchestrator.retries(RetryPolicy(retry_on=dict), ValueError())

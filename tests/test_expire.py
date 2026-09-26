@@ -20,7 +20,9 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 
 
 def suspend(graph, thread_id: str) -> datetime:
-    status = orchestrator.run_contract(graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
+    status = orchestrator.run_contract(
+        graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+    )
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
         graph.get_state({"configurable": {"thread_id": thread_id}}).created_at
@@ -72,13 +74,15 @@ def test_thread_termine_jamais_repris(pg, thread_id):
     deps = Deps(extractor=FixedExtractor(clauses()), crag=FakeCrag())  # GO direct
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         assert (
-            orchestrator.run_contract(g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)[
-                "statut"
-            ]
+            orchestrator.run_contract(
+                g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+            )["statut"]
             == "termine"
         )
         far = datetime.now(UTC) + timedelta(days=365)
-        assert orchestrator.expire_threads(g, DAY, now=far, thread_ids={thread_id}) == []
+        assert (
+            orchestrator.expire_threads(g, DAY, now=far, thread_ids={thread_id}) == []
+        )
 
 
 def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
@@ -87,7 +91,9 @@ def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
         graph, thread_id, {"decision": "ESCALADE", "reviewer": "r", "reason": "m"}
     )
     assert refused["statut"] == "suspendu"
-    [status] = orchestrator.expire_threads(graph, DAY, now=since + 2 * DAY, thread_ids={thread_id})
+    [status] = orchestrator.expire_threads(
+        graph, DAY, now=since + 2 * DAY, thread_ids={thread_id}
+    )
     assert status["final_decision"] == "NO_GO"
 
 

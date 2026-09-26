@@ -6,6 +6,7 @@ la proposition à l'état (route, clés écrites).
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from cdg.domain.config import DecisionConfig
 from cdg.domain.models import DOMAINS, AgentVerdict, Decision, NodeFailure, Usage
@@ -61,10 +62,12 @@ def aggregate(verdicts: list[AgentVerdict], config: DecisionConfig) -> Aggregate
         decision = "GO_RESERVES"
     else:
         decision = "NO_GO"
-    return Aggregate(decision=decision, score=score, margin=margin, hard_block=hard_block)
+    return Aggregate(
+        decision=decision, score=score, margin=margin, hard_block=hard_block
+    )
 
 
-def failure_report(failures: list[NodeFailure]) -> dict:
+def failure_report(failures: list[NodeFailure]) -> dict[str, Any]:
     """Rapport d'échec de nœud(s), captés par les gardes de l'orchestrateur."""
     return {"stage": "noeuds", "failures": [f.model_dump() for f in failures]}
 
@@ -76,14 +79,16 @@ class GateOutcome:
     proposed: Decision
     human_review: bool
     margin: float | None = None  # absente si l'agrégat est incalculable
-    failure_report: dict | None = None
+    failure_report: dict[str, Any] | None = None
 
     @property
     def final(self) -> Decision | None:
         return None if self.human_review else self.proposed
 
 
-def _hard_block(config: DecisionConfig, margin: float | None, report: dict | None) -> GateOutcome:
+def _hard_block(
+    config: DecisionConfig, margin: float | None, report: dict[str, Any] | None
+) -> GateOutcome:
     """1. NO_GO établi, marge ignorée ; un rapport d'échec (budget, nœuds) tracé quand même.
     Avec `hard_block_review`, NO_GO est seulement proposé : seul un humain peut le lever."""
     return GateOutcome(
@@ -111,14 +116,19 @@ def decide(
             report["budget"] = {"tokens": used, "limit": limit}
         if any(v.hard_block for v in verdicts):  # 1. le blocage établi suffit
             return _hard_block(config, None, report)
-        return GateOutcome(proposed="ESCALADE", human_review=True, failure_report=report)
+        return GateOutcome(
+            proposed="ESCALADE", human_review=True, failure_report=report
+        )
 
     d = aggregate(verdicts, config)
     if d.hard_block:  # 1. NO_GO établi, marge ignorée
         return _hard_block(config, d.margin, budget_report if over else None)
     if over:  # 3. budget
         return GateOutcome(
-            proposed="ESCALADE", human_review=True, margin=d.margin, failure_report=budget_report
+            proposed="ESCALADE",
+            human_review=True,
+            margin=d.margin,
+            failure_report=budget_report,
         )
     # 4. INSUFFISANT, 5. conflit, 6. seuils : déjà ordonnés par aggregate
     low_margin = rounded(d.margin) < rounded(config.min_margin)

@@ -52,7 +52,10 @@ def pg() -> Pg:
     try:
         admin, app = conninfo.admin_conninfo(), conninfo.app_conninfo()
     except settings.SettingsError as exc:
-        pytest.fail(f'tests PostgreSQL : {exc}. Exclusion volontaire : -m "not pg"', pytrace=False)
+        pytest.fail(
+            f'tests PostgreSQL : {exc}. Exclusion volontaire : -m "not pg"',
+            pytrace=False,
+        )
     try:
         psycopg.connect(admin, connect_timeout=3).close()
     except psycopg.OperationalError as exc:
@@ -63,7 +66,9 @@ def pg() -> Pg:
             pytrace=False,
         )
     checkpointer.setup_database(admin)  # idempotent : tables du checkpointer et droits
-    rag_store.setup(admin, load_config().embedding.dimension)  # migration 002, idempotente
+    rag_store.setup(
+        admin, load_config().embedding.dimension
+    )  # migration 002, idempotente
     return Pg(admin=admin, app=app)
 
 
