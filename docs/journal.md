@@ -1019,3 +1019,21 @@ Toutes sont corrigées sans `# type: ignore` et sans changer le comportement nom
 - **Domaines d'un extrait** : lus dans le manifeste et les fiches, ils sont validés par `ChunkRow.model_validate` au lieu du constructeur typé (même validation pydantic).
 - **Job `types`** dans la CI : tout le projet est installé, car mypy lit les types des bibliothèques.
 
+### Audit de sécurité des dépendances : pip-audit
+
+**Outil** : pip-audit 2.10.1, dernière version publiée, maintenue par la PyPA. Son README a été lu à cette étiquette.
+- **Pas de lecture de `uv.lock`** : `--locked` ne lit que `pyproject.toml` et `pylock.*.toml`. La voie documentée pour un projet déjà résolu est un fichier de requirements entièrement figé, avec les empreintes : `--require-hashes`, plus `--disable-pip`, qui évite toute résolution par pip.
+- **Codes de sortie documentés** : 0 sans faille connue, 1 si au moins une faille est trouvée. Le code de sortie ne peut pas être supprimé.
+- **Base consultée** : par défaut, les vulnérabilités publiées par l'API JSON de PyPI.
+
+**Mise en œuvre.**
+- Nouveau groupe de dépendances `audit` (`pip-audit`), figé dans `uv.lock` et installé seul dans le job (`uv sync --locked --only-group audit`) : ni le projet ni ses dépendances n'y sont installés.
+- `uv export --locked --all-groups --no-emit-project` : tous les groupes, sans le projet lui-même, qui n'est pas publié. Le résultat compte 104 paquets, avec leurs empreintes.
+- `pip-audit --require-hashes --disable-pip --strict` : `--strict` fait aussi échouer l'audit si un paquet est introuvable, plutôt que de le passer sous silence.
+
+**Vérifié** :
+- sur `uv.lock` : « No known vulnerabilities found », code 0 ;
+- sur `requests==2.19.1` : failles listées avec leur version corrigée, code 1.
+
+**Limite** : l'audit tourne sur chaque pull request et chaque push vers `main`. Une faille publiée entre deux commits n'est vue qu'au suivant. Un déclenchement planifié le couvrirait (non ajouté, à décider).
+

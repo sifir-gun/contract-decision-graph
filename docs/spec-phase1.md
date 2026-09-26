@@ -596,6 +596,7 @@ Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si
 `.github/workflows/ci.yml`, sur chaque push vers `main` et sur chaque pull request. Permissions minimales (`contents: read`) ; actions épinglées par empreinte de commit, version en commentaire ; uv 0.6.10 avec cache, installation stricte depuis `uv.lock` (`uv sync --locked`).
 - **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
 - **Job `types`** : mypy, configuré dans `pyproject.toml` : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`, plugin pydantic. Tout le projet est installé : mypy lit les types des bibliothèques.
+- **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`).
 - **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris.
 - **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
 - **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
@@ -685,7 +686,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - CRAG : domaines nommés par ce qu'ils couvrent (`crag.DOMAIN_LABELS`) dans la requête et dans les messages du juge et de la réécriture ;
   - critère 10 : seuil du taux d'aboutissement aux analystes à 4 sur 5 par contrat de mesure, l'invariant de sûreté restant à 5 sur 5 ;
   - intégration continue GitHub Actions (`.github/workflows/ci.yml`) : lint, puis toute la suite sur PostgreSQL + pgvector (image de `docker-compose.yml`), tests `llm` exclus ; badge dans le README ;
-  - vérification des types par mypy (job `types`) : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`.
+  - vérification des types par mypy (job `types`) : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py` ;
+  - audit de sécurité des dépendances de `uv.lock` par pip-audit (job `audit`), échec sur toute faille connue.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
