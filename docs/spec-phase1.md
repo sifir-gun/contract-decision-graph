@@ -526,13 +526,14 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `pytest-cov`, `ruff` (line-length 100) et `mypy` (dev), `pip-audit` (groupe `audit`), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `pytest-cov`, `ruff` (line-length 88) et `mypy` (dev), `pip-audit` (groupe `audit`), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/
 ├── CLAUDE.md
 ├── README.md
 ├── .env.example                # modèle des identifiants ; .env reste hors git
+├── .git-blame-ignore-revs      # commits de reformatage massif, ignorés par git blame
 ├── .github/
 │   ├── workflows/ci.yml        # CI : lint, types, audit, tests pg compris ; tests llm exclus
 │   └── dependabot.yml          # mises à jour hebdomadaires : uv, actions GitHub
@@ -709,7 +710,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - vérification des types par mypy (job `types`) : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py` ;
   - audit de sécurité des dépendances de `uv.lock` par pip-audit (job `audit`), échec sur toute faille connue ;
   - Dependabot : mises à jour hebdomadaires des dépendances Python (`uv`) et des actions GitHub ;
-  - couverture par pytest-cov (lignes et branches), seuil de 96 % en CI pour 96,81 % mesurés, badge statique du seuil dans le README.
+  - couverture par pytest-cov (lignes et branches), seuil de 96 % en CI pour 96,81 % mesurés, badge statique du seuil dans le README ;
+  - longueur de ligne à 88 (valeur par défaut de Ruff et de Black) : reformatage dans un commit à part, listé dans `.git-blame-ignore-revs`.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

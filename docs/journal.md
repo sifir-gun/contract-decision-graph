@@ -1077,3 +1077,12 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 
 **Badge.** Un badge dynamique demande un service tiers (Codecov, Coveralls : compte, application GitHub, parfois jeton) ou un droit d'écriture pour la CI (publication du badge) ; ces choix reviennent au propriétaire du repo. Le badge est donc statique (shields.io, format lu dans sa documentation) et affiche le seuil appliqué par la CI, « ≥ 96 % », pas la valeur mesurée. `tests/test_couverture.py` échoue si le badge et `fail_under` divergent.
 
+### Longueur de ligne à 88
+
+- **`pyproject.toml`** : `line-length = 88`, la valeur par défaut de Ruff et de Black.
+- **Commit à part, `f6f65eb`** (« style: longueur de ligne à 88 ») : réglage, `ruff format` et `ruff check --fix` sur tout le projet, rien d'autre. 60 fichiers reformatés, dont les blocs Python de la spec : ruff formate aussi le Markdown. `ruff check --fix` n'a rien changé, car ses règles par défaut n'incluent pas la longueur de ligne (E501).
+- **Vérifié après le reformatage** : ruff, mypy, 603 tests, couverture inchangée (96,81 %).
+- **`.git-blame-ignore-revs`**, à la racine, format lu dans la documentation de GitHub. GitHub l'applique d'office à sa vue *blame*. En local, il faut `git config blame.ignoreRevsFile .git-blame-ignore-revs` (option lue dans `git help config`), indiqué dans le README.
+- **Condition** : l'empreinte doit rester dans l'historique de `main`. C'est le cas avec une fusion par commit de fusion, la pratique du dépôt. Un *squash* la ferait disparaître.
+- **Sortie de ruff laissée telle quelle** : dans 8 cas, un commentaire de fin de ligne est rejeté après la parenthèse fermante d'une condition (`):  # …`). La lecture en souffre un peu. Un commit à part, non fait ici, pourrait remonter ces commentaires sur leur propre ligne.
+

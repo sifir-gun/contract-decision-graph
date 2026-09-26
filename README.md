@@ -28,6 +28,14 @@ uv run python -m cdg.cli resume <thread_id> --decision NO_GO --reviewer … --re
 
 `run` rend un statut JSON : décision proposée ou finale, verdicts par domaine avec le résumé du CRAG, rapport d'échec le cas échéant. Une revue humaine suspend le thread jusqu'à `resume`. `--analysis-date AAAA-MM-JJ` juge les versions des textes à une autre date que celle du jour.
 
+### Historique et `git blame`
+
+Les commits de reformatage massif (passage à 88 colonnes) sont listés dans `.git-blame-ignore-revs`. GitHub les ignore d'office dans sa vue *blame* ; en local, une commande par clone suffit :
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ## Architecture
 
 Architecture inspirée de l'architecture hexagonale (ports et adaptateurs), dans une version pragmatique :
