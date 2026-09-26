@@ -28,6 +28,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - Si l'API LangGraph installée diffère de la spec, consulte la documentation de la version installée, arrête-toi et signale l'écart avant de contourner quoi que ce soit.
 - N'ajoute aucune dépendance sans me le demander.
 - Petits commits, messages en français, un commit par tâche verte.
+- Avant chaque push : `./scripts/check.sh`, qui lance exactement les vérifications de la CI (un contrôle partiel, limité à `src tests`, a déjà laissé passer une ligne trop longue dans un bloc de code de la spec).
 - À la fin de chaque tâche : résume ce qui a été fait, ce qui reste, et les écarts avec la spec.
 
 ## Commandes
@@ -35,6 +36,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `docker compose up -d` : démarre PostgreSQL + pgvector (les migrations de `docker-entrypoint-initdb.d` ne s'exécutent que sur un volume vide)
 - `uv sync` : installe les dépendances
 - `uv run python -m cdg.cli setup-db` : tables du checkpointer et droits d'app_role, migrations idempotentes (`002` et suivantes) ; après `docker compose up -d`, et après l'ajout d'une migration
+- `./scripts/check.sh` : mêmes commandes et même périmètre que la CI (ruff format --check, ruff check, mypy, pip-audit, setup-db, pytest avec couverture), dans l'ordre des jobs ; avant chaque push. `tests/test_ci.py` échoue si ses commandes divergent de celles du workflow
 - `uv run pytest` : lance les tests (ceux marqués `pg` exigent PostgreSQL ; `-m "not pg"` pour les exclure volontairement)
 - `uv run pytest --cov` : tests avec couverture (lignes et branches) ; échoue sous le seuil `fail_under` de `pyproject.toml`
 - `uv run pytest --llm -m llm` : tests avec le vrai modèle (payants, 5 réussites sur 5, résultat consigné au journal)

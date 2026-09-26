@@ -1597,3 +1597,12 @@ README, « Limites connues » (décision du 26/09) :
 - **Synthèse écrite par le code** : pour le contrat 09, « Les règles n'ont proposé aucune décision et ont demandé une revue humaine, qui a tranché » ; la mention de convergence de la série 4 ne peut plus apparaître. Pour P1 : « Décision proposée par les règles et confirmée en revue humaine. Tentative d'instruction détectée dans le contrat : revue humaine obligatoire. »
 
 **Réserve.** Une série de 5 essais, à température 0, sur un seul contrat piégé, ne prouve pas la robustesse : elle montre que l'attaque de la série 4 est parée, par le prompt et par la détection, indépendamment. Les limites qui restent sont dans le README (« Limites connues »).
+
+### J4 : `scripts/check.sh`, les vérifications de la CI en local
+
+- **Incident** : le job lint de la CI a échoué sur les commits de la correction 3 à celui des limites du README. `ruff format --check` vérifie aussi les blocs de code Python des fichiers Markdown, et une ligne ajoutée au schéma `ContractState` de la spec dépassait 88 colonnes. En local, je ne lançais ruff que sur `src tests`. Corrigé dans `0c05508`.
+- **Script** (`scripts/check.sh`, décision du 26/09) : une seule installation (`uv sync --locked --all-groups`), puis, mot pour mot et dans l'ordre des jobs, les commandes de vérification du workflow : `ruff format --check`, `ruff check`, `mypy`, `uv export` puis `pip-audit`, `setup-db`, `pytest --cov`. `RUNNER_TEMP` y est un dossier temporaire. Écarts assumés, écrits en tête du script : une installation au lieu d'une par job ; la base de docker compose, déjà migrée, au lieu du script d'init du conteneur de service.
+- **Test** (`tests/test_ci.py`) : les commandes du script sont celles du workflow, dans le même ordre ; seules les installations (`uv sync`) et la migration dans le conteneur (`docker`) sont hors comparaison. Le script est exécutable et s'arrête au premier échec. Vérifié par mutation : restreindre `ruff format --check` à `src tests` dans le script fait échouer le test.
+- **Premier passage** : tout vert, 880 tests, couverture de 98,3 %, aucune faille connue.
+- Mentionné dans `CLAUDE.md` (façon de travailler, commandes) et dans le README.
+- **Limite 6 en phase 2** (décision du 26/09) : savoir quel nombre de la citation est la quantité de la clause.
