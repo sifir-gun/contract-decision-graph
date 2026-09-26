@@ -1037,3 +1037,25 @@ Toutes sont corrigées sans `# type: ignore` et sans changer le comportement nom
 
 **Limite** : l'audit tourne sur chaque pull request et chaque push vers `main`. Une faille publiée entre deux commits n'est vue qu'au suivant. Un déclenchement planifié le couvrirait (non ajouté, à décider).
 
+### Dependabot
+
+**Fait.** `.github/dependabot.yml`, deux écosystèmes :
+- **`uv`** : `pyproject.toml` et `uv.lock` ;
+- **`github-actions`** : `.github/workflows`.
+
+Réglages communs : chaque semaine, le lundi à 6 h, heure de Paris ; préfixes de commit « Dépendances : » et « CI : ».
+
+**Vérifié dans la documentation de GitHub** (source du dépôt `github/docs`) :
+- `uv` est un écosystème pris en charge, mis à jour par Dependabot avec uv v0.11, mises à jour de sécurité comprises ;
+- pour `github-actions`, `directory: "/"` couvre `.github/workflows` ;
+- `day`, `time` et `timezone` valent pour un intervalle hebdomadaire ;
+- un préfixe terminé par une espace évite le deux-points ajouté.
+
+**Compatibilité de `uv.lock`.** Dependabot réécrit le lock avec uv 0.11, alors que le poste et la CI sont en uv 0.6.10. Essai sur une copie du dépôt :
+- uv 0.11.33 met à jour `ruff` et réécrit le lock en révision 3 ;
+- uv 0.6.10 le relit : `uv lock --check`, puis `uv sync --locked` passent.
+
+Les pull requests de Dependabot ne casseront donc pas la CI pour une question de version d'uv. Aligner uv (poste, CI) sur une version récente reste à décider : Dependabot ne met pas à jour la version d'uv fixée dans le workflow, qui est une entrée d'action et non une dépendance.
+
+**Non couvert** : l'image PostgreSQL + pgvector, figée par empreinte dans `docker-compose.yml` et dans le workflow. Dependabot sait mettre à jour `docker-compose.yml`, mais pas l'image d'un conteneur de service : les deux empreintes divergeraient. Hors demande, à décider.
+

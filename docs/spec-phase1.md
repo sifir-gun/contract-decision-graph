@@ -516,7 +516,9 @@ contract-decision-graph/
 ├── CLAUDE.md
 ├── README.md
 ├── .env.example                # modèle des identifiants ; .env reste hors git
-├── .github/workflows/ci.yml    # CI : lint, tests pg compris ; tests llm exclus
+├── .github/
+│   ├── workflows/ci.yml        # CI : lint, types, audit, tests pg compris ; tests llm exclus
+│   └── dependabot.yml          # mises à jour hebdomadaires : uv, actions GitHub
 ├── docker-compose.yml          # postgres + pgvector
 ├── pyproject.toml
 ├── docs/
@@ -598,6 +600,7 @@ Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si
 - **Job `types`** : mypy, configuré dans `pyproject.toml` : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`, plugin pydantic. Tout le projet est installé : mypy lit les types des bibliothèques.
 - **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`).
 - **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris.
+- **Dependabot** (`.github/dependabot.yml`) : chaque lundi à 6 h (heure de Paris), pull requests de mise à jour des dépendances Python (`uv.lock`) et des actions GitHub (empreintes et commentaires de version). Chacune passe par la CI.
 - **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
 - **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
 - **Pas de `.env`** : la CI ne définit que les variables de la base jetable. Un test qui dépend en silence de l'environnement du poste y échoue : on corrige le test, on ne l'exclut pas.
@@ -687,7 +690,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - critère 10 : seuil du taux d'aboutissement aux analystes à 4 sur 5 par contrat de mesure, l'invariant de sûreté restant à 5 sur 5 ;
   - intégration continue GitHub Actions (`.github/workflows/ci.yml`) : lint, puis toute la suite sur PostgreSQL + pgvector (image de `docker-compose.yml`), tests `llm` exclus ; badge dans le README ;
   - vérification des types par mypy (job `types`) : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py` ;
-  - audit de sécurité des dépendances de `uv.lock` par pip-audit (job `audit`), échec sur toute faille connue.
+  - audit de sécurité des dépendances de `uv.lock` par pip-audit (job `audit`), échec sur toute faille connue ;
+  - Dependabot : mises à jour hebdomadaires des dépendances Python (`uv`) et des actions GitHub.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
