@@ -43,6 +43,7 @@ audit = [
 dev = [
     "mypy>=2.3.1",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.8",
 ]
 
@@ -82,3 +83,15 @@ ignore_missing_imports = true
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
+
+# Couverture (coverage.py, par pytest-cov) : mesurée en CI par `pytest --cov`, lignes et
+# branches du paquet cdg ; pytest-cov lit fail_under ici (pytest_cov/plugin.py, 7.1.0).
+[tool.coverage.run]
+source = ["cdg"]
+branch = true
+
+[tool.coverage.report]
+# juste sous la couverture mesurée le 26/09/2026 (96,81 %, lignes et branches, tests pg
+# compris) ; le badge du README affiche cette valeur (tests/test_couverture.py)
+fail_under = 96
+show_missing = true

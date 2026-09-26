@@ -36,6 +36,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `uv sync` : installe les dépendances
 - `uv run python -m cdg.cli setup-db` : tables du checkpointer et droits d'app_role (une fois, après `docker compose up -d`)
 - `uv run pytest` : lance les tests (ceux marqués `pg` exigent PostgreSQL ; `-m "not pg"` pour les exclure volontairement)
+- `uv run pytest --cov` : tests avec couverture (lignes et branches) ; échoue sous le seuil `fail_under` de `pyproject.toml`
 - `uv run pytest --llm -m llm` : tests avec le vrai modèle (payants, 5 réussites sur 5, résultat consigné au journal)
 - `uv run ruff format` : formate le code (line-length 100)
 - `uv run ruff check` : lint (jeu de règles par défaut de ruff 0.16) ; doit passer avant chaque commit
@@ -48,7 +49,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - **Job `lint`** : `ruff format --check` et `ruff check`, avec le seul groupe `dev` installé.
 - **Job `types`** : mypy, configuré dans `pyproject.toml` : strict sur `domain/`, `ports/` et `application/`, mode de base sur `adapters/` et `cli.py`, plugin pydantic. Tout le projet est installé : mypy lit les types des bibliothèques.
 - **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`).
-- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris.
+- **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris, avec la couverture (`pytest --cov`, lignes et branches) : le job échoue sous le seuil `fail_under` de `pyproject.toml` (96 %, pour 96,81 % mesurés le 26/09). Le badge de couverture du README est statique et affiche ce seuil ; `tests/test_couverture.py` échoue s'il en diverge.
 - **Dependabot** (`.github/dependabot.yml`) : chaque lundi à 6 h (heure de Paris), pull requests de mise à jour des dépendances Python (`uv.lock`) et des actions GitHub (empreintes et commentaires de version). Chacune passe par la CI.
 - **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
 - **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
@@ -56,4 +57,4 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 
 ## Stack
 
-Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, mistralai, anthropic, fastembed, pytest, ruff et mypy (dev), Docker Compose.
+Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, mistralai, anthropic, fastembed, pytest, pytest-cov, ruff et mypy (dev), pip-audit (groupe audit), Docker Compose.

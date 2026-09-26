@@ -1059,3 +1059,21 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 
 **Non couvert** : l'image PostgreSQL + pgvector, figée par empreinte dans `docker-compose.yml` et dans le workflow. Dependabot sait mettre à jour `docker-compose.yml`, mais pas l'image d'un conteneur de service : les deux empreintes divergeraient. Hors demande, à décider.
 
+### Couverture : pytest-cov
+
+**Fait.**
+- pytest-cov 7.1.0 (coverage.py 7.16.1) en dépendance de développement.
+- `[tool.coverage.run]` : `source = ["cdg"]`, `branch = true`. `[tool.coverage.report]` : `fail_under`, `show_missing`.
+- Le job `tests` lance `pytest --cov --cov-report=term`.
+- `.coverage` est ajouté au `.gitignore`.
+
+**Seuil.** La couverture mesurée est de **96,81 %**, en lignes et en branches, tests PostgreSQL compris (1 721 instructions, 350 branches). Le seuil est fixé à **96 %**, l'entier juste en dessous. Il vit dans `pyproject.toml` et non dans la ligne de commande : sans `--cov-fail-under`, pytest-cov lit `fail_under` dans la configuration de coverage.py. Ce n'est pas dit dans sa documentation, mais c'est vérifié dans le code installé, `pytest_cov/plugin.py`, ligne 270.
+
+**Parties les moins couvertes** :
+- `ports/audit_store.py` (0 %) : le port du J4, pas encore utilisé ;
+- `adapters/llm/__init__.py` (84 %) ;
+- `adapters/fastembed.py` (87 %) : chargement réel des poids ;
+- `cli.py` (91 %).
+
+**Badge.** Un badge dynamique demande un service tiers (Codecov, Coveralls : compte, application GitHub, parfois jeton) ou un droit d'écriture pour la CI (publication du badge) ; ces choix reviennent au propriétaire du repo. Le badge est donc statique (shields.io, format lu dans sa documentation) et affiche le seuil appliqué par la CI, « ≥ 96 % », pas la valeur mesurée. `tests/test_couverture.py` échoue si le badge et `fail_under` divergent.
+

@@ -9,6 +9,8 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+.coverage
+.coverage.*
 
 # Poids des modèles (EMBEDDING_CACHE_DIR)
 .cache/

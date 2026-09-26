@@ -126,5 +126,6 @@ jobs:
             bash -s < docker/initdb/00_migrate.sh
       - name: setup-db (tables du checkpointer, droits d'app_role)
         run: uv run --no-sync python -m cdg.cli setup-db
-      - name: Tests, tests pg compris (tests llm exclus par défaut)
-        run: uv run --no-sync pytest
+      - name: Tests, tests pg compris (tests llm exclus par défaut), couverture et seuil
+        # seuil : fail_under de [tool.coverage.report], lu par pytest-cov
+        run: uv run --no-sync pytest --cov --cov-report=term
