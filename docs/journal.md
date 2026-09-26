@@ -1606,3 +1606,30 @@ README, « Limites connues » (décision du 26/09) :
 - **Premier passage** : tout vert, 880 tests, couverture de 98,3 %, aucune faille connue.
 - Mentionné dans `CLAUDE.md` (façon de travailler, commandes) et dans le README.
 - **Limite 6 en phase 2** (décision du 26/09) : savoir quel nombre de la citation est la quantité de la clause.
+
+### J4 tâche 9 : documentation
+
+- **Spec** :
+  - arborescence à jour : `domain/audit.py` (rejeu compris), `explanation.py`, `instructions.py`, `text.py`, `application/explanation.py`, `adapters/postgres/migrations.py` et `audit_store.py`, `scripts/check.sh`, `docs/journal.md` ;
+  - commande `verify [--expect-head]` ; configuration (termes d'absence, motifs d'instruction, explication) ;
+  - ligne du J4 dans le tableau des jours ;
+  - limite de la cohérence valeur-citation en phase 2.
+- **README** :
+  - état de la phase 1 ;
+  - explication (synthèse du parcours écrite par le code) ;
+  - journal d'audit, vérification et rejeu (partie décision, `decision_hash`, `chain_hash`, `audit.replay`) ;
+  - rattachement déclaré et sa mesure ;
+  - jeu de démonstration, rédigé sans ambiguïté ;
+  - section « Contrat piégé : cinq couches de défense », avec les comportements du modèle simulés en test ;
+  - section « Résultats sur modèle réel » : les 5 séries, ce que chacune montre, et ce qu'elles ne prouvent pas (5 essais à température 0, un seul contrat piégé, contrats sans ambiguïté, un seul fournisseur, deux contrats de mesure) ;
+  - limites réorganisées.
+- **CLAUDE.md** :
+  - toute sortie de LLM contrôlée par du code, synthèse écrite par le code ;
+  - tentative d'instruction et couches de défense ;
+  - réglages de la configuration ;
+  - rattachement déclaré du corpus ;
+  - chaque règle déclenchée dans le jeu de démonstration ;
+  - journal d'audit jamais écrit par les tests ;
+  - tests `llm` ;
+  - `scripts/check.sh` avant chaque push.
+- **`docs/pr-j4.md`** : description de la PR 6, hors du dépôt (`.git/info/exclude`), comme les précédentes.

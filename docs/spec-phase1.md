@@ -558,11 +558,15 @@ contract-decision-graph/
 ├── docs/
 │   ├── spec-phase1.md          # ce document
 │   ├── adr-001-fan-out.md      # décision single vs multi, pattern, gates, NO_GO sur blocage dur seul
-│   └── adr-002-ports-et-adaptateurs.md  # couches, ports, règles de dépendance, écart assumé
+│   ├── adr-002-ports-et-adaptateurs.md  # couches, ports, règles de dépendance, écart assumé
+│   └── journal.md              # journal des décisions, des séries réelles et des pièges
 ├── config/
-│   └── decision.yaml           # poids, seuils, marge, budget, politique humaine
+│   └── decision.yaml           # poids, seuils, marge, budget, politique humaine, LLM,
+│                               # termes d'absence, motifs d'instruction, explication
 ├── docker/
 │   └── initdb/                 # script d'init : applique migrations/*.sql
+├── scripts/
+│   └── check.sh                # J4 : exactement les vérifications de la CI, avant chaque push
 ├── migrations/
 │   ├── 001_audit.sql           # J1 : extension vector, audit_decisions, app_role
 │   ├── 002_rag.sql             # J3 : rag_chunks, idempotente, lecture seule pour app_role
@@ -582,13 +586,17 @@ contract-decision-graph/
 │   │   ├── rules/              # une fonction par domaine, constats rattachés à leur clause
 │   │   ├── justification.py    # justification des constats par le corpus, statut du domaine
 │   │   ├── decision.py         # décision du gate (ordre, agrégat, marge, budget)
-│   │   ├── verification.py     # vérification de l'extraction (citations, types)
+│   │   ├── verification.py     # vérification de l'extraction : citations, types, absences
+│   │   │                       # évoquées, valeur dans la citation, citation hors consigne
+│   │   ├── text.py             # J4 : normalisation commune des textes
+│   │   ├── instructions.py     # J4 : détection des tentatives d'instruction (motifs)
+│   │   ├── explanation.py      # J4 : constats à expliquer, contrôles, gabarit, parcours
 │   │   ├── input_checks.py     # contrôle de l'entrée (taille, langue, résidus, date)
 │   │   ├── policy.py           # arbitrage humain, lu depuis la config
 │   │   ├── expiry.py           # expire : sélection pure, décision système NO_GO
 │   │   ├── masking.py          # masquage des données personnelles avant le graphe
 │   │   ├── corpus.py           # nettoyage (versions, notes, interface), découpage, fiches, ChunkRow
-│   │   └── audit.py            # J4 : canonical, seal, verify_chain
+│   │   └── audit.py            # J4 : forme canonique, empreintes, seal, verify_chain, replay
 │   ├── ports/                  # interfaces des dépendances externes ; n'importent que le domaine
 │   │   ├── llm.py              # LLMProvider
 │   │   ├── embedder.py         # Embedder
@@ -598,21 +606,23 @@ contract-decision-graph/
 │   │   ├── state.py            # état du graphe : ContractState, réducteurs, route, AnalystInput
 │   │   ├── nodes/              # un fichier par nœud : adaptation état -> domaine -> état
 │   │   ├── failures.py         # escalade d'un nœud à plusieurs sorties après un échec
-│   │   ├── deps.py             # dépendances injectées : Extractor, Crag, Deps (doublures en test)
+│   │   ├── deps.py             # dépendances injectées : Extractor, Crag, Explainer, Deps
 │   │   ├── extraction.py       # extraction LLM (modèle main), contrat délimité comme donnée
+│   │   ├── explanation.py      # J4 : explication LLM des constats (modèle main)
 │   │   ├── prompts/            # prompts système, sans règle de décision
 │   │   ├── crag.py             # fonctions pures du CRAG ; sous-graphe compilé dans l'orchestrateur
 │   │   └── ingestion.py        # lecture du corpus, extraits embarqués par le port Embedder
 │   └── adapters/               # chaque bibliothèque externe n'est importée que dans son adaptateur
 │       ├── langgraph/          # orchestrator.py (câblage, Send, interrupt, sous-graphe CRAG),
 │       │                       # checkpointer.py (PostgresSaver, sérialiseur strict)
-│       ├── postgres/           # conninfo.py, rag_store.py (corpus), audit_store.py (J4)
+│       ├── postgres/           # conninfo.py, migrations.py, rag_store.py (corpus),
+│       │                       # audit_store.py (J4 : verrou consultatif, ajout idempotent)
 │       ├── llm/                # fournisseurs mistral.py, anthropic.py, choisis par la config
 │       └── fastembed.py        # embedding local, préfixes e5, sans téléchargement implicite
 └── tests/
 ```
 
-CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `ingest` (identifiants administrateur, rejouable), `run <contrat> [--party …] [--contract-id …] [--analysis-date AAAA-MM-JJ]`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
+CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `ingest` (identifiants administrateur, rejouable), `run <contrat> [--party …] [--contract-id …] [--analysis-date AAAA-MM-JJ]`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify [--expect-head <empreinte>]`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
 
 Comportement de la CLI (J2) :
 - `run` refuse un thread existant, puisqu'un contrat correspond à un thread ;
@@ -661,7 +671,7 @@ Chaque jour se termine par un commit qui passe ses tests.
 | J1 | Compose Postgres, migration `001`, `.env.example`, schémas d'état, configuration validée, `orchestrator.py` avec nœuds bouchonnés (clauses fixes, CRAG en doublure, `human_review` passe-plat, `validate_input` minimal, `reject` câblé vers `audit_seal` bouchonné, sans checkpointer), fan-out `Send`, règles, `decision_gate` avec route, marge et budget | 1, 2 |
 | J2 | `PostgresSaver` avec sérialiseur verrouillé (types autorisés limités à nos modèles Pydantic) et droits sur ses tables, `interrupt()` et reprise, politique d'arbitrage, CLI `run` / `resume` / `history` / `expire`, étude de `error_handler` (LangGraph 1.2) pour qu'un échec de nœud produise un `failure_report` structuré | 4, 5, 11, 12 |
 | J3 | Ingestion du corpus, refonte en ports et adaptateurs, CRAG (fonctions pures dans `application/crag.py`, sous-graphe compilé dans `adapters/langgraph/orchestrator.py`), gardes d'échec de nœud (clé `failures`, escalade par `decision_gate`, `RetryPolicy` sur les analystes), `validate_input` complet (taille, langue, masquage), extraction réelle avec délimitation, `verify_extraction` : le contrat comme entrée non fiable | 3, 10 |
-| J4 | `explain` avec validation (rejeté s'il contredit le verdict, ou s'il cite un article absent des références effectivement récupérées, avec un test), `audit_seal`, `verify`, contrats de démonstration dont 2 piégés | 6, 7, 8, 9 |
+| J4 | `explain` avec validation (rejeté s'il contredit le verdict, ou s'il cite un article absent des références effectivement récupérées, avec un test), `audit_seal`, `verify`, contrats de démonstration dont 2 piégés. Réalisé, avec en plus : journal PostgreSQL et rejeu, rattachement déclaré du corpus, cinq couches de défense contre l'injection et l'omission (après la série 4), `scripts/check.sh` | 6, 7, 8, 9 |
 | J5 (tampon) | Répétitions sur modèle réel, ADR, README avec schéma, résultats et coût par contrat | Tous |
 
 Priorité si le temps manque : ne sacrifier ni J2, ni l'audit, ni le test d'injection. Le CRAG peut rester simplifié (une seule réécriture).
