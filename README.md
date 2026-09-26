@@ -91,6 +91,10 @@ Le sens des dépendances et le confinement de chaque bibliothèque dans son adap
 
 **Écart assumé : le flux vit dans le graphe.** Dans une architecture hexagonale stricte, le déroulé d'une analyse (validation, extraction, analystes, décision, arbitrage humain) serait un service de l'application, et LangGraph un simple exécutant. Ici, routes, fan-out et interruption sont câblés dans l'adaptateur LangGraph : c'est ce qui apporte checkpoints, reprise après interruption et historique par contrat. Les nœuds restent des fonctions pures, testables sans le framework ; changer d'orchestrateur voudrait dire réécrire le câblage, pas le domaine ni l'application. Détails : [docs/adr-002-ports-et-adaptateurs.md](docs/adr-002-ports-et-adaptateurs.md).
 
+### Souveraineté : embeddings sans appel réseau
+
+Le modèle d'embedding tourne en local (fastembed, ONNX) ; ses poids ne se téléchargent que par une commande explicite (`fetch-embedding-model`). onnxruntime, qui l'exécute, envoie par défaut de la télémétrie à Microsoft : l'adaptateur la coupe avant tout chargement (`ORT_DISABLE_TELEMETRY`). **L'absence de toute connexion sortante pendant le chargement du modèle et le calcul d'un embedding est vérifiée par un test** (`tests/test_embeddings.py`) : sur les vrais poids, dans un bac à sable macOS qui tue le processus à sa première connexion, qu'elle vienne de Python ou d'une bibliothèque native. Sans les poids (CI), le test est ignoré, explicitement. Les appels au fournisseur LLM de la configuration restent, eux, des appels réseau.
+
 ## Migrations
 
 Les fichiers `migrations/*.sql` sont appliqués par `docker/initdb/00_migrate.sh`, monté dans `docker-entrypoint-initdb.d`.

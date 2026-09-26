@@ -22,6 +22,8 @@ LIBRARIES = {
     "psycopg": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
     "pgvector": ("adapters/postgres/",),
     "fastembed": ("adapters/fastembed.py",),
+    # chargé par fastembed ; importé seulement pour en couper la télémétrie (J5)
+    "onnxruntime": ("adapters/fastembed.py",),
     "mistralai": ("adapters/llm/mistral.py",),
     "anthropic": ("adapters/llm/anthropic.py",),
 }

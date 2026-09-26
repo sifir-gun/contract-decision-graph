@@ -1703,3 +1703,25 @@ Correction de l'écart relevé au T1, avant la série réelle.
 - **Test** (`tests/test_donnees_fictives.py`) : tout courriel du dépôt (contrats, corpus rédigé, tests, sources, configuration, README, spec, journal) est sur un domaine réservé, et tout numéro de téléphone, repéré avec la même forme que le masquage (national, +33, 0033), est dans un bloc de l'Arcep. Le test échoue aussi si le motif ne trouve plus rien. Il a d'abord échoué sur 13 courriels et 11 numéros.
 - **Faux positif corrigé** : le jeton de balise d'un test du critère 9 commençait par les dix chiffres de 0 à 9, qui ont la forme d'un numéro de téléphone ; il devient `fedcba9876543210`, sans effet sur ce que le test vérifie. Le test a aussi refusé une première version de cette entrée du journal, qui recopiait l'ancien jeton.
 - `CLAUDE.md` et la spec le disent : données fictives dans les plages réservées.
+
+### J5 : télémétrie d'onnxruntime coupée (décision du 26/09)
+
+**Enquête.**
+- **Un garde-fou Python ne suffit pas.** Un chargement du modèle suivi d'un embedding, avec `socket.socket.connect` intercepté, ne montre aucune connexion. Pourtant les rapports de plantage montrent un client HTTP : celui de la télémétrie est natif (`onnxruntime_pybind11_state.so`) et ne passe pas par le module `socket` de Python.
+- **Au niveau du noyau**, le bac à sable de macOS (`sandbox-exec`, profil `deny network-outbound (remote ip)`) voit les tentatives : refusées vers le port 443, consignées dans le journal système. La première part de 5 à 20 secondes après le chargement du modèle : c'est une minuterie interne, pas l'appel lui-même. Avec l'action `(with send-signal SIGKILL)`, le processus est tué dès sa première tentative, ce qui donne une détection immédiate et sans lecture de journal. Un profil qui interdit aussi les sockets Unix locales tue Python dès son démarrage : le filtre `(remote ip)` est nécessaire.
+- **Source d'onnxruntime 1.30.0** (`core/platform/posix/telemetry.cc`, `core/platform/telemetry_environment.h`, dépôt officiel, étiquette v1.30.0) :
+  - destination : `https://mobile.events.data.microsoft.com/OneCollector/1.0` ;
+  - `disable_telemetry_events()` est une suppression « à l'exécution » qui laisse le module d'envoi actif : l'événement `ProcessInfo` part quand même (commentaire du code) ;
+  - la suppression complète, « process-wide and irreversible », a lieu à l'initialisation si `ORT_DISABLE_TELEMETRY` vaut 1, true, yes, on ou y, ou si une variable de CI est présente (`CI`, `GITHUB_ACTIONS`… 13 noms), ou `ORT_RUNNING_UNIT_TESTS` : ni module d'envoi, ni événement, ni identifiant d'appareil. D'où l'absence du plantage en CI ;
+  - un identifiant d'appareil et une base d'événements en attente sont conservés dans `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime` ; les événements non envoyés partent à l'exécution suivante. Sur ce poste : un identifiant créé le 24/09 (premier téléchargement des poids) et une base d'environ 1 Mo, laissés en place (suppression de données du poste : décision du propriétaire).
+- **Mesure, dans le bac à sable qui tue** (chargement, un embedding, puis 40 s d'attente) : télémétrie active, processus tué ; `disable_telemetry_events()` seul, tué aussi ; `ORT_DISABLE_TELEMETRY=1`, aucune tentative. La fonction demandée ne suffit pas seule ; la variable, si.
+
+**Correction** (`adapters/fastembed.py`) : `_without_telemetry()` pose `ORT_DISABLE_TELEMETRY=1`, importe onnxruntime et appelle `disable_telemetry_events()`, avant tout import de fastembed, pour l'analyse comme pour `fetch-embedding-model`. La variable est imposée, même si l'environnement en donnait une autre valeur. onnxruntime rejoint la table d'isolation : importé seulement dans cet adaptateur.
+
+**Tests** (`tests/test_embeddings.py`) :
+- l'adaptateur coupe la télémétrie avant l'import de fastembed, pour les deux chemins (doublures de fastembed et d'onnxruntime, en CI aussi) ;
+- **témoin** : le bac à sable tue un processus qui se connecte à 192.0.2.1 (adresse réservée à la documentation, RFC 5737) ; si le bac à sable cessait de bloquer, le témoin échouerait ;
+- **aucune connexion sortante** pendant le chargement des vrais poids et le calcul d'un embedding, puis 30 s d'attente, le temps de la minuterie de la télémétrie. Le processus fils ne reçoit ni les variables de CI ni `ORT_DISABLE_TELEMETRY` ni `HF_HUB_OFFLINE` : seul l'adaptateur peut couper la télémétrie. Rouge avant la correction (tué vers la 7e seconde), vert après. Ignoré explicitement sans les poids (CI) ou sans `sandbox-exec` (hors macOS). Coût : environ 35 s par exécution locale de la suite.
+- La demande parlait d'un blocage « au niveau des sockets » : le bac à sable agit sur l'appel système `connect` de tout le processus, code natif compris, ce qu'un blocage du module `socket` de Python ne ferait pas.
+
+**README** : section « Souveraineté : embeddings sans appel réseau ».

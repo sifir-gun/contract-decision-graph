@@ -7,6 +7,14 @@ onnxruntime >= 1.30 exige que les poids externes (`model.onnx_data`) soient dans
 dossier que `model.onnx` une fois les liens résolus ; le cache Hugging Face range chaque
 fichier dans un sous-dossier de blobs différent. D'où une copie « à plat » faite de liens
 physiques (aucun espace disque supplémentaire), chargée par `specific_model_path`.
+
+Aucun appel réseau (J5) : onnxruntime, chargé par fastembed, envoie par défaut de la
+télémétrie à Microsoft (mobile.events.data.microsoft.com), par son propre client HTTP. Sur
+macOS et Linux, seule la variable ORT_DISABLE_TELEMETRY, lue quand onnxruntime s'initialise,
+la coupe entièrement (ni envoi, ni identifiant d'appareil) ; disable_telemetry_events()
+laisse partir l'événement ProcessInfo (onnxruntime 1.30, core/platform/posix/telemetry.cc).
+Les deux sont appliqués avant tout import de fastembed ; un test le vérifie dans un bac à
+sable qui tue le processus à sa première connexion sortante.
 """
 
 import os
@@ -19,9 +27,18 @@ class EmbeddingError(Exception):
     """Poids absents, ou vecteur d'une dimension inattendue."""
 
 
+def _without_telemetry() -> None:
+    """Coupe la télémétrie d'onnxruntime ; à appeler avant tout import de fastembed."""
+    os.environ["ORT_DISABLE_TELEMETRY"] = "1"
+    import onnxruntime  # type: ignore[import-untyped]  # ni types ni paquet de types
+
+    onnxruntime.disable_telemetry_events()
+
+
 def _snapshot(
     config: EmbeddingConfig, cache_dir: Path, *, local_files_only: bool
 ) -> Path:
+    _without_telemetry()
     from fastembed import TextEmbedding
 
     description = TextEmbedding._get_model_description(config.model)
@@ -59,6 +76,7 @@ def materialize(snapshot: Path, flat: Path) -> None:
 
 
 def _load(config: EmbeddingConfig, cache_dir: Path, *, local_files_only: bool):
+    _without_telemetry()
     from fastembed import TextEmbedding
 
     flat = flat_dir(config, cache_dir)
