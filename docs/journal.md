@@ -889,3 +889,15 @@ Consommation de la série : environ 22 000 tokens du modèle principal et 51 000
 - **Seuil** : au moins 4 essais sur 5 aboutissent aux analystes, par contrat de mesure. L'invariant de sûreté (aucun analyste sur une citation non vérifiée) reste exigé à chaque essai : 5 sur 5.
 - **Test** : `test_10_taux_d_aboutissement_aux_analystes`, paramétré par contrat, défini après les essais et donc exécuté après eux ; il juge la série qui vient de tourner. Une série incomplète (essais désélectionnés ou interrompus) échoue explicitement, « taux non jugé ». 17 tests `llm` au lieu de 15.
 - **Vérifié sans réseau** : 5/5 et 4/5 passent, 3/5 échoue avec le taux et le seuil dans le message ; lancé seul, le test échoue sur une série vide.
+
+### J3 : domaines nommés par ce qu'ils couvrent dans le CRAG (décision du 26/09, point 2)
+
+- **`crag.DOMAIN_LABELS`**, dans la requête (« libellé ; sujet de la clause : valeur ») et dans les messages du juge et de la réécriture (« Domaine : libellé ») :
+  - financier : « conditions financières du contrat : prix, paiement, pénalités » (libellé de la décision) ;
+  - juridique : « responsabilité contractuelle des parties : plafonds de responsabilité » ;
+  - conformité : « protection des données personnelles : sous-traitance, transferts hors de l'Union européenne » ;
+  - opérationnel : « durée et fin du contrat : engagement, préavis de résiliation ».
+- **Les quatre noms sont jugés ambigus** : dans un corpus entièrement juridique, « juridique » ne dit rien du sujet ; « conformité » ne dit pas à quoi ; « opérationnel » peut désigner l'exploitation ou la logistique.
+- **Étendu au juge** (non demandé explicitement) : il recevait aussi « Domaine : financier », avec le même risque de lecture.
+- Les noms des nœuds de consommation gardent la clé du domaine (`crag_grade:financier:delai_paiement`).
+

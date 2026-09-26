@@ -7,7 +7,9 @@ compilé sans checkpointer dans `adapters/langgraph/orchestrator.py`, traite une
 `per_clause` l'applique à chaque type du domaine et `combine` rassemble les résultats.
 
 - La requête d'une clause est construite à partir de son seul type, de sa valeur et de sa
-  catégorie, jamais de sa citation : aucun texte du contrat n'atteint le CRAG.
+  catégorie, jamais de sa citation : aucun texte du contrat n'atteint le CRAG. Le domaine y
+  est nommé par ce qu'il couvre (`DOMAIN_LABELS`), comme dans les messages du juge et de la
+  réécriture.
 - generate n'appelle aucun LLM : il rassemble les références retenues pour la clause.
   Une référence dont la version a expiré à la date d'analyse est signalée et jamais
   retenue.
@@ -39,6 +41,20 @@ from cdg.ports.retriever import Passage, Retriever
 PROMPTS = Path(__file__).parent / "prompts"
 _GRADE_SYSTEM = (PROMPTS / "crag_grade_system.md").read_text(encoding="utf-8")
 _REWRITE_SYSTEM = (PROMPTS / "crag_rewrite_system.md").read_text(encoding="utf-8")
+
+# Domaines nommés par ce qu'ils couvrent, dans la requête et pour le juge et la réécriture :
+# le nom seul est ambigu (« financier » lu comme « services financiers », série 2 du
+# 25/09/2026 ; « juridique », « conformité » et « opérationnel » ne disent rien du sujet dans
+# un corpus juridique).
+DOMAIN_LABELS: dict[Domain, str] = {
+    "juridique": "responsabilité contractuelle des parties : plafonds de responsabilité",
+    "financier": "conditions financières du contrat : prix, paiement, pénalités",
+    "conformite": (
+        "protection des données personnelles : sous-traitance, transferts hors de l'Union "
+        "européenne"
+    ),
+    "operationnel": "durée et fin du contrat : engagement, préavis de résiliation",
+}
 
 # type de clause -> (sujet, unité de `value`, sens d'une valeur nulle) ; voir la spec,
 # « Règles par domaine »
@@ -124,8 +140,9 @@ def _describe(clause: Clause) -> str:
 
 
 def clause_query(domain: Domain, clause: Clause) -> str:
-    """Requête d'une clause : son type, sa valeur et sa catégorie, jamais sa citation."""
-    return f"{domain} : {_describe(clause)}"
+    """Requête d'une clause : son domaine, son type, sa valeur et sa catégorie, jamais sa
+    citation."""
+    return f"{DOMAIN_LABELS[domain]} ; {_describe(clause)}"
 
 
 def start(domain: Domain, clause: Clause, analysis_date: date) -> CragState:
@@ -155,7 +172,8 @@ def _grade_message(state: CragState) -> str:
         for n, p in enumerate(state["docs"], start=1)
     ]
     subject = _SUBJECTS[state["clause"].kind][0]
-    header = f"Domaine : {state['domain']}\nClause : {subject}\nRecherche : {state['query']}"
+    label = DOMAIN_LABELS[state["domain"]]
+    header = f"Domaine : {label}\nClause : {subject}\nRecherche : {state['query']}"
     return header + "\n\n" + "\n\n".join(blocks)
 
 
@@ -190,11 +208,11 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
 def rewrite(state: CragState, llm: LLMProvider) -> dict:
     """Nouvelle requête (modèle léger), à partir des seules requêtes déjà essayées."""
     tried = "\n".join(f"- {q}" for q in state["queries"])
-    subject = _SUBJECTS[state["clause"].kind][0]
+    subject, label = _SUBJECTS[state["clause"].kind][0], DOMAIN_LABELS[state["domain"]]
     output, used = llm.structured(
         tier="light",
         system=_REWRITE_SYSTEM,
-        user=f"Domaine : {state['domain']}\nClause : {subject}\nRequêtes déjà essayées :\n{tried}",
+        user=f"Domaine : {label}\nClause : {subject}\nRequêtes déjà essayées :\n{tried}",
         schema=RewriteOutput,
         node=_node(state, "rewrite"),
     )

@@ -39,13 +39,27 @@ def clause_of(kind, **overrides):
 # --- Requête d'une clause : son type, sa valeur, sa catégorie, jamais sa citation -----------
 
 
+FINANCIER = "conditions financières du contrat : prix, paiement, pénalités"
+
+
 def test_requete_construite_depuis_le_type_et_la_valeur():
     query = crag.clause_query("financier", clause_of("penalites_execution"))
     assert query == (
-        "financier : pénalités d'exécution à la charge du fournisseur : 10 % du montant du contrat"
+        f"{FINANCIER} ; pénalités d'exécution à la charge du fournisseur : "
+        "10 % du montant du contrat"
     )
     delay = crag.clause_query("financier", clause_of("delai_paiement"))
-    assert delay == "financier : délai de paiement par l'acheteur : 30 jours date de facture"
+    assert delay == f"{FINANCIER} ; délai de paiement par l'acheteur : 30 jours date de facture"
+
+
+def test_chaque_domaine_nomme_par_ce_qu_il_couvre():
+    # le nom seul est ambigu : « financier » lu comme « services financiers » (série 2)
+    assert set(crag.DOMAIN_LABELS) == set(DOMAINS)
+    assert crag.DOMAIN_LABELS["financier"] == FINANCIER
+    for domain, label in crag.DOMAIN_LABELS.items():
+        assert label != domain and ":" in label  # ce qu'il couvre, après son intitulé
+        kind = DOMAIN_KINDS[domain][0]
+        assert crag.clause_query(domain, clause_of(kind)).startswith(f"{label} ; ")
 
 
 def test_requete_limitee_a_sa_clause():
@@ -114,6 +128,7 @@ def test_grade_retient_les_extraits_pertinents():
     [call] = llm.calls
     assert call["tier"] == "light" and "Texte de B." in call["user"]
     assert "Clause : délai de paiement par l'acheteur" in call["user"]
+    assert f"Domaine : {FINANCIER}\n" in call["user"]
     assert out["usage"][-1].node == "crag_grade:financier:delai_paiement"
 
 
@@ -158,6 +173,8 @@ def test_rewrite_remplace_la_requete_de_la_clause():
     assert out["query"] == "indemnité forfaitaire de recouvrement"
     [call] = llm.calls
     assert call["tier"] == "light" and "q1" in call["user"] and "délai de paiement" in call["user"]
+    assert f"Domaine : {FINANCIER}\n" in call["user"]
+    assert "Domaine : financier\n" not in call["user"]
     assert out["usage"][-1].node == "crag_rewrite:financier:delai_paiement"
 
 
