@@ -1117,3 +1117,26 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
   - l'empreinte et le nom de l'image sont les mêmes dans les deux fichiers.
 - **Vérifié** : un seul caractère changé dans l'empreinte du workflow fait échouer le test, avec les deux empreintes dans le message. Le workflow est ensuite restauré à l'identique.
 
+### Incident Cursor : `.vscode/` et le commit `6f44be2`
+
+- **`6f44be2`** (« chore(ide): interpréteur Python du .venv pour l'IDE et Pylint », 23/09 17:24, ajoute `.vscode/settings.json`) existe dans la base d'objets locale. Aucune branche ne le contient, ni locale, ni distante (`git branch -a --contains`).
+- **Il ne tient qu'au reflog local**, tout comme son parent `bd05d45`. GitHub ne le connaît pas (API : « No commit found »). Il disparaîtra au prochain `git gc`, une fois l'entrée du reflog expirée (30 jours par défaut, `gc.reflogExpireUnreachable` non réglé).
+- **Le même changement a été refait** en `f6dfdf8`, puis retiré par `0a58fc1` (« chore : retire .vscode du dépôt »). Les deux sont dans l'historique de `main`, ce que montre `git log --all --full-history -- .vscode`. Sans `--full-history`, la simplification de l'historique les masque derrière le commit de fusion du J2. Le fichier ne contenait que les chemins de l'interpréteur (`${workspaceFolder}/.venv/bin/python`), aucune donnée personnelle.
+- **Aucune branche à supprimer.** `.vscode/` est dans `.gitignore`, et `git ls-files .vscode` ne liste rien.
+- **Branches restantes** : `ci` et `phase1-j3` (locales et distantes) sont fusionnées dans `main`. Elles ne sont pas concernées par l'incident et n'ont pas été touchées.
+
+### uv sur le poste de développement
+
+- **Installation** : `which -a uv` ne donne que le shim de pyenv (`~/.pyenv/shims/uv`). `pyenv which uv` donne `~/.pyenv/versions/3.11.7/bin/uv` : uv 0.6.10 installé **par pip** (`INSTALLER` = `pip`) dans le Python 3.11.7 global de pyenv. Il n'y en a aucune autre installation (Homebrew, conda, pipx, `~/.local/bin`, `~/.cargo/bin`).
+- **Pourquoi `uv self update` ne fait rien** : la documentation d'uv (« Upgrading uv ») indique qu'installé par un autre moyen que l'installateur autonome, uv désactive la mise à jour par lui-même ; il faut passer par le gestionnaire qui l'a installé.
+- **Commande** : `~/.pyenv/versions/3.11.7/bin/python -m pip install --upgrade "uv==0.12.19"`. La version 0.12.19 est la dernière publiée sur PyPI, le 25/09. L'interpréteur est désigné explicitement pour viser celui qui porte uv, quel que soit le Python actif de pyenv.
+- **D'ici là**, la CI garde uv 0.6.10.
+- **Ensuite** : épingler la nouvelle version dans la CI et la documentation, après avoir vérifié que `uv.lock` reste valide. À vérifier aussi : Dependabot met à jour le lock avec uv 0.11 (sa documentation). Un lock réécrit par uv 0.12 doit rester lisible par lui.
+
+### Observation : plantage natif intermittent à la sortie de pytest (macOS)
+
+- **Une fois**, sur une douzaine d'exécutions locales de la suite, le processus s'est terminé par `libc++abi: terminating due to uncaught exception of type std::__1::system_error: recursive_mutex lock failed: Invalid argument`. C'était après le résumé des tests, tous réussis.
+- **Pas reproduit** en 6 exécutions suivantes (605 réussites, code 0 à chaque fois), et jamais vu dans la CI (Linux).
+- **Cause non établie.** Piste : une bibliothèque native dont les fils d'exécution survivent à l'arrêt de l'interpréteur ; onnxruntime, chargé par `test_poids_absents_erreur_explicite_sans_telechargement`, serait le premier suspect. À suivre si cela se reproduit.
+- **Erreur de méthode** : le commit `67f09ac` a été fait sur une commande qui masquait le code de sortie de pytest (`| tail -1`). La suite a été vérifiée verte juste après. Désormais, le code de sortie est lu séparément.
+
