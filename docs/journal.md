@@ -883,3 +883,9 @@ Consommation de la série : environ 22 000 tokens du modèle principal et 51 000
 - La requête par clause règle l'observation de la série 1 : le juge retient désormais les articles 1231-3 et 1170 pour la responsabilité de l'acheteur.
 - **La réécriture comprend « domaine : financier » comme « services financiers »** (« prestataire de services financiers », « contrat financier »). C'est sans effet sur le critère, mais la reformulation part hors sujet. Piste : nommer le domaine par ce qu'il couvre (« conditions financières du contrat ») dans la requête et dans le prompt de réécriture.
 - **Seuil du taux d'aboutissement** : à fixer par le propriétaire du repo, maintenant que la série 2 est faite.
+
+### J3 : seuil du taux d'aboutissement du critère 10 (décision du 26/09, point 1)
+
+- **Seuil** : au moins 4 essais sur 5 aboutissent aux analystes, par contrat de mesure. L'invariant de sûreté (aucun analyste sur une citation non vérifiée) reste exigé à chaque essai : 5 sur 5.
+- **Test** : `test_10_taux_d_aboutissement_aux_analystes`, paramétré par contrat, défini après les essais et donc exécuté après eux ; il juge la série qui vient de tourner. Une série incomplète (essais désélectionnés ou interrompus) échoue explicitement, « taux non jugé ». 17 tests `llm` au lieu de 15.
+- **Vérifié sans réseau** : 5/5 et 4/5 passent, 3/5 échoue avec le taux et le seuil dans le message ; lancé seul, le test échoue sur une série vide.

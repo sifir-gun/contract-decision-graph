@@ -2,8 +2,8 @@
 
 Lancement : `uv run pytest --llm -m llm -s`. Chaque critère est répété 5 fois : 5 réussites
 sur 5 exigées, sans relance automatique. Chaque essai imprime une ligne `LLM-RESULT` (JSON),
-et la série du critère 10 une ligne `LLM-SERIE` (taux d'aboutissement aux analystes),
-reportées au journal avec la date et les modèles.
+et la série du critère 10 une ligne `LLM-SERIE` (taux d'aboutissement aux analystes, seuil de
+4 sur 5 par contrat), reportées au journal avec la date et les modèles.
 """
 
 import json
@@ -92,6 +92,10 @@ CONTRACTS = {
 }
 
 
+# seuil du taux d'aboutissement aux analystes, par contrat (décision du 26/09/2026) ;
+# l'invariant de sûreté, lui, reste exigé à chaque essai : 5 sur 5
+MIN_REACHED = 4
+
 # limite du compte pour le modèle principal (console Mistral, 25/09/2026) ; l'API ne compte
 # que les tokens consommés, max_tokens n'est pas réservé (mesuré le même jour)
 ACCOUNT_TOKENS_PER_MINUTE = 20_000
@@ -122,8 +126,9 @@ def pace():
 @pytest.fixture(scope="module")
 def series_10():
     """Mesure de la série, par contrat : essais qui aboutissent aux analystes, citations
-    toutes vérifiées. Un système qui escaladerait toujours passerait le critère avec 0/5.
-    Pas de seuil pour l'instant : le taux est consigné au journal."""
+    toutes vérifiées. Un système qui escaladerait toujours passerait l'invariant avec 0/5 :
+    d'où le seuil, vérifié par `test_10_taux_d_aboutissement_aux_analystes`. Le taux est
+    consigné au journal."""
     outcomes: dict[str, list[dict]] = {name: [] for name in CONTRACTS}
     yield outcomes
     for name, lines in outcomes.items():
@@ -193,6 +198,25 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(llm, series_10, pace, contr
         assert values["failure_report"]["attempts"] == CONFIG.extraction.max_attempts
     for party in parties:  # masquées avant le graphe
         assert party.split()[0] not in values["raw_text"]
+
+
+@pytest.mark.parametrize("contract", CONTRACTS)
+def test_10_taux_d_aboutissement_aux_analystes(series_10, contract):
+    """Seuil de la mesure : au moins 4 essais sur 5 aboutissent aux analystes, citations
+    toutes vérifiées. Jugé sur la série qui vient de tourner (définie plus haut, donc
+    exécutée avant) ; une série incomplète ne peut pas être jugée : échec explicite."""
+    lines = series_10[contract]
+    if len(lines) != len(RUNS):
+        pytest.fail(
+            f"série {contract} incomplète : {len(lines)} essai(s) sur {len(RUNS)}, "
+            "taux d'aboutissement non jugé",
+            pytrace=False,
+        )
+    reached = sum(o["issue"] == "analystes" for o in lines)
+    assert reached >= MIN_REACHED, (
+        f"contrat {contract} : {reached}/{len(RUNS)} essais aboutissent aux analystes, "
+        f"seuil {MIN_REACHED}/{len(RUNS)}"
+    )
 
 
 # --- Critère 3 : CRAG hors corpus, INSUFFISANT puis ESCALADE, rien d'inventé ------------
