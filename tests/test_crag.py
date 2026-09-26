@@ -11,6 +11,7 @@ from doubles import (
     ABSENT,
     ANALYSIS_DATE,
     CONTRACT_TEXT,
+    PENALIZED,
     FakeLLM,
     FakeRetriever,
     FixedExtractor,
@@ -223,7 +224,7 @@ def test_generate_sans_extrait_pertinent():
     assert (result.trace.passes, result.trace.queries) == (2, ["q1", "q2"])
 
 
-# --- combine : le domaine, à partir de ses clauses -------------------------------------
+# --- combine : les clauses recherchées, sans statut (déduit par la justification) ---------
 
 
 def _clause_result(kind, retained, findings=()):
@@ -231,27 +232,60 @@ def _clause_result(kind, retained, findings=()):
     return crag.ClauseResult(trace=trace, findings=list(findings), usage=[])
 
 
-def test_combine_toutes_les_clauses_justifiees():
-    result = crag.combine(
-        [_clause_result("revision_prix", ["A"]), _clause_result("delai_paiement", ["B", "A"])]
-    )
-    assert result.status == "OK" and result.evidence_ids == ["A", "B"]
-    assert [c.kind for c in result.trace.clauses] == ["revision_prix", "delai_paiement"]
-    assert result.trace.clauses[1].retained == ["B", "A"]  # rattachées à leur clause
-
-
-def test_combine_une_clause_sans_reference_rend_le_domaine_insuffisant():
+def test_combine_rassemble_les_resumes_et_les_constats():
     result = crag.combine(
         [_clause_result("revision_prix", ["A"]), _clause_result("delai_paiement", [], ["exp"])]
     )
-    assert result.status == "INSUFFISANT" and result.evidence_ids == ["A"]
-    assert result.findings == [
-        "exp",
-        "aucune référence en vigueur retenue pour la clause delai_paiement",
-    ]
+    assert [c.kind for c in result.trace.clauses] == ["revision_prix", "delai_paiement"]
+    assert result.trace.clauses[0].retained == ["A"]  # rattachées à leur clause
+    assert result.findings == ["exp"]
+    assert "status" not in crag.RetrievalResult.model_fields  # le CRAG ne décide pas
 
 
-# --- Sous-graphe compilé (orchestrateur), une invocation par type de clause ----------------
+def test_combine_sans_clause():
+    result = crag.combine([])
+    assert (result.trace.clauses, result.usage, result.findings) == ([], [], [])
+
+
+# --- per_clause : une recherche par clause reçue -------------------------------------------
+
+
+def _domain_clauses(domain, **overrides):
+    return [c for c in clauses(**overrides) if c.kind in DOMAIN_KINDS[domain]]
+
+
+def _not_run(state):
+    raise AssertionError("aucune recherche attendue")
+
+
+def test_per_clause_sans_clause_aucune_recherche():
+    result = crag.per_clause("financier", [], ANALYSIS_DATE, _not_run)
+    assert result.trace.clauses == []
+
+
+def test_per_clause_dans_l_ordre_recu():
+    seen = []
+
+    def run_clause(state):
+        seen.append(state["clause"].kind)
+        return _clause_result(state["clause"].kind, ["A"])
+
+    received = [clause_of("delai_paiement"), clause_of("revision_prix")]
+    result = crag.per_clause("financier", received, ANALYSIS_DATE, run_clause)
+    assert seen == ["delai_paiement", "revision_prix"]
+    assert [c.kind for c in result.trace.clauses] == seen
+
+
+@pytest.mark.parametrize(
+    "kinds",
+    [["revision_prix", "duree_engagement"], ["revision_prix", "revision_prix"]],
+)
+def test_per_clause_hors_du_domaine_ou_repetee_erreur_explicite(kinds):
+    with pytest.raises(ValueError, match="hors du domaine ou répétées"):
+        crag.per_clause("financier", [clause_of(k) for k in kinds], ANALYSIS_DATE, _not_run)
+
+
+# --- Sous-graphe compilé (orchestrateur), une invocation par clause reçue ------------------
 
 
 def _runner(passages, llm):
@@ -264,12 +298,11 @@ def test_sous_graphe_compile_sans_checkpointer():
     assert graph.checkpointer is False
 
 
-def test_une_requete_par_type_de_clause_une_passe_suffit():
+def test_une_requete_par_clause_une_passe_suffit():
     llm = FakeLLM({"crag_grade:financier": {"relevant": [1]}})
     run, retriever = _runner({"financier": [passage(L441)]}, llm)
-    result = run("financier", clauses(), ANALYSIS_DATE)
+    result = run("financier", _domain_clauses("financier"), ANALYSIS_DATE)
     kinds = list(DOMAIN_KINDS["financier"])
-    assert result.status == "OK" and result.evidence_ids == [L441]
     assert [c.kind for c in result.trace.clauses] == kinds
     assert all(c.passes == 1 and c.retained == [L441] for c in result.trace.clauses)
     assert [q for _, q, _ in retriever.calls] == [
@@ -278,7 +311,16 @@ def test_une_requete_par_type_de_clause_une_passe_suffit():
     assert [u.node for u in result.usage] == [f"crag_grade:financier:{k}" for k in kinds]
 
 
-def test_sous_graphe_reecrit_puis_insuffisant_apres_les_passes_permises():
+def test_sous_graphe_seulement_les_clauses_recues():
+    llm = FakeLLM({"crag_grade:financier": {"relevant": [1]}})
+    run, retriever = _runner({"financier": [passage(L441)]}, llm)
+    absent = clause_of("penalites_execution", penalites_execution=ABSENT)
+    result = run("financier", [absent], ANALYSIS_DATE)
+    assert [c.kind for c in result.trace.clauses] == ["penalites_execution"]
+    assert [q for _, q, _ in retriever.calls] == [crag.clause_query("financier", absent)]
+
+
+def test_sous_graphe_reecrit_puis_conclut_sans_reference_apres_les_passes_permises():
     llm = FakeLLM(
         {
             "crag_grade:financier": {"relevant": []},
@@ -286,9 +328,8 @@ def test_sous_graphe_reecrit_puis_insuffisant_apres_les_passes_permises():
         }
     )
     run, retriever = _runner({"financier": [passage("Recette de la tarte aux pommes")]}, llm)
-    result = run("financier", clauses(), ANALYSIS_DATE)
+    result = run("financier", _domain_clauses("financier"), ANALYSIS_DATE)
     assert CONFIG.crag.max_passes == 2
-    assert result.status == "INSUFFISANT" and result.evidence_ids == []
     for trace in result.trace.clauses:
         assert trace.passes == 2 and trace.retained == []
         assert trace.queries == [
@@ -296,39 +337,23 @@ def test_sous_graphe_reecrit_puis_insuffisant_apres_les_passes_permises():
             "requête reformulée",
         ]
     assert len(retriever.calls) == 2 * len(DOMAIN_KINDS["financier"])
-    assert sum("aucune référence en vigueur" in f for f in result.findings) == 3
-
-
-def test_une_clause_sans_reference_suffit_a_rendre_le_domaine_insuffisant():
-    # le juge ne retient rien pour le délai de paiement seulement
-    llm = FakeLLM(
-        {
-            "crag_grade:financier": {"relevant": [1]},
-            "crag_grade:financier:delai_paiement": {"relevant": []},
-            "crag_rewrite:financier": {"query": "autre requête"},
-        }
-    )
-    run, _ = _runner({"financier": [passage(L441)]}, llm)
-    result = run("financier", clauses(), ANALYSIS_DATE)
-    assert result.status == "INSUFFISANT" and result.evidence_ids == [L441]
-    by_kind = {c.kind: c for c in result.trace.clauses}
-    assert by_kind["delai_paiement"].retained == [] and by_kind["revision_prix"].retained == [L441]
-    assert "aucune référence en vigueur retenue pour la clause delai_paiement" in result.findings
 
 
 def test_sous_graphe_top_k_de_la_configuration_par_requete():
     llm = FakeLLM({"crag_grade:financier": {"relevant": [1]}})
     run, retriever = _runner({"financier": [passage(L441)]}, llm)
-    run("financier", clauses(), ANALYSIS_DATE)
+    run("financier", _domain_clauses("financier"), ANALYSIS_DATE)
     assert {k for _, _, k in retriever.calls} == {CONFIG.crag.top_k}
 
 
 # --- Critère 3 : CRAG hors corpus → INSUFFISANT, puis ESCALADE -------------------------
+# Règles d'abord : le CRAG ne cherche que pour les clauses qui portent un constat. Une
+# pénalité par domaine (PENALIZED), sans blocage, pour que chaque domaine ait à justifier.
 
 
-def _graph(retriever, llm):
+def _graph(retriever, llm, found=None):
     deps = Deps(
-        extractor=FixedExtractor(clauses()),
+        extractor=FixedExtractor(found or clauses(**PENALIZED)),
         crag=orchestrator.crag_runner(retriever, llm, CONFIG),
     )
     return orchestrator.build_graph(CONFIG, deps).compile(
@@ -345,18 +370,26 @@ def _invoke(graph, contract_id):
     return graph.get_state(thread).values
 
 
+FLAGGED = {  # clause à justifier par domaine, avec PENALIZED
+    "juridique": ["responsabilite_fournisseur"],
+    "financier": ["penalites_execution"],
+    "conformite": ["transfert_hors_ue"],
+    "operationnel": ["duree_engagement"],
+}
+
+
 def test_3_crag_hors_corpus_insuffisant_puis_escalade():
     references = {
         "juridique": [passage("C. civ., art. 1231-3", domain="juridique")],
         "financier": [passage("Recette de la tarte aux pommes")],  # hors sujet
-        "conformite": [passage("RGPD, art. 28", domain="conformite")],
+        "conformite": [passage("RGPD, art. 44", domain="conformite")],
         "operationnel": [passage("C. civ., art. 1211", domain="operationnel")],
     }
     llm = FakeLLM(
         {
             **{f"crag_grade:{d}": {"relevant": [1]} for d in DOMAINS if d != "financier"},
             "crag_grade:financier": {"relevant": []},  # le juge n'y trouve rien
-            "crag_rewrite:financier": {"query": "pénalités de retard de paiement"},
+            "crag_rewrite:financier": {"query": "pénalités de retard d'exécution"},
         }
     )
     retriever = FakeRetriever(references)
@@ -365,18 +398,28 @@ def test_3_crag_hors_corpus_insuffisant_puis_escalade():
     by_domain = {v.domain: v for v in values["verdicts"]}
     financier = by_domain["financier"]
     assert financier.retrieval_status == "INSUFFISANT" and financier.evidence_ids == []
+    assert financier.findings[-1] == (
+        "référentiel insuffisant : aucune référence en vigueur pour justifier le constat de "
+        "la clause penalites_execution"
+    )
     assert all(c.passes == CONFIG.crag.max_passes for c in financier.retrieval.clauses)
     assert values["proposed_decision"] == "ESCALADE" and values["route"] == "human_review"
+    # le CRAG n'a cherché que pour les clauses qui portent un constat
+    assert {d: [c.kind for c in v.retrieval.clauses] for d, v in by_domain.items()} == FLAGGED
+    searches = [d for d, _, _ in retriever.calls]
+    assert {d: searches.count(d) for d in DOMAINS} == {
+        "juridique": 1,
+        "financier": CONFIG.crag.max_passes,
+        "conformite": 1,
+        "operationnel": 1,
+    }
     # aucune réponse inventée : chaque référence retenue a été rendue par la recherche
     for verdict in values["verdicts"]:
         returned = {p.reference for p in references[verdict.domain]}
         assert set(verdict.evidence_ids) <= returned
         for trace in verdict.retrieval.clauses:
             assert set(trace.retained) <= set(verdict.evidence_ids)
-    assert by_domain["conformite"].evidence_ids == ["RGPD, art. 28"]
-    assert [c.kind for c in by_domain["conformite"].retrieval.clauses] == list(
-        DOMAIN_KINDS["conformite"]
-    )
+    assert by_domain["conformite"].evidence_ids == ["RGPD, art. 44"]
 
 
 def test_3_corpus_vide_insuffisant_sans_appel_au_juge():
@@ -386,3 +429,12 @@ def test_3_corpus_vide_insuffisant_sans_appel_au_juge():
     assert all(v.evidence_ids == [] for v in values["verdicts"])
     assert {c["node"].split(":")[0] for c in llm.calls} == {"crag_rewrite"}
     assert values["proposed_decision"] == "ESCALADE"
+
+
+def test_corpus_vide_contrat_sans_constat_go_sans_aucune_recherche():
+    # la règle d'avant (une référence par clause) aurait escaladé ce contrat
+    retriever, llm = FakeRetriever({}), FakeLLM()
+    values = _invoke(_graph(retriever, llm, found=clauses()), "c-sans-constat")
+    assert {v.retrieval_status for v in values["verdicts"]} == {"OK"}
+    assert retriever.calls == [] and llm.calls == []
+    assert (values["proposed_decision"], values["final_decision"]) == ("GO", "GO")

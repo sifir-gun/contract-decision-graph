@@ -4,7 +4,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 
 ## Règles non négociables
 
-- Le verdict est rendu par du code Python pur (`src/cdg/domain/rules/`, `src/cdg/domain/decision.py`). Aucun LLM ne décide.
+- Le verdict est rendu par du code Python pur (`src/cdg/domain/rules/`, `src/cdg/domain/justification.py`, `src/cdg/domain/decision.py`). Aucun LLM ne décide.
 - Architecture inspirée de l'architecture hexagonale (`docs/adr-002-ports-et-adaptateurs.md`). Couches : `domain/` (modèles métier et règles pures), `ports/` (interfaces des dépendances externes), `application/` (état du graphe, nœuds, extraction, CRAG, ingestion : orchestre le domaine à travers les ports), `adapters/` ; `cli.py` est la racine de composition. La logique vit dans le domaine ; un nœud ne fait qu'adapter l'état au domaine, puis le résultat à l'état.
 - Sens des dépendances, testé (`tests/test_isolation.py`) : `domain/` n'importe ni `ports/`, ni `application/`, ni `adapters/` ; `ports/` n'importe que `domain/` ; `application/` importe `domain/` et `ports/`, jamais `adapters/` ; `adapters/` importe `ports/`, `domain/`, `application/` et `settings`, jamais `cli` ni une autre famille d'adaptateurs.
 - Chaque bibliothèque externe n'est importée que dans son adaptateur : langgraph dans `adapters/langgraph/`, psycopg et pgvector dans `adapters/postgres/` (psycopg aussi dans `adapters/langgraph/checkpointer.py`), fastembed dans `adapters/fastembed.py`, mistralai et anthropic dans `adapters/llm/`. Une dépendance externe utilisée par l'application passe par un port (exception validée : l'écriture du corpus, commande d'administration câblée dans la CLI). Chaque adaptateur et chaque doublure respecte la signature de son port (`tests/test_ports.py`).

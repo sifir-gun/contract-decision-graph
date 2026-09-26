@@ -2,7 +2,16 @@
 
 import pytest
 import yaml
-from doubles import ABSENT, ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FakeLLM, FixedExtractor, clauses
+from doubles import (
+    ABSENT,
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    PENALIZED,
+    FakeCrag,
+    FakeLLM,
+    FixedExtractor,
+    clauses,
+)
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, Send
 
@@ -17,9 +26,9 @@ CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
 
 
-def make(clause_overrides=None, statuses=None, crag_tokens=0):
+def make(clause_overrides=None, empty=(), crag_tokens=0):
     extractor = FixedExtractor(clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100)
-    crag = FakeCrag(statuses, tokens_in=crag_tokens)
+    crag = FakeCrag(empty, tokens_in=crag_tokens)
     graph = build_graph(CONFIG, Deps(extractor=extractor, crag=crag)).compile()
     return graph, extractor, crag
 
@@ -45,7 +54,8 @@ def updates(raw_text=CONTRACT_TEXT, **kwargs) -> list[tuple[str, dict]]:
 
 
 def test_1_fan_out_quatre_verdicts_distincts_aucun_ecrase():
-    out, extractor, crag = run(crag_tokens=10)
+    # une pénalité par domaine : chaque analyste a une clause à justifier
+    out, extractor, crag = run(clause_overrides=PENALIZED, crag_tokens=10)
     assert len(out["verdicts"]) == 4
     assert sorted(v.domain for v in out["verdicts"]) == sorted(DOMAINS)
     # chaque verdict porte la référence de son propre domaine : aucun n'a écrasé l'autre
@@ -57,12 +67,21 @@ def test_1_fan_out_quatre_verdicts_distincts_aucun_ecrase():
     assert sorted(u.node for u in out["usage"]) == sorted(
         ["extract_clauses"] + [f"crag:{d}" for d in DOMAINS]
     )
+    # 0,3 × 0,5 + 0,25 × 0,6 + 0,25 × 0,7 + 0,2 × 0,7 = 0,615, marge 0,115
     assert (out["route"], out["proposed_decision"], out["final_decision"]) == (
         "explain",
-        "GO",
-        "GO",
+        "GO_RESERVES",
+        "GO_RESERVES",
     )
     assert out["extraction_attempts"] == 1 and len(extractor.calls) == 1
+
+
+def test_contrat_sans_constat_go_sans_reference_a_justifier():
+    # corpus vide partout : aucune clause ne déclenche de règle, rien à justifier
+    out, _, crag = run(empty=DOMAINS)
+    assert {v.retrieval_status for v in out["verdicts"]} == {"OK"}
+    assert crag.kinds == {d: [] for d in DOMAINS}
+    assert (out["route"], out["final_decision"]) == ("explain", "GO")
 
 
 def test_1_quatre_analystes_puis_un_seul_decision_gate():
@@ -101,10 +120,10 @@ THREAD = {"configurable": {"thread_id": "c-synth-001"}}
 VALID = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "marge trop faible"}
 
 
-def start(clause_overrides=None, statuses=None, crag_tokens=0, config=CONFIG):
+def start(clause_overrides=None, empty=(), crag_tokens=0, config=CONFIG):
     """Graphe avec checkpointer mémoire, lancé jusqu'à sa première suspension."""
     extractor = FixedExtractor(clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100)
-    crag = FakeCrag(statuses, tokens_in=crag_tokens)
+    crag = FakeCrag(empty, tokens_in=crag_tokens)
     graph = build_graph(config, Deps(extractor=extractor, crag=crag)).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
@@ -159,7 +178,7 @@ def test_reponse_refusee_redemandee_avec_erreur_puis_acceptee():
 
 
 def test_insuffisant_suspend_en_escalade():
-    _, out = start(statuses={"conformite": "INSUFFISANT"})
+    _, out = start(clause_overrides={"transfert_hors_ue": ABSENT}, empty={"conformite"})
     assert (out["route"], out["proposed_decision"]) == ("human_review", "ESCALADE")
     assert request_of(out)["proposed_decision"] == "ESCALADE"
 

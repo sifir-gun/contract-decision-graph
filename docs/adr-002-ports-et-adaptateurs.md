@@ -17,7 +17,7 @@ Architecture **inspirée de l'architecture hexagonale** (ports et adaptateurs), 
 
 | Couche | Contenu | Peut importer |
 | --- | --- | --- |
-| `domain/` | modèles métier (`models.py`), configuration, règles par domaine, décision du gate (`decision.py`), vérification de l'extraction (`verification.py`), contrôle de l'entrée (`input_checks.py`), politique d'arbitrage, expiration, masquage, partie pure du corpus (nettoyage, découpage, fiches), audit (J4) | rien d'autre que lui-même |
+| `domain/` | modèles métier (`models.py`), configuration, règles par domaine, justification des constats par le corpus (`justification.py`), décision du gate (`decision.py`), vérification de l'extraction (`verification.py`), contrôle de l'entrée (`input_checks.py`), politique d'arbitrage, expiration, masquage, partie pure du corpus (nettoyage, découpage, fiches), audit (J4) | rien d'autre que lui-même |
 | `ports/` | interfaces des dépendances externes et types échangés | `domain/` |
 | `application/` | état du graphe (`state.py` : `ContractState`, réducteurs, route, entrée des analystes), nœuds, extraction, CRAG, ingestion, dépendances injectées (`Extractor`, `Crag`, `Deps`) | `domain/`, `ports/` |
 | `adapters/` | `langgraph/` (orchestrateur, checkpointer), `postgres/`, `llm/` (Mistral, Anthropic), `fastembed.py` | `domain/`, `ports/`, `application/`, `settings` ; jamais `cli`, ni une autre famille d'adaptateurs |

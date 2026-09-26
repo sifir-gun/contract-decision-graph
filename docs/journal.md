@@ -901,3 +901,29 @@ Consommation de la série : environ 22 000 tokens du modèle principal et 51 000
 - **Étendu au juge** (non demandé explicitement) : il recevait aussi « Domaine : financier », avec le même risque de lecture.
 - Les noms des nœuds de consommation gardent la clé du domaine (`crag_grade:financier:delai_paiement`).
 
+### J3 : règles d'abord, CRAG sur les seules clauses qui portent un constat (décision du 26/09, point 3)
+
+**Constat de départ.** La règle `INSUFFISANT` du 25/09 exigeait une référence pour chaque clause du domaine, même sans constat. Mesurée sur le contrat valide, elle escaladait un contrat sans aucun constat en juridique ni en opérationnel : le juge ne retenait rien pour la responsabilité de l'acheteur ni pour la durée d'engagement.
+
+**Étude de l'inversion.** Les règles lisaient le statut de récupération pour deux choses seulement : ajouter le constat « référentiel insuffisant » et remplir `retrieval_status`. Aucun score, aucune pénalité, aucun blocage n'en dépendait. L'inversion est donc propre :
+- **Règles** : signature `(clauses, config) -> Assessment`, sans statut. Chaque constat (`RuleFinding`) porte la clause qui le déclenche et son effet : `blocage`, `penalite` (avec son montant) ou `information`. Score et blocage se déduisent des constats. Rattachements choisis : « données personnelles sans accord » va à `accord_traitement_donnees`, la clause manquante ; « localisation non précisée » va à `transfert_hors_ue`.
+- **Analyste** : règles, puis CRAG sur les clauses qui portent un constat (dans l'ordre des clauses), puis `justification.justify`. Le CRAG est toujours appelé : avec aucune clause, il ne fait aucune recherche et rend un résumé vide. Les tests des gardes, qui injectent les pannes par le CRAG, en dépendent.
+- **Justification** (`domain/justification.py`, pur) :
+  - un constat qui bloque ou pénalise, sans référence en vigueur : `INSUFFISANT`, avec « référentiel insuffisant : aucune référence en vigueur pour justifier le constat de la clause … » ;
+  - une clause à justifier absente du résumé du CRAG compte comme non justifiée, par prudence ;
+  - une clause sans constat n'exige rien.
+- **Choix à valider** : **constat d'information** (délai supplétif de L441-10, transfert encadré par une garantie). La décision ne tranche pas ce cas. Il est recherché, puisqu'il a un constat. Sans référence, il est signalé (« information seule, sans effet sur le statut ») mais ne rend pas le domaine `INSUFFISANT`, car il ne déclenche ni pénalité ni blocage.
+- **CRAG** : il ne décide plus de statut. `RetrievalResult` perd `status` et `evidence_ids` ; le résumé devient obligatoire. `per_clause` cherche les clauses reçues, dans l'ordre reçu ; une clause hors du domaine ou répétée lève une erreur.
+- **Doublure `FakeCrag`** : une référence par clause reçue, aucune pour les domaines `empty` ; elle enregistre les clauses reçues. Les tests qui voulaient un domaine `INSUFFISANT` avec un contrat favorable passent désormais une clause qui porte un constat (`PENALIZED`, ou pénalités d'exécution absentes) : sans constat, plus d'`INSUFFISANT` possible.
+- **Critère 1** : fan-out avec une pénalité par domaine, pour que chaque verdict porte sa propre référence (`GO_RESERVES`, 0,615). Nouveau test : un contrat sans constat, corpus vide partout, rend `GO` sans aucune recherche.
+- **Critère 3** : libellé « constat sans référence ». Test `llm` adapté : financier avec deux pénalités (pénalités d'exécution absentes, délai de 90 jours date de facture), la révision n'étant pas recherchée ; témoin juridique sur le plafond fournisseur à 50 %. Vérifié sans réseau avec un faux juge sur les extraits réels.
+
+**Nombre de recherches sur les deux contrats de mesure** (CRAG réel : pgvector, e5, juge `ministral-8b-2512`, clauses attendues, date d'analyse 26/09/2026) :
+
+| Contrat | Avant (une recherche par type) | Après (clauses à constat) |
+| --- | --- | --- |
+| valide | **15** recherches, 24 573 tokens ; juridique et opérationnel `INSUFFISANT`, donc `ESCALADE` | **2** recherches (pénalités d'exécution absentes, délai de paiement absent), 3 695 tokens ; tout `OK` |
+| complet | **13** recherches, 22 335 tokens ; tout `OK` | **1** recherche (transfert encadré par les clauses types), 1 854 tokens ; tout `OK` |
+
+La mesure « avant » précède aussi les libellés de domaine : les deux changements jouent sur les références retenues, pas sur le nombre de clauses recherchées. Sur le contrat complet, le juge retient l'art. 28 et la fiche sur la sous-traitance pour la clause de transfert, un rattachement lâche.
+

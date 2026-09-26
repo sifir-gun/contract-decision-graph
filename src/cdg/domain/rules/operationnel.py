@@ -1,15 +1,13 @@
 """Règles du domaine opérationnel : durée d'engagement et préavis de résiliation."""
 
 from cdg.domain.config import DecisionConfig
-from cdg.domain.models import AgentVerdict, Clause, RetrievalStatus
-from cdg.domain.rules._common import above, clause, verdict
+from cdg.domain.models import Clause
+from cdg.domain.rules._common import Assessment, above, clause, penalize
 
 
-def operationnel(
-    clauses: list[Clause], retrieval_status: RetrievalStatus, config: DecisionConfig
-) -> AgentVerdict:
+def operationnel(clauses: list[Clause], config: DecisionConfig) -> Assessment:
     cfg = config.rules.operationnel
-    penalties, findings = [], []
+    findings = []
 
     checks = [
         (
@@ -32,12 +30,10 @@ def operationnel(
         if not c.present:
             continue
         if c.value is None:  # présente mais non chiffrée : pénalité par prudence
-            penalties.append(penalty)
-            findings.append(f"{label} {unquantified} : pénalité appliquée par prudence")
+            text = f"{label} {unquantified} : pénalité appliquée par prudence"
+            findings.append(penalize(kind, text, penalty))
         elif above(c.value, max_months):
-            penalties.append(penalty)
-            findings.append(f"{label} de {c.value:g} mois, au-delà de {max_months:g} mois")
+            text = f"{label} de {c.value:g} mois, au-delà de {max_months:g} mois"
+            findings.append(penalize(kind, text, penalty))
 
-    return verdict(
-        "operationnel", retrieval_status, hard_block=False, penalties=penalties, findings=findings
-    )
+    return Assessment(domain="operationnel", findings=findings)

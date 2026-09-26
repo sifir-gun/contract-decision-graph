@@ -7,7 +7,8 @@ from doubles import ABSENT, clauses, usage, verdict, verdicts
 from cdg.application.nodes.decision_gate import decision_gate
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.decision import aggregate, conflict, decide, total_tokens
-from cdg.domain.models import DOMAINS, NodeFailure
+from cdg.domain.justification import justify
+from cdg.domain.models import DOMAINS, ClauseRetrieval, NodeFailure, RetrievalTrace
 from cdg.domain.rules import RULES
 
 CONFIG = load_config()
@@ -301,7 +302,7 @@ def test_pire_cumul_des_penalites_sans_blocage_reste_au_dessus_du_seuil_no_go():
         duree_engagement=48,  # opérationnel : engagement > 36 mois
         preavis_resiliation=12,  # opérationnel : préavis > 6 mois
     )
-    vs = [RULES[d](worst, "OK", CONFIG) for d in DOMAINS]
+    vs = [_justified(RULES[d](worst, CONFIG)) for d in DOMAINS]
     assert not any(v.hard_block for v in vs)
     assert {v.domain: v.score for v in vs} == {
         "juridique": 0.5,
@@ -311,3 +312,14 @@ def test_pire_cumul_des_penalites_sans_blocage_reste_au_dessus_du_seuil_no_go():
     }
     d = aggregate(vs, CONFIG)
     assert (d.score, d.decision, d.margin) == (0.505, "GO_RESERVES", 0.005)
+
+
+def _justified(assessment):
+    """Verdict dont chaque constat est justifié par une référence : statut OK."""
+    trace = RetrievalTrace(
+        clauses=[
+            ClauseRetrieval(kind=k, queries=["q"], passes=1, retained=["réf"], expired=[])
+            for k in assessment.kinds_to_justify()
+        ]
+    )
+    return justify(assessment, trace, [])

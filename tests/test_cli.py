@@ -5,7 +5,7 @@ from datetime import date
 
 import psycopg
 import pytest
-from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, HashEmbedder, clauses
+from doubles import ABSENT, CONTRACT_TEXT, FakeCrag, FixedExtractor, HashEmbedder, clauses
 
 from cdg import cli
 from cdg.application.deps import Deps
@@ -47,13 +47,18 @@ def contract(tmp_path):
     return str(path)
 
 
+# financier INSUFFISANT : un constat (pénalités d'exécution absentes) que le corpus ne
+# justifie pas
+INSUFFICIENT = (FixedExtractor(clauses(penalites_execution=ABSENT)), {"financier"})
+
+
 @pytest.fixture
 def analysis(monkeypatch):
     """Remplace les dépendances réelles (LLM, embedding, corpus) par des doublures."""
 
-    def use(extractor=None, statuses=None):
+    def use(extractor=None, empty=()):
         extractor = extractor or FixedExtractor(clauses())
-        crag = FakeCrag(statuses)
+        crag = FakeCrag(empty)
         monkeypatch.setattr(cli, "build_deps", lambda config: Deps(extractor, crag))
         return extractor, crag
 
@@ -70,7 +75,7 @@ def test_aide_de_run(capsys):
 
 @pytest.mark.pg
 def test_run_insuffisant_suspend_en_escalade(pg, thread_id, contract, analysis, capsys):
-    analysis(statuses={"financier": "INSUFFISANT"})
+    analysis(*INSUFFICIENT)
     code, out = run_cli(capsys, "run", contract, "--contract-id", thread_id)
     assert code == 0 and "mode" not in out
     assert (out["thread_id"], out["statut"], out["proposed_decision"]) == (
@@ -144,7 +149,7 @@ def test_run_date_d_analyse_invalide(contract, capsys):
 
 @pytest.mark.pg
 def test_resume_finalise_puis_history(pg, thread_id, contract, analysis, capsys):
-    analysis(statuses={"financier": "INSUFFISANT"})
+    analysis(*INSUFFICIENT)
     run_cli(capsys, "run", contract, "--contract-id", thread_id)
     code, out = run_cli(
         capsys,
@@ -170,7 +175,7 @@ def test_resume_finalise_puis_history(pg, thread_id, contract, analysis, capsys)
 
 @pytest.mark.pg
 def test_resume_n_appelle_ni_llm_ni_corpus(pg, thread_id, contract, analysis, capsys, monkeypatch):
-    analysis(statuses={"financier": "INSUFFISANT"})
+    analysis(*INSUFFICIENT)
     run_cli(capsys, "run", contract, "--contract-id", thread_id)
 
     def forbidden(config):
@@ -185,7 +190,7 @@ def test_resume_n_appelle_ni_llm_ni_corpus(pg, thread_id, contract, analysis, ca
 
 @pytest.mark.pg
 def test_resume_refuse_reste_suspendu_avec_le_motif(pg, thread_id, contract, analysis, capsys):
-    analysis(statuses={"financier": "INSUFFISANT"})
+    analysis(*INSUFFICIENT)
     run_cli(capsys, "run", contract, "--contract-id", thread_id)
     code, out = run_cli(
         capsys,

@@ -1,7 +1,7 @@
 """Nœuds purs, testés sans LangGraph."""
 
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import ABSENT, ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 
 from cdg.application.deps import RetrievalResult
 from cdg.application.nodes.analyst import analyst
@@ -99,16 +99,17 @@ def test_extract_clauses_premier_essai_sans_retour():
     assert out["extraction_attempts"] == 1 and extractor.calls == [("Contrat.", [])]
 
 
-# --- analyst --------------------------------------------------------------------
+# --- analyst : règles d'abord, puis CRAG sur les seules clauses qui portent un constat ------
+
+
+def analyse(domain, crag, **overrides):
+    inp = {"domain": domain, "clauses": clauses(**overrides), "analysis_date": ANALYSIS_DATE}
+    return analyst(inp, crag=crag, decision_config=CONFIG)
 
 
 def test_analyst_ne_renvoie_que_verdicts_et_usage():
     crag = FakeCrag(tokens_in=30)
-    out = analyst(
-        {"domain": "financier", "clauses": clauses(), "analysis_date": ANALYSIS_DATE},
-        crag=crag,
-        decision_config=CONFIG,
-    )
+    out = analyse("financier", crag, penalites_execution=ABSENT)
     assert set(out) == {"verdicts", "usage"}
     [v] = out["verdicts"]
     assert isinstance(v, AgentVerdict) and v.domain == "financier"
@@ -116,27 +117,34 @@ def test_analyst_ne_renvoie_que_verdicts_et_usage():
     assert crag.calls == ["financier"]
 
 
+def test_analyst_sans_constat_ne_cherche_rien_et_reste_ok():
+    crag = FakeCrag(empty={"financier"})  # même un corpus vide ne gêne pas : rien à justifier
+    [v] = analyse("financier", crag)["verdicts"]
+    assert crag.kinds == {"financier": []}
+    assert (v.retrieval_status, v.score, v.findings, v.evidence_ids) == ("OK", 1.0, [], [])
+    assert v.retrieval.clauses == []
+
+
+def test_analyst_crag_sur_les_seules_clauses_qui_portent_un_constat():
+    crag = FakeCrag()
+    # pénalités d'exécution absentes (pénalité), délai absent (information), révision plafonnée
+    [v] = analyse("financier", crag, penalites_execution=ABSENT, delai_paiement=ABSENT)["verdicts"]
+    assert crag.kinds == {"financier": ["penalites_execution", "delai_paiement"]}
+    assert [c.kind for c in v.retrieval.clauses] == ["penalites_execution", "delai_paiement"]
+    assert v.retrieval_status == "OK" and v.score == 0.6
+
+
 def test_analyst_applique_les_regles_du_domaine():
-    out = analyst(
-        {
-            "domain": "juridique",
-            "clauses": clauses(responsabilite_acheteur=None),
-            "analysis_date": ANALYSIS_DATE,
-        },
-        crag=FakeCrag(),
-        decision_config=CONFIG,
-    )
-    assert out["verdicts"][0].hard_block
+    crag = FakeCrag()
+    [v] = analyse("juridique", crag, responsabilite_acheteur=None)["verdicts"]
+    assert v.hard_block and crag.kinds == {"juridique": ["responsabilite_acheteur"]}
 
 
-def test_analyst_transmet_le_statut_insuffisant():
-    out = analyst(
-        {"domain": "conformite", "clauses": clauses(), "analysis_date": ANALYSIS_DATE},
-        crag=FakeCrag({"conformite": "INSUFFISANT"}),
-        decision_config=CONFIG,
-    )
-    [v] = out["verdicts"]
+def test_analyst_constat_sans_reference_insuffisant():
+    crag = FakeCrag(empty={"conformite"})
+    [v] = analyse("conformite", crag, transfert_hors_ue=ABSENT)["verdicts"]
     assert v.retrieval_status == "INSUFFISANT" and v.evidence_ids == []
+    assert "la clause transfert_hors_ue" in v.findings[-1]
 
 
 def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
@@ -148,26 +156,21 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
         expired=["L441-10"],
     )
     trace = RetrievalTrace(clauses=[clause])
+    received = []
 
     def crag(domain, clauses, analysis_date):
         assert analysis_date == ANALYSIS_DATE
+        received.extend(c.kind for c in clauses)
         return RetrievalResult(
-            status="OK",
-            evidence_ids=["Fiche"],
-            usage=[],
-            findings=["référence expirée à la date d'analyse : L441-10"],
-            trace=trace,
+            trace=trace, usage=[], findings=["référence expirée à la date d'analyse : L441-10"]
         )
 
-    inp = {
-        "domain": "financier",
-        "clauses": clauses(penalites_execution=2.0),
-        "analysis_date": ANALYSIS_DATE,
-    }
-    [v] = analyst(inp, crag=crag, decision_config=CONFIG)["verdicts"]
+    [v] = analyse("financier", crag, penalites_execution=2.0)["verdicts"]
+    assert received == ["penalites_execution"]
     assert v.findings[-1] == "référence expirée à la date d'analyse : L441-10"
     assert len(v.findings) == 2  # constat de la règle, puis celui du CRAG
     assert v.retrieval == trace and v.evidence_ids == ["Fiche"]
+    assert v.retrieval_status == "OK"
 
 
 # --- bouchons -------------------------------------------------------------------

@@ -1,10 +1,12 @@
 """CRAG : recherche corrective dans le corpus, en fonctions pures (nœuds du sous-graphe).
 
-Une recherche par type de clause du domaine (`DOMAIN_KINDS`). Pour chacune : retrieve,
-puis grade (juge de pertinence, modèle léger) ; generate si un extrait est pertinent,
-sinon rewrite et nouvelle recherche, dans la limite de `crag.max_passes`. Le sous-graphe,
-compilé sans checkpointer dans `adapters/langgraph/orchestrator.py`, traite une clause ;
-`per_clause` l'applique à chaque type du domaine et `combine` rassemble les résultats.
+Une recherche par clause reçue : l'analyste applique d'abord les règles, puis ne transmet
+que les clauses qui portent un constat (le corpus sert à justifier un constat). Pour
+chacune : retrieve, puis grade (juge de pertinence, modèle léger) ; generate si un extrait
+est pertinent, sinon rewrite et nouvelle recherche, dans la limite de `crag.max_passes`.
+Le sous-graphe, compilé sans checkpointer dans `adapters/langgraph/orchestrator.py`,
+traite une clause ; `per_clause` l'applique à chaque clause reçue et `combine` rassemble
+les résultats.
 
 - La requête d'une clause est construite à partir de son seul type, de sa valeur et de sa
   catégorie, jamais de sa citation : aucun texte du contrat n'atteint le CRAG. Le domaine y
@@ -13,8 +15,8 @@ compilé sans checkpointer dans `adapters/langgraph/orchestrator.py`, traite une
 - generate n'appelle aucun LLM : il rassemble les références retenues pour la clause.
   Une référence dont la version a expiré à la date d'analyse est signalée et jamais
   retenue.
-- Le domaine est INSUFFISANT dès qu'une de ses clauses n'a aucune référence en vigueur :
-  l'issue la plus prudente l'emporte.
+- Le CRAG ne décide pas du statut du domaine : `domain/justification.py` le déduit des
+  constats des règles et des références retenues pour chaque clause.
 """
 
 from collections.abc import Callable
@@ -250,16 +252,11 @@ def generate(state: CragState) -> dict:
 
 
 def combine(results: list[ClauseResult]) -> RetrievalResult:
-    """Résultat du domaine : INSUFFISANT dès qu'une clause n'a aucune référence en vigueur."""
-    findings = [f for r in results for f in r.findings]
-    lacking = [r.trace.kind for r in results if not r.trace.retained]
-    findings += [f"aucune référence en vigueur retenue pour la clause {kind}" for kind in lacking]
+    """Résultat des clauses recherchées : leurs résumés, leurs constats, leur consommation."""
     return RetrievalResult(
-        status="INSUFFISANT" if lacking else "OK",
-        evidence_ids=list(dict.fromkeys(ref for r in results for ref in r.trace.retained)),
-        usage=[u for r in results for u in r.usage],
-        findings=findings,
         trace=RetrievalTrace(clauses=[r.trace for r in results]),
+        usage=[u for r in results for u in r.usage],
+        findings=[f for r in results for f in r.findings],
     )
 
 
@@ -269,8 +266,9 @@ def per_clause(
     analysis_date: date,
     run_clause: Callable[[CragState], ClauseResult],
 ) -> RetrievalResult:
-    """Une recherche par type de clause du domaine, dans l'ordre de `DOMAIN_KINDS`."""
-    by_kind = {c.kind: c for c in clauses}
-    return combine(
-        [run_clause(start(domain, by_kind[kind], analysis_date)) for kind in DOMAIN_KINDS[domain]]
-    )
+    """Une recherche par clause reçue, dans l'ordre reçu ; aucune clause, aucune recherche.
+    Une clause hors du domaine ou répétée est une erreur explicite."""
+    kinds = [c.kind for c in clauses]
+    if len(set(kinds)) != len(kinds) or not set(kinds) <= set(DOMAIN_KINDS[domain]):
+        raise ValueError(f"CRAG {domain} : clauses hors du domaine ou répétées : {kinds}")
+    return combine([run_clause(start(domain, c, analysis_date)) for c in clauses])

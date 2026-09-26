@@ -3,7 +3,15 @@
 from datetime import date
 
 from cdg.application.deps import ExtractionResult, RetrievalResult
-from cdg.domain.models import DOMAINS, REQUIRED_KINDS, AgentVerdict, Clause, Usage
+from cdg.domain.models import (
+    DOMAINS,
+    REQUIRED_KINDS,
+    AgentVerdict,
+    Clause,
+    ClauseRetrieval,
+    RetrievalTrace,
+    Usage,
+)
 from cdg.ports.retriever import Passage
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
@@ -24,6 +32,15 @@ FAVORABLE = {
 }
 
 ABSENT = object()  # marqueur : la clause ne figure pas dans le contrat
+
+# Une pénalité par domaine, sans blocage : chaque domaine a une clause à justifier par le
+# corpus (juridique 0,5 ; financier 0,6 ; conformité 0,7 ; opérationnel 0,7 ; GO_RESERVES).
+PENALIZED = {
+    "responsabilite_fournisseur": 50.0,  # plafond fournisseur sous le minimum
+    "penalites_execution": ABSENT,  # pénalités d'exécution absentes
+    "transfert_hors_ue": ABSENT,  # localisation des données non précisée
+    "duree_engagement": 48.0,  # engagement au-delà de 36 mois
+}
 
 # Contrat synthétique en français, sans donnée réelle : contient la citation de chaque
 # clause rendue par `clauses()` (« Article synthétique : <kind>. »).
@@ -109,20 +126,31 @@ class FixedExtractor:
 
 
 class FakeCrag:
-    """Doublure du CRAG : statut par domaine (OK par défaut), une référence si OK."""
+    """Doublure du CRAG : une référence par clause reçue (celles qui portent un constat),
+    aucune pour les domaines de `empty`, où le corpus ne justifie rien."""
 
-    def __init__(self, statuses: dict | None = None, tokens_in=0, tokens_out=0):
-        self.statuses, self.tokens = statuses or {}, (tokens_in, tokens_out)
+    def __init__(self, empty=(), tokens_in=0, tokens_out=0):
+        self.empty, self.tokens = set(empty), (tokens_in, tokens_out)
         self.calls: list[str] = []
+        self.kinds: dict[str, list[str]] = {}  # clauses reçues, par domaine
 
     def __call__(self, domain, clauses: list[Clause], analysis_date: date) -> RetrievalResult:
         self.calls.append(domain)
-        status = self.statuses.get(domain, "OK")
-        return RetrievalResult(
-            status=status,
-            evidence_ids=[f"{domain}-ref-1"] if status == "OK" else [],
-            usage=[usage(*self.tokens, node=f"crag:{domain}")],
+        self.kinds[domain] = [c.kind for c in clauses]
+        retained = [] if domain in self.empty else [f"{domain}-ref-1"]
+        trace = RetrievalTrace(
+            clauses=[
+                ClauseRetrieval(
+                    kind=c.kind,
+                    queries=[f"requête {c.kind}"],
+                    passes=1,
+                    retained=retained,
+                    expired=[],
+                )
+                for c in clauses
+            ]
         )
+        return RetrievalResult(trace=trace, usage=[usage(*self.tokens, node=f"crag:{domain}")])
 
 
 class FakeLLM:

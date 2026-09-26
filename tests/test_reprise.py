@@ -8,7 +8,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from doubles import CONTRACT_TEXT, clauses
+from doubles import ABSENT, CONTRACT_TEXT, clauses
 
 pytestmark = pytest.mark.pg
 TESTS = Path(__file__).resolve().parent
@@ -29,7 +29,7 @@ KILLED_RUN = textwrap.dedent("""
 
     settings.load_env()
     found = [Clause.model_validate(c) for c in json.load(open(clauses_path))]
-    deps = Deps(extractor=FixedExtractor(found), crag=FakeCrag({"financier": "INSUFFISANT"}))
+    deps = Deps(extractor=FixedExtractor(found), crag=FakeCrag(empty={"financier"}))
     with orchestrator.open_graph(load_config(), deps, conninfo.app_conninfo()) as graph:
         status = orchestrator.run_contract(
             graph, thread_id, open(text).read(), analysis_date=date(2026, 9, 25)
@@ -44,7 +44,9 @@ def test_5_processus_tue_pendant_l_interrupt_puis_reprise(pg, thread_id, tmp_pat
     text = tmp_path / "contrat.txt"
     text.write_text(CONTRACT_TEXT, encoding="utf-8")
     cl = tmp_path / "contrat.clauses.json"
-    cl.write_text(json.dumps([c.model_dump() for c in clauses()]), encoding="utf-8")
+    # financier INSUFFISANT : un constat que le corpus de la doublure ne justifie pas
+    found = clauses(penalites_execution=ABSENT)
+    cl.write_text(json.dumps([c.model_dump() for c in found]), encoding="utf-8")
 
     killed = subprocess.run(
         [sys.executable, "-c", KILLED_RUN, str(text), str(cl), thread_id, str(TESTS)],

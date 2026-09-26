@@ -1,8 +1,17 @@
 """Règles du domaine financier : révision de prix, pénalités d'exécution, délai de paiement."""
 
 from cdg.domain.config import DecisionConfig, FinancierRules
-from cdg.domain.models import AgentVerdict, Clause, RetrievalStatus
-from cdg.domain.rules._common import above, below, clause, verdict
+from cdg.domain.models import Clause
+from cdg.domain.rules._common import (
+    Assessment,
+    RuleFinding,
+    above,
+    below,
+    block,
+    clause,
+    note,
+    penalize,
+)
 
 DELAY_BASIS_LABELS = {
     "date_facture": "date de facture",
@@ -18,15 +27,16 @@ DEFAULT_DELAY_NOTE = (
 )
 
 
-def _payment_delay(delay: Clause, cfg: FinancierRules) -> tuple[list[float], list[str]]:
+def _payment_delay(delay: Clause, cfg: FinancierRules) -> list[RuleFinding]:
+    kind, penalty = "delai_paiement", cfg.payment_delay_score_penalty
     if not delay.present:  # pas de pénalité : le délai supplétif s'applique
-        return [], [DEFAULT_DELAY_NOTE]
+        return [note(kind, DEFAULT_DELAY_NOTE)]
     if delay.value is None:  # présent mais non chiffré : pénalité par prudence
-        finding = (
+        text = (
             "délai de paiement non chiffré : pénalité par prudence, délai non conforme, "
             "à renégocier"
         )
-        return [cfg.payment_delay_score_penalty], [finding]
+        return [penalize(kind, text, penalty)]
     limits = {
         "date_facture": cfg.payment_delay_max_days_invoice,
         "fin_de_mois": cfg.payment_delay_max_days_end_of_month,
@@ -35,43 +45,36 @@ def _payment_delay(delay: Clause, cfg: FinancierRules) -> tuple[list[float], lis
     # point de départ inconnu (impossible après vérification) : le seuil le plus strict
     limit = limits.get(delay.category, min(limits.values()))
     if not above(delay.value, limit):
-        return [], []
+        return []
     label = DELAY_BASIS_LABELS.get(delay.category, "point de départ non précisé")
-    finding = (
+    text = (
         f"délai non conforme, à renégocier : {delay.value:g} jours {label}, "
         f"au-delà de {limit:g} jours"
     )
-    return [cfg.payment_delay_score_penalty], [finding]
+    return [penalize(kind, text, penalty)]
 
 
-def financier(
-    clauses: list[Clause], retrieval_status: RetrievalStatus, config: DecisionConfig
-) -> AgentVerdict:
+def financier(clauses: list[Clause], config: DecisionConfig) -> Assessment:
     cfg = config.rules.financier
-    hard_block, penalties, findings = False, [], []
+    findings = []
 
     revision = clause(clauses, "revision_prix")
     if revision.present and revision.value is None:
-        hard_block = True
-        findings.append("blocage : révision de prix non plafonnée")
+        findings.append(block("revision_prix", "blocage : révision de prix non plafonnée"))
 
     execution = clause(clauses, "penalites_execution")
+    kind, penalty = "penalites_execution", cfg.execution_penalties_score_penalty
     if not execution.present:
-        penalties.append(cfg.execution_penalties_score_penalty)
-        findings.append("pénalités d'exécution absentes")
+        findings.append(penalize(kind, "pénalités d'exécution absentes", penalty))
     elif execution.value is not None and below(
         execution.value, cfg.execution_penalties_min_cap_pct
     ):
-        penalties.append(cfg.execution_penalties_score_penalty)
-        findings.append(
+        text = (
             f"pénalités d'exécution plafonnées à {execution.value:g} % du montant du contrat, "
             f"sous le minimum de {cfg.execution_penalties_min_cap_pct:g} %"
         )
+        findings.append(penalize(kind, text, penalty))
 
-    delay_penalties, delay_findings = _payment_delay(clause(clauses, "delai_paiement"), cfg)
-    penalties += delay_penalties
-    findings += delay_findings
+    findings += _payment_delay(clause(clauses, "delai_paiement"), cfg)
 
-    return verdict(
-        "financier", retrieval_status, hard_block=hard_block, penalties=penalties, findings=findings
-    )
+    return Assessment(domain="financier", findings=findings)

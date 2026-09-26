@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import ABSENT, ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 from langgraph.checkpoint.memory import InMemorySaver
 
 from cdg import settings
@@ -22,7 +22,6 @@ from cdg.application import ingestion
 from cdg.application.deps import Deps
 from cdg.application.extraction import LLMExtractor
 from cdg.domain.config import load_config
-from cdg.domain.models import DOMAIN_KINDS
 from cdg.domain.verification import problems_of
 from cdg.ports.retriever import Passage
 
@@ -267,11 +266,22 @@ class ByDomain:
         return crag(domain, clauses, analysis_date)
 
 
+# Règles d'abord : le CRAG ne cherche que pour les clauses qui portent un constat. Financier :
+# deux pénalités (pénalités d'exécution absentes, délai de 90 jours date de facture), la
+# révision plafonnée n'a rien à justifier. Juridique, témoin : plafond fournisseur à 50 %.
+FLAGGED_3 = {
+    "penalites_execution": ABSENT,
+    "delai_paiement": 90.0,
+    "responsabilite_fournisseur": 50.0,
+}
+
+
 @pytest.mark.parametrize("run", RUNS)
 def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
     """Financier : la recherche ne rend que des extraits hors sujet (sécurité des données,
-    résiliation) ; le vrai juge doit les écarter aux 2 passes, d'où INSUFFISANT puis
-    ESCALADE, sans référence. Témoin : juridique, extraits pertinents, retenus."""
+    résiliation) ; le vrai juge doit les écarter aux 2 passes pour chaque clause qui porte
+    un constat, d'où INSUFFISANT puis ESCALADE, sans référence. Témoin : juridique, extraits
+    pertinents, retenus pour la clause qui porte un constat."""
     off_topic = _real_passages(
         ("rgpd", "32"), ("rgpd", "33"), ("code-civil", "1211"), domain="financier"
     )
@@ -289,7 +299,7 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
         }
     )
     # extraction en doublure (citations de CONTRACT_TEXT) : seul le CRAG appelle le modèle
-    graph = compiled(Deps(extractor=FixedExtractor(clauses()), crag=crag))
+    graph = compiled(Deps(extractor=FixedExtractor(clauses(**FLAGGED_3)), crag=crag))
     thread = f"llm-3-{run}"
     orchestrator.run_contract(graph, thread, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
@@ -298,9 +308,12 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
     assert values.get("failures", []) == []
     fin = by_domain["financier"]
     assert fin.retrieval_status == "INSUFFISANT" and fin.evidence_ids == []
-    # une requête par type de clause, chacune épuise ses passes
+    # une requête par clause qui porte un constat, chacune épuise ses passes
+    assert [c.kind for c in fin.retrieval.clauses] == ["penalites_execution", "delai_paiement"]
     assert all(c.passes == CONFIG.crag.max_passes for c in fin.retrieval.clauses)
-    assert len(financier.queries) == CONFIG.crag.max_passes * len(DOMAIN_KINDS["financier"])
+    assert len(financier.queries) == CONFIG.crag.max_passes * 2
+    lacking = [f for f in fin.findings if f.startswith("référentiel insuffisant")]
+    assert [f.rsplit(" ", 1)[-1] for f in lacking] == ["penalites_execution", "delai_paiement"]
     assert (values["proposed_decision"], values["route"]) == ("ESCALADE", "human_review")
     # aucune réponse inventée : toute référence retenue a été rendue par la recherche
     returned = {"financier": off_topic, "juridique": on_topic}
@@ -308,7 +321,8 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
         if verdict.domain in returned:
             assert set(verdict.evidence_ids) <= {p.reference for p in returned[verdict.domain]}
     jur = by_domain["juridique"]
-    # témoin : le juge n'écarte pas tout, chaque clause juridique est justifiée
+    # témoin : le juge n'écarte pas tout, la clause qui porte un constat est justifiée
+    assert [c.kind for c in jur.retrieval.clauses] == ["responsabilite_fournisseur"]
     assert jur.retrieval_status == "OK" and all(c.retained for c in jur.retrieval.clauses)
     report(
         "3",
