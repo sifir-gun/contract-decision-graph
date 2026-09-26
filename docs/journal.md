@@ -1994,3 +1994,4 @@ Tableau et texte du gain de latence mis à jour avec la série 8 : 29 essais à 
 - **`SOURCES.md`** : la liste des renvois non suivis et la note sur les dérogations de l'art. 49 y passent ; `SOURCES.md` y renvoyait depuis le README.
 - **Spec** : ligne du J5 dans le tableau des jours, arborescence (`LICENSE`, `docs/exploitation.md`), historique.
 - Le schéma Mermaid est vérifié dans le rendu de GitHub après le push.
+- **Schéma vérifié** : le dépôt privé n'est pas lisible sans session GitHub dans le navigateur intégré ; le schéma a été rendu en local par Mermaid 11 (page servie depuis un dossier ignoré, puis supprimée) : 13 nœuds, le sous-graphe des analystes et toutes les flèches. En largeur, il était illisible à la largeur d'une page : passé de haut en bas.

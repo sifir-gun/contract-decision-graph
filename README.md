@@ -39,7 +39,7 @@ Exemple, sur le contrat piégé du jeu de démonstration (série 8, modèle rée
 ## Schéma
 
 ```mermaid
-flowchart LR
+flowchart TD
     C([Contrat<br/>texte masqué]) --> V[validate_input<br/>langue, taille,<br/>tentatives d'instruction]
     V --> X[extract_clauses<br/>LLM]
     X --> VX{verify_extraction<br/>code}
