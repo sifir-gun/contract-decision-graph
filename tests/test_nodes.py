@@ -7,16 +7,19 @@ from doubles import (
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
+    MemoryAuditStore,
     clauses,
+    context,
+    fixed_clock,
 )
 
 from cdg.application.deps import RetrievalResult
 from cdg.application.nodes.analyst import analyst
 from cdg.application.nodes.audit_seal import audit_seal
-from cdg.application.nodes.explain import explain
 from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
+from cdg.domain import audit
 from cdg.domain.config import load_config
 from cdg.domain.input_checks import rejection
 from cdg.domain.models import (
@@ -187,17 +190,18 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
         retained=["Fiche"],
         expired=["L441-10"],
     )
-    trace = RetrievalTrace(clauses=[clause])
+    trace = RetrievalTrace(
+        clauses=[clause],
+        findings=[
+            "référence expirée à la date d'analyse : L441-10"
+        ],  # constats du CRAG
+    )
     received = []
 
     def crag(domain, clauses, analysis_date):
         assert analysis_date == ANALYSIS_DATE
         received.extend(c.kind for c in clauses)
-        return RetrievalResult(
-            trace=trace,
-            usage=[],
-            findings=["référence expirée à la date d'analyse : L441-10"],
-        )
+        return RetrievalResult(trace=trace, usage=[])
 
     [v] = analyse("financier", crag, penalites_execution=2.0)["verdicts"]
     assert received == ["penalites_execution"]
@@ -207,9 +211,43 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
     assert v.retrieval_status == "OK"
 
 
-# --- bouchons -------------------------------------------------------------------
+# --- reject ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("node", [explain, audit_seal, reject])
-def test_bouchons_ne_modifient_rien(node):
-    assert node({"reject_reason": "texte du contrat vide"}) == {}
+def test_reject_n_ecrit_rien_de_plus():
+    # reject_reason (validate_input) suffit au scellement ; explain est testé à part
+    assert reject({"reject_reason": "texte du contrat vide"}) == {}
+
+
+# --- audit_seal ----------------------------------------------------------------------
+
+
+def seal(state, store, thread_id="c-1"):
+    return audit_seal(
+        state,
+        audit_store=store,
+        clock=fixed_clock,
+        decision_config=CONFIG,
+        thread_id=thread_id,
+    )
+
+
+def test_audit_seal_ecrit_les_empreintes_du_journal():
+    store = MemoryAuditStore()
+    out = seal(
+        {"contract_id": "c-1", "reject_reason": "texte vide", **context()}, store
+    )
+    [entry] = store.entries()
+    assert out == {
+        "config_hash": entry.config_hash,
+        "decision_hash": entry.decision_hash,
+        "chain_hash": entry.chain_hash,
+    }
+    assert entry.config_hash == audit.config_hash(CONFIG)
+
+
+def test_audit_seal_rejoue_rend_l_enregistrement_existant():
+    store = MemoryAuditStore()
+    state = {"contract_id": "c-1", "reject_reason": "texte vide", **context()}
+    assert seal(state, store) == seal(state, store)
+    assert len(store.entries()) == 1

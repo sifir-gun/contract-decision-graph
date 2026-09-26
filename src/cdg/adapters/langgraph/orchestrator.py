@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointMetadata
+from langgraph.config import get_config
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -30,7 +31,7 @@ from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.state import AnalystInput, ContractState
-from cdg.domain import expiry, masking, policy
+from cdg.domain import audit, expiry, masking, policy
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
@@ -145,6 +146,26 @@ def retries(policy: RetryPolicy, exc: Exception) -> bool:
     return bool(retry_on(exc))
 
 
+def _retried(policy: RetryPolicy, exc: Exception, attempt: int) -> bool:
+    """La RetryPolicy relancera-t-elle le nœud après cette tentative (1 à la première) ?"""
+    return retries(policy, exc) and attempt < policy.max_attempts
+
+
+def _attempt(name: str) -> int:
+    """Tentative en cours du nœud, 1 à la première ; renseignée par LangGraph pendant
+    l'exécution d'un nœud."""
+    info = get_runtime().execution_info
+    if info is None:
+        raise RuntimeError(f"{name} : hors d'une exécution de nœud")
+    return info.node_attempt
+
+
+def will_retry(name: str, policy: RetryPolicy) -> Callable[[Exception], bool]:
+    """Prédicat donné à un nœud qui se replie lui-même après la dernière tentative
+    (`explain`) : l'erreur sera-t-elle reprise par la RetryPolicy du nœud ?"""
+    return lambda exc: _retried(policy, exc, _attempt(name))
+
+
 def guard(
     name: str,
     fn: Callable[[Any], dict[str, Any]],
@@ -159,6 +180,8 @@ def guard(
       la RetryPolicy du nœud la reprend, et la garde n'intervient qu'après la dernière ;
     - `on_failure` complète la mise à jour d'un nœud à plusieurs sorties (route vers
       l'humain), à partir de tous les échecs connus.
+    `explain` se replie lui-même sur le gabarit : sa garde ne voit qu'une erreur d'avant
+    l'appel au LLM.
     """
 
     def node(state: Any) -> dict[str, Any]:
@@ -174,11 +197,7 @@ def guard(
                 ) from exc
             attempt = info.node_attempt  # 1 à la première
             # retry_on : prédicat par défaut de RetryPolicy (erreurs réseau, 5xx...)
-            if (
-                retry is not None
-                and retries(retry, exc)
-                and attempt < retry.max_attempts
-            ):
+            if retry is not None and _retried(retry, exc, attempt):
                 raise
             failure = NodeFailure(
                 node=name,
@@ -225,6 +244,14 @@ def analyst_retryable(exc: Exception) -> bool:
     return not isinstance(exc, LLMQuotaError) and retries(_LANGGRAPH_DEFAULT, exc)
 
 
+def current_thread(state: ContractState) -> str:
+    """Thread LangGraph de l'exécution en cours, scellé avec le contrat. Sans checkpointer
+    (graphe de test), il n'y a pas de thread : l'identifiant du contrat en tient lieu,
+    comme dans `run_contract`, où un contrat est un thread."""
+    thread = get_config().get("configurable", {}).get("thread_id")
+    return state["contract_id"] if thread is None else str(thread)
+
+
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     """Câble les 9 nœuds, dépendances liées et gardes d'échec ; graphe non compilé.
 
@@ -235,6 +262,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     """
     retry = retry_policy(config.analyst_retry, retry_on=analyst_retryable)
     extraction_retry = retry_policy(config.extraction_retry, retry_on=transient)
+    explain_retry = retry_policy(config.explain_retry, retry_on=transient)
     builder = StateGraph(ContractState)
     builder.add_node(
         "validate_input",
@@ -282,8 +310,34 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
         ),
     )
     builder.add_node("human_review", partial(human_review, decision_config=config))
-    builder.add_node("explain", guard("explain", explain))
-    builder.add_node("audit_seal", guard("audit_seal", audit_seal))
+    # explain se replie sur le gabarit, sauf pour une erreur passagère encore reprise
+    builder.add_node(
+        "explain",
+        guard(
+            "explain",
+            partial(
+                explain,
+                explainer=deps.explainer,
+                decision_config=config,
+                retrying=will_retry("explain", explain_retry),
+            ),
+            retry=explain_retry,
+        ),
+        retry_policy=explain_retry,
+    )
+    builder.add_node(
+        "audit_seal",
+        guard(
+            "audit_seal",
+            lambda state: audit_seal(
+                state,
+                audit_store=deps.audit_store,
+                clock=deps.clock,
+                decision_config=config,
+                thread_id=current_thread(state),
+            ),
+        ),
+    )
     builder.add_node("reject", guard("reject", reject))
 
     builder.add_edge(START, "validate_input")
@@ -339,7 +393,7 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
     """État d'un thread, sérialisable en JSON ; `demande` : charge utile en attente."""
     snapshot = graph.get_state(_thread(thread_id))
     values = snapshot.values
-    human = values.get("human")
+    human, explanation = values.get("human"), values.get("explanation")
     pending = [i.value for i in snapshot.interrupts]
     return {
         "thread_id": thread_id,
@@ -354,7 +408,12 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "failure_report": values.get("failure_report"),
         "failures": [f.model_dump() for f in values.get("failures", [])],
         "reject_reason": values.get("reject_reason"),
+        "input_findings": values.get("input_findings", []),
+        "config_hash": values.get("config_hash"),
+        "decision_hash": values.get("decision_hash"),
+        "chain_hash": values.get("chain_hash"),
         "human": human.model_dump() if human else None,
+        "explanation": explanation.model_dump(mode="json") if explanation else None,
         "verdicts": [
             v.model_dump(exclude={"evidence_ids"}) for v in values.get("verdicts", [])
         ],
@@ -369,13 +428,16 @@ def run_contract(
     parties: Sequence[str] = (),
     *,
     analysis_date: date,
+    config: DecisionConfig,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
 
     Le texte est masqué AVANT l'invocation : l'entrée du graphe est écrite dans le
     premier checkpoint, le texte original n'atteint donc jamais la base ni le LLM.
     `analysis_date` fixe la date à laquelle les versions des textes sont jugées ; elle est
-    écrite dans l'état, donc rejouable.
+    écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
+    produit la décision, et modèles) est posé dans l'état initial, avant tout nœud :
+    c'est lui qui est scellé.
     """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
@@ -388,14 +450,35 @@ def run_contract(
             "contract_id": contract_id,
             "raw_text": masked.text,
             "analysis_date": analysis_date,
+            **audit.analysis_context(config),
         },
         _thread(contract_id),
     )
     return {**thread_status(graph, contract_id), "masquage": masked.counts}
 
 
-def resume_thread(graph: CompiledStateGraph, thread_id: str, answer: dict) -> dict:
-    """Reprise par Command(resume=...) d'un thread en attente d'un humain."""
+def resume_thread(
+    graph: CompiledStateGraph, thread_id: str, answer: dict, *, config: DecisionConfig
+) -> dict:
+    """Reprise humaine par Command(resume=...) d'un thread en attente. Refusée avant toute
+    reprise si la configuration courante n'est pas celle de l'analyse : la décision a été
+    produite par l'autre."""
+    snapshot = _awaiting(graph, thread_id)
+    analysed_with, current = (
+        snapshot.values.get("config_hash"),
+        audit.config_hash(config),
+    )
+    if analysed_with != current:
+        raise ThreadError(
+            f"configuration modifiée depuis l'analyse du thread {thread_id} "
+            f"(analyse : {analysed_with}, courante : {current}) : reprise refusée. "
+            "Relancer l'analyse (run, avec un nouvel identifiant de contrat) ou "
+            "restaurer la configuration de l'analyse."
+        )
+    return _resume(graph, thread_id, answer)
+
+
+def _awaiting(graph: CompiledStateGraph, thread_id: str) -> StateSnapshot:
     snapshot = graph.get_state(_thread(thread_id))
     if not snapshot.values:
         raise ThreadError(f"thread inconnu : {thread_id}")
@@ -403,6 +486,11 @@ def resume_thread(graph: CompiledStateGraph, thread_id: str, answer: dict) -> di
         raise ThreadError(
             f"le thread {thread_id} n'est pas en attente d'une décision humaine"
         )
+    return snapshot
+
+
+def _resume(graph: CompiledStateGraph, thread_id: str, answer: dict) -> dict:
+    _awaiting(graph, thread_id)
     graph.invoke(Command(resume=answer), _thread(thread_id))
     return thread_status(graph, thread_id)
 
@@ -464,6 +552,8 @@ def expire_threads(
                 raise ThreadError(f"thread {thread_id} : checkpoint sans date")
             pending.append((thread_id, datetime.fromisoformat(snapshot.created_at)))
     return [
-        resume_thread(graph, thread_id, expiry.system_decision(now - since, older_than))
+        # expire continue même si la configuration a changé : NO_GO système, scellé avec
+        # les deux empreintes et le constat de configuration modifiée
+        _resume(graph, thread_id, expiry.system_decision(now - since, older_than))
         for thread_id, since in expiry.expired(pending, older_than, now)
     ]

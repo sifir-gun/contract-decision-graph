@@ -12,11 +12,19 @@ justifier. D'où, après les règles et le CRAG (sur les seules clauses qui port
 from cdg.domain.models import AgentVerdict, RetrievalTrace
 from cdg.domain.rules import Assessment
 
+LACKING = (
+    "référentiel insuffisant : aucune référence en vigueur pour justifier le constat de "
+    "la clause {kind}"
+)
+UNSUPPORTED = (
+    "constat de la clause {kind} sans référence en vigueur : information seule, sans "
+    "effet sur le statut"
+)
 
-def justify(
-    assessment: Assessment, trace: RetrievalTrace, crag_findings: list[str]
-) -> AgentVerdict:
-    """Verdict du domaine : constats des règles, puis du CRAG, puis de la justification."""
+
+def justify(assessment: Assessment, trace: RetrievalTrace) -> AgentVerdict:
+    """Verdict du domaine : constats des règles, puis du CRAG (portés par son résumé),
+    puis de la justification, chacun rattaché à sa clause (`finding_kinds`)."""
     retained = {c.kind: c.retained for c in trace.clauses}
     required = assessment.kinds_requiring_reference()
     lacking = [kind for kind in required if not retained.get(kind)]
@@ -25,22 +33,19 @@ def justify(
         for kind in assessment.kinds_to_justify()
         if kind not in required and not retained.get(kind)
     ]
-    findings = [f.text for f in assessment.findings] + crag_findings
-    findings += [
-        "référentiel insuffisant : aucune référence en vigueur pour justifier le constat de "
-        f"la clause {kind}"
-        for kind in lacking
+    # chaque constat avec sa clause ; ceux du CRAG sont propres à la recherche
+    attached: list[tuple[str | None, str]] = [
+        (f.kind, f.text) for f in assessment.findings
     ]
-    findings += [
-        f"constat de la clause {kind} sans référence en vigueur : information seule, "
-        "sans effet sur le statut"
-        for kind in unsupported
-    ]
+    attached += [(None, text) for text in trace.findings]
+    attached += [(kind, LACKING.format(kind=kind)) for kind in lacking]
+    attached += [(kind, UNSUPPORTED.format(kind=kind)) for kind in unsupported]
     return AgentVerdict(
         domain=assessment.domain,
         score=assessment.score,
         hard_block=assessment.hard_block,
-        findings=findings,
+        findings=[text for _, text in attached],
+        finding_kinds=[kind for kind, _ in attached],
         evidence_ids=list(
             dict.fromkeys(ref for c in trace.clauses for ref in c.retained)
         ),

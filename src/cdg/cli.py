@@ -7,6 +7,7 @@ Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Callable
 from datetime import UTC, date, datetime
@@ -17,14 +18,17 @@ from zoneinfo import ZoneInfo
 from cdg import settings
 from cdg.adapters import fastembed
 from cdg.adapters.langgraph import checkpointer, orchestrator
-from cdg.adapters.llm import build_provider
-from cdg.adapters.postgres import conninfo, rag_store
+from cdg.adapters.llm import API_KEY_VARS, build_provider
+from cdg.adapters.postgres import conninfo, migrations, rag_store
+from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.application import ingestion
-from cdg.application.deps import Deps
+from cdg.application.deps import Deps, Explainer, TemplateOnly
+from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
-from cdg.domain import expiry
+from cdg.domain import audit, expiry
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
+from cdg.ports.audit_store import AuditStore
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
 LEGAL_TIMEZONE = ZoneInfo("Europe/Paris")
@@ -34,8 +38,20 @@ def today() -> date:
     return datetime.now(LEGAL_TIMEZONE).date()
 
 
+def open_audit_store() -> AuditStore:
+    """Journal d'audit réel, avec le rôle applicatif. Les tests le remplacent par un
+    journal jetable : aucune option de la CLI ni de la configuration n'en change la table."""
+    return PostgresAuditStore(conninfo.app_conninfo())
+
+
+def now() -> datetime:
+    """Horloge des scellements : heure UTC, avec fuseau."""
+    return datetime.now(UTC)
+
+
 def build_deps(config: DecisionConfig) -> Deps:
-    """Dépendances réelles d'une analyse : fournisseur LLM, embedding local, corpus.
+    """Dépendances réelles d'une analyse : fournisseur LLM, embedding local, corpus,
+    journal d'audit.
 
     Le fournisseur d'abord : une clé d'API absente échoue avant tout chargement de
     modèle et avant la création du thread.
@@ -48,6 +64,9 @@ def build_deps(config: DecisionConfig) -> Deps:
     return Deps(
         extractor=LLMExtractor(llm),
         crag=orchestrator.crag_runner(retriever, llm, config),
+        audit_store=open_audit_store(),
+        clock=now,
+        explainer=LLMExplainer(llm),
     )
 
 
@@ -60,20 +79,50 @@ def _not_needed(what: str):
     return fail
 
 
-# resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
-# aucun modèle chargé, aucune clé d'API exigée. Un appel échouerait explicitement.
-REVIEW_DEPS = Deps(extractor=_not_needed("extraction"), crag=_not_needed("CRAG"))
+# expire : décision système, toujours expliquée par le gabarit (un expire planifié reste
+# sans clé d'API) ; history n'exécute aucun nœud
+EXPIRE_EXPLAINER = TemplateOnly(
+    "décision système (expire) : explication par le gabarit, sans LLM"
+)
+HISTORY_EXPLAINER = TemplateOnly("history : aucun nœud exécuté")
+
+
+def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
+    """resume : le LLM si la clé d'API du fournisseur est présente, sinon le gabarit, avec
+    le motif scellé. La clé n'est pas exigée pour reprendre un contrat."""
+    var = API_KEY_VARS[config.llm.provider]
+    if not os.environ.get(var):
+        return TemplateOnly(f"clé d'API absente ({var}) : explication par le gabarit")
+    return LLMExplainer(build_provider(config.llm))
+
+
+def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> Deps:
+    """resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
+    aucun modèle d'embedding chargé, un appel échouerait explicitement. Seule
+    l'explication peut appeler le LLM (resume avec clé). Le contrat repris est scellé dans
+    le journal réel."""
+    return Deps(
+        extractor=_not_needed("extraction"),
+        crag=_not_needed("CRAG"),
+        audit_store=open_audit_store(),
+        clock=now,
+        explainer=explainer,
+    )
 
 
 def _setup_db(args: argparse.Namespace) -> dict:
-    checkpointer.setup_database(conninfo.admin_conninfo())
-    rag_store.setup(conninfo.admin_conninfo(), load_config().embedding.dimension)
+    admin = conninfo.admin_conninfo()
+    checkpointer.setup_database(admin)
+    applied = migrations.apply(admin)
+    rag_store.check_dimension(admin, load_config().embedding.dimension)
     return {
         "setup_db": "ok",
         "role": settings.APP_ROLE,
         "tables": list(checkpointer.CHECKPOINT_TABLES),
         "droits": ["SELECT", "INSERT", "UPDATE"],
+        "migrations": applied,
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
+        "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
     }
 
 
@@ -98,7 +147,7 @@ def _ingest(args: argparse.Namespace) -> dict:
     return {"ingest": "ok", "model": embedder.model, **summary}
 
 
-def _graph(config: DecisionConfig, deps: Deps = REVIEW_DEPS):
+def _graph(config: DecisionConfig, deps: Deps):
     return orchestrator.open_graph(config, deps, conninfo.app_conninfo())
 
 
@@ -114,6 +163,7 @@ def _run(args: argparse.Namespace) -> dict:
             raw_text,
             parties=args.party,
             analysis_date=args.analysis_date or today(),
+            config=config,
         )
 
 
@@ -124,12 +174,44 @@ def _resume(args: argparse.Namespace) -> dict:
         "reason": args.reason,
         "overrides_block": args.overrides_block,
     }
-    with _graph(load_config()) as graph:
-        return orchestrator.resume_thread(graph, args.thread_id, answer)
+    config = load_config()
+    deps = review_deps(config, resume_explainer(config))
+    with _graph(config, deps) as graph:
+        return orchestrator.resume_thread(graph, args.thread_id, answer, config=config)
+
+
+class ChaineRompue(Exception):
+    """Journal d'audit non conforme : code 1, avec le rapport de vérification."""
+
+    def __init__(self, report: audit.ChainReport):
+        super().__init__(report.reason)
+        self.payload = {
+            "enregistrements": report.count,
+            "maillon_fautif": report.broken_id,
+            "raison": report.reason,
+            "tete": report.head,
+        }
+
+
+def _verify(args: argparse.Namespace) -> dict:
+    """Vérifie la chaîne du journal d'audit (rôle applicatif, lecture seule)."""
+    report = audit.verify_chain(open_audit_store().entries(), args.expect_head)
+    if not report.ok:
+        raise ChaineRompue(report)
+    return {"verify": "ok", "enregistrements": report.count, "tete": report.head}
+
+
+def _head(value: str) -> str:
+    if not audit.is_hash(value):
+        raise argparse.ArgumentTypeError(
+            f"empreinte invalide : {value!r} (64 caractères hexadécimaux minuscules)"
+        )
+    return value
 
 
 def _history(args: argparse.Namespace) -> dict:
-    with _graph(load_config()) as graph:
+    config = load_config()
+    with _graph(config, review_deps(config, HISTORY_EXPLAINER)) as graph:
         checkpoints = orchestrator.thread_history(graph, args.thread_id)
     return {"thread_id": args.thread_id, "checkpoints": checkpoints}
 
@@ -137,7 +219,8 @@ def _history(args: argparse.Namespace) -> dict:
 def _expire(args: argparse.Namespace) -> dict:
     older_than = expiry.parse_duration(args.older_than)
     now = datetime.now(UTC)
-    with _graph(load_config()) as graph:
+    config = load_config()
+    with _graph(config, review_deps(config, EXPIRE_EXPLAINER)) as graph:
         expired = orchestrator.expire_threads(graph, older_than, now)
     return {
         "older_than": args.older_than,
@@ -168,9 +251,9 @@ def build_parser() -> argparse.ArgumentParser:
     ).set_defaults(handler=_ingest)
 
     run_notice = (
-        "Masque le contrat, puis extrait ses clauses et interroge le juge du CRAG par le "
-        "fournisseur LLM de la configuration (appels payants, clé dans .env) ; corpus "
-        "indexé par ingest, modèle d'embedding local."
+        "Masque le contrat, puis extrait ses clauses, interroge le juge du CRAG et rédige "
+        "l'explication par le fournisseur LLM de la configuration (appels payants, clé "
+        "dans .env) ; corpus indexé par ingest, modèle d'embedding local."
     )
     run = sub.add_parser(
         "run", help="analyse un contrat (appels LLM payants)", description=run_notice
@@ -194,7 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.set_defaults(handler=_run)
 
-    resume = sub.add_parser("resume", help="reprend un thread en attente d'un humain")
+    resume = sub.add_parser(
+        "resume",
+        help="reprend un thread en attente d'un humain ; explication par le LLM si la "
+        "clé d'API est présente (appel payant), sinon par le gabarit",
+    )
     resume.add_argument("thread_id")
     resume.add_argument("--decision", required=True, choices=get_args(Decision))
     resume.add_argument("--reviewer", required=True)
@@ -215,10 +302,24 @@ def build_parser() -> argparse.ArgumentParser:
     expire = sub.add_parser(
         "expire",
         help="NO_GO système (motif timeout) pour les threads en attente "
-        "d'un humain depuis plus que le délai ; jamais d'approbation",
+        "d'un humain depuis plus que le délai ; jamais d'approbation ; explication "
+        "par le gabarit, sans LLM",
     )
     expire.add_argument("--older-than", required=True, help="délai : 24h, 30m, 2d…")
     expire.set_defaults(handler=_expire)
+
+    verify = sub.add_parser(
+        "verify",
+        help="vérifie la chaîne du journal d'audit (lecture seule) ; code 1 et premier "
+        "maillon fautif si un enregistrement a été modifié, supprimé ou déplacé",
+    )
+    verify.add_argument(
+        "--expect-head",
+        type=_head,
+        help="empreinte de la tête de chaîne conservée hors de la base : échoue si la "
+        "tête diffère (fin du journal tronquée)",
+    )
+    verify.set_defaults(handler=_verify)
     return parser
 
 
@@ -230,12 +331,11 @@ def main(argv: list[str] | None = None) -> int:
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
-        print(
-            json.dumps(
-                {"erreur": type(exc).__name__, "detail": str(exc)}, ensure_ascii=False
-            ),
-            file=sys.stderr,
-        )
+        error = {"erreur": type(exc).__name__, "detail": str(exc)}
+        payload = getattr(exc, "payload", None)  # rapport structuré, s'il y en a un
+        if isinstance(payload, dict):
+            error |= payload
+        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0

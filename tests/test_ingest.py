@@ -9,6 +9,7 @@ from doubles import HashEmbedder
 from cdg.adapters.postgres import rag_store
 from cdg.application import ingestion
 from cdg.domain.config import load_config
+from cdg.domain.models import DOMAIN_KINDS
 
 pytestmark = pytest.mark.pg
 
@@ -127,3 +128,33 @@ def test_sync_remplace_un_extrait_dont_la_validite_change(pg, ingested):
         target.domain,
     )
     assert valid_until == date(2028, 1, 1)
+
+
+def test_lignes_rattachees_aux_clauses_de_leur_domaine(pg, ingested):
+    rows, _ = ingested
+    for row in rows:
+        assert row.kinds and set(row.kinds) <= set(DOMAIN_KINDS[row.domain]), row
+    stored = dict(
+        query(
+            pg,
+            "SELECT DISTINCT domain, kinds FROM rag_chunks WHERE embedding_model = %s "
+            "AND reference = 'C. com., art. L442-1'",
+            EMBEDDER.model,
+        )
+    )
+    assert stored == {
+        "juridique": ["responsabilite_acheteur", "responsabilite_fournisseur"],
+        "operationnel": ["preavis_resiliation"],
+    }
+
+
+def test_rattachement_modifie_extrait_remplace(pg, ingested):
+    rows, _ = ingested
+    changed = [
+        r.model_copy(update={"kinds": r.kinds[:1]})
+        if r.reference == "C. com., art. L442-1" and r.domain == "juridique"
+        else r
+        for r in rows
+    ]
+    summary = rag_store.sync(pg.admin, changed, EMBEDDER.model)
+    assert summary["deleted"] == summary["inserted"] > 0

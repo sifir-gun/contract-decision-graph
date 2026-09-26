@@ -169,7 +169,16 @@ def start(domain: Domain, clause: Clause, analysis_date: date) -> CragState:
 
 
 def retrieve(state: CragState, retriever: Retriever, top_k: int) -> dict[str, Any]:
-    docs = retriever.search(state["domain"], state["query"], k=top_k)
+    """Recherche filtrée par domaine et par clause (rattachement déclaré) ; un extrait
+    non rattaché à la clause est une erreur de l'adaptateur, jamais écartée en silence."""
+    kind = state["clause"].kind
+    docs = retriever.search(state["domain"], state["query"], kind=kind, k=top_k)
+    foreign = [p.reference for p in docs if kind not in p.kinds]
+    if foreign:
+        raise ValueError(
+            f"extraits non rattachés à la clause {kind} rendus par la recherche : "
+            + ", ".join(foreign)
+        )
     return {
         "docs": docs,
         "attempts": state["attempts"] + 1,
@@ -270,11 +279,14 @@ def generate(state: CragState) -> dict[str, Any]:
 
 
 def combine(results: list[ClauseResult]) -> RetrievalResult:
-    """Résultat des clauses recherchées : leurs résumés, leurs constats, leur consommation."""
+    """Résultat des clauses recherchées : leurs résumés et leurs constats, réunis dans le
+    résumé du domaine, et leur consommation."""
     return RetrievalResult(
-        trace=RetrievalTrace(clauses=[r.trace for r in results]),
+        trace=RetrievalTrace(
+            clauses=[r.trace for r in results],
+            findings=[f for r in results for f in r.findings],
+        ),
         usage=[u for r in results for u in r.usage],
-        findings=[f for r in results for f in r.findings],
     )
 
 

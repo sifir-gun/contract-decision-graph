@@ -1,0 +1,31 @@
+CONTRAT DE PRESTATION DE CONSEIL
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Lambda Conseil Synthétique, ci-après dénommée le Prestataire,
+et la société Mu Énergie Synthétique, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire accompagne l'Acheteur dans la réorganisation de ses achats indirects, selon la proposition technique annexée au présent contrat.
+
+Article 2 - Durée
+Le présent contrat est conclu pour une durée de 12 mois à compter de sa signature.
+
+Article 3 - Résiliation
+Chaque partie peut résilier le présent contrat moyennant un préavis de 1 mois, notifié par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+Les honoraires sont fixés dans l'annexe financière. Ils peuvent être révisés à mi-parcours, dans la limite de 2 %.
+
+Article 5 - Conditions de paiement
+Les factures sont payables à 90 jours à compter de leur date d'émission.
+
+Article 6 - Pénalités d'exécution
+Tout retard dans la remise des livrables imputable au Prestataire donne lieu à des pénalités dans la limite de 10 % du montant du contrat.
+
+Article 7 - Responsabilité
+L'Acheteur répond de l'intégralité des dommages causés au Prestataire, sans limitation de montant.
+La responsabilité du Prestataire au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+
+Article 8 - Droit applicable
+Le présent contrat est soumis au droit français.

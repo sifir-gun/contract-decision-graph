@@ -7,8 +7,9 @@ import pytest
 from doubles import HashEmbedder
 
 from cdg.application import ingestion
-from cdg.domain import corpus
+from cdg.domain import corpus, explanation
 from cdg.domain.config import load_config
+from cdg.domain.models import REQUIRED_KINDS
 
 RAW = Path(__file__).resolve().parents[1] / "data" / "corpus" / "raw"
 CONFIG = load_config()
@@ -142,10 +143,29 @@ def test_articles_ingérés():
     assert all(domains for _, domains in rows)
 
 
+def test_aucun_numero_d_article_commun_a_deux_sources():
+    # l'explication compare les articles cités par leur seul numéro normalisé
+    # (domain/explanation.py) : un numéro partagé par deux sources rendrait citable
+    # l'article d'une source quand seul celui de l'autre est retenu
+    sources: dict[str, set[str]] = {}
+    for article, _ in ingestion.articles():
+        [number] = explanation.articles(article.reference)
+        sources.setdefault(number, set()).add(article.source_id)
+    shared = {n: sorted(s) for n, s in sources.items() if len(s) > 1}
+    assert not shared, (
+        f"numéros d'articles communs à plusieurs sources : {shared}. Passer, dans "
+        "domain/explanation.py, à une comparaison des articles cités par source et "
+        "numéro, puis retirer ce test."
+    )
+
+
 def test_date_de_recuperation_propre_a_un_article():
-    by_ref = {a.reference: (a, domains) for a, domains in ingestion.articles()}
-    clause_penale, domains = by_ref["C. civ., art. 1231-5"]
-    assert (clause_penale.retrieved_at, domains) == (date(2026, 9, 25), ["financier"])
+    by_ref = {a.reference: (a, kinds) for a, kinds in ingestion.articles()}
+    clause_penale, kinds = by_ref["C. civ., art. 1231-5"]
+    assert (clause_penale.retrieved_at, kinds) == (
+        date(2026, 9, 25),
+        ["penalites_execution"],
+    )
     assert by_ref["C. civ., art. 1231-3"][0].retrieved_at == date(
         2026, 9, 24
     )  # date de la source
@@ -237,3 +257,90 @@ def test_aucun_fichier_brut_ne_repete_sa_ligne_de_titre():
         if lines and lines.count(lines[0]) > 1:
             repeated.append(path.relative_to(RAW).as_posix())
     assert repeated == []
+
+
+# --- Rattachement déclaré des sources aux types de clause (J4) ---------------------------
+
+
+def declared():
+    """(source, types de clause déclarés) : articles du manifeste, puis fiches."""
+    articles = [(a.reference, kinds) for a, kinds in ingestion.articles()]
+    fiches = [(f.id, f.kinds) for f in ingestion.load_fiches()]
+    return articles, fiches
+
+
+def test_chaque_source_declare_des_types_de_clause_connus():
+    articles, fiches = declared()
+    for source, kinds in articles + fiches:
+        assert kinds, f"{source} : aucun type de clause déclaré"
+        assert len(set(kinds)) == len(kinds), f"{source} : type répété"
+        assert set(kinds) <= set(REQUIRED_KINDS), (source, kinds)
+
+
+def test_chaque_type_de_clause_a_au_moins_un_article_et_une_fiche():
+    articles, fiches = declared()
+    for kind in REQUIRED_KINDS:
+        assert any(kind in kinds for _, kinds in articles), f"{kind} : aucun article"
+        assert any(kind in kinds for _, kinds in fiches), f"{kind} : aucune fiche"
+
+
+def test_article_cite_par_une_fiche_rattache_a_une_de_ses_clauses():
+    # une fiche paraphrase ses articles pour son sujet : chacun peut justifier au moins
+    # une des clauses de la fiche
+    kinds_of = {(a.source_id, a.article): set(k) for a, k in ingestion.articles()}
+    for fiche in ingestion.load_fiches():
+        cited = {
+            c for line in corpus.claim_lines(fiche.body) for c in corpus.citations(line)
+        }
+        for article in cited:
+            assert kinds_of[article] & set(fiche.kinds), (fiche.id, article)
+
+
+def test_rattachements_de_la_mesure_du_j3_corriges():
+    # rattachements lâches relevés par la mesure du J3 : l'art. 28 et la fiche sur la
+    # sous-traitance ne justifient pas un transfert, la fiche transferts pas un accord
+    by_ref = {a.reference: kinds for a, kinds in ingestion.articles()}
+    fiches = {f.id: f.kinds for f in ingestion.load_fiches()}
+    assert "transfert_hors_ue" not in by_ref["RGPD, art. 28"]
+    assert "transfert_hors_ue" not in fiches["fiche-sous-traitance-rgpd"]
+    assert "accord_traitement_donnees" not in fiches["fiche-transferts-hors-ue"]
+
+
+def test_domaines_deduits_des_types_de_clause():
+    assert corpus.by_domain(
+        ["preavis_resiliation", "responsabilite_fournisseur", "responsabilite_acheteur"]
+    ) == [
+        ("juridique", ["responsabilite_acheteur", "responsabilite_fournisseur"]),
+        ("operationnel", ["preavis_resiliation"]),
+    ]
+    with pytest.raises(ValueError, match="inconnu"):
+        corpus.by_domain(["penalites_retard"])
+    with pytest.raises(ValueError, match="aucun type"):
+        corpus.by_domain([])
+
+
+def test_fiche_domaines_deduits():
+    [fiche] = [f for f in ingestion.load_fiches() if f.id == "fiche-duree-preavis"]
+    assert fiche.kinds == ["duree_engagement", "preavis_resiliation"]
+    assert fiche.domains == ["operationnel"]
+
+
+def test_sources_md_donne_les_memes_rattachements_que_le_manifeste_et_les_fiches():
+    text = (RAW.parent / "SOURCES.md").read_text(encoding="utf-8")
+    documented = {}
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) >= 4 and cells[0].startswith("`") and "`" in cells[-2]:
+            kinds = [k.strip(" `") for k in cells[-2].split(",")]
+            key = (
+                cells[0].strip("`")
+                if cells[0].startswith("`fiche-")
+                else (
+                    cells[0].strip("`"),
+                    cells[1].removeprefix("art. "),
+                )
+            )
+            documented[key] = kinds
+    expected = {(a.source_id, a.article): k for a, k in ingestion.articles()}
+    expected |= {f.id: f.kinds for f in ingestion.load_fiches()}
+    assert documented == expected

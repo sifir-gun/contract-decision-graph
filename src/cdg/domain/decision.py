@@ -1,11 +1,14 @@
 """Décision du gate, déterministe et sans LLM. L'issue la plus conservatrice l'emporte.
 
 Ordre : 1. blocage dur, 2. analyste en échec, 3. budget, 4. INSUFFISANT, 5. conflit,
-6. seuils puis marge. Le nœud `decision_gate` ne fait qu'adapter l'état à `decide`, puis
-la proposition à l'état (route, clés écrites).
+6. seuils puis marge. Un constat du contrat lui-même (tentative d'instruction détectée,
+J4) impose ensuite la revue humaine, la proposition restant celle des règles (NO_GO
+compris, comme `hard_block_review`). Le nœud `decision_gate` ne fait qu'adapter l'état à
+`decide`, puis la proposition à l'état (route, clés écrites).
 """
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from cdg.domain.config import DecisionConfig
@@ -100,6 +103,22 @@ def _hard_block(
 
 
 def decide(
+    verdicts: list[AgentVerdict],
+    failures: list[NodeFailure],
+    usage: list[Usage],
+    config: DecisionConfig,
+    *,
+    input_findings: Sequence[str] = (),
+) -> GateOutcome:
+    """`input_findings` : constats du contrat (tentative d'instruction) ; s'il y en a, la
+    revue humaine est obligatoire."""
+    outcome = _decide(verdicts, failures, usage, config)
+    if input_findings and not outcome.human_review:
+        return replace(outcome, human_review=True)
+    return outcome
+
+
+def _decide(
     verdicts: list[AgentVerdict],
     failures: list[NodeFailure],
     usage: list[Usage],

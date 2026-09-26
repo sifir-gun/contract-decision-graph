@@ -16,6 +16,8 @@ from doubles import (
     FakeRetriever,
     FixedExtractor,
     clauses,
+    context,
+    make_deps,
     passage,
 )
 from langgraph.checkpoint.memory import InMemorySaver
@@ -23,7 +25,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application import crag
-from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 from cdg.domain.models import DOMAIN_KINDS, DOMAINS, ClauseRetrieval
 from cdg.ports.llm import LLMOutputError
@@ -114,7 +115,31 @@ def test_retrieve_compte_les_passes_et_trace_les_requetes():
     out = crag.retrieve(state, retriever=retriever, top_k=3)
     assert out["attempts"] == 1 and out["queries"] == [state["query"]]
     assert retriever.calls == [("financier", state["query"], 3)]
+    assert retriever.searched_kinds == ["delai_paiement"]
     assert [p.reference for p in out["docs"]] == [L441]
+
+
+class Unfiltered(FakeRetriever):
+    """Adaptateur fautif : ignore la clause demandée."""
+
+    def search(self, domain, query, *, kind, k):
+        return list(self.passages.get(domain, []))[:k]
+
+
+def test_retrieve_refuse_un_extrait_non_rattache_a_la_clause():
+    foreign = passage("C. civ., art. 1231-5", kinds=["penalites_execution"])
+    retriever = Unfiltered({"financier": [passage(L441), foreign]})
+    state = crag.start("financier", clause_of("delai_paiement"), ANALYSIS_DATE)
+    with pytest.raises(ValueError, match="non rattachés à la clause delai_paiement"):
+        crag.retrieve(state, retriever=retriever, top_k=3)
+
+
+def test_la_doublure_filtre_aussi_par_clause():
+    retriever = FakeRetriever(
+        {"financier": [passage("C. civ., art. 1231-5", kinds=["penalites_execution"])]}
+    )
+    state = crag.start("financier", clause_of("delai_paiement"), ANALYSIS_DATE)
+    assert crag.retrieve(state, retriever=retriever, top_k=3)["docs"] == []
 
 
 # --- grade : juge de pertinence, modèle léger ------------------------------------------
@@ -273,13 +298,13 @@ def test_combine_rassemble_les_resumes_et_les_constats():
     )
     assert [c.kind for c in result.trace.clauses] == ["revision_prix", "delai_paiement"]
     assert result.trace.clauses[0].retained == ["A"]  # rattachées à leur clause
-    assert result.findings == ["exp"]
+    assert result.trace.findings == ["exp"]  # constats du CRAG, dans son résumé
     assert "status" not in crag.RetrievalResult.model_fields  # le CRAG ne décide pas
 
 
 def test_combine_sans_clause():
     result = crag.combine([])
-    assert (result.trace.clauses, result.usage, result.findings) == ([], [], [])
+    assert (result.trace.clauses, result.usage, result.trace.findings) == ([], [], [])
 
 
 # --- per_clause : une recherche par clause reçue -------------------------------------------
@@ -395,7 +420,7 @@ def test_sous_graphe_top_k_de_la_configuration_par_requete():
 
 
 def _graph(retriever, llm, found=None):
-    deps = Deps(
+    deps = make_deps(
         extractor=FixedExtractor(found or clauses(**PENALIZED)),
         crag=orchestrator.crag_runner(retriever, llm, CONFIG),
     )
@@ -411,6 +436,7 @@ def _invoke(graph, contract_id):
             "contract_id": contract_id,
             "raw_text": CONTRACT_TEXT,
             "analysis_date": ANALYSIS_DATE,
+            **context(),
         },
         thread,
     )

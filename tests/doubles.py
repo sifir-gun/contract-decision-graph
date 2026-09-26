@@ -1,9 +1,14 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
-from datetime import date
+import json
+from datetime import UTC, date, datetime
 
-from cdg.application.deps import ExtractionResult, RetrievalResult
+from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, TemplateOnly
+from cdg.domain import audit
+from cdg.domain.audit import StoredAuditEntry
+from cdg.domain.config import load_config
 from cdg.domain.models import (
+    DOMAIN_KINDS,
     DOMAINS,
     REQUIRED_KINDS,
     AgentVerdict,
@@ -12,6 +17,8 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.verification import VALUE_UNITS
+from cdg.ports.audit_store import AuditStoreError
 from cdg.ports.retriever import Passage
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
@@ -42,13 +49,37 @@ PENALIZED = {
     "duree_engagement": 48.0,  # engagement au-delà de 36 mois
 }
 
+
+def quote_of(kind: str, value) -> str:
+    """Citation synthétique d'une clause présente : avec sa valeur et son unité quand elle
+    est chiffrée, comme l'exige la vérification (correction 4 de la série 4)."""
+    unit = VALUE_UNITS.get(kind)
+    if value is None or unit is None:
+        return f"Article synthétique : {kind}."
+    return f"Article synthétique : la clause {kind} est fixée à {value:g} {unit}."
+
+
+# Valeurs d'essai des tests qui passent par la vérification de l'extraction : le contrat
+# synthétique en contient la citation. Une autre valeur donne « citation introuvable » :
+# l'ajouter ici.
+TEST_VALUES = {
+    "responsabilite_fournisseur": (50.0,),
+    "delai_paiement": (90.0,),
+    "duree_engagement": (48.0,),
+    "preavis_resiliation": (12.0,),
+}
+
 # Contrat synthétique en français, sans donnée réelle : contient la citation de chaque
-# clause rendue par `clauses()` (« Article synthétique : <kind>. »).
+# clause rendue par `clauses()`, sans valeur puis pour chaque valeur d'essai.
 CONTRACT_TEXT = (
     "CONTRAT DE PRESTATION DE SERVICES (document synthétique)\n\n"
     "Entre la société cliente, ci-après dénommée l'Acheteur, et la société prestataire, "
     "ci-après dénommée le Fournisseur, il est convenu ce qui suit.\n\n"
-    + "".join(f"Article synthétique : {kind}.\n" for kind in REQUIRED_KINDS)
+    + "".join(
+        f"{quote_of(kind, value)}\n"
+        for kind in REQUIRED_KINDS
+        for value in dict.fromkeys((None, FAVORABLE[kind], *TEST_VALUES.get(kind, ())))
+    )
     + "\nLe présent contrat est soumis au droit français. Les parties s'engagent à exécuter "
     "leurs obligations de bonne foi et dans les délais convenus. Toute modification du "
     "présent contrat fera l'objet d'un avenant écrit signé par les deux parties.\n"
@@ -81,7 +112,7 @@ def clauses(categories: dict | None = None, **overrides) -> list[Clause]:
                 Clause(
                     kind=kind,
                     present=True,
-                    quote=f"Article synthétique : {kind}.",
+                    quote=quote_of(kind, value),
                     value=value,
                     category=categories.get(kind),
                 )
@@ -226,8 +257,9 @@ class HashEmbedder:
 
 
 def passage(
-    reference: str, domain="financier", valid_until=None, text=None, id=1
+    reference: str, domain="financier", valid_until=None, text=None, id=1, kinds=None
 ) -> Passage:
+    """Extrait de test ; rattaché par défaut à toutes les clauses de son domaine."""
     return Passage(
         id=id,
         domain=domain,
@@ -236,16 +268,96 @@ def passage(
         text=text or f"Texte de {reference}.",
         distance=0.1,
         valid_until=valid_until,
+        kinds=list(DOMAIN_KINDS[domain]) if kinds is None else kinds,
     )
 
 
 class FakeRetriever:
-    """Doublure du port Retriever : extraits fixes par domaine, requêtes enregistrées."""
+    """Doublure du port Retriever : extraits fixes par domaine, filtrés par clause comme
+    l'adaptateur ; requêtes et clauses enregistrées."""
 
     def __init__(self, passages: dict | None = None):
         self.passages = passages or {}
         self.calls: list[tuple[str, str, int]] = []
+        self.searched_kinds: list[str] = []
 
-    def search(self, domain, query: str, *, k: int) -> list[Passage]:
+    def search(self, domain, query: str, *, kind: str, k: int) -> list[Passage]:
         self.calls.append((domain, query, k))
-        return list(self.passages.get(domain, []))[:k]
+        self.searched_kinds.append(kind)
+        return [p for p in self.passages.get(domain, []) if kind in p.kinds][:k]
+
+
+class MemoryAuditStore:
+    """Doublure du port AuditStore : journal en mémoire, mêmes règles que PostgreSQL
+    (un enregistrement par thread, ajout rejoué idempotent à décision égale)."""
+
+    def __init__(self):
+        self.stored: list[StoredAuditEntry] = []
+
+    def append(self, seal) -> StoredAuditEntry:
+        entry = seal(self.stored[-1].chain_hash if self.stored else None)
+        for stored in self.stored:
+            if stored.thread_id == entry.thread_id:
+                if stored.decision_hash != entry.decision_hash:
+                    raise AuditStoreError(
+                        f"thread {entry.thread_id} déjà scellé avec une autre décision"
+                    )
+                return stored
+        created_at = datetime.fromisoformat(entry.record["sealed_at"])
+        stored = StoredAuditEntry(
+            **entry.model_dump(), id=len(self.stored) + 1, created_at=created_at
+        )
+        self.stored.append(stored)
+        return stored
+
+    def entries(self) -> list[StoredAuditEntry]:
+        return list(self.stored)
+
+
+# horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre
+FIXED_NOW = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)
+
+
+def fixed_clock() -> datetime:
+    return FIXED_NOW
+
+
+# explication des tests par défaut : le gabarit, sans LLM, motif scellé
+TEMPLATE = TemplateOnly("tests : explication par le gabarit")
+
+
+def make_deps(
+    extractor=None, crag=None, audit_store=None, clock=fixed_clock, explainer=TEMPLATE
+) -> Deps:
+    """Dépendances de test : doublures, journal d'audit en mémoire, horloge fixe,
+    explication par le gabarit."""
+    return Deps(
+        extractor=extractor if extractor is not None else FixedExtractor(clauses()),
+        crag=crag if crag is not None else FakeCrag(),
+        audit_store=audit_store if audit_store is not None else MemoryAuditStore(),
+        clock=clock,
+        explainer=explainer,
+    )
+
+
+def faithful_explanation(user: str) -> dict:
+    """Réponse fidèle d'un LLM d'explication (FakeLLM, nœud `explain`) : chaque constat du
+    dossier reçu, avec sa clause et ses références. La synthèse est écrite par le code."""
+    data, _ = json.JSONDecoder().raw_decode(user, user.index("{"))
+    return {
+        "findings": [
+            {
+                "id": f["id"],
+                "kind": f["kind"],
+                "references": f["references"],
+                "text": f["text"],
+            }
+            for f in data["findings"]
+        ]
+    }
+
+
+def context(config=None) -> dict:
+    """Contexte d'analyse (config_hash, modèles), tel que run_contract le pose dans l'état
+    initial : à joindre à toute entrée passée directement au graphe."""
+    return audit.analysis_context(config if config is not None else load_config())

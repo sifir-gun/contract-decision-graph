@@ -1,7 +1,7 @@
 ---
 id: fiche-penalites-execution
 titre: Pénalités d'exécution (clause pénale)
-domaines: [financier]
+clauses: [penalites_execution]
 ---
 Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique.
 

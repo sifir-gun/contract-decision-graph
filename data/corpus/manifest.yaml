@@ -1,5 +1,7 @@
-# Ce qui est ingéré dans rag_chunks, et sous quel domaine (filtre de recherche).
-# Règle de périmètre et justification de chaque article : SOURCES.md.
+# Ce qui est ingéré dans rag_chunks, et à quels types de clause chaque article est
+# rattaché (J4) : les seules clauses qu'il peut justifier. Les domaines d'indexation s'en
+# déduisent (DOMAIN_KINDS) ; la recherche filtre par domaine ET par clause.
+# Règle de périmètre et de rattachement, justification de chaque article : SOURCES.md.
 # Tout fichier de raw/ doit figurer ici, ingéré ou exclu (vérifié par les tests).
 
 sources:
@@ -10,19 +12,19 @@ sources:
     file: "art-{article}.txt"
     retrieved_at: 2026-09-24
     articles:
-      "4": [conformite]
-      "28": [conformite]
-      "32": [conformite]
-      "33": [conformite]
-      "36": [conformite]
-      "40": [conformite]
-      "42": [conformite]
-      "44": [conformite]
-      "45": [conformite]
-      "46": [conformite]
-      "82": [conformite]
-      "83": [conformite]
-      "84": [conformite]
+      "4": [donnees_personnelles, accord_traitement_donnees, transfert_hors_ue]
+      "28": [accord_traitement_donnees]
+      "32": [accord_traitement_donnees]
+      "33": [accord_traitement_donnees]
+      "36": [accord_traitement_donnees]
+      "40": [accord_traitement_donnees, transfert_hors_ue]
+      "42": [accord_traitement_donnees, transfert_hors_ue]
+      "44": [transfert_hors_ue]
+      "45": [transfert_hors_ue]
+      "46": [transfert_hors_ue]
+      "82": [accord_traitement_donnees]
+      "83": [accord_traitement_donnees, transfert_hors_ue]
+      "84": [accord_traitement_donnees]
     excluded:
       "79": "hors périmètre : cité seulement par l'art. 82, lui-même cité par l'art. 28"
 
@@ -33,8 +35,8 @@ sources:
     file: "{article}.txt"
     retrieved_at: 2026-09-24
     articles:
-      "L441-10": [financier]
-      "L442-1": [operationnel, juridique]
+      "L441-10": [delai_paiement]
+      "L442-1": [responsabilite_acheteur, responsabilite_fournisseur, preavis_resiliation]
 
   code-civil:
     format: legifrance
@@ -45,12 +47,12 @@ sources:
     retrieved_at_overrides:
       "1231-5": 2026-09-25
     articles:
-      "1170": [juridique]
-      "1171": [juridique]
-      "1231-3": [juridique]
-      "1231-5": [financier]   # clause pénale : règle des pénalités d'exécution
-      "1210": [operationnel]
-      "1211": [operationnel]
+      "1170": [responsabilite_acheteur, responsabilite_fournisseur]
+      "1171": [responsabilite_acheteur, responsabilite_fournisseur]
+      "1231-3": [responsabilite_acheteur, responsabilite_fournisseur]
+      "1231-5": [penalites_execution]   # clause pénale : pénalités d'exécution
+      "1210": [duree_engagement]
+      "1211": [preavis_resiliation]
 
   code-monetaire-financier:
     format: legifrance
@@ -59,4 +61,4 @@ sources:
     file: "{article}.txt"
     retrieved_at: 2026-09-24
     articles:
-      "L112-2": [financier]
+      "L112-2": [revision_prix]

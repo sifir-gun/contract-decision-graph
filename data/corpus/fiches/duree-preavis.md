@@ -1,7 +1,7 @@
 ---
 id: fiche-duree-preavis
 titre: Durée d'engagement et préavis de résiliation
-domaines: [operationnel]
+clauses: [duree_engagement, preavis_resiliation]
 ---
 Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique.
 

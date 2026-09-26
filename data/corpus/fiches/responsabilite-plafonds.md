@@ -1,7 +1,7 @@
 ---
 id: fiche-responsabilite-plafonds
 titre: Plafonds et clauses de responsabilité
-domaines: [juridique]
+clauses: [responsabilite_acheteur, responsabilite_fournisseur]
 ---
 Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique.
 

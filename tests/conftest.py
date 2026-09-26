@@ -8,10 +8,13 @@ from dataclasses import dataclass
 
 import psycopg
 import pytest
+from psycopg import sql
 
-from cdg import settings
+from cdg import cli, settings
 from cdg.adapters.langgraph import checkpointer
-from cdg.adapters.postgres import conninfo, rag_store
+from cdg.adapters.llm import API_KEY_VARS
+from cdg.adapters.postgres import conninfo, migrations, rag_store
+from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.domain.config import load_config
 
 
@@ -66,9 +69,8 @@ def pg() -> Pg:
             pytrace=False,
         )
     checkpointer.setup_database(admin)  # idempotent : tables du checkpointer et droits
-    rag_store.setup(
-        admin, load_config().embedding.dimension
-    )  # migration 002, idempotente
+    migrations.apply(admin)  # 002 et suivantes, idempotentes
+    rag_store.check_dimension(admin, load_config().embedding.dimension)
     return Pg(admin=admin, app=app)
 
 
@@ -78,3 +80,61 @@ def thread_id(pg) -> str:
     tid = f"test-{uuid.uuid4()}"
     yield tid
     checkpointer.delete_thread(pg.admin, tid)
+
+
+@pytest.fixture
+def journal(pg) -> str:
+    """Journal d'audit jetable : même structure (index uniques compris) et mêmes droits
+    qu'`audit_decisions`. Les tests ne touchent jamais au vrai journal, qu'on ne peut pas
+    purger sans casser la chaîne."""
+    name = f"audit_test_{uuid.uuid4().hex[:12]}"
+    table, role = sql.Identifier(name), sql.Identifier(settings.APP_ROLE)
+    with psycopg.connect(pg.admin, autocommit=True) as conn:
+        conn.execute(
+            sql.SQL("CREATE TABLE {} (LIKE audit_decisions INCLUDING ALL)").format(
+                table
+            )
+        )
+        conn.execute(sql.SQL("GRANT SELECT, INSERT ON {} TO {}").format(table, role))
+    yield name
+    with psycopg.connect(pg.admin, autocommit=True) as conn:
+        conn.execute(sql.SQL("DROP TABLE {}").format(table))
+
+
+class ForbiddenAuditStore:
+    """Journal réel de la CLI pendant les tests : toute écriture ou lecture échoue. Un
+    test qui scelle par la CLI demande la fixture `audit_journal` (journal jetable)."""
+
+    def append(self, seal):
+        raise AssertionError(
+            "un test ne scelle jamais dans le vrai journal : fixture audit_journal"
+        )
+
+    def entries(self):
+        raise AssertionError(
+            "un test ne lit jamais le vrai journal : fixture audit_journal"
+        )
+
+
+@pytest.fixture(autouse=True)
+def _journal_reel_interdit(monkeypatch):
+    monkeypatch.setattr(cli, "open_audit_store", ForbiddenAuditStore)
+
+
+@pytest.fixture(autouse=True)
+def _cles_d_api_vides(request, monkeypatch):
+    """Clés d'API vides, comme en CI, quel que soit le .env du poste (load_env ne remplace
+    pas une variable exportée) : aucun test n'appelle le vrai fournisseur, et `resume`
+    explique par le gabarit, même en sous-processus. Les tests llm gardent leur clé."""
+    if request.node.get_closest_marker("llm"):
+        return
+    for var in API_KEY_VARS.values():
+        monkeypatch.setenv(var, "")
+
+
+@pytest.fixture
+def audit_journal(pg, journal, monkeypatch) -> PostgresAuditStore:
+    """La CLI scelle dans un journal jetable (même structure, mêmes droits)."""
+    store = PostgresAuditStore(pg.app, table=journal)
+    monkeypatch.setattr(cli, "open_audit_store", lambda: store)
+    return store

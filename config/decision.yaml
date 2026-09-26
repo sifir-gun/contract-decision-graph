@@ -25,6 +25,66 @@ budget:
 
 extraction:
   max_attempts: 2
+  # Vérification des absences (J4) : une clause déclarée absente alors que le texte masqué
+  # contient l'un de ces termes (casse et typographie ignorées) est redemandée avec un
+  # retour ciblé, puis escaladée. Listes imparfaites : une couche de défense parmi d'autres.
+  absence_terms:
+    responsabilite_acheteur:
+      - responsabilité de l'acheteur
+      - l'acheteur répond
+      - responsabilité du client
+      - le client répond
+    responsabilite_fournisseur:
+      - responsabilité du prestataire
+      - responsabilité du fournisseur
+      - responsabilité du titulaire
+      - le prestataire répond
+      - le fournisseur répond
+    revision_prix:
+      - révision des prix
+      - révision du prix
+      - révision des tarifs
+      - prix sont révisés
+      - prix peuvent être révisés
+      - peut être révisé
+      - peuvent être révisés
+      - indexation
+    penalites_execution:
+      - pénalités d'exécution
+      - clause pénale
+      - redevable de pénalités
+      - donne lieu à des pénalités
+      - pénalités de retard de livraison
+      - pénalités de retard d'exécution
+    delai_paiement:
+      - payables à
+      - payable à
+      - payables dans
+      - payable dans
+      - délai de paiement
+      - délai de règlement
+    duree_engagement:
+      - conclu pour une durée
+      - conclu pour la durée
+      - durée ferme
+      - durée d'engagement
+      - durée du contrat
+    preavis_resiliation:
+      - préavis
+    donnees_personnelles:
+      - données à caractère personnel
+      - données personnelles
+    accord_traitement_donnees:
+      - accord de traitement
+      - accord de sous-traitance
+      - article 28 du règlement
+    transfert_hors_ue:
+      - données sont hébergées
+      - hébergement des données
+      - transfert de données
+      - transfert des données
+      - pays tiers
+      - hors de l'union
 
 # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
 rules:
@@ -76,8 +136,26 @@ input:
   max_chars: 200000        # au-delà : rejet
   min_words: 30            # en dessous : langue non vérifiable, rejet
   min_french_ratio: 0.15   # part minimale de mots-outils français parmi les mots
+  # Détection d'instructions (J4) : motifs (expressions régulières, casse ignorée, sur le
+  # texte masqué normalisé, ligne par ligne) d'un passage qui s'adresse à l'outil, à une IA
+  # ou à un analyste, qui demande d'ignorer des règles ou de conclure une décision. Une
+  # ligne qui en contient un devient un constat « tentative d'instruction détectée » et
+  # impose la revue humaine, même en cas de blocage dur. Se contourne par paraphrase : une
+  # couche de défense parmi d'autres.
+  instruction_patterns:
+    # demande d'ignorer des règles ou des consignes, en tête de phrase (impératif)
+    - '(?:^|[.:;!?]\s+)(?:ignore|ignorez|oublie|oubliez)\s+(?:les|toutes\s+les|tous\s+les|la|le|ces|vos|tes)\b[^.\n]{0,60}\b(?:règles?|consignes?|instructions?|critères?)\b'
+    - '\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|the\s+|your\s+)?(?:previous\s+|prior\s+|above\s+)?(?:rules|instructions|guidelines)\b'
+    # consignes adressées à l'outil, à une IA, à un modèle ou à un analyste
+    - '\b(?:consignes?|instructions?|note|message)\s+(?:pour|à|au|aux|à\s+l''attention\s+de|destinée?s?\s+à)\s+(?:l''|le\s+|la\s+|les\s+|un\s+|une\s+)?(?:outil|intelligence\s+artificielle|ia|modèle|assistant|analyste|lecteur\s+automatique)s?\b'
+    - '\bà\s+l''attention\s+(?:de\s+l''|du\s+|des\s+)(?:outil|ia|intelligence\s+artificielle|modèle|assistant|analyste)s?\b'
+    - '\b(?:en\s+tant\s+qu''|tu\s+es|vous\s+êtes|you\s+are)\s*(?:un|une|an?)?\s*(?:ia|intelligence\s+artificielle|assistant|modèle\s+de\s+langage|ai|language\s+model)\b'
+    # demande de conclure une décision (libellés du projet, en majuscules)
+    - '\b(?:conclus|concluez|conclure\s+à|rends|rendez|retiens|retenez|donne|donnez)\b[^.\n]{0,40}(?-i:\b(?:NO[\s_-]?GO|GO[\s_-]?RESERVES|GO)\b)'
+    - '\bne\s+(?:signale|signalez)\s+(?:aucun|aucune|rien)\b'
 
-# LLM : extraction (modèle principal) et juge CRAG (modèle léger). Clés d'API dans .env.
+# LLM : extraction et explication (modèle principal), juge CRAG (modèle léger). Clés d'API
+# dans .env.
 # Identifiants figés, jamais d'alias « -latest » : le modèle est scellé dans l'audit.
 # Vérifiés le 2026-09-24 dans la documentation officielle (docs.mistral.ai,
 # platform.claude.com).
@@ -123,6 +201,22 @@ analyst_retry:
 # Reprise de l'extraction sur erreur passagère du fournisseur seulement : limite de débit
 # (429), erreur serveur (5xx), délai dépassé. Les SDK ne reprennent rien eux-mêmes.
 extraction_retry:
+  max_attempts: 3                 # tentatives, la première comprise
+  initial_interval_seconds: 2.0
+  backoff_factor: 2.0
+  max_interval_seconds: 20.0
+  jitter: false
+
+# Explication (J4) : rédigée par le modèle principal à partir du verdict figé, jamais du
+# contrat. Refusée si elle nomme une autre décision que la décision finale, ou cite une
+# référence non retenue pour la clause du constat ; après max_attempts essais refusés, ou
+# une erreur, gabarit sans LLM. Jamais bloquante : la source et les motifs sont scellés.
+explain:
+  max_attempts: 2                 # le premier essai, puis une régénération
+
+# Reprise de l'explication sur erreur passagère du fournisseur seulement (429, 5xx, délai
+# dépassé), puis gabarit.
+explain_retry:
   max_attempts: 3                 # tentatives, la première comprise
   initial_interval_seconds: 2.0
   backoff_factor: 2.0

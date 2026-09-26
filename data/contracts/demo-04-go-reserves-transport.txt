@@ -1,0 +1,31 @@
+CONTRAT DE TRANSPORT DE MARCHANDISES
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Eta Logistique Synthétique, ci-après dénommée le Prestataire,
+et la société Theta Industries Synthétiques, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire assure le transport de pièces mécaniques entre les sites de production de l'Acheteur, selon le programme de livraisons défini en annexe.
+
+Article 2 - Durée
+Le présent contrat est conclu pour la durée nécessaire à l'achèvement du programme de livraisons défini en annexe.
+
+Article 3 - Résiliation
+Chaque partie peut résilier le présent contrat moyennant un préavis de 2 mois, notifié par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+Les tarifs sont fixés dans l'annexe financière. Ils peuvent être révisés au 1er janvier de chaque année, dans la limite de 1,5 % par an.
+
+Article 5 - Conditions de paiement
+Les factures sont payables à 60 jours à compter de leur date d'émission.
+
+Article 6 - Pénalités de retard de livraison
+Tout retard de livraison imputable au Prestataire donne lieu à des pénalités de 0,2 % du montant du contrat par jour de retard, dans la limite de 2 % du montant du contrat.
+
+Article 7 - Responsabilité
+La responsabilité de l'Acheteur au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+La responsabilité du Prestataire au titre du présent contrat est plafonnée à 80 % du montant annuel du contrat.
+
+Article 8 - Droit applicable
+Le présent contrat est soumis au droit français. Tout différend relatif à son exécution sera porté devant les juridictions compétentes.

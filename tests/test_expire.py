@@ -4,11 +4,16 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import (
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FixedExtractor,
+    clauses,
+    make_deps,
+)
 
 from cdg import cli
 from cdg.adapters.langgraph import orchestrator
-from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 
 pytestmark = pytest.mark.pg
@@ -21,7 +26,7 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 
 def suspend(graph, thread_id: str) -> datetime:
     status = orchestrator.run_contract(
-        graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+        graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
     )
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
@@ -31,7 +36,7 @@ def suspend(graph, thread_id: str) -> datetime:
 
 @pytest.fixture
 def graph(pg):
-    deps = Deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)), crag=FakeCrag())
+    deps = make_deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)))
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         yield g
 
@@ -54,6 +59,12 @@ def test_11_thread_expire_no_go_systeme_motif_timeout(graph, thread_id):
     )
     assert human["reason"].startswith("timeout : en attente depuis 25 h")
     assert orchestrator.thread_status(graph, thread_id)["statut"] == "termine"
+    # décision système expliquée par le gabarit, sans LLM
+    assert (status["explanation"]["source"], status["explanation"]["decision"]) == (
+        "gabarit",
+        "NO_GO",
+    )
+    assert "délai de revue humaine est dépassé" in status["explanation"]["synthesis"]
 
 
 def test_thread_recent_non_expire(graph, thread_id):
@@ -71,11 +82,11 @@ def test_thread_recent_non_expire(graph, thread_id):
 
 
 def test_thread_termine_jamais_repris(pg, thread_id):
-    deps = Deps(extractor=FixedExtractor(clauses()), crag=FakeCrag())  # GO direct
+    deps = make_deps()  # GO direct
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         assert (
             orchestrator.run_contract(
-                g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+                g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
             )["statut"]
             == "termine"
         )
@@ -88,7 +99,10 @@ def test_thread_termine_jamais_repris(pg, thread_id):
 def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
     since = suspend(graph, thread_id)
     refused = orchestrator.resume_thread(
-        graph, thread_id, {"decision": "ESCALADE", "reviewer": "r", "reason": "m"}
+        graph,
+        thread_id,
+        {"decision": "ESCALADE", "reviewer": "r", "reason": "m"},
+        config=CONFIG,
     )
     assert refused["statut"] == "suspendu"
     [status] = orchestrator.expire_threads(

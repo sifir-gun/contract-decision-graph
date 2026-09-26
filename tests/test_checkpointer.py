@@ -2,7 +2,14 @@
 
 import psycopg
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import (
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FixedExtractor,
+    clauses,
+    context,
+    make_deps,
+)
 from langgraph.types import Command
 
 from cdg.adapters.langgraph import checkpointer, orchestrator
@@ -34,7 +41,7 @@ def grants(pg, table: str) -> set[str]:
 
 
 def deps() -> Deps:
-    return Deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)), crag=FakeCrag())
+    return make_deps(extractor=FixedExtractor(clauses(**LOW_MARGIN)))
 
 
 def thread(tid: str) -> dict:
@@ -72,6 +79,7 @@ def test_4_cycle_complet_run_interrupt_resume_avec_app_role(pg, thread_id):
                 "contract_id": thread_id,
                 "raw_text": CONTRACT_TEXT,
                 "analysis_date": ANALYSIS_DATE,
+                **context(),
             },
             thread(thread_id),
         )
@@ -99,6 +107,7 @@ def test_app_role_ne_peut_pas_supprimer_un_thread(pg, thread_id):
                 "contract_id": thread_id,
                 "raw_text": CONTRACT_TEXT,
                 "analysis_date": ANALYSIS_DATE,
+                **context(),
             },
             thread(thread_id),
         )
@@ -110,7 +119,7 @@ def test_texte_original_jamais_ecrit_en_base(pg, thread_id):
     original = CONTRACT_TEXT + "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89.\n"
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
         orchestrator.run_contract(
-            graph, thread_id, original, analysis_date=ANALYSIS_DATE
+            graph, thread_id, original, analysis_date=ANALYSIS_DATE, config=CONFIG
         )
     # colonnes binaires des writes et des blobs, JSON des checkpoints
     columns = {

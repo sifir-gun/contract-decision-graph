@@ -1,36 +1,27 @@
 """Port du journal d'audit, en ajout seul. Défini au J3, implémenté au J4.
 
-Le calcul des empreintes reste dans le domaine : le magasin fournit la tête de chaîne
-et insère, dans une même transaction sous verrou, ce que `seal` a scellé.
+Le calcul des empreintes reste dans le domaine (`domain/audit.py`, qui définit aussi
+`AuditEntry`) : le magasin fournit la tête de chaîne et insère, dans une même
+transaction sous verrou, ce que `seal` a scellé.
 """
 
 from collections.abc import Callable
-from datetime import datetime
-from typing import Any, Protocol
+from typing import Protocol
 
-from pydantic import BaseModel
-
-
-class AuditEntry(BaseModel):
-    """Enregistrement scellé, prêt à l'ajout."""
-
-    contract_id: str
-    thread_id: str
-    record: dict[str, Any]
-    config_hash: str
-    decision_hash: str
-    prev_hash: str
-    chain_hash: str
+from cdg.domain.audit import AuditEntry, StoredAuditEntry
 
 
-class StoredAuditEntry(AuditEntry):
-    id: int
-    created_at: datetime
+class AuditStoreError(Exception):
+    """Ajout refusé : thread déjà scellé avec une autre décision."""
 
 
 class AuditStore(Protocol):
     def append(self, seal: Callable[[str | None], AuditEntry]) -> StoredAuditEntry:
-        """Lit la tête de chaîne (None si le journal est vide), appelle `seal`, insère."""
+        """Lit la tête de chaîne (None si le journal est vide), appelle `seal`, insère.
+
+        Un seul enregistrement par thread : un ajout rejoué (même thread, même
+        `decision_hash`) rend l'enregistrement existant sans rien insérer ; une autre
+        décision pour le même thread lève `AuditStoreError`."""
         ...
 
     def entries(self) -> list[StoredAuditEntry]:

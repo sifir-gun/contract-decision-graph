@@ -7,6 +7,7 @@ import operator
 from datetime import date
 from typing import Annotated, Any, Literal, TypedDict
 
+from cdg.domain.explanation import Explanation
 from cdg.domain.models import (
     AgentVerdict,
     Clause,
@@ -27,6 +28,8 @@ class ContractState(TypedDict, total=False):
         date  # versions des textes jugées à cette date ; fixée par run_contract
     )
     reject_reason: str | None
+    # constats du contrat lui-même (tentative d'instruction), écrits par validate_input
+    input_findings: list[str]
     clauses: list[Clause]
     extraction_attempts: int
     extraction_feedback: list[str]
@@ -41,8 +44,9 @@ class ContractState(TypedDict, total=False):
     final_decision: (
         Decision | None
     )  # decision_gate (route explain) ou human_review ; None après reject
-    explanation: str
-    config_hash: str
+    explanation: Explanation  # écrite par explain ; absente après reject
+    config_hash: str  # configuration de l'analyse, posée par run_contract (J4)
+    models: dict[str, str]  # modèles de l'analyse, posés par run_contract (J4)
     decision_hash: str
     chain_hash: str
 

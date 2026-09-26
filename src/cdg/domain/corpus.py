@@ -9,6 +9,9 @@ Règles de nettoyage explicites, testées sur les fichiers réels :
 2. lignes d'interface en fin de fichier (« Voir les versions »…) : supprimées ;
 3. notes « Conformément à … » : sorties du texte, conservées en métadonnée `note` ;
 4. la fin de validité est stockée ; `expired` dit si une version a expiré à une date.
+
+Rattachement déclaré (J4) : chaque article du manifeste et chaque fiche déclarent les types
+de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (`by_domain`).
 """
 
 import hashlib
@@ -17,9 +20,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
-from cdg.domain.models import Domain
+from cdg.domain.models import DOMAIN_KINDS, DOMAINS, Domain
 
 FICHE_DISCLAIMER = (
     "Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique."
@@ -191,6 +194,25 @@ class Manifest:
         return article in self.sources.get(source_id, {}).get("articles", {})
 
 
+# --- Rattachement aux types de clause --------------------------------------------------
+
+
+def by_domain(kinds: list[str]) -> list[tuple[Domain, list[str]]]:
+    """Domaines d'indexation d'une source, chacun avec ses types de clause, dans l'ordre
+    des domaines puis des types. Un type inconnu, ou aucun type, est une erreur."""
+    if not kinds:
+        raise ValueError("aucun type de clause déclaré")
+    known = {kind for domain_kinds in DOMAIN_KINDS.values() for kind in domain_kinds}
+    unknown = sorted(set(kinds) - known)
+    if unknown:
+        raise ValueError(f"type de clause inconnu : {', '.join(unknown)}")
+    return [
+        (domain, [k for k in DOMAIN_KINDS[domain] if k in kinds])
+        for domain in DOMAINS
+        if set(DOMAIN_KINDS[domain]) & set(kinds)
+    ]
+
+
 # --- Fiches ---------------------------------------------------------------------------
 
 
@@ -198,8 +220,12 @@ class Manifest:
 class Fiche:
     id: str
     title: str
-    domains: list[str]
+    kinds: list[str]  # types de clause que la fiche peut justifier
     body: str
+
+    @property
+    def domains(self) -> list[Domain]:
+        return [domain for domain, _ in by_domain(self.kinds)]
 
 
 _CITATION = re.compile(r"\(sources? : ([^)]+)\)")
@@ -241,12 +267,14 @@ def citations(line: str) -> list[tuple[str, str]]:
 
 
 class ChunkRow(BaseModel):
-    """Extrait à ingérer (administrateur)."""
+    """Extrait à ingérer (administrateur), rattaché aux types de clause de son domaine que
+    sa source peut justifier."""
 
     domain: Domain
     source_id: str
     reference: str
     text: str
+    kinds: list[str]
     embedding_model: str
     embedding: list[float]
     article: str | None = None
@@ -256,6 +284,18 @@ class ChunkRow(BaseModel):
     amendment: str | None = None
     note: str | None = None
     retrieved_at: date | None = None
+
+    @model_validator(mode="after")
+    def _clauses_du_domaine(self) -> "ChunkRow":
+        if not self.kinds:
+            raise ValueError(f"{self.reference} : aucun type de clause déclaré")
+        foreign = [k for k in self.kinds if k not in DOMAIN_KINDS[self.domain]]
+        if foreign:
+            raise ValueError(
+                f"{self.reference} : types hors du domaine {self.domain} : "
+                + ", ".join(foreign)
+            )
+        return self
 
     @property
     def content_hash(self) -> str:

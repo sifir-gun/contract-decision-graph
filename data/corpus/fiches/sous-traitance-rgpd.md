@@ -1,7 +1,7 @@
 ---
 id: fiche-sous-traitance-rgpd
 titre: Sous-traitance de données personnelles
-domaines: [conformite]
+clauses: [donnees_personnelles, accord_traitement_donnees]
 ---
 Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique.
 

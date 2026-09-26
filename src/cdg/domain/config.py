@@ -1,12 +1,13 @@
 """Chargement et validation de config/decision.yaml. Invalide : ConfigError, arrêt au démarrage."""
 
+import re
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from cdg.domain.models import Decision, Domain, TransferCategory
+from cdg.domain.models import REQUIRED_KINDS, Decision, Domain, TransferCategory
 from cdg.domain.numeric import rounded
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "decision.yaml"
@@ -56,7 +57,31 @@ class Budget(_Strict):
     max_tokens_per_contract: Annotated[int, Field(gt=0)]
 
 
+Term = Annotated[str, Field(min_length=1)]
+
+
 class Extraction(_Strict):
+    max_attempts: Annotated[int, Field(ge=1)]
+    # vérification des absences : termes qui évoquent chaque type de clause
+    absence_terms: dict[str, Annotated[list[Term], Field(min_length=1)]]
+
+    @model_validator(mode="after")
+    def _un_jeu_de_termes_par_type(self) -> "Extraction":
+        kinds = set(self.absence_terms)
+        if kinds != set(REQUIRED_KINDS):
+            missing = sorted(set(REQUIRED_KINDS) - kinds)
+            unknown = sorted(kinds - set(REQUIRED_KINDS))
+            raise ValueError(
+                f"absence_terms : types manquants {missing}, types inconnus {unknown}"
+            )
+        for kind, terms in self.absence_terms.items():
+            if len({t.casefold() for t in terms}) != len(terms):
+                raise ValueError(f"absence_terms : terme répété pour {kind}")
+        return self
+
+
+class ExplainConfig(_Strict):
+    # essais du LLM, le premier compris ; ensuite le gabarit
     max_attempts: Annotated[int, Field(ge=1)]
 
 
@@ -138,6 +163,17 @@ class InputConfig(_Strict):
     max_chars: Annotated[int, Field(gt=0)]
     min_words: Annotated[int, Field(gt=0)]  # en dessous, la langue n'est pas vérifiable
     min_french_ratio: Unit  # part minimale de mots-outils français
+    # détection d'instructions adressées à l'outil (expressions régulières, casse ignorée)
+    instruction_patterns: Annotated[list[Term], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _motifs_valides(self) -> "InputConfig":
+        for pattern in self.instruction_patterns:
+            try:
+                re.compile(pattern, re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(f"motif d'instruction invalide {pattern!r} : {exc}")
+        return self
 
 
 class EmbeddingConfig(_Strict):
@@ -173,7 +209,7 @@ ModelId = Annotated[str, Field(min_length=1)]
 
 
 class TierModels(_Strict):
-    main: ModelId  # extraction
+    main: ModelId  # extraction, explication
     light: ModelId  # juge CRAG, réécriture de requête
 
     @model_validator(mode="after")
@@ -228,6 +264,8 @@ class DecisionConfig(_Strict):
     crag: CragConfig
     analyst_retry: RetrySettings
     extraction_retry: RetrySettings
+    explain: ExplainConfig
+    explain_retry: RetrySettings
 
     def weight(self, domain: Domain) -> float:
         weight: float = getattr(self.weights, domain)
