@@ -185,7 +185,7 @@ class ContractState(TypedDict, total=False):
         date  # versions des textes jugées à cette date (J3) ; fixée par run_contract
     )
     reject_reason: str | None
-    input_findings: list[str]  # J4 : tentative d'instruction détectée, par validate_input
+    input_findings: list[str]  # J4 : tentative d'instruction (validate_input)
     clauses: list[Clause]
     extraction_attempts: int
     extraction_feedback: list[str]
