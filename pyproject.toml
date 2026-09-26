@@ -45,6 +45,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.8",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 # Vérification des types (mypy) : strict sur domain/, ports/ et application/, mode de base
@@ -72,12 +73,6 @@ warn_unused_ignores = true
 warn_return_any = true
 implicit_reexport = false
 strict_equality = true
-
-# PyYAML n'a pas d'annotations : yaml.safe_load rend Any de toute façon. Les stubs de
-# typeshed (types-PyYAML) seraient une dépendance de plus, non ajoutée sans accord.
-[[tool.mypy.overrides]]
-module = ["yaml"]
-ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

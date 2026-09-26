@@ -57,4 +57,4 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 
 ## Stack
 
-Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, mistralai, anthropic, fastembed, pytest, pytest-cov, ruff et mypy (dev), pip-audit (groupe audit), Docker Compose.
+Python 3.12, uv, langgraph, langgraph-checkpoint-postgres, langchain-core, pydantic v2, pyyaml, python-dotenv, psycopg, pgvector, mistralai, anthropic, fastembed, pytest, pytest-cov, ruff, mypy et types-PyYAML (dev), pip-audit (groupe audit), Docker Compose.

@@ -1103,3 +1103,9 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 - Un échec planifié rend rouge le badge CI de `main` : une faille connue y est alors présente.
 - **Limite documentée** : sur un dépôt public, GitHub désactive un déclenchement planifié après 60 jours sans activité.
 
+### types-PyYAML
+
+- **`types-PyYAML`** (stubs de typeshed, 6.0.12.20260906) ajouté en dépendance de développement (décision du 26/09).
+- **Exception mypy retirée** : `ignore_missing_imports` sur `yaml`. mypy ne signale aucune nouvelle erreur, car `yaml.safe_load` est typé comme rendant `Any`, et ce qu'il rend est validé par pydantic.
+- **Vérifié que les stubs sont lus**, sur un fichier d'essai hors du dépôt : `yaml.safe_load(1)` est refusé par mypy (`arg-type`, type attendu `str | bytes | SupportsRead[…]`). Contrôle sans les stubs : mypy s'arrête à `import-untyped`. Une première tentative par `mypy -c` n'avait pas tourné, car `files` dans `pyproject.toml` l'interdit.
+

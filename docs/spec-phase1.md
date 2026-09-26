@@ -526,7 +526,7 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `pytest-cov`, `ruff` (line-length 88) et `mypy` (dev), `pip-audit` (groupe `audit`), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `pytest-cov`, `ruff` (line-length 88), `mypy` et `types-PyYAML` (dev), `pip-audit` (groupe `audit`), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/
@@ -712,7 +712,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - Dependabot : mises à jour hebdomadaires des dépendances Python (`uv`) et des actions GitHub ;
   - couverture par pytest-cov (lignes et branches), seuil de 96 % en CI pour 96,81 % mesurés, badge statique du seuil dans le README ;
   - longueur de ligne à 88 (valeur par défaut de Ruff et de Black) : reformatage dans un commit à part, listé dans `.git-blame-ignore-revs` ;
-  - audit des dépendances aussi planifié, chaque lundi sur `main` (décision du 26/09).
+  - audit des dépendances aussi planifié, chaque lundi sur `main` (décision du 26/09) ;
+  - `types-PyYAML` en dépendance de développement ; plus d'exception mypy sur `yaml`.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
