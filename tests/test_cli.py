@@ -44,6 +44,7 @@ def test_setup_db(pg, capsys):
             "002_rag.sql",
             "003_rag_versions.sql",
             "004_audit_integrite.sql",
+            "005_rag_clauses.sql",
         ],
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
         "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},

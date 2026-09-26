@@ -18,6 +18,7 @@ from cdg.domain.corpus import (
     ChunkRow,
     Fiche,
     Manifest,
+    by_domain,
     chunk,
     citations,
     claim_lines,
@@ -35,7 +36,7 @@ def load_manifest(path: Path = MANIFEST) -> Manifest:
 
 
 def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[str]]]:
-    """Articles admis, nettoyés, avec leurs domaines d'indexation."""
+    """Articles admis, nettoyés, avec les types de clause qu'ils peuvent justifier."""
     manifest = manifest or load_manifest()
     parsers = {"legifrance": parse_legifrance, "eurlex": parse_eurlex}
     for path, (source_id, number) in manifest.files():
@@ -68,7 +69,7 @@ def load_fiches(directory: Path = FICHES) -> list[Fiche]:
             Fiche(
                 id=meta["id"],
                 title=meta["titre"],
-                domains=meta["domaines"],
+                kinds=meta["clauses"],
                 body=body.strip(),
             )
         )
@@ -87,7 +88,7 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
     """
     pending: list[tuple[dict[str, Any], str, list[str]]] = []
     validity: dict[tuple[str, str], date | None] = {}
-    for article, domains in articles():
+    for article, kinds in articles():
         validity[(article.source_id, article.article)] = article.valid_until
         header = article.reference + (
             f" — {article.heading}" if article.heading else ""
@@ -110,7 +111,7 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
                 "note": article.note,
                 "retrieved_at": article.retrieved_at,
             }
-            pending.append((meta, f"{header}\n{text}", domains))
+            pending.append((meta, f"{header}\n{text}", kinds))
     for fiche in load_fiches():
         reference = f"Fiche projet : {fiche.title}"
         cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
@@ -123,18 +124,20 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
                 "chunk_index": index,
                 "valid_until": min(ends, default=None),
             }
-            pending.append((meta, f"{reference}\n{text}", fiche.domains))
+            pending.append((meta, f"{reference}\n{text}", fiche.kinds))
     vectors = embedder.embed_passages([embedded for _, embedded, _ in pending])
     return [
-        # domaines lus dans le manifeste et les fiches : validés par ChunkRow
+        # une ligne par domaine d'indexation, avec les types de clause de ce domaine que la
+        # source déclare (manifeste, fiches) ; validés par ChunkRow
         ChunkRow.model_validate(
             {
                 "domain": domain,
+                "kinds": domain_kinds,
                 "embedding_model": embedder.model,
                 "embedding": vector,
                 **meta,
             }
         )
-        for (meta, _, domains), vector in zip(pending, vectors, strict=True)
-        for domain in domains
+        for (meta, _, kinds), vector in zip(pending, vectors, strict=True)
+        for domain, domain_kinds in by_domain(kinds)
     ]

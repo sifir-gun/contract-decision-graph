@@ -1,7 +1,7 @@
 ---
 id: fiche-transferts-hors-ue
 titre: Transferts de données hors de l'Union européenne
-domaines: [conformite]
+clauses: [transfert_hors_ue]
 ---
 Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique.
 

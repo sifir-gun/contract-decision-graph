@@ -1367,3 +1367,50 @@ Décision du 26/09 : l'empreinte scellée est celle de la configuration qui a pr
 - **Changement de configuration** : procédure d'exploitation ajoutée au README (« Modifier la configuration »). Les contrats suspendus se tranchent avant la modification. Après, `resume` les refuse : il faut les relancer sous un nouvel identifiant, ou les laisser expirer. Restaurer la configuration rouvre la reprise.
 - **Articles comparés par numéro** : `test_aucun_numero_d_article_commun_a_deux_sources` (`test_corpus.py`) échoue si un même numéro apparaît dans deux sources du corpus. Son message demande de passer à une comparaison par source et numéro dans `domain/explanation.py`. Vérifié par mutation : un « C. civ., art. 28 » ajouté au corpus le fait échouer.
 - **`explain` en réel** : dans la série du T8. On y mesure le taux d'explications acceptées sans gabarit, sans seuil pour l'instant, et on consigne ici les motifs de refus.
+
+### J4 tâche 6 : rattachement déclaré des sources aux types de clause
+
+**Fait.**
+- **Déclarations** : `manifest.yaml` donne, pour chaque article, les types de clause qu'il peut justifier, à la place des domaines ; chaque fiche les donne dans l'en-tête `clauses`, à la place de `domaines`. Les domaines d'indexation s'en déduisent (`corpus.by_domain`) : une seule source de vérité. Règle, écrite dans `SOURCES.md` : une source est rattachée aux clauses des règles qu'elle sert, et, pour un article cité par un autre article ou paraphrasé par une fiche, aux clauses de celui qui le cite.
+- **Choix notables** :
+  - art. 83 : rattaché à l'accord de traitement (cité par l'art. 28) et au transfert (la fiche transferts le paraphrase pour les sanctions) ;
+  - art. 40 et 42 : aux deux (cités par les art. 28 et 46) ;
+  - art. 4 : aux trois clauses de conformité (définitions) ;
+  - L442-1 : aux responsabilités et au préavis.
+- **Stockage** : migration `005` (`rag_chunks.kinds`, `TEXT[]`). Une ligne par domaine, avec les types de ce domaine ; `ChunkRow` refuse un type hors du domaine ou une liste vide. `sync` compare aussi le rattachement : un rattachement modifié remplace l'extrait.
+- **Filtre dans la requête du `Retriever`** : le port reçoit la clause (`search(domaine, requête, kind=…, k=…)`) et filtre sur `%s = ANY(kinds)` avant la distance. Le juge ne voit donc que des extraits rattachés à la clause, et `top_k` n'est plus consommé par ceux d'une autre clause.
+- **Aucun repli silencieux** :
+  - un extrait sans rattachement (indexé avant `005`) fait échouer la recherche du modèle concerné, avec le message « relancer ingest ». Vérifié sur la base de développement après la migration, avant la réindexation ;
+  - le CRAG lève une erreur si un adaptateur rend un extrait non rattaché à la clause.
+- **Test réel du critère 3** : sa doublure rend exprès des extraits hors sujet ; elle force désormais leur rattachement à la clause demandée, pour que le test porte toujours sur le juge.
+- **Base de développement** : `setup-db` (migration `005`), puis `ingest` (67 extraits réindexés, 1 min 39 s).
+
+**Tests.**
+- Chaque source déclare des types connus, sans doublon.
+- Chaque type de clause a au moins un article et une fiche.
+- Chaque article cité par une fiche partage une clause avec elle.
+- Les rattachements lâches relevés au J3 sont exclus.
+- Les domaines se déduisent des types.
+- Côté base : lignes d'ingestion rattachées aux clauses de leur domaine (L442-1 : responsabilités en juridique, préavis en opérationnel) ; extrait remplacé si son rattachement change ; recherche filtrée par clause, où un extrait du même domaine, très proche de la requête mais d'une autre clause, n'est jamais rendu ; extraits sans rattachement : erreur explicite.
+- CRAG : clause transmise au `Retriever`, extrait étranger refusé. `SOURCES.md` concorde avec le manifeste et les fiches.
+- Au total, 790 tests ; couverture de 98,2 %.
+
+**Mesure avant et après** (CRAG réel : pgvector, e5, juge `ministral-8b-2512` ; clauses attendues, sans extraction ; date d'analyse 26/09/2026). Mesure « avant » : même résultat que la mesure du J3 sur le contrat valide (2 recherches, 3 695 tokens). En plus des deux contrats de mesure, qui n'exercent que 3 clauses, un contrat « toutes règles » déclenche une règle par clause qui peut porter un constat (9 clauses).
+
+| Contrat | `INSUFFISANT` avant → après | Recherches | Tokens |
+| --- | --- | --- | --- |
+| valide | 0 → 0 | 2 → 2 | 3 695 → 2 619 |
+| complet | 0 → 0 | 1 → 1 | 1 854 → 1 825 |
+| toutes règles | 0 → 0 | 12 → 13 | 20 204 → 18 317 |
+
+Références retenues qui changent :
+
+| Contrat, clause | Avant | Après |
+| --- | --- | --- |
+| complet, transfert | fiche transferts, **fiche sous-traitance**, **RGPD art. 28** | fiche transferts, RGPD art. 46 |
+| toutes règles, accord de traitement | **fiche transferts**, fiche sous-traitance | fiche sous-traitance |
+| toutes règles, transfert | fiche transferts, **fiche sous-traitance** | fiche transferts, RGPD art. 46 |
+| toutes règles, révision de prix | L112-2 | fiche révision de prix, L112-2 (2 passes au lieu d'1) |
+| toutes règles, durée d'engagement | fiche durée et préavis | fiche durée et préavis, C. civ. 1210 (2 passes au lieu d'1) |
+
+Les autres clauses gardent les mêmes références. En gras, les rattachements lâches : tous disparaissent. **Aucun `INSUFFISANT` de plus : aucune déclaration à élargir.** Le filtre libère les places de `top_k` prises par les extraits d'autres clauses ; des références plus pertinentes les remplacent (art. 46 pour le transfert, art. 1210 pour la durée).

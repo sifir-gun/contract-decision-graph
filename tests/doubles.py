@@ -8,6 +8,7 @@ from cdg.domain import audit
 from cdg.domain.audit import StoredAuditEntry
 from cdg.domain.config import load_config
 from cdg.domain.models import (
+    DOMAIN_KINDS,
     DOMAINS,
     REQUIRED_KINDS,
     AgentVerdict,
@@ -231,8 +232,9 @@ class HashEmbedder:
 
 
 def passage(
-    reference: str, domain="financier", valid_until=None, text=None, id=1
+    reference: str, domain="financier", valid_until=None, text=None, id=1, kinds=None
 ) -> Passage:
+    """Extrait de test ; rattaché par défaut à toutes les clauses de son domaine."""
     return Passage(
         id=id,
         domain=domain,
@@ -241,19 +243,23 @@ def passage(
         text=text or f"Texte de {reference}.",
         distance=0.1,
         valid_until=valid_until,
+        kinds=list(DOMAIN_KINDS[domain]) if kinds is None else kinds,
     )
 
 
 class FakeRetriever:
-    """Doublure du port Retriever : extraits fixes par domaine, requêtes enregistrées."""
+    """Doublure du port Retriever : extraits fixes par domaine, filtrés par clause comme
+    l'adaptateur ; requêtes et clauses enregistrées."""
 
     def __init__(self, passages: dict | None = None):
         self.passages = passages or {}
         self.calls: list[tuple[str, str, int]] = []
+        self.searched_kinds: list[str] = []
 
-    def search(self, domain, query: str, *, k: int) -> list[Passage]:
+    def search(self, domain, query: str, *, kind: str, k: int) -> list[Passage]:
         self.calls.append((domain, query, k))
-        return list(self.passages.get(domain, []))[:k]
+        self.searched_kinds.append(kind)
+        return [p for p in self.passages.get(domain, []) if kind in p.kinds][:k]
 
 
 class MemoryAuditStore:

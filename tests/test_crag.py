@@ -115,7 +115,31 @@ def test_retrieve_compte_les_passes_et_trace_les_requetes():
     out = crag.retrieve(state, retriever=retriever, top_k=3)
     assert out["attempts"] == 1 and out["queries"] == [state["query"]]
     assert retriever.calls == [("financier", state["query"], 3)]
+    assert retriever.searched_kinds == ["delai_paiement"]
     assert [p.reference for p in out["docs"]] == [L441]
+
+
+class Unfiltered(FakeRetriever):
+    """Adaptateur fautif : ignore la clause demandée."""
+
+    def search(self, domain, query, *, kind, k):
+        return list(self.passages.get(domain, []))[:k]
+
+
+def test_retrieve_refuse_un_extrait_non_rattache_a_la_clause():
+    foreign = passage("C. civ., art. 1231-5", kinds=["penalites_execution"])
+    retriever = Unfiltered({"financier": [passage(L441), foreign]})
+    state = crag.start("financier", clause_of("delai_paiement"), ANALYSIS_DATE)
+    with pytest.raises(ValueError, match="non rattachés à la clause delai_paiement"):
+        crag.retrieve(state, retriever=retriever, top_k=3)
+
+
+def test_la_doublure_filtre_aussi_par_clause():
+    retriever = FakeRetriever(
+        {"financier": [passage("C. civ., art. 1231-5", kinds=["penalites_execution"])]}
+    )
+    state = crag.start("financier", clause_of("delai_paiement"), ANALYSIS_DATE)
+    assert crag.retrieve(state, retriever=retriever, top_k=3)["docs"] == []
 
 
 # --- grade : juge de pertinence, modèle léger ------------------------------------------

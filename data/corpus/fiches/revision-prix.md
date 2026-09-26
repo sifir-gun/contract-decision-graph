@@ -1,7 +1,7 @@
 ---
 id: fiche-revision-prix
 titre: Révision et indexation des prix
-domaines: [financier]
+clauses: [revision_prix]
 ---
 Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique.
 

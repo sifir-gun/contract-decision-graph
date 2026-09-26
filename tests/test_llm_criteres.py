@@ -242,14 +242,20 @@ def test_10_taux_d_aboutissement_aux_analystes(series_10, contract):
 
 def _real_passages(*keys, domain):
     """Extraits réels du corpus (textes publics, fiches), sans base ni embedding."""
-    articles = {(a.source_id, a.article): a for a, _ in ingestion.articles()}
+    articles = {(a.source_id, a.article): (a, k) for a, k in ingestion.articles()}
     fiches = {f.id: f for f in ingestion.load_fiches()}
     passages = []
     for n, key in enumerate(keys, start=1):
         if key in fiches:
-            reference, text = f"Fiche projet : {fiches[key].title}", fiches[key].body
+            fiche = fiches[key]
+            reference, text, kinds = (
+                f"Fiche projet : {fiche.title}",
+                fiche.body,
+                fiche.kinds,
+            )
         else:
-            reference, text = articles[key].reference, articles[key].text
+            article, kinds = articles[key]
+            reference, text = article.reference, article.text
         passages.append(
             Passage(
                 id=n,
@@ -258,20 +264,24 @@ def _real_passages(*keys, domain):
                 reference=reference,
                 text=text,
                 distance=0.2,
+                kinds=kinds,
             )
         )
     return passages
 
 
 class FixedRetriever:
-    """Retriever qui rend toujours les mêmes extraits réels, quelle que soit la requête."""
+    """Retriever qui rend toujours les mêmes extraits réels, quelle que soit la requête.
+
+    Rattachement forcé à la clause demandée (J4) : un corpus bien déclaré ne rendrait pas
+    ces extraits hors sujet ; le test porte sur le juge, qui doit les écarter lui-même."""
 
     def __init__(self, passages: list[Passage]):
         self.passages, self.queries = passages, []
 
-    def search(self, domain, query, *, k):
+    def search(self, domain, query, *, kind, k):
         self.queries.append(query)
-        return self.passages[:k]
+        return [p.model_copy(update={"kinds": [kind]}) for p in self.passages[:k]]
 
 
 class ByDomain:

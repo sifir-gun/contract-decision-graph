@@ -1,7 +1,7 @@
 ---
 id: fiche-delais-paiement
 titre: Délais de paiement entre professionnels
-domaines: [financier]
+clauses: [delai_paiement]
 ---
 Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique.
 

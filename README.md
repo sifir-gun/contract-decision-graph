@@ -86,9 +86,11 @@ Les fichiers `migrations/*.sql` sont appliqués par `docker/initdb/00_migrate.sh
 
 Le rôle applicatif `app_role` n'a que `SELECT` et `INSERT` sur `audit_decisions` : le journal d'audit est en ajout seul. La migration `004` y ajoute deux index uniques : un enregistrement par thread (`thread_id`) et une chaîne sans fourche (`prev_hash`).
 
+La migration `005` rattache chaque extrait du corpus aux types de clause qu'il peut justifier (`kinds`). Sur une base existante, après `setup-db`, relancer `ingest` : tant qu'un extrait n'est pas rattaché, la recherche échoue avec un message explicite, plutôt que de l'ignorer.
+
 ## Corpus et versions des textes
 
-Le corpus (`data/corpus/`) réunit des textes publics (RGPD, Code de commerce, Code civil, Code monétaire et financier) et des fiches rédigées pour le projet. `SOURCES.md` liste chaque source, sa licence, sa date de récupération et la raison de sa présence (règle de périmètre). `uv run python -m cdg.cli ingest` nettoie, découpe et indexe le corpus. La commande est rejouable : elle supprime les extraits disparus et remplace ceux dont une métadonnée a changé (fin de validité, note…).
+Le corpus (`data/corpus/`) réunit des textes publics (RGPD, Code de commerce, Code civil, Code monétaire et financier) et des fiches rédigées pour le projet. `SOURCES.md` liste chaque source, sa licence, sa date de récupération, la raison de sa présence (règle de périmètre) et les types de clause qu'elle peut justifier (règle de rattachement, déclarée dans `manifest.yaml` et dans chaque fiche). La recherche ne rend pour une clause que les extraits des sources rattachées à cette clause. `uv run python -m cdg.cli ingest` nettoie, découpe et indexe le corpus. La commande est rejouable : elle supprime les extraits disparus et remplace ceux dont une métadonnée a changé (fin de validité, note…).
 
 **Exemple de gestion des versions : C. com., art. L441-10.** Légifrance indique « Version en vigueur du 26 avril 2019 au 01 janvier 2027 ».
 - À l'ingestion, cette ligne ne devient pas du texte indexé, mais des métadonnées : `valid_from = 2019-04-26`, `valid_until = 2027-01-01`, avec le texte modificateur.

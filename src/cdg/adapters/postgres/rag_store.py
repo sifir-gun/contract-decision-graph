@@ -48,8 +48,8 @@ def insert(admin_conninfo: str, rows: list[ChunkRow]) -> int:
             cursor = conn.execute(
                 "INSERT INTO rag_chunks (domain, source_id, reference, text, content_hash,"
                 " embedding_model, embedding, article, chunk_index, valid_from, valid_until,"
-                " amendment, note, retrieved_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " amendment, note, retrieved_at, kinds)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (domain, content_hash, embedding_model) DO NOTHING",
                 (
                     row.domain,
@@ -66,6 +66,7 @@ def insert(admin_conninfo: str, rows: list[ChunkRow]) -> int:
                     row.amendment,
                     row.note,
                     row.retrieved_at,
+                    row.kinds,
                 ),
             )
             inserted += cursor.rowcount
@@ -73,17 +74,29 @@ def insert(admin_conninfo: str, rows: list[ChunkRow]) -> int:
 
 
 def search(
-    conninfo: str, domain: Domain, query: list[float], *, k: int, model: str
+    conninfo: str, domain: Domain, query: list[float], *, kind: str, k: int, model: str
 ) -> list[Passage]:
-    """Recherche exacte : filtre (domaine, modèle) AVANT l'ordre par distance cosinus."""
+    """Recherche exacte : filtre (domaine, type de clause, modèle) AVANT l'ordre par
+    distance cosinus. Des extraits du modèle sans rattachement (indexés avant la migration
+    005) sont une erreur explicite : ils ne sont jamais ignorés en silence."""
     with psycopg.connect(conninfo) as conn:
         register_vector(conn)
+        unattached = conn.execute(
+            "SELECT count(*) FROM rag_chunks WHERE embedding_model = %s AND kinds IS NULL",
+            (model,),
+        ).fetchone()
+        if unattached is not None and unattached[0]:
+            raise RagStoreError(
+                f"{unattached[0]} extrait(s) du modèle {model} sans rattachement aux types "
+                "de clause (indexés avant la migration 005) : relancer ingest"
+            )
         rows = conn.execute(
             "SELECT id, domain, source_id, reference, text, embedding <=> %s AS distance,"
-            " valid_until, note"
-            " FROM rag_chunks WHERE domain = %s AND embedding_model = %s"
+            " valid_until, note, kinds"
+            " FROM rag_chunks WHERE domain = %s AND %s = ANY(kinds)"
+            " AND embedding_model = %s"
             " ORDER BY distance, id LIMIT %s",
-            (Vector(query), domain, model, k),
+            (Vector(query), domain, kind, model, k),
         ).fetchall()
     return [
         Passage(
@@ -95,6 +108,7 @@ def search(
             distance=float(r[5]),
             valid_until=r[6],
             note=r[7],
+            kinds=r[8],
         )
         for r in rows
     ]
@@ -102,20 +116,24 @@ def search(
 
 class PgvectorRetriever:
     """Adaptateur du port Retriever : vecteur de la requête par l'Embedder, puis recherche
-    exacte filtrée sur le domaine et sur le modèle de cet Embedder."""
+    exacte filtrée sur le domaine, le type de clause et le modèle de cet Embedder."""
 
     def __init__(self, conninfo: str, embedder: Embedder):
         self._conninfo = conninfo
         self._embedder = embedder
 
-    def search(self, domain: Domain, query: str, *, k: int) -> list[Passage]:
+    def search(self, domain: Domain, query: str, *, kind: str, k: int) -> list[Passage]:
         vector = self._embedder.embed_query(query)
-        return search(self._conninfo, domain, vector, k=k, model=self._embedder.model)
+        return search(
+            self._conninfo, domain, vector, kind=kind, k=k, model=self._embedder.model
+        )
 
 
-# métadonnées stockées avec le texte : si l'une change (fin de validité, note…),
-# l'extrait est remplacé, même quand le texte, donc son empreinte, est identique
+# métadonnées stockées avec le texte : si l'une change (fin de validité, note,
+# rattachement…), l'extrait est remplacé, même quand le texte, donc son empreinte, est
+# identique
 _METADATA = (
+    "kinds",
     "reference",
     "article",
     "chunk_index",
@@ -127,6 +145,12 @@ _METADATA = (
 )
 
 
+def _hashable(values: tuple) -> tuple:
+    """Clé de comparaison : une liste (types de clause) devient un tuple ; NULL reste None,
+    et diffère donc de tout rattachement déclaré."""
+    return tuple(tuple(v) if isinstance(v, list) else v for v in values)
+
+
 def sync(admin_conninfo: str, rows: list[ChunkRow], model: str) -> dict:
     """Aligne rag_chunks sur le corpus, source par source, pour un modèle d'embedding :
     supprime les extraits disparus (texte nettoyé autrement, article retiré) ou dont une
@@ -134,8 +158,8 @@ def sync(admin_conninfo: str, rows: list[ChunkRow], model: str) -> dict:
     passage ne change rien."""
     wanted: dict[str, set[tuple]] = {}
     for row in rows:
-        key = (row.domain, row.content_hash, *(getattr(row, f) for f in _METADATA))
-        wanted.setdefault(row.source_id, set()).add(key)
+        values = (row.domain, row.content_hash, *(getattr(row, f) for f in _METADATA))
+        wanted.setdefault(row.source_id, set()).add(_hashable(values))
     deleted = 0
     with psycopg.connect(admin_conninfo) as conn:
         existing = conn.execute(
@@ -145,7 +169,9 @@ def sync(admin_conninfo: str, rows: list[ChunkRow], model: str) -> dict:
             " rag_chunks WHERE embedding_model = %s",
             (model,),
         ).fetchall()
-        stale = [r[0] for r in existing if tuple(r[2:]) not in wanted.get(r[1], set())]
+        stale = [
+            r[0] for r in existing if _hashable(r[2:]) not in wanted.get(r[1], set())
+        ]
         if stale:
             deleted = conn.execute(
                 "DELETE FROM rag_chunks WHERE id = ANY(%s)", (stale,)
