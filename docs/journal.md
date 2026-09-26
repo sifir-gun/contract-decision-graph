@@ -1760,3 +1760,7 @@ Correction de l'écart relevé au T1, avant la série réelle.
 - **Tests sans LLM** (`tests/test_serie.py`, 24 tests, en CI) : classement sur des issues de chaque sorte, écarts d'extraction, coût, tarif absent, latences, durée de l'étape des analystes, résumé. Vérifiés par mutation (une comparaison `>` changée en `>=` dans le classement, le tarif de sortie ignoré : échecs). Écrits avant le module, mais lancés après lui : ils ne pouvaient pas être rouges autrement qu'à l'import.
 - **Rangement** : la cadence (`Pacer`, limite de 20 000 tokens par minute du compte) passe dans `tests/serie.py`, partagée avec `test_llm_criteres.py`, sans changement de comportement.
 - **Coût estimé** de la série de clôture (toute la suite `llm`) : environ 0,20 $, au plus 0,40 $ ; environ une heure.
+
+### J5 : test réseau en CI, en phase 2 (décision du 26/09)
+
+Le test d'absence d'appel réseau des embeddings ne tourne pas en CI, faute de poids : il ne protège pas les mises à jour de Dependabot (une version d'onnxruntime qui changerait sa télémétrie passerait). Piste reportée en phase 2 dans la spec : un modèle ONNX minuscule en fixture, puisque la télémétrie se déclenche à l'initialisation d'onnxruntime quel que soit le modèle, exécuté en CI dans un environnement Linux sans réseau (espace de noms réseau isolé) ; le test tournerait à chaque pull request et ne coûterait plus 35 secondes en local. Fichiers de télémétrie du poste supprimés par le propriétaire.
