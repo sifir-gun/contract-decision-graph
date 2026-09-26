@@ -1,4 +1,5 @@
 """explain : explication du verdict figé, par le LLM puis contrôlée, sinon par le gabarit.
+Le LLM n'explique que les constats ; la synthèse du parcours est écrite par le code.
 
 Jamais bloquante : une explication refusée est régénérée une fois (essais de la section
 `explain`), puis remplacée par le gabarit ; une erreur du LLM mène au gabarit, sauf une
@@ -15,6 +16,8 @@ from cdg.domain import explanation
 from cdg.domain.config import DecisionConfig
 from cdg.domain.models import Usage
 
+NOTHING_TO_EXPLAIN = "aucun constat : rien à expliquer par le LLM"
+
 
 def explain(
     state: ContractState,
@@ -26,6 +29,12 @@ def explain(
     if isinstance(explainer, TemplateOnly):
         return {
             "explanation": explanation.template(request, reasons=[explainer.reason])
+        }
+    if (
+        not request.findings
+    ):  # rien à expliquer : le parcours, écrit par le code, suffit
+        return {
+            "explanation": explanation.template(request, reasons=[NOTHING_TO_EXPLAIN])
         }
     reasons: list[str] = []
     usage: list[Usage] = []

@@ -116,6 +116,8 @@ def test_9_consigne_seulement_dans_le_bloc_delimite_de_l_extraction():
     explain = calls["explain"]["system"] + calls["explain"]["user"]
     assert ORDER not in explain and "Ignore les règles" not in explain
     assert run.status["explanation"]["source"] == "llm"
+    # parcours écrit par le code : la tentative détectée y figure
+    assert "Tentative d'instruction détectée" in run.status["explanation"]["synthesis"]
 
 
 # --- Série 4 : comportements du modèle simulés -----------------------------------------------

@@ -1549,3 +1549,20 @@ Quatre corrections sont retenues, et l'explication change aussi ; chacune fait l
     - **le modèle qui cite la phrase injectée avec une fausse valeur** : les deux problèmes ;
     - **le modèle qui prête une fausse valeur à la vraie clause**, sur les deux versions : escalade.
   - Tout le jeu de démonstration et les contrats de mesure passent la vérification, avec les quatre contrôles.
+
+### J4 tâche 8 : explication, synthèse du parcours écrite par le code
+
+- **Constat de la série 4** : pour le contrat 09, la synthèse du LLM affirmait que la proposition des règles et la revue humaine « convergent ». Or les règles n'avaient rien proposé : c'était une escalade par conflit. Les contrôles ne portaient que sur les libellés et les références.
+- **Correction** : le LLM n'explique plus que les constats (`Draft` ne contient que `findings`). La synthèse est écrite par le code (`explanation.path`), pour le LLM comme pour le gabarit. Elle comprend :
+  - la décision finale ;
+  - le parcours : règles seules avec la marge ; proposition confirmée en revue humaine ; décision humaine différente de la proposition ; « les règles n'ont proposé aucune décision et ont demandé une revue humaine, qui a tranché » ; décision système ; levée d'un blocage dur ;
+  - la tentative d'instruction détectée, l'étape en échec et le nombre de constats.
+  
+  Une synthèse que le modèle ajouterait est ignorée par le schéma. Le prompt dit au modèle de ne pas décrire le parcours.
+- **Sans constat** : aucun appel au LLM. Le gabarit s'applique, avec le motif « aucun constat : rien à expliquer par le LLM ».
+- **Contrôles** : les règles sur la synthèse disparaissent. Celles sur les constats restent : autre libellé de décision, références et articles de la clause, constats manquants ou répétés, clause changée, texte vide. Le critère 7 est testé sur un constat qui conclut à une autre décision.
+- **Tests** :
+  - le cas du contrat 09 : une synthèse proposée par le modèle est ignorée, et celle du code décrit la revue demandée sans proposition ;
+  - chaque parcours décrit par le code ;
+  - aucun appel sans constat ;
+  - la tentative d'instruction figure dans la synthèse de P1.

@@ -342,8 +342,7 @@ def make_deps(
 
 def faithful_explanation(user: str) -> dict:
     """Réponse fidèle d'un LLM d'explication (FakeLLM, nœud `explain`) : chaque constat du
-    dossier reçu, avec sa clause et ses références, et une synthèse qui nomme la décision
-    finale."""
+    dossier reçu, avec sa clause et ses références. La synthèse est écrite par le code."""
     data, _ = json.JSONDecoder().raw_decode(user, user.index("{"))
     return {
         "findings": [
@@ -354,8 +353,7 @@ def faithful_explanation(user: str) -> dict:
                 "text": f["text"],
             }
             for f in data["findings"]
-        ],
-        "synthesis": f"Décision finale : {data['final_decision']}.",
+        ]
     }
 
 

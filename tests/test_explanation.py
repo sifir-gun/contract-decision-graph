@@ -76,10 +76,16 @@ def entry(finding, text=None, references=None, kind="same"):
     )
 
 
-def draft(*entries, synthesis="Décision finale : NO_GO, par blocage dur.") -> Draft:
-    return Draft(
-        findings=list(entries) or [entry(ACCORD), entry(TRANSFERT)], synthesis=synthesis
-    )
+def draft(*entries) -> Draft:
+    return Draft(findings=list(entries) or [entry(ACCORD), entry(TRANSFERT)])
+
+
+# une explication qui contredit le verdict : un constat qui conclut à une autre décision
+CONTRADICTORY = "Ce constat est sans gravité : les risques sont acceptables, GO."
+
+
+def bad():
+    return draft(entry(ACCORD, text=CONTRADICTORY), entry(TRANSFERT))
 
 
 # --- Constats à expliquer ------------------------------------------------------------------
@@ -198,14 +204,9 @@ def test_explication_fidele_acceptee():
 
 
 def test_7_explication_qui_contredit_le_verdict_rejetee():
-    contradictory = draft(
-        synthesis="Décision finale : GO, les risques sont acceptables."
-    )
-    reasons = explanation.refusals(contradictory, REQUEST)
-    assert any("ne nomme pas la décision finale (NO_GO)" in r for r in reasons)
-    assert any(
-        "autre décision que la décision finale (NO_GO) : GO" in r for r in reasons
-    )
+    assert explanation.refusals(bad(), REQUEST) == [
+        "conformite-1 : nomme une autre décision que la décision finale (NO_GO) : GO"
+    ]
 
 
 def test_7_autre_libelle_dans_un_constat_rejete():
@@ -225,8 +226,9 @@ def test_7_autre_libelle_dans_un_constat_rejete():
 
 
 def test_7_escalade_nommee_rejetee():
+    text = "Constat relevé après escalade du dossier."
     reasons = explanation.refusals(
-        draft(synthesis="Décision finale : NO_GO, après escalade."), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST
     )
     assert any("ESCALADE" in r for r in reasons)
 
@@ -277,15 +279,6 @@ def test_article_du_texte_du_constat_citable():
         explanation.refusals(draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST)
         == []
     )
-
-
-def test_synthese_citant_un_article_hors_des_references_rejetee():
-    reasons = explanation.refusals(
-        draft(synthesis="Décision finale : NO_GO (C. civ., art. 1171)."), REQUEST
-    )
-    assert reasons == [
-        "la synthèse cite un article hors des références retenues : 1171"
-    ]
 
 
 def test_constats_manquants_inconnus_ou_repetes_rejetes():
@@ -399,12 +392,10 @@ def test_explicateur_recoit_le_verdict_fige_jamais_le_texte_du_contrat():
 
 def test_explicateur_retour_de_refus_hors_des_donnees():
     llm = FakeLLM({"explain": llm_answer(draft())})
-    LLMExplainer(llm)(
-        REQUEST, ["essai 1 : la synthèse ne nomme pas la décision finale"]
-    )
+    LLMExplainer(llm)(REQUEST, ["essai 1 : conformite-1 : nomme une autre décision"])
     user = llm.calls[0]["user"]
     data, feedback = user.split("Essai précédent refusé", 1)
-    assert "essai 1 : la synthèse ne nomme pas" in feedback
+    assert "essai 1 : conformite-1 : nomme une autre décision" in feedback
     assert "essai 1" not in data
 
 
@@ -442,29 +433,26 @@ def test_explication_llm_acceptee_au_premier_essai():
 
 
 def test_7_explication_contradictoire_regeneree_une_fois_puis_acceptee():
-    bad = draft(synthesis="Décision finale : GO.")
-    llm = FakeLLM({"explain": [llm_answer(bad), llm_answer(draft())]})
+    llm = FakeLLM({"explain": [llm_answer(bad()), llm_answer(draft())]})
     out = run_explain(LLMExplainer(llm))
     result = out["explanation"]
     assert (result.source, result.attempts) == ("llm", 2)
-    assert result.reasons[0].startswith("essai 1 : la synthèse ne nomme pas")
+    expected = (
+        "essai 1 : conformite-1 : nomme une autre décision que la décision finale "
+        "(NO_GO) : GO"
+    )
+    assert result.reasons == [expected]
     # le second essai reçoit les motifs du refus
-    assert "la synthèse ne nomme pas la décision finale" in llm.calls[1]["user"]
+    assert "nomme une autre décision" in llm.calls[1]["user"]
     assert len(out["usage"]) == 2
 
 
 def test_7_deux_explications_refusees_puis_gabarit():
-    bad = draft(synthesis="Décision finale : GO.")
-    llm = FakeLLM({"explain": [llm_answer(bad), llm_answer(bad)]})
+    llm = FakeLLM({"explain": [llm_answer(bad()), llm_answer(bad())]})
     out = run_explain(LLMExplainer(llm))
     result = out["explanation"]
     assert (result.source, result.attempts) == ("gabarit", 2)
-    assert [r.split(" : ", 1)[0] for r in result.reasons] == [
-        "essai 1",
-        "essai 1",
-        "essai 2",
-        "essai 2",
-    ]
+    assert [r.split(" : ", 1)[0] for r in result.reasons] == ["essai 1", "essai 2"]
     assert len(llm.calls) == 2 and len(out["usage"]) == 2
     assert result.synthesis.startswith("Décision finale : NO_GO.")
 
@@ -473,8 +461,7 @@ def test_nombre_d_essais_lu_dans_la_configuration():
     config = CONFIG.model_copy(
         update={"explain": CONFIG.explain.model_copy(update={"max_attempts": 1})}
     )
-    bad = draft(synthesis="Décision finale : GO.")
-    llm = FakeLLM({"explain": [llm_answer(bad)]})
+    llm = FakeLLM({"explain": [llm_answer(bad())]})
     out = explain(
         state(),
         explainer=LLMExplainer(llm),
@@ -520,3 +507,66 @@ def test_sans_llm_gabarit_avec_le_motif_et_aucun_appel():
         ["décision système (expire) : gabarit"],
     )
     assert set(out) == {"explanation"}
+
+
+# --- Synthèse écrite par le code (série 4, contrat 09) ---------------------------------------
+
+ESCALATED = HumanDecision(
+    decision="GO_RESERVES", reviewer="relecteur-demo", reason="à fixer par avenant"
+)
+
+
+def test_synthese_du_parcours_ecrite_par_le_code_meme_si_le_llm_en_propose_une():
+    # contrat 09 : les règles n'ont rien proposé (conflit), l'humain a tranché. En série 4,
+    # le LLM a écrit que la proposition des règles et la revue humaine « convergent ».
+    # Il n'écrit plus la synthèse : une synthèse qu'il ajouterait est ignorée.
+    escalated = state(
+        proposed_decision="ESCALADE", final_decision="GO_RESERVES", human=ESCALATED
+    )
+    answer = {
+        **llm_answer(draft()),
+        "synthesis": "La proposition des règles et la revue humaine convergent : GO.",
+    }
+    out = run_explain(LLMExplainer(FakeLLM({"explain": answer})), **escalated)
+    result = out["explanation"]
+    assert (result.source, result.reasons) == ("llm", [])
+    assert result.synthesis == explanation.path(explanation.request(escalated))
+    assert "convergent" not in result.synthesis
+    assert result.synthesis.startswith(
+        "Décision finale : GO_RESERVES. Les règles n'ont proposé aucune décision et ont "
+        "demandé une revue humaine, qui a tranché."
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "sentence"),
+    [
+        ({}, "Décision rendue par les règles du projet, sans revue humaine."),
+        (
+            {"final_decision": "GO", "proposed_decision": "GO", "human": HUMAN},
+            "Décision proposée par les règles et confirmée en revue humaine.",
+        ),
+        (
+            {"final_decision": "GO", "proposed_decision": "NO_GO", "human": HUMAN},
+            "Décision prise en revue humaine, différente de la proposition des règles.",
+        ),
+        (
+            {"input_findings": ["tentative d'instruction détectée : « x »"]},
+            (
+                "Tentative d'instruction détectée dans le contrat : revue humaine "
+                "obligatoire."
+            ),
+        ),
+    ],
+)
+def test_parcours_decrit_par_le_code(overrides, sentence):
+    assert sentence in explanation.path(explanation.request(state(**overrides)))
+
+
+def test_sans_constat_aucun_appel_au_llm():
+    llm = FakeLLM({})
+    out = run_explain(LLMExplainer(llm), verdicts=[], final_decision="GO")
+    result = out["explanation"]
+    assert (result.source, result.findings, llm.calls) == ("gabarit", [], [])
+    assert result.reasons == ["aucun constat : rien à expliquer par le LLM"]
+    assert "Aucune règle déclenchée" in result.synthesis

@@ -1,10 +1,13 @@
 """Explication d'une décision déjà rendue : constats à expliquer, contrôles, gabarit.
 
 Le LLM (`application/explanation.py`) reçoit le verdict figé et les constats, jamais le
-texte du contrat. Une explication est structurée : une entrée par constat, avec sa clause,
-les références citées et le texte, puis une synthèse. Elle est refusée :
-- si elle nomme une autre décision que la décision finale, ou si la synthèse ne nomme pas
-  la décision finale (détection par règles sur les libellés de décision) ;
+texte du contrat, et n'explique que les constats : une entrée par constat, avec sa clause,
+les références citées et le texte. La synthèse, qui nomme la décision finale et décrit le
+parcours (règles seules, revue humaine, décision système, tentative d'instruction), est
+écrite par le code (`path`), pour le LLM comme pour le gabarit : la série 4 a montré qu'un
+LLM peut décrire le parcours à tort. L'explication est refusée :
+- si elle nomme une autre décision que la décision finale (détection par règles sur les
+  libellés de décision) ;
 - si elle cite une référence non retenue pour la clause du constat : dans le champ
   `references`, ou un article dans le texte. Un article que le texte du constat cite
   lui-même reste citable : ce texte vient du code des règles, pas du LLM ;
@@ -55,10 +58,9 @@ class ExplainedFinding(BaseModel):
 
 
 class Draft(BaseModel):
-    """Sortie structurée demandée au LLM."""
+    """Sortie structurée demandée au LLM : les constats expliqués, rien d'autre."""
 
     findings: list[ExplainedFinding]
-    synthesis: str
 
 
 class Explanation(BaseModel):
@@ -67,14 +69,14 @@ class Explanation(BaseModel):
     source: Source
     decision: Decision
     findings: list[ExplainedFinding]
-    synthesis: str
+    synthesis: str  # écrite par le code (`path`) : décision finale et parcours
     attempts: int = Field(ge=0)  # essais du LLM ; 0 : gabarit sans appel
     # motifs : refus des essais du LLM, erreur, ou absence de LLM ; vide si le premier
     # essai est accepté
     reasons: list[str]
 
     def draft(self) -> Draft:
-        return Draft(findings=self.findings, synthesis=self.synthesis)
+        return Draft(findings=self.findings)
 
 
 # --- Constats à expliquer ----------------------------------------------------------------
@@ -219,20 +221,6 @@ def refusals(draft: Draft, req: ExplanationRequest) -> list[str]:
                 f"{finding.kind} : {', '.join(sorted(cited))}"
             )
 
-    if req.decision not in named_decisions(draft.synthesis):
-        reasons.append(f"la synthèse ne nomme pas la décision finale ({req.decision})")
-    if labels := others(draft.synthesis):
-        reasons.append(
-            "la synthèse nomme une autre décision que la décision finale "
-            f"({req.decision}) : {labels}"
-        )
-    citable: set[str] = set().union(*(_citable(f) for f in req.findings))
-    cited = articles(draft.synthesis) - citable
-    if cited:
-        reasons.append(
-            "la synthèse cite un article hors des références retenues : "
-            + ", ".join(sorted(cited))
-        )
     return reasons
 
 
@@ -243,7 +231,7 @@ def accepted(
         source="llm",
         decision=req.decision,
         findings=draft.findings,
-        synthesis=draft.synthesis,
+        synthesis=path(req),
         attempts=attempts,
         reasons=reasons,
     )
@@ -252,9 +240,10 @@ def accepted(
 # --- Gabarit -----------------------------------------------------------------------------
 
 
-def _synthesis(req: ExplanationRequest) -> str:
-    """Synthèse du gabarit : nomme la seule décision finale, et le parcours sans libellé.
-    Ni relecteur ni motif humain : texte libre, scellé avec la décision humaine."""
+def path(req: ExplanationRequest) -> str:
+    """Synthèse écrite par le code, pour le LLM comme pour le gabarit : la décision finale
+    et le parcours, sans autre libellé de décision. Ni relecteur ni motif humain : texte
+    libre, scellé avec la décision humaine."""
     parts = [f"Décision finale : {req.decision}."]
     human = req.human
     if human is None:
@@ -272,16 +261,18 @@ def _synthesis(req: ExplanationRequest) -> str:
             "humaine n'a été rendue."
         )
     else:
-        same = human.decision == req.proposed_decision
-        parts.append(
-            "Décision prise en revue humaine"
-            + (", avec levée d'un blocage dur" if human.overrides_block else "")
-            + (
-                ", conforme à la proposition des règles."
-                if same
-                else ", différente de la proposition des règles."
+        if req.proposed_decision == "ESCALADE":
+            how = (
+                "Les règles n'ont proposé aucune décision et ont demandé une revue "
+                "humaine, qui a tranché"
             )
-        )
+        elif human.decision == req.proposed_decision:
+            how = "Décision proposée par les règles et confirmée en revue humaine"
+        else:
+            how = "Décision prise en revue humaine, différente de la proposition des règles"
+        if human.overrides_block:
+            how += ", avec levée d'un blocage dur"
+        parts.append(how + ".")
     if req.input_findings:
         parts.append(
             "Tentative d'instruction détectée dans le contrat : revue humaine "
@@ -310,7 +301,7 @@ def template(
             ExplainedFinding(id=f.id, kind=f.kind, references=f.references, text=f.text)
             for f in req.findings
         ],
-        synthesis=_synthesis(req),
+        synthesis=path(req),
         attempts=attempts,
         reasons=reasons,
     )
