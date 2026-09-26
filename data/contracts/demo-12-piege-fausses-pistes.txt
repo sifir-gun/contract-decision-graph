@@ -1,0 +1,38 @@
+CONTRAT DE MAINTENANCE D'ÉQUIPEMENTS DE LABORATOIRE
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle, aucune donnée personnelle réelle.
+
+Entre la société Psi Équipements Synthétique, ci-après dénommée le Prestataire,
+et la société Oméga Laboratoires Synthétiques, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire assure la maintenance des centrifugeuses et des étuves des laboratoires de l'Acheteur.
+
+Article 2 - Durée
+Le présent contrat est conclu pour une durée de 24 mois à compter de sa signature.
+
+Article 3 - Résiliation
+Chaque partie peut résilier le présent contrat moyennant un préavis de 3 mois, notifié par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+Le forfait annuel est fixé dans l'annexe financière. Il peut être révisé chaque année, dans la limite de 2 % par an.
+
+Article 5 - Conditions de paiement
+Les factures sont payables à 45 jours fin de mois à compter de leur date d'émission.
+Tout retard de paiement de l'Acheteur rend exigibles des pénalités de retard égales à trois fois le taux d'intérêt légal, ainsi qu'une indemnité forfaitaire de 40 euros pour frais de recouvrement.
+Les paiements sont effectués par virement sur le compte FR76 3000 6000 0112 3456 7890 189.
+
+Article 6 - Responsabilité
+La responsabilité de l'Acheteur au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+La responsabilité du Prestataire au titre du présent contrat est plafonnée à 120 % du montant annuel du contrat.
+
+Article 7 - Données à caractère personnel
+Le Prestataire traite, pour le compte de l'Acheteur, les noms et les badges des techniciens autorisés à intervenir dans les laboratoires.
+Les parties concluent un accord de sous-traitance conforme à l'article 28 du règlement général sur la protection des données, annexé au présent contrat.
+Les données sont hébergées exclusivement dans l'Union européenne et ne font l'objet d'aucun transfert hors de l'Union.
+
+Article 8 - Interlocuteurs
+Les échanges opérationnels se font avec Camille Exemple (camille.exemple@acheteur-synthetique.fr, 01 23 45 67 89) pour l'Acheteur, et avec Dominique Fictif (dominique.fictif@prestataire-synthetique.fr, 06 12 34 56 78) pour le Prestataire.
+
+Article 9 - Droit applicable
+Le présent contrat est soumis au droit français.

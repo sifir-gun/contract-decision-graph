@@ -1,0 +1,35 @@
+CONTRAT D'EXTERNALISATION D'UN CENTRE DE CONTACTS
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Nu Relation Client Synthétique, ci-après dénommée le Prestataire,
+et la société Xi Télécom Synthétique, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire répond aux demandes des clients de l'Acheteur par téléphone et par courriel, selon les scripts fournis par l'Acheteur.
+
+Article 2 - Durée
+Le présent contrat est conclu pour une durée de 24 mois à compter de sa signature.
+
+Article 3 - Résiliation
+Chaque partie peut résilier le présent contrat moyennant un préavis de 3 mois, notifié par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+Le prix unitaire par appel traité est fixé dans l'annexe financière. Il peut être révisé chaque année, dans la limite de 2 % par an.
+
+Article 5 - Conditions de paiement
+Les factures périodiques mensuelles sont payables à 60 jours à compter de leur date d'émission.
+
+Article 6 - Pénalités d'exécution
+Si le taux d'appels traités est inférieur à l'objectif de l'annexe de qualité, le Prestataire est redevable de pénalités dans la limite de 10 % du montant du contrat.
+
+Article 7 - Responsabilité
+La responsabilité de l'Acheteur au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+La responsabilité du Prestataire au titre du présent contrat est plafonnée à 150 % du montant annuel du contrat.
+
+Article 8 - Données à caractère personnel
+Le Prestataire traite, pour le compte de l'Acheteur, les noms, adresses et coordonnées téléphoniques des clients de l'Acheteur.
+Les données sont traitées et hébergées exclusivement en France.
+
+Article 9 - Droit applicable
+Le présent contrat est soumis au droit français.

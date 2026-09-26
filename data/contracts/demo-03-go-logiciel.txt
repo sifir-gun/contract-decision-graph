@@ -1,0 +1,36 @@
+CONTRAT D'ABONNEMENT À UN LOGICIEL EN LIGNE
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Epsilon Logiciels Synthétiques, ci-après dénommée le Prestataire,
+et la société Zeta Assurances Synthétiques, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire met à la disposition de l'Acheteur un logiciel de gestion des sinistres, accessible en ligne, ainsi que les services d'assistance associés.
+
+Article 2 - Durée
+Le présent contrat est conclu pour une durée ferme de 48 mois à compter de la mise en service.
+
+Article 3 - Résiliation
+À l'issue de la durée ferme, chaque partie peut résilier le présent contrat moyennant un préavis de 3 mois, notifié par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+L'abonnement annuel est fixé dans l'annexe financière. Il peut être révisé chaque année, dans la limite de 3 % par an.
+
+Article 5 - Conditions de paiement
+Les factures sont payables à 45 jours fin de mois à compter de leur date d'émission.
+
+Article 6 - Niveaux de service et pénalités
+Si le taux de disponibilité mensuel du logiciel est inférieur à l'engagement de service, le Prestataire est redevable de pénalités calculées selon l'annexe de niveaux de service, dans la limite de 10 % du montant du contrat.
+
+Article 7 - Responsabilité
+La responsabilité de l'Acheteur au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+La responsabilité du Prestataire est plafonnée à 50 % du montant annuel du contrat.
+
+Article 8 - Données à caractère personnel
+Le Prestataire traite, pour le compte de l'Acheteur, les données à caractère personnel des assurés nécessaires à la gestion des sinistres.
+Les parties concluent un accord de sous-traitance conforme à l'article 28 du règlement général sur la protection des données, annexé au présent contrat.
+Les données sont hébergées exclusivement dans l'Union européenne et ne font l'objet d'aucun transfert hors de l'Union.
+
+Article 9 - Droit applicable
+Le présent contrat est soumis au droit français.

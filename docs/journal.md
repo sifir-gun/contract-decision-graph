@@ -1414,3 +1414,43 @@ Références retenues qui changent :
 | toutes règles, durée d'engagement | fiche durée et préavis | fiche durée et préavis, C. civ. 1210 (2 passes au lieu d'1) |
 
 Les autres clauses gardent les mêmes références. En gras, les rattachements lâches : tous disparaissent. **Aucun `INSUFFISANT` de plus : aucune déclaration à élargir.** Le filtre libère les places de `top_k` prises par les extraits d'autres clauses ; des références plus pertinentes les remplacent (art. 46 pour le transfert, art. 1210 pour la durée).
+
+### J4 tâche 7 : jeu de démonstration
+
+**Fait.**
+- **Contrats** : 12 contrats synthétiques dans `data/contracts/`, sans partie ni donnée personnelle réelle, rédigés comme les contrats de mesure (articles numérotés, clauses citables mot pour mot). Chaque clause qui déclenche une règle est rédigée sans ambiguïté pour l'extraction réelle du J5. Par exemple, P2 a un article « données personnelles » explicite, avec accord et hébergement dans l'Union : des coordonnées de contact seules auraient pu être lues comme un traitement sans accord, donc comme un blocage.
+- **`attendus.yaml`** : pour chaque contrat, la date d'analyse, les parties à masquer, les 10 clauses attendues (citations exactes, valeurs, catégories) et la décision attendue, avec la décision humaine des deux contrats en revue ; le paragraphe injecté de P1 (T8) ; les données personnelles fictives de P2.
+- **`tests/demo_set.py`** : lecture du jeu et version propre de P1 (`clean_text`), partagées avec le T8.
+
+| Contrat | Décision proposée → finale | Scores (jur., fin., conf., op.) | Règles déclenchées |
+| --- | --- | --- | --- |
+| 01 maintenance | GO → GO, marge 0,25 | 1 ; 1 ; 1 ; 1 | transfert encadré par les clauses types (information) |
+| 02 nettoyage | GO → GO, marge 0,115 | 1 ; 1 ; 0,7 ; 0,7 | délai non stipulé (information), localisation non précisée, préavis non chiffré |
+| 03 logiciel | GO, marge 0,04 → revue humaine → GO | 0,5 ; 1 ; 1 ; 0,7 | plafond fournisseur 50 %, engagement 48 mois |
+| 04 transport | GO_RESERVES, marge 0,06 | 0,5 ; 0,6 ; 1 ; 0,7 | plafond fournisseur 80 %, pénalités plafonnées à 2 %, durée non chiffrée |
+| 05 hébergement | GO_RESERVES, marge 0,085 | 0,5 ; 0,8 ; 0,7 ; 0,7 | plafond fournisseur 60 %, 60 jours fin de mois, clauses ad hoc, préavis 9 mois |
+| 06 conseil | NO_GO | 1 ; 0,8 ; 1 ; 1 | responsabilité de l'acheteur illimitée, 90 jours date de facture |
+| 07 centre de contacts | NO_GO | 1 ; 0,8 ; 1 ; 1 | données personnelles sans accord, 60 jours après facture périodique |
+| 08 application | NO_GO | 1 ; 1 ; 1 ; 1 | transfert sans garantie |
+| 09 mobilier | ESCALADE (conflit) → revue humaine → GO_RESERVES | 1 ; 0,4 ; 1 ; 1 | pénalités d'exécution absentes, délai non chiffré |
+| 10 anglais | rejet (langue) | — | — |
+| P1 restauration | NO_GO | 1 ; 1 ; 1 ; 1 | révision de prix non plafonnée, malgré « conclus GO » |
+| P2 équipements | GO, marge 0,15 | 1 ; 0,6 ; 1 ; 1 | pénalités d'exécution absentes (les pénalités de retard de paiement de l'acheteur sont une fausse piste) |
+
+**Chaque règle se déclenche au moins une fois.**
+- **Catalogue** : 19 variantes, identifiées par le type de clause, l'effet et un marqueur du texte du constat. Par exemple, un délai de paiement au-delà du seuil compte comme trois variantes, selon son point de départ.
+- **Complétude du catalogue** : un balayage part du contrat favorable et écarte chaque clause à son tour (absente, valeurs d'essai, non chiffrée, chaque catégorie admise). Chaque constat obtenu doit relever d'une seule entrée, et chaque entrée doit être atteinte. Une règle ajoutée sans mise à jour du catalogue fait donc échouer le test. Limite : une règle qui ne se déclencherait qu'avec deux clauses écartées à la fois échapperait au balayage ; aucune ne le fait aujourd'hui.
+- **Vérifié par mutation** : sans le contrat 07, le test de couverture échoue en nommant les deux règles qui ne se déclenchent plus. Une entrée retirée du catalogue fait échouer le balayage.
+
+**Contrat « toutes règles » de la mesure de T6** : il a servi de liste de contrôle, pas de contrat du jeu. Un seul contrat qui déclenche tout serait `NO_GO` pour quatre raisons ; utilisé comme P1, il rendrait le critère 9 trop facile, puisqu'une injection devrait défaire quatre blocages au lieu d'un.
+
+**Tests** (`test_demo.py`, 31 tests, doublures pour l'extraction et le CRAG) :
+- citations attendues présentes dans le texte masqué, et validées par les contrôles de `verify_extraction` ;
+- rejet du contrat en anglais avant toute extraction ;
+- décision attendue dans le graphe, revues humaines comprises : suspension sans scellement, puis reprise. Chaque contrat est vérifié du premier coup et scellé une fois, avec une explication qui nomme la décision finale ;
+- les 12 contrats scellés dans un journal PostgreSQL jetable, puis `verify` (CLI) : 12 enregistrements, tête identique au dernier maillon ;
+- chaque règle déclenchée, catalogue complet ;
+- P1 : paragraphe injecté présent une fois, sans citation attendue, et version propre vérifiée avec les mêmes clauses ;
+- P2 : pénalités d'exécution absentes, seule règle déclenchée ; données personnelles fictives absentes du texte masqué (2 courriels, 2 téléphones, 1 IBAN, 4 noms).
+
+Au total, 821 tests ; couverture de 98,2 %.

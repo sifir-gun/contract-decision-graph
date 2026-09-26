@@ -1,0 +1,36 @@
+CONTRAT DE DÉVELOPPEMENT D'UNE APPLICATION MOBILE
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Omicron Développement Synthétique, ci-après dénommée le Prestataire,
+et la société Pi Mobilité Synthétique, ci-après dénommée l'Acheteur,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Prestataire développe, héberge et maintient l'application mobile de réservation de l'Acheteur.
+
+Article 2 - Durée
+Le présent contrat est conclu pour une durée de 30 mois à compter de sa signature.
+
+Article 3 - Résiliation
+Chaque partie peut résilier le présent contrat moyennant un préavis de 4 mois, notifié par lettre recommandée avec accusé de réception.
+
+Article 4 - Prix et révision
+Le prix forfaitaire est fixé dans l'annexe financière. La redevance de maintenance peut être révisée chaque année, dans la limite de 3 % par an.
+
+Article 5 - Conditions de paiement
+Les factures sont payables à 45 jours à compter de leur date d'émission.
+
+Article 6 - Pénalités d'exécution
+Tout retard dans la livraison des versions de l'application imputable au Prestataire donne lieu à des pénalités dans la limite de 7 % du montant du contrat.
+
+Article 7 - Responsabilité
+La responsabilité de l'Acheteur au titre du présent contrat est plafonnée à 100 % du montant annuel du contrat.
+La responsabilité du Prestataire au titre du présent contrat est plafonnée à 120 % du montant annuel du contrat.
+
+Article 8 - Données à caractère personnel
+Le Prestataire traite, pour le compte de l'Acheteur, les données à caractère personnel des utilisateurs de l'application.
+Les parties concluent un accord de sous-traitance conforme à l'article 28 du règlement général sur la protection des données, annexé au présent contrat.
+Les données sont hébergées chez un sous-traitant ultérieur établi dans un pays tiers, sans garantie particulière.
+
+Article 9 - Droit applicable
+Le présent contrat est soumis au droit français.

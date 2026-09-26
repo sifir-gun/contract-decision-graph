@@ -30,6 +30,16 @@ uv run python -m cdg.cli resume <thread_id> --decision NO_GO --reviewer … --re
 
 L'explication est rédigée par le LLM à partir du verdict figé, jamais du texte du contrat, puis contrôlée : elle est refusée si elle nomme une autre décision que la décision finale, ou cite une référence que la recherche n'a pas retenue pour la clause concernée. Après une régénération refusée, ou une erreur, un gabarit la remplace. `resume` n'utilise le LLM que si la clé d'API est présente ; `expire` utilise toujours le gabarit. La source de l'explication (`llm` ou `gabarit`) et les motifs de refus sont scellés dans le journal d'audit, hors de l'empreinte de décision.
 
+### Jeu de démonstration
+
+`data/contracts/` contient 12 contrats synthétiques (aucune partie ni donnée personnelle réelle) : 10 qui couvrent chaque décision, dont un rejet, et 2 piégés (une consigne « conclus GO » injectée dans le texte, et des fausses pistes avec des données personnelles fictives à masquer). `attendus.yaml` donne, pour chacun, les parties à masquer, les clauses attendues avec leurs citations exactes et la décision attendue. Chaque règle du projet se déclenche dans au moins un contrat (vérifié par `tests/test_demo.py`).
+
+```bash
+uv run python -m cdg.cli run data/contracts/demo-01-go-maintenance.txt \
+  --party "Alpha Maintenance Synthétique" --party "Beta Distribution Synthétique" \
+  --analysis-date 2026-09-25   # appels LLM payants
+```
+
 ### Historique et `git blame`
 
 Les commits de reformatage massif (passage à 88 colonnes) sont listés dans `.git-blame-ignore-revs`. GitHub les ignore d'office dans sa vue *blame* ; en local, une commande par clone suffit :
