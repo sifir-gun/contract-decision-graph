@@ -945,3 +945,9 @@ La mesure « avant » précède aussi les libellés de domaine : les deux change
 - **Traitement validé** : un constat d'information (délai supplétif de L441-10, transfert encadré par une garantie) est recherché ; sans référence, il est signalé (« information seule, sans effet sur le statut ») et ne rend jamais le domaine `INSUFFISANT`.
 - **Noté pour le J4** : le juge léger rattache l'art. 28 du RGPD à la clause de transfert, un rattachement lâche. C'est à surveiller pour `explain`, qui ne doit citer que des références pertinentes.
 
+### Test d'`ingest` : environnement déclaré par le test
+
+- **Symptôme** : en environnement de CI simulé (arbre de travail propre, sans `.env`), `test_ingest_indexe_le_corpus_puis_rejouable` échoue : `SettingsError`, `EMBEDDING_CACHE_DIR` absent. Il passe sur le poste de développement.
+- **Cause** : la commande `ingest` lit `EMBEDDING_CACHE_DIR` avant de construire l'embedder. Le test remplaçait l'embedder par une doublure, mais la variable venait en silence du `.env` du poste. C'est une dépendance cachée du test, pas un défaut de l'application : la variable absente produit bien une erreur explicite.
+- **Correction** : le test déclare lui-même `EMBEDDING_CACHE_DIR` (dossier temporaire) et vérifie que la commande le transmet à la fabrique de l'embedder. La CI ne définit pas cette variable : un autre test qui en dépendrait en silence échouerait aussi.
+

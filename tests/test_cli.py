@@ -300,12 +300,21 @@ def test_echec_de_noeud_escalade_avec_rapport_puis_resume(
 
 
 @pytest.mark.pg
-def test_ingest_indexe_le_corpus_puis_rejouable(pg, capsys, monkeypatch):
-    embedder = HashEmbedder()
-    monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", lambda config, cache_dir: embedder)
+def test_ingest_indexe_le_corpus_puis_rejouable(pg, capsys, monkeypatch, tmp_path):
+    # environnement déclaré par le test, jamais lu dans le .env du poste : la commande exige
+    # EMBEDDING_CACHE_DIR avant de construire l'embedder, même remplacé par une doublure
+    monkeypatch.setenv("EMBEDDING_CACHE_DIR", str(tmp_path))
+    embedder, cache_dirs = HashEmbedder(), []
+
+    def factory(config, cache_dir):
+        cache_dirs.append(cache_dir)
+        return embedder
+
+    monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", factory)
     try:
         code, first = run_cli(capsys, "ingest")
         assert code == 0 and first["model"] == "hash-test"
+        assert cache_dirs == [tmp_path]
         assert first["inserted"] == first["chunks"] > 0 and first["deleted"] == 0
         code, again = run_cli(capsys, "ingest")
         assert (again["inserted"], again["deleted"], again["unchanged"]) == (
