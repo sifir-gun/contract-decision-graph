@@ -77,6 +77,10 @@ class FastembedEmbedder:
         self.dimension = config.dimension
         self._config = config
         if model is None:
+            if cache_dir is None:
+                raise EmbeddingError(
+                    f"poids de {config.model} : dossier du cache non indiqué (EMBEDDING_CACHE_DIR)"
+                )
             try:
                 model = _load(config, cache_dir, local_files_only=True)
             except Exception as exc:

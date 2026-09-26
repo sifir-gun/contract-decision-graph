@@ -10,7 +10,7 @@ from cdg.domain.models import AgentVerdict, HumanDecision
 from cdg.domain.numeric import rounded
 
 
-def build_request(state: Mapping[str, Any], config: DecisionConfig) -> dict:
+def build_request(state: Mapping[str, Any], config: DecisionConfig) -> dict[str, Any]:
     """Charge utile exposée à l'humain ; le texte du contrat n'y figure pas.
 
     `state` : l'état du contrat, lu seulement ; le domaine n'en connaît pas la forme

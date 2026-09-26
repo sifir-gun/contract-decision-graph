@@ -38,6 +38,44 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "pytest>=9.1.1",
     "ruff>=0.16.8",
 ]
+
+# Vérification des types (mypy) : strict sur domain/, ports/ et application/, mode de base
+# sur adapters/ et cli.py. `strict` ne se règle que globalement : ses options sont reprises
+# une à une pour les modules stricts (liste de `mypy --help`, mypy 2.3.1).
+[tool.mypy]
+files = ["src"]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+# options de `strict` réglables seulement ici : elles valent pour tout le paquet
+warn_redundant_casts = true
+extra_checks = true
+
+[[tool.mypy.overrides]]
+module = ["cdg.domain.*", "cdg.ports.*", "cdg.application.*"]
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_unused_ignores = true
+warn_return_any = true
+implicit_reexport = false
+strict_equality = true
+
+# PyYAML n'a pas d'annotations : yaml.safe_load rend Any de toute façon. Les stubs de
+# typeshed (types-PyYAML) seraient une dépendance de plus, non ajoutée sans accord.
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true

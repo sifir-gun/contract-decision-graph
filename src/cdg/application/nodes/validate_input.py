@@ -3,12 +3,14 @@
 Écrit `route` : extract_clauses si l'entrée est recevable, sinon reject avec son motif.
 """
 
+from typing import Any
+
 from cdg.application.state import ContractState
 from cdg.domain.config import DecisionConfig
 from cdg.domain.input_checks import rejection
 
 
-def validate_input(state: ContractState, decision_config: DecisionConfig) -> dict:
+def validate_input(state: ContractState, decision_config: DecisionConfig) -> dict[str, Any]:
     reason = rejection(state.get("raw_text", ""), state.get("analysis_date"), decision_config.input)
     if reason is not None:
         return {"route": "reject", "reject_reason": reason}

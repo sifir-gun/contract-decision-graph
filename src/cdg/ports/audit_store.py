@@ -6,7 +6,7 @@ et insère, dans une même transaction sous verrou, ce que `seal` a scellé.
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -16,7 +16,7 @@ class AuditEntry(BaseModel):
 
     contract_id: str
     thread_id: str
-    record: dict
+    record: dict[str, Any]
     config_hash: str
     decision_hash: str
     prev_hash: str

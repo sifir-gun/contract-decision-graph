@@ -22,7 +22,7 @@ les résultats.
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, StringConstraints
 
@@ -133,7 +133,8 @@ def _describe(clause: Clause) -> str:
         detail = "clause absente"
     elif clause.value is None:
         # catégorie seule (transfert), sinon sens d'une valeur nulle
-        detail = _CATEGORY_LABELS.get(clause.category) or none_label or "clause présente"
+        category = _CATEGORY_LABELS.get(clause.category) if clause.category is not None else None
+        detail = category or none_label or "clause présente"
     else:
         detail = f"{clause.value:g} {unit}"
         if clause.category is not None:  # point de départ d'un délai de paiement
@@ -159,7 +160,7 @@ def start(domain: Domain, clause: Clause, analysis_date: date) -> CragState:
     }
 
 
-def retrieve(state: CragState, retriever: Retriever, top_k: int) -> dict:
+def retrieve(state: CragState, retriever: Retriever, top_k: int) -> dict[str, Any]:
     docs = retriever.search(state["domain"], state["query"], k=top_k)
     return {
         "docs": docs,
@@ -183,7 +184,7 @@ def _node(state: CragState, step: str) -> str:
     return f"crag_{step}:{state['domain']}:{state['clause'].kind}"
 
 
-def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
+def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict[str, Any]:
     """Juge de pertinence (modèle léger) ; sans extrait, aucun appel au juge."""
     docs, usage, relevant = state["docs"], state["usage"], []
     if docs:
@@ -207,7 +208,7 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict:
     return {"relevant": relevant, "route": route, "usage": usage}
 
 
-def rewrite(state: CragState, llm: LLMProvider) -> dict:
+def rewrite(state: CragState, llm: LLMProvider) -> dict[str, Any]:
     """Nouvelle requête (modèle léger), à partir des seules requêtes déjà essayées."""
     tried = "\n".join(f"- {q}" for q in state["queries"])
     subject, label = _SUBJECTS[state["clause"].kind][0], DOMAIN_LABELS[state["domain"]]
@@ -221,7 +222,7 @@ def rewrite(state: CragState, llm: LLMProvider) -> dict:
     return {"query": output.query, "usage": [*state["usage"], used]}
 
 
-def generate(state: CragState) -> dict:
+def generate(state: CragState) -> dict[str, Any]:
     """Références retenues pour la clause, sans LLM ; les versions expirées sont signalées,
     jamais retenues."""
     on, relevant, kind = state["analysis_date"], state.get("relevant", []), state["clause"].kind
@@ -229,7 +230,7 @@ def generate(state: CragState) -> dict:
     retained = list(dict.fromkeys(p.reference for p in valid))
     old: dict[str, date] = {}
     for p in relevant:
-        if expired(p.valid_until, on):
+        if p.valid_until is not None and expired(p.valid_until, on):  # sans fin : jamais expiré
             old.setdefault(p.reference, p.valid_until)
     findings = [
         f"référence expirée à la date d'analyse ({on.isoformat()}) : {reference}, "

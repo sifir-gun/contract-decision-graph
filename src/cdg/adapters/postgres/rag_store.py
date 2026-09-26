@@ -28,6 +28,8 @@ def column_dimension(conninfo: str) -> int:
             "SELECT atttypmod FROM pg_attribute "
             "WHERE attrelid = 'rag_chunks'::regclass AND attname = 'embedding'"
         ).fetchone()
+    if row is None:  # créée par la migration 002 : son absence est une erreur explicite
+        raise RagStoreError("colonne rag_chunks.embedding introuvable : lancer setup-db")
     return row[0]
 
 

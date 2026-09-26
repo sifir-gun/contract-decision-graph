@@ -30,14 +30,14 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
-def _company_id(match: re.Match) -> bool:
+def _company_id(match: re.Match[str]) -> bool:
     digits = re.sub(r"\D", "", match.group())
     followed_by_unit = _UNIT_AFTER.match(match.string, match.end()) is not None
     return _luhn(digits) and not followed_by_unit
 
 
 # (type, motif, filtre éventuel), dans l'ordre d'application
-_PATTERNS: list[tuple[str, re.Pattern, Callable[[re.Match], bool] | None]] = [
+_PATTERNS: list[tuple[str, re.Pattern[str], Callable[[re.Match[str]], bool] | None]] = [
     ("EMAIL", _EMAIL, None),
     ("IBAN", _IBAN, None),
     ("SIRET", _SIRET, _company_id),
@@ -56,7 +56,11 @@ def mask(text: str, parties: Sequence[str] = ()) -> MaskResult:
     counts: Counter[str] = Counter()
     for kind, pattern, keep in _PATTERNS:
 
-        def replace(match: re.Match, kind: str = kind, keep=keep) -> str:
+        def replace(
+            match: re.Match[str],
+            kind: str = kind,
+            keep: Callable[[re.Match[str]], bool] | None = keep,
+        ) -> str:
             if keep is not None and not keep(match):
                 return match.group()
             counts[kind] += 1

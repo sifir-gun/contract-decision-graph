@@ -46,9 +46,10 @@ def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
         httpx_classes = [
             c.__name__ for c in type(exc).__mro__ if c.__module__.split(".")[0] == "httpx"
         ]
-        reason = next((_HTTPX_TRANSIENT[n] for n in httpx_classes if n in _HTTPX_TRANSIENT), None)
-        if reason is None:
+        known = next((_HTTPX_TRANSIENT[n] for n in httpx_classes if n in _HTTPX_TRANSIENT), None)
+        if known is None:
             return None
+        reason = known
     return LLMTransientError(f"{model} : erreur passagère, {reason} ({node})")
 
 
@@ -83,7 +84,8 @@ class MistralProvider:
                 raise
             raise error from exc
         latency_ms = int((time.monotonic() - start) * 1000)
-        parsed = response.choices[0].message.parsed if response.choices else None
+        message = response.choices[0].message if response.choices else None
+        parsed = message.parsed if message is not None else None
         if parsed is None:
             raise LLMOutputError(f"{model} : réponse vide ou non structurée ({node})")
         if response.usage is None:

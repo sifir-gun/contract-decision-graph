@@ -43,10 +43,11 @@ def _payment_delay(delay: Clause, cfg: FinancierRules) -> list[RuleFinding]:
         "facture_periodique": cfg.payment_delay_max_days_periodic_invoice,
     }
     # point de départ inconnu (impossible après vérification) : le seuil le plus strict
-    limit = limits.get(delay.category, min(limits.values()))
+    basis = delay.category or ""  # sans point de départ : aucune clé ne correspond
+    limit = limits.get(basis, min(limits.values()))
     if not above(delay.value, limit):
         return []
-    label = DELAY_BASIS_LABELS.get(delay.category, "point de départ non précisé")
+    label = DELAY_BASIS_LABELS.get(basis, "point de départ non précisé")
     text = (
         f"délai non conforme, à renégocier : {delay.value:g} jours {label}, "
         f"au-delà de {limit:g} jours"

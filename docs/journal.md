@@ -982,3 +982,40 @@ Résultats :
 
 La simulation tourne sur macOS : un écart propre à Linux ne peut se voir que sur GitHub.
 
+## 2026-09-26 · CI, qualité (branche `ci-qualite`)
+
+### Vérification des types : mypy
+
+**Choix de mypy plutôt que pyright.**
+- **Installation figée** : mypy est un paquet Python pur (compilé par mypyc), figé dans `uv.lock` comme le reste. Le paquet PyPI de pyright, lui, cherche Node.js, le télécharge au besoin, puis installe le paquet npm de pyright à la première exécution (documentation du paquet sur PyPI) : ce téléchargement échappe à `uv.lock`, en CI comme en local.
+- **Pydantic** : son plugin mypy officiel type les `__init__` synthétisés (`init_typed`, `init_forbid_extra`, lus dans la documentation de pydantic).
+- **Limite de mypy** : `strict` ne se règle que globalement (documentation de mypy 2.3.1). Les options qu'il active (liste de `mypy --help`) sont donc reprises une à une pour `cdg.domain.*`, `cdg.ports.*` et `cdg.application.*`. Deux d'entre elles ne se règlent que globalement : `warn_redundant_casts` et `extra_checks`. Elles valent donc aussi pour `adapters/` et `cli.py`, au-delà du mode de base.
+
+**Erreurs trouvées** : 74 dans 26 fichiers.
+- 42 dans les couches strictes : 28 paramètres génériques manquants (`dict` au lieu de `dict[str, Any]`, `re.Match` sans type), des annotations manquantes, et quelques valeurs `None` que mypy ne pouvait pas exclure (catégorie d'une clause, fin de validité d'un extrait).
+- 32 dans les adaptateurs, dont 25 dans l'orchestrateur :
+  - typage de LangGraph (nœuds gardés, `RunnableConfig`) ;
+  - valeurs `None` que LangGraph, psycopg ou le SDK Mistral déclarent possibles.
+
+Toutes sont corrigées sans `# type: ignore` et sans changer le comportement nominal. Un seul `cast` : la clé du fournisseur dans `LLMConfig.model`, où un fournisseur inconnu lève toujours `KeyError`.
+
+**Chemins d'erreur rendus explicites.** Chacun échouait avant par une erreur Python générique, sur un cas qui ne se produit pas dans l'usage actuel :
+- `MistralProvider` : un choix sans message (le SDK le type optionnel) lève `LLMOutputError` au lieu d'`AttributeError` (testé) ;
+- `FastembedEmbedder` sans modèle injecté ni dossier de cache : `EmbeddingError` qui cite `EMBEDDING_CACHE_DIR`, au lieu d'un `EmbeddingError` citant « None » (testé) ;
+- `rag_store.column_dimension` : colonne absente, `RagStoreError` ;
+- orchestrateur :
+  - garde hors d'une exécution de nœud : `RuntimeError` ;
+  - `expire` sur un graphe sans checkpointer : `ThreadError` ;
+  - checkpoint sans métadonnées ou sans date : `ThreadError` ;
+- `setup_database` : `TypeError` si le checkpointer tenait un pool au lieu d'une connexion.
+
+**Écart réel trouvé par le typage : la règle de reprise de la garde.**
+- La garde appelait `retry.retry_on(exc)`, alors que LangGraph accepte aussi une classe ou une liste d'exceptions, qu'il ne faut pas appeler. Nos politiques passent toujours un prédicat, donc rien ne cassait.
+- `orchestrator.retries` reprend la règle de LangGraph (`pregel/_retry.py`, `_should_retry_on`). Un test la compare à la fonction de LangGraph sur 16 combinaisons : politique × erreur.
+
+**Autres points.**
+- `langchain_core` (pour `RunnableConfig`) est importé dans `adapters/langgraph/` : ajouté à la liste des bibliothèques confinées du test d'isolation.
+- **PyYAML sans annotations** : `ignore_missing_imports` pour `yaml`. `yaml.safe_load` rend `Any` de toute façon. Les stubs de typeshed (`types-PyYAML`) seraient une dépendance de plus : non ajoutés sans accord.
+- **Domaines d'un extrait** : lus dans le manifeste et les fiches, ils sont validés par `ChunkRow.model_validate` au lieu du constructeur typé (même validation pydantic).
+- **Job `types`** dans la CI : tout le projet est installé, car mypy lit les types des bibliothèques.
+

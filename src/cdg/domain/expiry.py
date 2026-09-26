@@ -5,6 +5,7 @@ Fonctions pures ; l'horloge est injectée. Jamais d'approbation automatique.
 
 import re
 from datetime import datetime, timedelta
+from typing import Any
 
 EXPIRE_REVIEWER = "systeme:expire"
 _UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
@@ -32,7 +33,7 @@ def expired(
     return [(thread_id, since) for thread_id, since in pending if now - since > older_than]
 
 
-def system_decision(waited: timedelta, older_than: timedelta) -> dict:
+def system_decision(waited: timedelta, older_than: timedelta) -> dict[str, Any]:
     """Réponse de reprise : NO_GO système, motif timeout, tracée comme telle."""
     return {
         "decision": "NO_GO",

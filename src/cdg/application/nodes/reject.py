@@ -4,9 +4,11 @@
 car `Decision` n'a pas de valeur « invalide ».
 """
 
+from typing import Any
+
 from cdg.application.state import ContractState
 
 
-def reject(state: ContractState) -> dict:
+def reject(state: ContractState) -> dict[str, Any]:
     # TODO J4 : contenu du rejet tel qu'il sera scellé par audit_seal.
     return {}

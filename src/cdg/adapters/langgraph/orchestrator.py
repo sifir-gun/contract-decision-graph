@@ -7,8 +7,10 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, Protocol
 
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver, CheckpointMetadata
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -71,7 +73,7 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
     request = policy.build_request(state, decision_config)
     while True:
         human, error = policy.review(interrupt(request), state.get("verdicts", []), decision_config)
-        if error is None:
+        if human is not None:  # acceptée : policy.review ne rend alors aucun motif de refus
             return {"human": human, "final_decision": human.decision}
         request = {**request, "error": error}
 
@@ -112,13 +114,33 @@ def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) 
     return run
 
 
+class Node(Protocol):
+    """Nœud gardé, tel que l'attend `StateGraph.add_node`."""
+
+    def __call__(self, state: Any) -> dict[str, Any]: ...
+
+
+def retries(policy: RetryPolicy, exc: Exception) -> bool:
+    """La RetryPolicy reprendrait-elle cette erreur ? Même règle que LangGraph 1.2.12
+    (`pregel/_retry.py`, `_should_retry_on`) : `retry_on` est une liste ou une classe
+    d'exceptions, ou un prédicat."""
+    retry_on = policy.retry_on
+    if isinstance(retry_on, Sequence):
+        return isinstance(exc, tuple(retry_on))
+    if isinstance(retry_on, type):
+        if issubclass(retry_on, Exception):
+            return isinstance(exc, retry_on)
+        raise TypeError(f"retry_on : classe d'exception attendue, reçu {retry_on!r}")
+    return bool(retry_on(exc))
+
+
 def guard(
     name: str,
-    fn: Callable[[Any], dict],
+    fn: Callable[[Any], dict[str, Any]],
     *,
     retry: RetryPolicy | None = None,
-    on_failure: Callable[[list[NodeFailure]], dict] | None = None,
-) -> Callable[[Any], dict]:
+    on_failure: Callable[[list[NodeFailure]], dict[str, Any]] | None = None,
+) -> Node:
     """Garde d'échec de nœud : une exception devient un `NodeFailure` dans `failures`.
 
     - le contrôle de LangGraph (interruption, commande) passe au travers ;
@@ -128,15 +150,18 @@ def guard(
       l'humain), à partir de tous les échecs connus.
     """
 
-    def node(state: Any) -> dict:
+    def node(state: Any) -> dict[str, Any]:
         try:
             return fn(state)
         except GraphBubbleUp:
             raise
         except Exception as exc:
-            attempt = get_runtime().execution_info.node_attempt  # 1 à la première
+            info = get_runtime().execution_info
+            if info is None:  # renseigné par LangGraph pendant l'exécution d'un nœud
+                raise RuntimeError(f"garde {name} : hors d'une exécution de nœud") from exc
+            attempt = info.node_attempt  # 1 à la première
             # retry_on : prédicat par défaut de RetryPolicy (erreurs réseau, 5xx...)
-            if retry is not None and retry.retry_on(exc) and attempt < retry.max_attempts:
+            if retry is not None and retries(retry, exc) and attempt < retry.max_attempts:
                 raise
             failure = NodeFailure(
                 node=name,
@@ -145,7 +170,7 @@ def guard(
                 attempts=attempt,
                 domain=state.get("domain"),  # analyste seulement
             )
-            update: dict = {"failures": [failure]}
+            update: dict[str, Any] = {"failures": [failure]}
             if on_failure is not None:
                 update |= on_failure([*state.get("failures", []), failure])
             return update
@@ -174,13 +199,13 @@ def transient(exc: Exception) -> bool:
     return isinstance(exc, LLMTransientError)
 
 
-_LANGGRAPH_RETRY_ON = RetryPolicy().retry_on  # prédicat par défaut de LangGraph
+_LANGGRAPH_DEFAULT = RetryPolicy()  # prédicat par défaut de LangGraph
 
 
 def analyst_retryable(exc: Exception) -> bool:
     """Prédicat par défaut de LangGraph (réseau, 5xx, erreurs hors bogues…), sauf le quota
     nul, qui n'est jamais passager."""
-    return not isinstance(exc, LLMQuotaError) and _LANGGRAPH_RETRY_ON(exc)
+    return not isinstance(exc, LLMQuotaError) and retries(_LANGGRAPH_DEFAULT, exc)
 
 
 def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
@@ -265,7 +290,7 @@ class ThreadError(Exception):
     """Thread inconnu, déjà existant, ou pas en attente d'une décision humaine."""
 
 
-def _thread(thread_id: str) -> dict:
+def _thread(thread_id: str) -> RunnableConfig:
     return {"configurable": {"thread_id": thread_id}}
 
 
@@ -345,8 +370,8 @@ def thread_history(graph: CompiledStateGraph, thread_id: str) -> list[dict]:
     return [
         {
             "checkpoint_id": snap.config["configurable"]["checkpoint_id"],
-            "step": snap.metadata.get("step"),
-            "source": snap.metadata.get("source"),
+            "step": _metadata(snap).get("step"),
+            "source": _metadata(snap).get("source"),
             "created_at": snap.created_at,
             "next": list(snap.next),
             "route": snap.values.get("route"),
@@ -355,6 +380,12 @@ def thread_history(graph: CompiledStateGraph, thread_id: str) -> list[dict]:
         }
         for snap in reversed(history)
     ]
+
+
+def _metadata(snapshot: StateSnapshot) -> CheckpointMetadata:
+    if snapshot.metadata is None:  # écrites par le checkpointer à chaque étape
+        raise ThreadError(f"checkpoint sans métadonnées : {snapshot.config}")
+    return snapshot.metadata
 
 
 def expire_threads(
@@ -370,10 +401,10 @@ def expire_threads(
     """
     # list() garde le verrou (non réentrant) du checkpointer tant que le
     # générateur n'est pas épuisé : collecter d'abord, interroger ensuite
-    found = {
-        checkpoint.config["configurable"]["thread_id"]
-        for checkpoint in graph.checkpointer.list(None)
-    }
+    saver = graph.checkpointer
+    if not isinstance(saver, BaseCheckpointSaver):
+        raise ThreadError("expire exige un graphe compilé avec un checkpointer")
+    found = {checkpoint.config["configurable"]["thread_id"] for checkpoint in saver.list(None)}
     if thread_ids is not None:
         found &= thread_ids
     pending = []
@@ -381,6 +412,8 @@ def expire_threads(
         snapshot = graph.get_state(_thread(thread_id))
         if _awaits_human(snapshot):
             # dernier checkpoint = suspension : l'attente ne bouge plus ensuite
+            if snapshot.created_at is None:  # daté par le checkpointer
+                raise ThreadError(f"thread {thread_id} : checkpoint sans date")
             pending.append((thread_id, datetime.fromisoformat(snapshot.created_at)))
     return [
         resume_thread(graph, thread_id, expiry.system_decision(now - since, older_than))

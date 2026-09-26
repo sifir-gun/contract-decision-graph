@@ -47,6 +47,11 @@ def test_poids_absents_erreur_explicite_sans_telechargement(tmp_path):
         fastembed.FastembedEmbedder(CONFIG, cache_dir=tmp_path)
 
 
+def test_poids_sans_dossier_de_cache_erreur_explicite():
+    with pytest.raises(fastembed.EmbeddingError, match="EMBEDDING_CACHE_DIR"):
+        fastembed.FastembedEmbedder(CONFIG)
+
+
 def test_dossier_de_cache_obligatoire(monkeypatch):
     monkeypatch.delenv("EMBEDDING_CACHE_DIR", raising=False)
     with pytest.raises(settings.SettingsError, match="EMBEDDING_CACHE_DIR"):

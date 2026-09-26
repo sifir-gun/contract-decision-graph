@@ -30,6 +30,24 @@ jobs:
       - run: uv run --no-sync ruff format --check
       - run: uv run --no-sync ruff check
 
+  types:
+    name: types (mypy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.6.10"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Dépendances, strictement depuis uv.lock (mypy lit les types des bibliothèques)
+        run: uv sync --locked
+      - name: mypy, strict sur domain/, ports/ et application/ (configuration dans pyproject.toml)
+        run: uv run --no-sync mypy
+
   tests:
     name: tests (PostgreSQL + pgvector)
     runs-on: ubuntu-24.04

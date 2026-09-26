@@ -9,6 +9,8 @@ import pytest
 from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
+from langgraph.pregel._retry import _should_retry_on  # règle de référence
+from langgraph.types import RetryPolicy
 
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
@@ -292,3 +294,29 @@ def test_quota_nul_jamais_repris_sur_un_analyste():
     values = run(deps(crag)).values
     assert crag.calls.count("financier") == 1
     assert values["failures"][0].attempts == 1
+
+
+# --- Règle de reprise de la garde : celle de LangGraph -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "retry_on",
+    [
+        ValueError,  # une classe
+        (ValueError, KeyError),  # une liste de classes
+        lambda exc: isinstance(exc, KeyError),  # un prédicat
+        RetryPolicy().retry_on,  # le prédicat par défaut de LangGraph
+    ],
+)
+@pytest.mark.parametrize(
+    "exc", [ValueError("v"), KeyError("k"), ConnectionError("c"), LLMQuotaError("q")]
+)
+def test_regle_de_reprise_identique_a_celle_de_langgraph(retry_on, exc):
+    # la garde décide comme la RetryPolicy : sinon elle consignerait trop tôt, ou jamais
+    policy = RetryPolicy(retry_on=retry_on)
+    assert orchestrator.retries(policy, exc) == _should_retry_on(policy, exc)
+
+
+def test_regle_de_reprise_classe_hors_exception_refusee():
+    with pytest.raises(TypeError, match="classe d'exception attendue"):
+        orchestrator.retries(RetryPolicy(retry_on=dict), ValueError())

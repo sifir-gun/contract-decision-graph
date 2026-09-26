@@ -15,6 +15,7 @@ SRC = Path(__file__).resolve().parent.parent / "src" / "cdg"
 # bibliothèque -> seuls chemins (relatifs à src/cdg) où elle peut être importée
 LIBRARIES = {
     "langgraph": ("adapters/langgraph/",),
+    "langchain_core": ("adapters/langgraph/",),  # RunnableConfig, type des appels au graphe
     # PostgresSaver exige une connexion psycopg
     "psycopg": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
     "pgvector": ("adapters/postgres/",),

@@ -15,6 +15,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -144,7 +145,8 @@ def chunk(text: str, max_words: int) -> list[str]:
         for sentence in re.split(r"(?<=[.;:])\s+", paragraph):
             words = sentence.split()
             pieces += [" ".join(words[i : i + max_words]) for i in range(0, len(words), max_words)]
-    chunks, current = [], []
+    chunks: list[str] = []
+    current: list[str] = []
     for piece in pieces:
         if current and len(" ".join(current + [piece]).split()) > max_words:
             chunks.append("\n\n".join(current))
@@ -160,7 +162,7 @@ def chunk(text: str, max_words: int) -> list[str]:
 
 @dataclass(frozen=True)
 class Manifest:
-    sources: dict
+    sources: dict[str, Any]
 
     def files(self) -> list[tuple[str, tuple[str, str]]]:
         return [

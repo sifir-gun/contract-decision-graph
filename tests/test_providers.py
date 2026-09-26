@@ -30,8 +30,9 @@ OK = Answer(verdict="ok")
 
 
 class FakeMistralChat:
-    def __init__(self, parsed=OK, usage=(120, 30)):
+    def __init__(self, parsed=OK, usage=(120, 30), without_message=False):
         self.parsed, self.usage, self.calls = parsed, usage, []
+        self.without_message = without_message
 
     def parse(self, response_format, **kwargs):
         self.calls.append({"response_format": response_format, **kwargs})
@@ -40,7 +41,7 @@ class FakeMistralChat:
             if self.usage is None
             else SimpleNamespace(prompt_tokens=self.usage[0], completion_tokens=self.usage[1])
         )
-        message = SimpleNamespace(parsed=self.parsed)
+        message = None if self.without_message else SimpleNamespace(parsed=self.parsed)
         return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
 
 
@@ -293,3 +294,10 @@ def test_anthropic_429_avec_limite_non_nulle_reste_passager():
     )
     with pytest.raises(LLMTransientError):
         provider.structured(tier="light", system="s", user="u", schema=Answer, node="n")
+
+
+def test_mistral_choix_sans_message_erreur_du_port():
+    # le SDK type message comme optionnel : sans lui, erreur du port, pas AttributeError
+    provider, _ = mistral(without_message=True)
+    with pytest.raises(LLMOutputError, match="réponse vide ou non structurée"):
+        provider.structured(tier="main", system="s", user="u", schema=Answer, node="n")

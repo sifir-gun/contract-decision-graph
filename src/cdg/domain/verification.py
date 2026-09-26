@@ -10,7 +10,7 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from cdg.domain.models import (
     CATEGORY_KINDS,
@@ -79,7 +79,7 @@ def problems_of(raw_text: str, clauses: list[Clause]) -> list[str]:
 class ExtractionCheck:
     outcome: Literal["verified", "retry", "escalate"]
     problems: list[str]
-    failure_report: dict | None = None  # escalate seulement
+    failure_report: dict[str, Any] | None = None  # escalate seulement
 
 
 def check_extraction(
