@@ -1,0 +1,51 @@
+"""État du graphe : forme de l'état d'un contrat, réducteurs, route, entrée des analystes.
+
+Les objets qu'il transporte sont les modèles métier de `domain/models.py`.
+"""
+
+import operator
+from datetime import date
+from typing import Annotated, Literal, TypedDict
+
+from cdg.domain.models import (
+    AgentVerdict,
+    Clause,
+    Decision,
+    Domain,
+    HumanDecision,
+    NodeFailure,
+    Usage,
+)
+
+Route = Literal["extract_clauses", "reject", "analysts", "human_review", "explain"]
+
+
+class ContractState(TypedDict, total=False):
+    contract_id: str
+    raw_text: str
+    analysis_date: date  # versions des textes jugées à cette date ; fixée par run_contract
+    reject_reason: str | None
+    clauses: list[Clause]
+    extraction_attempts: int
+    extraction_feedback: list[str]
+    verdicts: Annotated[list[AgentVerdict], operator.add]
+    usage: Annotated[list[Usage], operator.add]
+    failures: Annotated[list[NodeFailure], operator.add]  # gardes d'échec de nœud
+    proposed_decision: Decision
+    margin: float
+    route: Route  # écrite par un nœud, lue par l'arête
+    failure_report: dict | None
+    human: HumanDecision | None
+    final_decision: (
+        Decision | None
+    )  # decision_gate (route explain) ou human_review ; None après reject
+    explanation: str
+    config_hash: str
+    decision_hash: str
+    chain_hash: str
+
+
+class AnalystInput(TypedDict):  # état privé reçu via Send
+    domain: Domain
+    clauses: list[Clause]
+    analysis_date: date

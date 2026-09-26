@@ -1,0 +1,62 @@
+# Ce qui est ingéré dans rag_chunks, et sous quel domaine (filtre de recherche).
+# Règle de périmètre et justification de chaque article : SOURCES.md.
+# Tout fichier de raw/ doit figurer ici, ingéré ou exclu (vérifié par les tests).
+
+sources:
+  rgpd:
+    format: eurlex
+    citation: RGPD
+    directory: rgpd
+    file: "art-{article}.txt"
+    retrieved_at: 2026-09-24
+    articles:
+      "4": [conformite]
+      "28": [conformite]
+      "32": [conformite]
+      "33": [conformite]
+      "36": [conformite]
+      "40": [conformite]
+      "42": [conformite]
+      "44": [conformite]
+      "45": [conformite]
+      "46": [conformite]
+      "82": [conformite]
+      "83": [conformite]
+      "84": [conformite]
+    excluded:
+      "79": "hors périmètre : cité seulement par l'art. 82, lui-même cité par l'art. 28"
+
+  code-commerce:
+    format: legifrance
+    citation: C. com.
+    directory: code-commerce
+    file: "{article}.txt"
+    retrieved_at: 2026-09-24
+    articles:
+      "L441-10": [financier]
+      "L442-1": [operationnel, juridique]
+
+  code-civil:
+    format: legifrance
+    citation: C. civ.
+    directory: code-civil
+    file: "{article}.txt"
+    retrieved_at: 2026-09-24
+    retrieved_at_overrides:
+      "1231-5": 2026-09-25
+    articles:
+      "1170": [juridique]
+      "1171": [juridique]
+      "1231-3": [juridique]
+      "1231-5": [financier]   # clause pénale : règle des pénalités d'exécution
+      "1210": [operationnel]
+      "1211": [operationnel]
+
+  code-monetaire-financier:
+    format: legifrance
+    citation: C. mon. fin.
+    directory: code-monetaire-financier
+    file: "{article}.txt"
+    retrieved_at: 2026-09-24
+    articles:
+      "L112-2": [financier]

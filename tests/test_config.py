@@ -7,7 +7,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cdg.config import DEFAULT_CONFIG_PATH, ConfigError, DecisionConfig, load_config
+from cdg.domain.config import DEFAULT_CONFIG_PATH, ConfigError, DecisionConfig, load_config
 
 
 @pytest.fixture
@@ -36,12 +36,61 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert cfg.extraction.max_attempts == 2
     j, f, o = cfg.rules.juridique, cfg.rules.financier, cfg.rules.operationnel
     assert (j.supplier_cap_min_pct, j.supplier_cap_score_penalty) == (100, 0.5)
-    assert (f.late_penalties_min_cap_pct, f.late_penalties_score_penalty) == (5, 0.4)
+    assert (f.execution_penalties_min_cap_pct, f.execution_penalties_score_penalty) == (5, 0.4)
+    assert (
+        f.payment_delay_max_days_invoice,
+        f.payment_delay_max_days_end_of_month,
+        f.payment_delay_max_days_periodic_invoice,
+        f.payment_delay_score_penalty,
+    ) == (60, 45, 45, 0.2)
     assert (o.commitment_max_months, o.commitment_score_penalty) == (36, 0.3)
     assert (o.notice_max_months, o.notice_score_penalty) == (6, 0.3)
+    c = cfg.rules.conformite
+    assert c.transfer_safeguards == [
+        "decision_adequation",
+        "clauses_contractuelles_types",
+        "clauses_contractuelles_ad_hoc_autorisees",
+        "regles_entreprise_contraignantes",
+        "code_conduite",
+        "certification",
+    ]
+    assert c.transfer_authorization_to_verify == ["clauses_contractuelles_ad_hoc"]
+    assert c.transfer_authorization_score_penalty == 0.3
+    assert c.unlocated_data_score_penalty == 0.3
     assert cfg.human_policy.allowed_decisions == ["GO", "GO_RESERVES", "NO_GO"]
     assert cfg.human_policy.allow_block_override is True
     assert cfg.human_policy.hard_block_review is False
+    assert cfg.llm.provider == "mistral" and cfg.llm.temperature == 0
+    assert cfg.llm.models["mistral"].model_dump() == {
+        "main": "mistral-small-2603",
+        "light": "ministral-8b-2512",
+    }
+    assert cfg.llm.models["anthropic"].model_dump() == {
+        "main": "claude-sonnet-5",
+        "light": "claude-haiku-4-5-20251001",
+    }
+    assert cfg.llm.model("light") == "ministral-8b-2512"
+    assert cfg.crag.model_dump() == {"top_k": 4, "max_passes": 2}
+    assert cfg.analyst_retry.model_dump() == {
+        "max_attempts": 3,
+        "initial_interval_seconds": 1.0,
+        "backoff_factor": 2.0,
+        "max_interval_seconds": 10.0,
+        "jitter": False,
+    }
+    assert cfg.extraction_retry.model_dump() == {
+        "max_attempts": 3,
+        "initial_interval_seconds": 2.0,
+        "backoff_factor": 2.0,
+        "max_interval_seconds": 20.0,
+        "jitter": False,
+    }
+    assert cfg.embedding.model_dump() == {
+        "model": "intfloat/multilingual-e5-large",
+        "dimension": 1024,
+        "query_prefix": "query: ",
+        "passage_prefix": "passage: ",
+    }
 
 
 def test_poids_par_domaine():
@@ -88,7 +137,11 @@ _DELETE = object()
         ("extraction.max_attempts", 0),
         ("rules.juridique.supplier_cap_score_penalty", -0.1),
         ("rules.operationnel.notice_score_penalty", 1.5),
-        ("rules.financier.late_penalties_min_cap_pct", -5),
+        ("rules.financier.execution_penalties_min_cap_pct", -5),
+        ("rules.financier.payment_delay_max_days_invoice", -1),
+        ("rules.financier.payment_delay_max_days_periodic_invoice", _DELETE),
+        ("rules.financier.payment_delay_score_penalty", 1.5),
+        ("rules.financier.late_penalties_min_cap_pct", 5),  # ancienne clé refusée
         ("rules.operationnel", _DELETE),
         ("human_policy", _DELETE),
         ("human_policy.allowed_decisions", []),
@@ -99,6 +152,35 @@ _DELETE = object()
         ("human_policy.allow_block_override", "oui"),  # mode strict
         ("human_policy.hard_block_review", _DELETE),  # réglage explicite
         ("human_policy.hard_block_review", "non"),  # mode strict
+        ("llm.provider", "openai"),  # fournisseur sans modèles configurés
+        ("llm.models.mistral.main", "mistral-small-latest"),  # alias mouvant refusé
+        ("llm.models.mistral.light", ""),
+        ("llm.models.mistral", _DELETE),  # fournisseur choisi sans modèles
+        ("llm.temperature", 1.5),
+        ("llm.max_output_tokens", 0),
+        ("llm.timeout_seconds", 0),
+        ("embedding.dimension", 0),
+        ("rules.conformite.transfer_safeguards", []),
+        ("rules.conformite.transfer_safeguards", ["aucune_garantie"]),  # pas une garantie
+        ("rules.conformite.transfer_safeguards", ["sans_transfert"]),
+        ("rules.conformite.transfer_safeguards", ["certification", "certification"]),
+        ("rules.conformite.unlocated_data_score_penalty", 1.5),
+        ("rules.conformite.transfer_authorization_to_verify", ["certification"]),  # déjà garantie
+        ("rules.conformite.transfer_authorization_to_verify", ["aucune_garantie"]),
+        ("rules.conformite.transfer_authorization_score_penalty", 1.5),
+        ("rules.conformite.transfer_authorization_score_penalty", _DELETE),
+        ("embedding.model", ""),
+        ("crag", _DELETE),
+        ("crag.top_k", 0),
+        ("crag.max_passes", 0),
+        ("crag.max_passes", 2.0),  # mode strict
+        ("analyst_retry", _DELETE),
+        ("analyst_retry.max_attempts", 0),
+        ("analyst_retry.initial_interval_seconds", -1.0),
+        ("analyst_retry.backoff_factor", 0.5),  # intervalle décroissant
+        ("analyst_retry.jitter", "non"),
+        ("extraction_retry", _DELETE),
+        ("extraction_retry.max_attempts", 0),
     ],
 )
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):

@@ -1,22 +1,29 @@
 """Schémas d'état et modèles métier (spec, « Schéma d'état »)."""
 
 import operator
+from datetime import date
 from typing import get_args, get_type_hints
 
 import pytest
 from pydantic import ValidationError
 
-from cdg.state import (
+from cdg.application.state import AnalystInput, ContractState, Route
+from cdg.domain.models import (
+    CATEGORY_KINDS,
+    CLAUSE_CATEGORIES,
+    DOMAIN_KINDS,
     DOMAINS,
+    KIND_CATEGORIES,
     REQUIRED_KINDS,
+    TRANSFER_CATEGORIES,
     AgentVerdict,
-    AnalystInput,
     Clause,
-    ContractState,
+    ClauseRetrieval,
     Decision,
     Domain,
     HumanDecision,
-    Route,
+    NodeFailure,
+    RetrievalTrace,
     Usage,
 )
 
@@ -35,18 +42,18 @@ def test_clause_absente_citation_vide_et_valeur_nulle():
 
 def test_clause_absente_refuse_une_citation():
     with pytest.raises(ValidationError, match="absente"):
-        Clause(kind="penalites_retard", present=False, quote="texte", value=None)
+        Clause(kind="penalites_execution", present=False, quote="texte", value=None)
 
 
 @pytest.mark.parametrize("quote", ["", "   "])
 def test_clause_presente_exige_une_citation(quote):
     with pytest.raises(ValidationError, match="présente"):
-        Clause(kind="penalites_retard", present=True, quote=quote, value=5)
+        Clause(kind="penalites_execution", present=True, quote=quote, value=5)
 
 
 def test_clause_valeur_obligatoire_meme_nulle():
     with pytest.raises(ValidationError):
-        Clause(kind="penalites_retard", present=False, quote="")
+        Clause(kind="penalites_execution", present=False, quote="")
 
 
 # --- AgentVerdict -------------------------------------------------------------
@@ -105,11 +112,25 @@ def test_domaines_et_types_de_clauses():
         "responsabilite_acheteur",
         "responsabilite_fournisseur",
         "revision_prix",
-        "penalites_retard",
+        "penalites_execution",
+        "delai_paiement",
         "duree_engagement",
         "preavis_resiliation",
         "donnees_personnelles",
         "accord_traitement_donnees",
+        "transfert_hors_ue",
+    )
+    assert CATEGORY_KINDS == {"transfert_hors_ue", "delai_paiement"}
+    assert KIND_CATEGORIES["delai_paiement"] == (
+        "date_facture",
+        "fin_de_mois",
+        "facture_periodique",
+    )
+    assert KIND_CATEGORIES["transfert_hors_ue"] == TRANSFER_CATEGORIES
+    assert CLAUSE_CATEGORIES == TRANSFER_CATEGORIES + (
+        "date_facture",
+        "fin_de_mois",
+        "facture_periodique",
     )
 
 
@@ -124,18 +145,20 @@ def test_valeurs_de_route_et_de_decision():
     assert set(get_args(Decision)) == {"GO", "GO_RESERVES", "NO_GO", "ESCALADE"}
 
 
-def test_seuls_verdicts_et_usage_ont_un_reducteur():
+def test_seuls_verdicts_usage_et_failures_ont_un_reducteur():
     hints = get_type_hints(ContractState, include_extras=True)
     reducers = {
         key
         for key, hint in hints.items()
         if any(meta is operator.add for meta in getattr(hint, "__metadata__", ()))
     }
-    assert reducers == {"verdicts", "usage"}
+    assert reducers == {"verdicts", "usage", "failures"}
 
 
 def test_etat_prive_des_analystes():
-    assert set(get_type_hints(AnalystInput)) == {"domain", "clauses"}
+    assert set(get_type_hints(AnalystInput)) == {"domain", "clauses", "analysis_date"}
+    assert get_type_hints(AnalystInput)["analysis_date"] is date
+    assert get_type_hints(ContractState)["analysis_date"] is date
 
 
 # --- HumanDecision.source : décision humaine ou système ---------------------------
@@ -170,3 +193,53 @@ def test_decision_systeme_exige_un_relecteur_systeme():
 def test_un_humain_ne_peut_pas_se_dire_systeme():
     with pytest.raises(ValidationError, match="réservé"):
         HumanDecision(decision="NO_GO", reviewer="systeme:expire", reason="m")
+
+
+# --- Clauses par domaine, résumé du CRAG ----------------------------------------------
+
+
+def test_chaque_type_de_clause_releve_d_un_seul_domaine():
+    assert set(DOMAIN_KINDS) == set(DOMAINS)
+    kinds = [k for d in DOMAINS for k in DOMAIN_KINDS[d]]
+    assert sorted(kinds) == sorted(REQUIRED_KINDS)  # partition : ni oubli, ni doublon
+
+
+def test_verdict_sans_resume_du_crag_par_defaut():
+    v = AgentVerdict(
+        domain="financier",
+        score=1.0,
+        hard_block=False,
+        findings=[],
+        evidence_ids=[],
+        retrieval_status="OK",
+    )
+    assert v.retrieval is None
+
+
+def test_resume_du_crag_par_clause():
+    clause = ClauseRetrieval(
+        kind="delai_paiement", queries=["q1", "q2"], passes=2, retained=[], expired=["L441-10"]
+    )
+    assert RetrievalTrace(clauses=[clause]).model_dump() == {
+        "clauses": [
+            {
+                "kind": "delai_paiement",
+                "queries": ["q1", "q2"],
+                "passes": 2,
+                "retained": [],
+                "expired": ["L441-10"],
+            }
+        ]
+    }
+    with pytest.raises(ValidationError):
+        ClauseRetrieval(kind="x", queries=[], passes=-1, retained=[], expired=[])
+
+
+def test_echec_de_noeud():
+    f = NodeFailure(node="analyst", error="ValueError", message="m", attempts=1, domain="financier")
+    assert f.model_dump()["domain"] == "financier"
+    assert NodeFailure(node="extract_clauses", error="E", message="m", attempts=1).domain is None
+    with pytest.raises(ValidationError):
+        NodeFailure(node="analyst", error="E", message="m", attempts=0)
+    with pytest.raises(ValidationError):
+        NodeFailure(node="analyst", error="E", message="m", attempts=1, domain="fiscal")

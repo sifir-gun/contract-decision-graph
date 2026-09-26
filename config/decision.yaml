@@ -27,14 +27,35 @@ extraction:
   max_attempts: 2
 
 # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
-# La conformité n'a que des blocages durs, sans paramètre.
 rules:
   juridique:
     supplier_cap_min_pct: 100          # plafond fournisseur, % du montant annuel
     supplier_cap_score_penalty: 0.5
   financier:
-    late_penalties_min_cap_pct: 5      # plafond des pénalités de retard, %
-    late_penalties_score_penalty: 0.4  # aussi appliquée si la clause est absente
+    # pénalités d'exécution dues par le fournisseur (C. civ., art. 1231-5)
+    execution_penalties_min_cap_pct: 5        # plafond minimal, % du montant du contrat
+    execution_penalties_score_penalty: 0.4    # aussi appliquée si la clause est absente
+    # délai de paiement par l'acheteur (C. com., art. L441-10) : choix de politique d'achat
+    payment_delay_max_days_invoice: 60        # jours à compter de la date de facture
+    payment_delay_max_days_end_of_month: 45   # jours fin de mois
+    payment_delay_max_days_periodic_invoice: 45  # jours après une facture périodique
+    payment_delay_score_penalty: 0.2          # au-delà, ou délai présent mais non chiffré
+  conformite:
+    # transfert hors UE (RGPD, art. 44 à 46) : la règle juge ce que dit le contrat,
+    # jamais une liste de pays. Garanties nommées acceptées :
+    transfer_safeguards:
+      - decision_adequation
+      - clauses_contractuelles_types              # adoptées ou approuvées par la Commission
+      - clauses_contractuelles_ad_hoc_autorisees  # autorisation de l'autorité mentionnée
+      - regles_entreprise_contraignantes
+      - code_conduite
+      - certification
+    # clauses ad hoc sans mention d'autorisation (art. 46, par. 3, a) : pénalité et constat
+    # « autorisation de l'autorité de contrôle à vérifier », pas de blocage
+    transfer_authorization_to_verify:
+      - clauses_contractuelles_ad_hoc
+    transfer_authorization_score_penalty: 0.3
+    unlocated_data_score_penalty: 0.3   # localisation des données non précisée
   operationnel:
     commitment_max_months: 36
     commitment_score_penalty: 0.3
@@ -49,3 +70,61 @@ human_policy:
   # false : un blocage dur donne NO_GO et part vers explain, sans humain.
   # true : il part en revue humaine avec NO_GO proposé ; la levée exige overrides_block et motif.
   hard_block_review: false
+
+# Contrôle de l'entrée (validate_input), sur le texte déjà masqué.
+input:
+  max_chars: 200000        # au-delà : rejet
+  min_words: 30            # en dessous : langue non vérifiable, rejet
+  min_french_ratio: 0.15   # part minimale de mots-outils français parmi les mots
+
+# LLM : extraction (modèle principal) et juge CRAG (modèle léger). Clés d'API dans .env.
+# Identifiants figés, jamais d'alias « -latest » : le modèle est scellé dans l'audit.
+# Vérifiés le 2026-09-24 dans la documentation officielle (docs.mistral.ai,
+# platform.claude.com).
+llm:
+  provider: mistral   # mistral ou anthropic
+  temperature: 0
+  max_output_tokens: 4096
+  timeout_seconds: 60
+  models:
+    mistral:
+      main: mistral-small-2603   # Mistral Small 4
+      light: ministral-8b-2512   # Ministral 3 8B
+    anthropic:
+      main: claude-sonnet-5
+      light: claude-haiku-4-5-20251001
+
+# Embedding local (fastembed, ONNX), multilingue, sans appel réseau à l'exécution.
+embedding:
+  model: intfloat/multilingual-e5-large   # licence MIT, 1024 dimensions
+  dimension: 1024                          # = colonne rag_chunks.embedding (migration 002)
+  query_prefix: "query: "                  # préfixes attendus par les modèles e5
+  passage_prefix: "passage: "
+
+# Découpage du corpus à l'ingestion : paragraphes regroupés jusqu'à ce nombre de mots
+# (environ 1,5 token par mot en français : reste sous la limite de 512 tokens de e5).
+corpus:
+  chunk_max_words: 300
+
+# CRAG (J3) : recherche, juge de pertinence (modèle léger), réécriture, puis INSUFFISANT.
+crag:
+  top_k: 4          # extraits par requête (une requête par type de clause), soumis au juge
+  max_passes: 2     # recherches au plus : la première, puis une réécriture
+
+# Reprise d'un analyste sur erreur transitoire (réseau, API), par la RetryPolicy de
+# LangGraph, avant que la garde ne transforme l'échec en `failures` (J3).
+analyst_retry:
+  max_attempts: 3                 # tentatives, la première comprise
+  initial_interval_seconds: 1.0
+  backoff_factor: 2.0
+  max_interval_seconds: 10.0
+  jitter: false
+
+# Reprise de l'extraction sur erreur passagère du fournisseur seulement : limite de débit
+# (429), erreur serveur (5xx), délai dépassé. Les SDK ne reprennent rien eux-mêmes.
+extraction_retry:
+  max_attempts: 3                 # tentatives, la première comprise
+  initial_interval_seconds: 2.0
+  backoff_factor: 2.0
+  max_interval_seconds: 20.0
+  jitter: false

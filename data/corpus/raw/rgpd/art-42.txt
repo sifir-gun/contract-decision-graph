@@ -1,0 +1,18 @@
+Article 42
+Certification
+
+1.   Les États membres, les autorités de contrôle, le comité et la Commission encouragent, en particulier au niveau de l'Union, la mise en place de mécanismes de certification en matière de protection des données ainsi que de labels et de marques en la matière, aux fins de démontrer que les opérations de traitement effectuées par les responsables du traitement et les sous-traitants respectent le présent règlement. Les besoins spécifiques des micro, petites et moyennes entreprises sont pris en considération.
+
+2.   Outre l'application par les responsables du traitement ou les sous-traitants soumis au présent règlement, les mécanismes de certification, les labels ou les marques en matière de protection des données approuvés en vertu du paragraphe 5 du présent article peuvent être établis aux fins de démontrer que des responsables du traitement ou des sous-traitants qui ne sont pas soumis au présent règlement en vertu du l'article 3 fournissent des garanties appropriées dans le cadre des transferts de données à caractère personnel vers un pays tiers ou à une organisation internationale dans les conditions visées à l'article 46, paragraphe 2, point f). Ces responsables du traitement ou sous-traitants prennent l'engagement contraignant et exécutoire, au moyen d'instruments contractuels ou d'autres instruments juridiquement contraignants, d'appliquer ces garanties appropriées, y compris en ce qui concerne les droits des personnes concernées.
+
+3.   La certification est volontaire et accessible via un processus transparent.
+
+4.   Une certification en vertu du présent article ne diminue par la responsabilité du responsable du traitement ou du sous-traitant quant au respect du présent règlement et est sans préjudice des missions et des pouvoirs des autorités de contrôle qui sont compétentes en vertu de l'article 55 ou 56.
+
+5.   Une certification en vertu du présent article est délivrée par les organismes de certification visés à l'article 43 ou par l'autorité de contrôle compétente sur la base des critères approuvés par cette autorité de contrôle compétente en application de l'article 58, paragraphe 3, ou par le comité en application de l'article 63. Lorsque les critères sont approuvés par le comité, cela peut donner lieu à une certification commune, le label européen de protection des données.
+
+6.   Le responsable du traitement ou le sous-traitant qui soumet son traitement au mécanisme de certification fournit à l'organisme de certification visé à l'article 43 ou, le cas échéant, à l'autorité de contrôle compétente toutes les informations ainsi que l'accès à ses activités de traitement, qui sont nécessaires pour mener la procédure de certification.
+
+7.   La certification est délivrée à un responsable du traitement ou à un sous-traitant pour une durée maximale de trois ans et peut être renouvelée dans les mêmes conditions tant que les exigences applicables continuent d'être satisfaites. La certification est retirée, s'il y a lieu, par les organismes de certification visés à l'article 43 ou par l'autorité de contrôle compétente lorsque les exigences applicables à la certification ne sont pas ou plus satisfaites.
+
+8.   Le comité consigne dans un registre tous les mécanismes de certification et les labels ou les marques en matière de protection des données et les met à la disposition du public par tout moyen approprié.

@@ -2,11 +2,14 @@
 
 import pytest
 import yaml
-from doubles import usage, verdict, verdicts
+from doubles import ABSENT, clauses, usage, verdict, verdicts
 
-from cdg.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.nodes.decision_gate import aggregate, conflict, decision_gate, total_tokens
-from cdg.state import DOMAINS
+from cdg.application.nodes.decision_gate import decision_gate
+from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
+from cdg.domain.decision import aggregate, conflict, decide, total_tokens
+from cdg.domain.justification import justify
+from cdg.domain.models import DOMAINS, ClauseRetrieval, NodeFailure, RetrievalTrace
+from cdg.domain.rules import RULES
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
@@ -219,3 +222,104 @@ def test_blocage_dur_en_revue_humaine_conserve_le_rapport_budget():
     assert (out["route"], out["proposed_decision"]) == ("human_review", "NO_GO")
     assert out["failure_report"] == {"stage": "budget", "tokens": BUDGET + 1, "limit": BUDGET}
     assert "final_decision" not in out
+
+
+# --- Analyste en échec (garde de l'orchestrateur) : escalade --------------------------
+
+FAILURE = NodeFailure(
+    node="analyst", error="ValueError", message="m", attempts=1, domain="financier"
+)
+
+
+def gate_with_failure(vs, tokens=0, config=CONFIG):
+    state = {"verdicts": vs, "failures": [FAILURE], "usage": [usage(tokens_in=tokens)]}
+    return decision_gate(state, config)
+
+
+def three_verdicts(**by_domain):
+    return [v for v in verdicts(**by_domain) if v.domain != "financier"]
+
+
+def test_analyste_en_echec_escalade_sans_marge():
+    out = gate_with_failure(three_verdicts())
+    assert out == {
+        "proposed_decision": "ESCALADE",
+        "failure_report": {"stage": "noeuds", "failures": [FAILURE.model_dump()]},
+        "route": "human_review",
+    }
+
+
+def test_analyste_en_echec_et_budget_depasse_rapport_commun():
+    out = gate_with_failure(three_verdicts(), tokens=BUDGET + 1)
+    assert out["proposed_decision"] == "ESCALADE"
+    assert out["failure_report"]["budget"] == {"tokens": BUDGET + 1, "limit": BUDGET}
+
+
+def test_analyste_en_echec_n_empeche_pas_un_blocage_dur_etabli():
+    out = gate_with_failure(three_verdicts(juridique={"hard_block": True}))
+    assert (out["proposed_decision"], out["final_decision"], out["route"]) == (
+        "NO_GO",
+        "NO_GO",
+        "explain",
+    )
+    assert out["failure_report"]["stage"] == "noeuds" and "margin" not in out
+
+
+def test_analyste_en_echec_blocage_dur_en_revue_si_configure():
+    config = config_with(
+        human_policy={
+            "allowed_decisions": ["GO", "GO_RESERVES", "NO_GO"],
+            "allow_block_override": True,
+            "hard_block_review": True,
+        }
+    )
+    out = gate_with_failure(three_verdicts(juridique={"hard_block": True}), config=config)
+    assert (out["proposed_decision"], out["route"]) == ("NO_GO", "human_review")
+    assert "final_decision" not in out
+
+
+# --- Domaine : proposition sans route ni état du graphe -------------------------------
+
+
+def test_decide_rend_une_proposition_que_le_noeud_traduit():
+    outcome = decide(verdicts(), [], [], CONFIG)
+    assert (outcome.proposed, outcome.human_review, outcome.final) == ("GO", False, "GO")
+    outcome = decide(verdicts(financier={"status": "INSUFFISANT"}), [], [], CONFIG)
+    assert (outcome.proposed, outcome.human_review, outcome.final) == ("ESCALADE", True, None)
+
+
+# --- Choix de conception : NO_GO réservé aux blocages durs --------------------------------
+
+
+def test_pire_cumul_des_penalites_sans_blocage_reste_au_dessus_du_seuil_no_go():
+    """Toutes les pénalités de score déclenchées, aucun blocage : au pire GO_RESERVES.
+    Si une configuration rendait NO_GO atteignable sans blocage dur, ce test le signalerait."""
+    worst = clauses(
+        responsabilite_fournisseur=50,  # juridique : plafond fournisseur < 100 %
+        penalites_execution=ABSENT,  # financier : pénalités d'exécution absentes
+        delai_paiement=90,  # financier : délai non conforme
+        transfert_hors_ue=ABSENT,  # conformité : localisation non précisée
+        duree_engagement=48,  # opérationnel : engagement > 36 mois
+        preavis_resiliation=12,  # opérationnel : préavis > 6 mois
+    )
+    vs = [_justified(RULES[d](worst, CONFIG)) for d in DOMAINS]
+    assert not any(v.hard_block for v in vs)
+    assert {v.domain: v.score for v in vs} == {
+        "juridique": 0.5,
+        "financier": 0.4,
+        "conformite": 0.7,
+        "operationnel": 0.4,
+    }
+    d = aggregate(vs, CONFIG)
+    assert (d.score, d.decision, d.margin) == (0.505, "GO_RESERVES", 0.005)
+
+
+def _justified(assessment):
+    """Verdict dont chaque constat est justifié par une référence : statut OK."""
+    trace = RetrievalTrace(
+        clauses=[
+            ClauseRetrieval(kind=k, queries=["q"], passes=1, retained=["réf"], expired=[])
+            for k in assessment.kinds_to_justify()
+        ]
+    )
+    return justify(assessment, trace, [])

@@ -4,11 +4,12 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from doubles import FakeCrag, FixedExtractor, clauses
+from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
 
-from cdg import cli, orchestrator
-from cdg.config import load_config
-from cdg.deps import Deps
+from cdg import cli
+from cdg.adapters.langgraph import orchestrator
+from cdg.application.deps import Deps
+from cdg.domain.config import load_config
 
 pytestmark = pytest.mark.pg
 
@@ -19,7 +20,7 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 
 
 def suspend(graph, thread_id: str) -> datetime:
-    status = orchestrator.run_contract(graph, thread_id, "Contrat synthétique.")
+    status = orchestrator.run_contract(graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
         graph.get_state({"configurable": {"thread_id": thread_id}}).created_at
@@ -70,7 +71,12 @@ def test_thread_recent_non_expire(graph, thread_id):
 def test_thread_termine_jamais_repris(pg, thread_id):
     deps = Deps(extractor=FixedExtractor(clauses()), crag=FakeCrag())  # GO direct
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
-        assert orchestrator.run_contract(g, thread_id, "x")["statut"] == "termine"
+        assert (
+            orchestrator.run_contract(g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)[
+                "statut"
+            ]
+            == "termine"
+        )
         far = datetime.now(UTC) + timedelta(days=365)
         assert orchestrator.expire_threads(g, DAY, now=far, thread_ids={thread_id}) == []
 
@@ -89,7 +95,7 @@ def test_cli_expire_sans_effet_sous_le_delai(pg, capsys):
     # délai de 1 000 jours : aucun thread réel ne peut être touché
     assert cli.main(["expire", "--older-than", "1000d"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert (out["mode"], out["older_than"], out["expired"]) == ("stub-j2", "1000d", [])
+    assert (out["older_than"], out["expired"]) == ("1000d", [])
 
 
 def test_cli_expire_duree_invalide(capsys):

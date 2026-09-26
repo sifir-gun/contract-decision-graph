@@ -406,3 +406,537 @@ Tests :
 - **Une correction sûre qui gêne l'audit.** SIM114, pourtant marqué « sûr », avait fusionné les étapes 3 (`INSUFFISANT`) et 4 (conflit) du gate en un seul `or`. Le résultat était équivalent, mais l'ordre de la spec devenait illisible. Les deux branches ont été rétablies, commentées. Il faut relire les corrections automatiques, même sûres, quand elles touchent la logique de décision.
 - **Tri des imports (I001).** ruff classe `doubles`, le module de test, parmi les imports tiers, car il ne le connaît pas comme premier parti. C'est sans effet.
 - **Commentaires déplacés.** Le formateur avait sorti un commentaire de fin de ligne de son contexte, dans un `parametrize` de `test_rules.py`. Il a été remis à la main.
+
+## 2026-09-24 · J3
+
+### J3 tâche 1 : dépendances, section llm, option --llm
+
+**Fait.**
+- Dépendances ajoutées par le propriétaire du repo : `mistralai` 2.10.1, `anthropic` 1.8.0, `fastembed` 0.8.1 (`onnxruntime` 1.30.0) et `pgvector` 0.5.0.
+- Section `llm` de `decision.yaml` : fournisseur `mistral` par défaut, `anthropic` en alternative ; température 0 ; modèles par niveau (`main` pour l'extraction, `light` pour le juge CRAG). Le modèle Pydantic **refuse les alias `-latest`**.
+- Option pytest `--llm` : les tests `llm` sont exclus par défaut et comptés comme *deselected*. L'en-tête de pytest le signale. Des tests à part (`pytester`) vérifient ce mécanisme.
+
+**Vérification des modèles**, faite le 2026-09-24 dans la documentation officielle, par le navigateur intégré :
+- **Mistral** (docs.mistral.ai, fiche de chaque modèle) :
+  - Small 4 : `mistral-small-2603` ;
+  - Ministral 3 8B : `ministral-8b-2512` ;
+  - Medium 3.5 : `mistral-medium-3-5` ;
+  - Large 3 : `mistral-large-2512` ;
+  - Embed : `mistral-embed-2312`, dimension 1024 (page « Text Embeddings »).
+- **Anthropic** (platform.claude.com, « Models overview ») : `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5` et `claude-haiku-4-5-20251001`.
+
+**Pièges.**
+- **Page de Mistral illisible en brut.** Le HTML mélange modèles actuels et retirés. Il a fallu lire la page rendue, puis ouvrir chaque fiche pour voir l'identifiant daté.
+- **Alias `-latest`.** Ils existent chez Mistral (`mistral-small-latest`…) mais changent de cible sans que la config change. On les refuse pour que le rejeu et l'audit restent fidèles.
+- **Pourquoi une option `--llm`.** Avec un simple marqueur exclu par `addopts`, un `-m "not pg"` passé en ligne de commande aurait remplacé l'exclusion, et lancé les tests payants. Le test `test_exclure_pg_n_active_pas_les_tests_llm` le fixe.
+- **`onnxruntime`.** La version résolue par `uv add` (1.30.0) diffère de celle de ma résolution de dimensionnement (1.19.2) : la résolution dépend du lock existant. Les tailles annoncées restent un ordre de grandeur.
+
+### J3 tâche 2 : interface des fournisseurs LLM
+
+**Fait.**
+- `deps.LLMProvider` expose `structured(tier, system, user, schema, node)`, qui renvoie le modèle Pydantic validé et un `Usage` (tokens et latence).
+- `providers/mistral.py` utilise `chat.parse(response_format=…)`, et `providers/anthropic.py` utilise `messages.parse(output_format=…)`.
+- `providers.build_provider` choisit le fournisseur d'après la configuration. Si la clé d'API manque, il lève une `SettingsError` qui nomme la variable.
+- Une réponse non structurée, ou sans consommation, lève une `LLMOutputError`, jamais un repli.
+- Doublure `FakeLLM` : réponses scriptées par nœud, appels enregistrés, ce qui permet de vérifier le texte envoyé au modèle.
+- Tests avec de faux clients qui imitent les réponses des SDK : aucun appel réseau.
+
+**Pièges.**
+- **Import du client Mistral.** `mistralai` 2.x n'exporte plus `Mistral` à la racine : l'import correct est `from mistralai.client import Mistral`.
+- **Sortie structurée de Mistral.** Elle se trouve dans `choices[0].message.parsed`, qui vaut `None` si le contenu est vide. Il faut le vérifier explicitement.
+- **Pas de `temperature` chez Anthropic.** `anthropic` 1.8.0 : `messages.parse` n'a plus de paramètre `temperature` (liste lue dans la signature installée). Le réglage `llm.temperature: 0` ne vaut donc que pour Mistral. Le verdict reste déterministe à partir des clauses, mais l'extraction par Claude peut varier d'une exécution à l'autre.
+- **Bug corrigé** : le fournisseur Anthropic lisait les modèles du fournisseur *configuré* (Mistral). Chaque fournisseur lit désormais ses propres modèles (`config.model(tier, provider=self.name)`).
+- **Aucun essai réel du fournisseur Anthropic** : pas de clé d'API. Seul le test avec faux client le couvre.
+
+### J3 tâche 3 : masquage avant le graphe, validate_input complet
+
+**Fait.**
+- `masking.py` : e-mails, téléphones, IBAN, SIRET et SIREN, remplacés par un repère (`[EMAIL]`, `[IBAN]`…). Les noms de parties déclarés deviennent `[PARTIE_n]`, en mot entier, sans tenir compte de la casse. `residual_pii` signale ce qui subsiste.
+- `run_contract(…, parties)` masque **avant** `graph.invoke`, et renvoie le nombre de masquages par type. La CLI accepte `--party`, répétable.
+- `validate_input`, sur le texte masqué :
+  - rejette un texte vide ;
+  - rejette un texte trop long (`max_chars`) ;
+  - rejette un texte trop court pour juger de la langue (`min_words`) ;
+  - rejette un texte dont la part de mots-outils français est trop faible (`min_french_ratio`) ;
+  - rejette un texte où subsiste une donnée personnelle.
+- `tests/doubles.CONTRACT_TEXT` : contrat synthétique en français, qui contient les citations des clauses de test. Les anciens tests qui envoyaient `"x"` ou `"Contrat synthétique."` l'utilisent désormais.
+- Tests :
+  - chaque motif est masqué ;
+  - montants et références sans clé de Luhn ne sont pas masqués ;
+  - le masquage est idempotent ;
+  - l'état et l'extracteur ne voient que le texte masqué ;
+  - **sur PostgreSQL**, aucune trace du texte original dans `checkpoints`, `checkpoint_blobs` ni `checkpoint_writes`, alors que le texte masqué y est bien.
+
+**Pièges.**
+- **Masquer dans le nœud aurait été trop tard.** L'entrée de `graph.invoke` est écrite dans le premier checkpoint *avant* `validate_input`. Masquer dans le nœud aurait laissé le texte en clair dans PostgreSQL. C'était la recommandation 5, et le test sur la base réelle le démontre.
+- **Faux positifs SIREN.** `150 000 000 euros` a la forme d'un SIREN. Deux filtres évitent de masquer des montants : la clé de Luhn (vérifiée par un test sur `123 456 789`) et l'absence d'unité juste après (€, euros, %, mois, jours, ans).
+- **Langue.** La liste de mots-outils exclut « a » et « on », qui sont aussi anglais. Un texte anglais typique donne une part proche de 0, un contrat français environ 0,3.
+- **Recherche dans PostgreSQL.** Un `jsonb` ne se convertit pas en `bytea` par un simple cast (`InvalidTextRepresentation`) : il faut `convert_to(x::text, 'UTF8')`.
+
+### J3 tâche 4 : extraction réelle, contrat délimité comme donnée
+
+**Fait.**
+- `extraction.py` : `LLMExtractor` appelle le modèle `main` avec un schéma `ExtractionOutput`, dont `kind` est limité aux 8 types attendus. Chaque élément est ensuite validé en `Clause`.
+- Prompt système dans `prompts/extraction_system.md` : le contrat est une donnée, jamais une instruction ; pour chaque type, l'unité de `value` et le sens de `null` ; interdiction d'inventer une citation. **Aucune règle de décision** (seuils, pénalités, poids, verdicts), ce que vérifie un test.
+- Délimitation : `<<<CONTRAT-jeton>>> … <<<FIN-CONTRAT-jeton>>>`, avec un jeton aléatoire (`secrets.token_hex`) régénéré s'il figure déjà dans le texte. Le retour de vérification d'un nouvel essai est placé **après** la balise de fin.
+- Test du graphe : ce que reçoit le fournisseur LLM est le texte masqué (`[EMAIL]`, `[PARTIE_1]`), sans aucune donnée d'origine (précision 5).
+
+**Choix.**
+- **Clause incohérente.** Une clause présente sans citation, ou absente avec une citation, lève une erreur explicite au lieu d'être corrigée en silence. Au J3, la garde d'échec de nœud (tâche 10) en fera un rapport d'échec et une escalade.
+- **Types dupliqués.** Le type `Kind` recopie `REQUIRED_KINDS`, parce qu'un `Literal` ne se construit pas dynamiquement proprement. Un test vérifie que l'énumération du schéma JSON reste identique à `REQUIRED_KINDS`.
+
+**Pièges.**
+- **Faux positif possible dans le test « aucune règle de décision ».** Il cherche `GO` dans le prompt : un mot en capitales comme « CATÉGORIE » le déclencherait. Le prompt est écrit en minuscules.
+- **Prompt livré avec le paquet.** Le fichier `.md` doit partir avec le paquet. Vérifié : il est bien présent dans la wheel construite par hatchling.
+
+### J3 tâche 5 : verify_extraction réel, critère n° 10
+
+**Fait.**
+- `verify_extraction`, sans LLM :
+  - normalisation : NFKC, apostrophes, guillemets et tirets typographiques unifiés, espaces (insécables compris) réduits, **casse conservée** ;
+  - problèmes détectés : clause manquante, clause en double, type inconnu, citation introuvable ;
+  - essais : retour ciblé tant qu'il en reste, puis `ESCALADE` avec `failure_report` (`stage`, `attempts`, `problems`).
+- Tests :
+  - normalisation ;
+  - citation typographiquement différente mais équivalente, acceptée ;
+  - clause absente non vérifiée ;
+  - ré-extraction puis escalade ;
+  - citations comparées **au texte masqué** : une citation qui porte la donnée d'origine est introuvable (précision 5) ;
+  - **critère n° 10** sur le graphe : deux citations inventées donnent une escalade avec rapport d'échec, **aucun analyste** ne tourne, et le second essai reçoit le retour ciblé. Une citation corrigée au second essai mène aux 4 analystes.
+
+**Pièges.**
+- **Le test d'échec de nœud du J2 ne provoquait plus de panne.** Il retirait une clause attendue pour faire échouer une règle pendant le fan-out. Désormais, `verify_extraction` intercepte ce cas en amont : un nouvel essai, puis une escalade. Le test provoque maintenant la panne par une clause présente sans citation, qui fait échouer le nœud d'extraction lui-même. C'est aussi une preuve que la vérification protège les règles.
+- **Normalisation et guillemets français.** « » devient `"`, mais l'espace insécable qui suit le guillemet français reste un espace. Une citation copiée sans ces espaces serait déclarée introuvable. Ce cas est volontairement strict ; le retour ciblé laisse au modèle une chance de corriger.
+
+### J3 tâche 6 : migration 002, table rag_chunks
+
+**Fait.**
+- `migrations/002_rag.sql`, idempotente (`IF NOT EXISTS`) : table `rag_chunks`, domaine contrôlé par `CHECK`, unicité (`domain`, `content_hash`, `embedding_model`), index sur `domain`, `GRANT SELECT` à `app_role`.
+- `rag_store.setup` : appliquée par `setup-db` sur une base existante, puis contrôle de la dimension de la colonne par rapport à `embedding.dimension`. En cas d'écart, `RagStoreError`, qui nomme les deux valeurs.
+- Section `embedding` de `decision.yaml` : `intfloat/multilingual-e5-large`, 1024 dimensions, préfixes e5.
+- Vérifié :
+  - sur la base existante (tests `pg`) : lecture seule, dimension, migration rejouable, écriture refusée à `app_role` ;
+  - sur un **volume vide** (instance jetable), par l'init Docker : les deux migrations passent, dimension 1024, `SELECT` seul.
+
+**Écart avec mon plan : pas d'index HNSW.** La spec veut le filtre `domain` *avant* la recherche vectorielle. Or un index HNSW filtre après son parcours, et peut rendre moins de `k` résultats (pgvector propose des parcours itératifs, mais c'est de la complexité inutile ici). Pour quelques centaines d'extraits, une recherche exacte `WHERE domain = … ORDER BY embedding <=> …` est fidèle à la spec et rapide.
+
+**Pièges.**
+- **Lire la dimension d'une colonne `vector`.** Elle se trouve dans `pg_attribute.atttypmod` : ici 1024, sans décalage, contrairement à `varchar`.
+- **ruff et le Markdown.** `ruff format` (0.16) reformate aussi les blocs de code Python des fichiers Markdown, donc ceux de la spec. C'est sans effet sur le sens, mais il faut le savoir en lisant un diff de la spec.
+- **Plusieurs commandes SQL en une fois.** psycopg les accepte dans un seul `execute`, mais seulement sans paramètre et sur une connexion ordinaire. Celle du checkpointer (`prepare_threshold=0`) les refuserait (voir J2).
+
+### J3 tâche 7 : embedding local et recherche filtrée
+
+**Fait.**
+- `embeddings.FastembedEmbedder` :
+  - `embed_passages` et `embed_query` ajoutent les préfixes e5 (`passage: ` et `query: `) ;
+  - la dimension de chaque vecteur est contrôlée ;
+  - à l'exécution, `local_files_only=True` : sans poids en cache, `EmbeddingError` cite la commande à lancer.
+- `embeddings.fetch_model` et la commande `cdg.cli fetch-embedding-model` : le seul chemin qui télécharge, lancé explicitement.
+- `settings.embedding_cache_dir()` : `EMBEDDING_CACHE_DIR` est obligatoire, et un chemin relatif part de la racine du dépôt. `.cache/` est ignoré par git, et `.env.example` est complété.
+- `rag_store` :
+  - `insert` : idempotent grâce à `ON CONFLICT` sur (`domain`, hash, modèle) ;
+  - `search` : recherche exacte `WHERE domain = … AND embedding_model = … ORDER BY embedding <=> …`.
+- Doublure `HashEmbedder` : sac de mots haché, normalisé et déterministe, sans modèle.
+- Tests `pg` :
+  - le filtre par domaine s'applique **avant** la distance : un extrait d'un autre domaine, pourtant plus proche de la requête, ne sort jamais ;
+  - `k` est respecté ;
+  - un autre modèle d'embedding ne voit pas ces extraits.
+
+**Pièges.**
+- **Pas de préfixes e5 par fastembed.** `query_embed` et `passage_embed` appellent simplement `embed`, alors que les modèles e5 attendent `query: ` et `passage: `. Sans eux, la qualité de la recherche chute sans aucune erreur.
+- **Cache temporaire par défaut.** fastembed range les poids dans un dossier temporaire du système (`tempfile.gettempdir()/fastembed_cache`), qui peut être vidé : 2,2 Go à retélécharger à chaque fois. Le chemin est donc explicite et persistant.
+- **Aucun téléchargement à l'exécution.** Sans `local_files_only`, le premier embedding lancé déclencherait un téléchargement de 2,2 Go en plein graphe. Le paramètre passe par les `kwargs` de `TextEmbedding`.
+- **Filtre par modèle.** On filtre aussi sur `embedding_model` : des vecteurs de deux modèles différents ne sont pas comparables, même à dimension égale.
+
+### J3 tâche 7 (suite) : chargement ONNX depuis le cache Hugging Face
+
+**Incident.** `fetch-embedding-model`, lancé par le propriétaire du repo, a bien téléchargé les 2,25 Go, puis le chargement a échoué : « External data path validation failed … External data path escapes model directory ».
+
+**Cause.**
+- **Le cache.** Hugging Face, avec le stockage `hf-xet`, range les fichiers dans un stockage dédupliqué, avec un sous-dossier par préfixe de hash (`blobs/29/…`, `blobs/9e/…`). L'instantané du modèle n'est qu'une série de liens symboliques vers ces blobs.
+- **onnxruntime 1.30.** Un contrôle de sécurité exige que `model.onnx_data` (les poids externes) soit dans le même dossier que `model.onnx` *une fois les liens résolus*. Ici, les deux fichiers résolvent vers `blobs/29` et `blobs/9e` : refus.
+
+**Correctif** (sans nouvelle dépendance ni copie) :
+- `embeddings.materialize` crée `EMBEDDING_CACHE_DIR/flat/<modèle>/` avec des **liens physiques** vers les fichiers réels, que fastembed charge par `specific_model_path`. Aucun espace disque supplémentaire : le cache pèse toujours 2,1 Go.
+- Si le cache et ce dossier ne sont pas sur le même système de fichiers, une erreur explicite est levée, plutôt qu'une copie silencieuse de 2 Go.
+- La mise à plat est locale et rejouable. L'exécution la refait au besoin, sans aucun accès réseau (`local_files_only`). Il n'a donc pas fallu relancer le téléchargement.
+
+**Vérifié** avec le vrai modèle, hors ligne (`HF_HUB_OFFLINE=1`, sandbox sans réseau) :
+- chargement en 6,7 s, vecteurs de dimension 1024 ;
+- sur une requête « obligations du sous-traitant », la phrase RGPD sur le sous-traitant score 0,872, contre 0,783 pour une phrase sur les pénalités de retard.
+
+**Pièges.**
+- Cet échec n'apparaissait dans aucun test à doublures : il fallait les vrais poids. Un test reproduit désormais la structure du cache, avec des blobs dans des sous-dossiers différents et un instantané en liens symboliques.
+- Les similarités cosinus de e5 sont resserrées (environ 0,78 à 0,87). Un seuil fixe de pertinence serait fragile. Le tri reste bon, et c'est le juge du CRAG, pas un seuil, qui décidera de la pertinence.
+
+### J3 : règle de transfert hors UE (avant la tâche 8)
+
+**Fait.**
+- Nouveau type de clause `transfert_hors_ue`, et un champ `Clause.category`, optionnel et nul par défaut, obligatoire pour les types de `CATEGORY_KINDS`.
+- Catégories possibles, figées dans le schéma d'extraction (`TransferCategory`) : `sans_transfert`, cinq garanties nommées, et `aucune_garantie`.
+- Règle de conformité :
+  - transfert avec une garantie de `rules.conformite.transfer_safeguards` : aucune pénalité, un constat informatif ;
+  - données dans l'UE (`sans_transfert`) : rien ;
+  - toute autre catégorie (dont `aucune_garantie`, ou catégorie absente) : **blocage dur** ;
+  - clause absente alors que des données personnelles sont traitées : pénalité `unlocated_data_score_penalty` (0,3) et constat « à vérifier ».
+- `verify_extraction` signale une catégorie manquante sur un transfert et une catégorie inattendue sur un autre type. Le prompt d'extraction décrit les catégories.
+- Configuration validée : liste non vide, sans doublon, et ni `sans_transfert` ni `aucune_garantie` ne peuvent y figurer.
+
+**Choix, à valider.**
+- **Pourquoi un champ `category` plutôt que `value` :** un transfert se décrit par une catégorie (quelle garantie ?), pas par une quantité. C'est un changement du schéma des clauses, compatible avec les 8 autres types (nul par défaut).
+- **Pénalité de localisation : 0,3.** La valeur n'était pas fixée ; c'est celle que je propose, réglable dans la config.
+- **Localisation non précisée sans données personnelles : aucune pénalité**, puisqu'il n'y a alors rien à localiser. En revanche, un transfert annoncé sans garantie bloque même sans clause de données personnelles, car la règle juge ce que dit le contrat.
+- **Catégorie absente : blocage, par prudence.** `verify_extraction` la signale d'abord et relance l'extraction ; la règle ne la voit donc qu'en dernier recours.
+
+**Piège.** `set -e && commande` ne protège rien : dans une liste `&&`, bash n'interrompt pas le script sur l'échec d'une commande qui n'est pas la dernière. Deux commits de documentation sont ainsi passés sans leur mise à jour de la spec (corrigés par `--amend`). `set -e` se met désormais seul sur sa ligne.
+
+**Vérification du choix de conception « `NO_GO` seulement sur blocage dur ».** La conformité peut désormais perdre 0,3. Le pire cumul de toutes les pénalités donne 0,555, sans conflit, donc au pire `GO_RESERVES`. Le choix tient toujours, mais sa justification change ; la spec est mise à jour.
+
+### J3 tâche 8 : corpus, nettoyage, fiches, ingestion
+
+**Fait.**
+- `corpus.py` : analyse des fichiers Légifrance et EUR-Lex, règles de nettoyage, `expired`, découpage (paragraphes regroupés jusqu'à `corpus.chunk_max_words = 300` mots), manifeste et fiches.
+- `data/corpus/manifest.yaml` : pour chaque article admis, son domaine d'indexation. RGPD art. 79 est explicitement exclu. Un test vérifie que **chaque fichier de `raw/` est ingéré ou exclu**, jamais ignoré en silence.
+- Migration `003_rag_versions.sql`, idempotente : `article`, `chunk_index`, `valid_from`, `valid_until`, `amendment`, `note`, `retrieved_at`. `setup-db` applique désormais toutes les migrations du corpus (002, 003).
+- `rag_store.sync` aligne la base sur le corpus : il supprime les extraits disparus, par exemple après un changement de règle de nettoyage, et insère les nouveaux. La commande `ingest` s'en sert.
+- **6 fiches** (`data/corpus/fiches/`), listées dans `SOURCES.md`. Un test vérifie que chacune commence par l'avertissement demandé, et que chaque ligne d'affirmation cite un article admis du corpus.
+- Ingestion réelle (vrai modèle, hors ligne) : 57 extraits, en 1 min 28 s. Les recherches de contrôle tombent juste dans chaque domaine (voir le rapport de tâche).
+- README : exemple de gestion des versions (L441-10), et section « Limites connues ».
+
+**Règles de nettoyage, testées sur les fichiers réels :**
+1. Métadonnées de version : L441-10 (du 26/04/2019 au 01/01/2027, « Modifié par ») et 1231-3 (« Création », version ouverte).
+2. Lignes d'interface : **aucun fichier réel n'en contient**. Le test les ajoute au texte réel de L441-10 et vérifie qu'on retrouve exactement le texte d'origine.
+3. Note « Conformément aux dispositions … » : 1171, sortie du texte et stockée dans `note` (vérifié aussi en base).
+4. Validité : `expired(valid_until, date)` est vrai à partir du 01/01/2027. La date est stockée ; son exploitation à l'analyse arrive à la tâche 9 (CRAG).
+
+**Choix.**
+- **Périmètre, art. 4 du RGPD.** Il est admis comme « servant la règle conformité », au titre des définitions. Aucun article servant une règle ne le cite : c'est une interprétation, à valider.
+- **Texte embarqué et texte stocké.** Le texte embarqué est précédé de la référence et de l'intitulé (`RGPD, art. 28 — Sous-traitant`), ce qui améliore la recherche. Le texte stocké reste celui de l'article, pour être cité tel quel.
+- **Un article dans plusieurs domaines.** C'est le cas de L442-1 (opérationnel et juridique) : une ligne par domaine, pour que le filtre avant recherche reste simple.
+
+**Pièges.**
+- **Faux renvoi.** « articles 32 à 36 » (art. 28) désigne aussi 34 et 35, qui n'ont pas été récupérés. Ils sont listés dans les limites connues du README.
+- **Format EUR-Lex.** L'intitulé suit le titre, parfois après une ligne vide (art. 4). Les points `a)`, `b)` sont sur une ligne à part, et le découpage par paragraphes les conserve dans l'ordre (vérifié : aucun mot perdu sur l'art. 28).
+- **Règles de nettoyage modifiées.** Une ingestion seulement additive laisserait les anciens extraits en base, avec des doublons contradictoires. D'où `sync`, qui supprime les extraits obsolètes (testé).
+
+### J3 tâche 9 : sonde du sous-graphe CRAG (point d'arrêt)
+
+La spec demande de vérifier, dans la version installée, si un sous-graphe hérite du checkpointer.
+
+**Sonde** (jetable, hors dépôt), dans langgraph 1.2.12 : un sous-graphe invoqué à l'intérieur de `analyst`, lancé 4 fois en parallèle par `Send`, dans un graphe parent muni d'un checkpointer à sérialiseur strict.
+
+| Compilation du sous-graphe | Résultat |
+| --- | --- |
+| `compile()`, par défaut (`checkpointer=None`) | **Il hérite du checkpointer du parent.** Chaque étape du sous-graphe est écrite dans les checkpoints du parent, sous un espace de noms par analyste (`analyst:<id de tâche>`). Son état contient un type hors de la liste autorisée : `StrictSerializer` lève `BlockedDeserialization` et **l'exécution échoue**. |
+| `compile(checkpointer=False)` | Aucun checkpoint du sous-graphe. Les 4 analystes aboutissent, et l'état du parent se relit normalement. |
+| Par défaut, avec le type du sous-graphe ajouté à la liste autorisée | Les 4 analystes aboutissent, avec 4 espaces de noms de checkpoints en plus de celui du parent. |
+
+**Conclusion.** L'héritage est le comportement par défaut. Il touche à trois choses : la liste des types autorisés du sérialiseur, le volume de la base, et la reprise (un CRAG interrompu reprend-il en cours de route, ou repart-il de zéro ?). Décision soumise au propriétaire du repo.
+
+**Piège.** Sans le sérialiseur strict du J2, l'héritage serait passé inaperçu : les états du CRAG se seraient retrouvés en `dict` dans les checkpoints, avec seulement un avertissement.
+
+### J3 : décisions du 25/09/2026
+
+1. **Sous-graphe CRAG : `compile(checkpointer=False)`.** Aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Le CRAG renvoie un résumé (requêtes, passes, références retenues et expirées), porté par le verdict de l'analyste. Reporté dans la spec.
+2. **RGPD, art. 4 : admis.** La règle de périmètre de `SOURCES.md` est complétée : un article est aussi admis s'il définit un terme utilisé par une règle.
+3. **RGPD, art. 79 : exclusion validée.** Le fichier reste dans `raw/`, non ingéré.
+4. **Tests `llm` (tâche 12) : lancés par l'agent**, avec la clé Mistral du propriétaire du repo.
+5. **Refonte en ports et adaptateurs avant la tâche 9**, pour que le CRAG dépende d'un port dès sa création. Plan soumis avant tout code.
+
+### J3 : refonte en ports et adaptateurs (avant la tâche 9)
+
+Refonte sans changement de comportement, décidée pour que le CRAG dépende d'un port dès sa création. Détails et écart assumé (le flux vit dans le graphe) : `docs/adr-002-ports-et-adaptateurs.md`.
+
+- **Couches** : `domain/` (règles pures), `ports/` (`LLMProvider`, `Embedder`, `Retriever`, `AuditStore`), `application/` (nœuds, extraction, CRAG, ingestion, `deps.py`), `adapters/` (`langgraph/`, `postgres/`, `llm/`, `fastembed.py`) ; `cli.py`, `settings.py` et `stub_j2.py` restent à la racine du paquet.
+- **Fichiers scindés** : `deps.py` (ports LLM et embedding d'un côté, dépendances injectées de l'autre), `orchestrator.py` (câblage d'un côté, checkpointer et sérialiseur de l'autre), `corpus.py` (partie pure dans le domaine, lecture des fichiers et construction des `ChunkRow` dans `application/ingestion.py`), `settings.py` (chaînes de connexion vers `adapters/postgres/conninfo.py`, qui seul importe psycopg).
+- **Renommages** : `deps.Retriever` → `application.deps.Crag` (le nom `Retriever` passe au port de recherche) ; `rag_store.Chunk` → `ports.retriever.Passage` ; `settings._require` → `settings.require` ; `providers.LLMOutputError` → `ports.llm.LLMOutputError` (supprime l'import circulaire local des deux fournisseurs) ; `orchestrator._saver` → `checkpointer.open_saver`.
+- **Tests** : `test_isolation.py` réécrit (confinement de 6 bibliothèques, sens des dépendances pour 4 couches, indépendance des familles d'adaptateurs, chaque vérification prouvée sur une arborescence fictive) ; `test_ports.py` ajouté (signatures, 10 implémentations). Imports des tests mis à jour, aucune assertion modifiée. 368 → 405 tests.
+- **Vérification de bout en bout** : `setup-db` puis `ingest` réel après la refonte : 57 extraits inchangés, 0 inséré, 0 supprimé. Le corpus produit est identique.
+
+**Fichiers qui ne se rangent pas proprement dans une couche** (laissés comme demandé, soumis au propriétaire du repo) :
+1. `domain/state.py` mêle les modèles métier (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`) et la forme de l'état du graphe (`ContractState` avec ses réducteurs, `route`, `AnalystInput` pour les `Send`), qui relève de l'orchestration.
+2. `domain/config.py` lit un fichier (`load_config`), et porte des réglages d'adaptateurs : identifiants de modèles LLM, modèle et préfixes d'embedding.
+3. `application/nodes/decision_gate.py`, `verify_extraction.py` et `validate_input.py` contiennent de la logique de décision ou de vérification pure (ordre des gardes, agrégat, conflit, marge ; normalisation des citations ; part de mots-outils), sans aucun port : c'est du domaine logé dans des nœuds.
+4. `application/ingestion.py` lit les fichiers du corpus sans port, comme `load_config`.
+5. `domain/corpus.py` porte `ChunkRow`, qui est la ligne à écrire en base (vecteur, modèle d'embedding) : faute de port d'écriture, le domaine est le seul endroit commun à l'application et à l'adaptateur.
+
+**Pièges.**
+- **Module homonyme d'une variable.** `test_providers.py` avait une variable locale `llm` qui masquait le module `cdg.adapters.llm` importé sous ce nom : import direct de `build_provider`.
+- **`from a import b` dans l'AST.** On ne sait pas sans l'exécuter si `b` est un module ou un nom : le test considère `a` et `a.b`, ce qui suffit pour les deux règles.
+- **`corpus.py` n'était pas formaté** depuis la tâche 8 (une liste de mois sur une ligne) : reformaté par `ruff format` dans ce commit, sans changement de contenu.
+
+### J3 tâche 9 : CRAG
+
+- **`application/crag.py`**, fonctions pures sur les ports `Retriever` et `LLMProvider` : `retrieve`, `grade` (juge, modèle léger), `rewrite` (modèle léger), `generate` (sans LLM). Sous-graphe compilé dans `adapters/langgraph/orchestrator.py` avec `checkpointer=False` (`build_crag_graph`), injecté dans les analystes par `crag_runner`.
+- **Requêtes** à partir des seuls types, valeurs et catégories des clauses du domaine (`DOMAIN_KINDS`, nouvelle partition des `REQUIRED_KINDS`), jamais des citations : aucun texte du contrat n'atteint le CRAG (testé avec une citation piégée).
+- **Juge** : extraits délimités (`<<<EXTRAIT n>>>`), réponse en numéros d'extraits. Un numéro hors liste ou répété lève `LLMOutputError`, jamais ignoré. Sans extrait, pas d'appel.
+- **Versions** : `analysis_date` dans l'état (fixée par `run_contract`, exigée par `validate_input`) et dans `AnalystInput`. `generate` écarte toute référence expirée à cette date et la signale dans les constats ; si toutes les références pertinentes ont expiré, `INSUFFISANT`. Une fiche prend la plus proche des fins de validité des articles qu'elle cite.
+- **Résumé pour l'audit** : `RetrievalTrace` (requêtes, passes, références retenues, références expirées) dans `AgentVerdict.retrieval`, ajouté à la liste des types autorisés du sérialiseur ; constats du CRAG ajoutés à ceux des règles.
+- **Configuration** : section `crag` (`top_k` 4, `max_passes` 2).
+- **Adaptateur `PgvectorRetriever`** (port `Retriever`) : requête en texte, vecteur par l'`Embedder`, filtre sur son modèle.
+- **Critère 3** avec doublures, sur le graphe complet avec sérialiseur strict : domaine hors corpus → 2 passes, `INSUFFISANT`, `ESCALADE`, aucune référence qui n'ait été rendue par la recherche ; corpus vide → `INSUFFISANT` partout, juge jamais appelé.
+
+**Défauts corrigés.**
+- `rag_store.search` sélectionnait `valid_until` et `note` sans les transmettre (défaut signalé au plan de la refonte) : corrigé, testé.
+- `sync` ne comparait que le texte : une fin de validité modifiée sans changement de texte restait en base. Il compare désormais toutes les métadonnées stockées (testé).
+
+**Choix.**
+- `evidence_ids` = références citables (« RGPD, art. 28 »), dédoublonnées, et non les identifiants de ligne : ceux-ci changent à chaque réingestion, les références restent lisibles et stables dans l'audit.
+- Validité des fiches : la plus proche fin de validité de **toute** la fiche, pas extrait par extrait (plus prudent).
+- Date d'analyse de la CLI : jour légal en France (`Europe/Paris`).
+
+**Piège.** LangGraph déduit un schéma de l'annotation de type d'une fonction de routage. `read_route`, annotée `ContractState`, ajoutait les canaux du graphe principal au sous-graphe (« Channel 'usage' already exists with a different type ») : fonction de routage propre au CRAG, annotée `CragState`.
+
+**Vérification réelle** (modèle d'embedding réel, hors ligne, sans LLM) :
+- `ingest` après la tâche : 1 extrait remplacé (la fiche « pénalités de retard », désormais valable jusqu'au 2027-01-01), 56 inchangés ;
+- `PgvectorRetriever` avec les requêtes initiales du CRAG (contrat favorable de test), 4 premiers extraits par domaine : juridique → fiche responsabilité, L442-1, 1231-3 ; financier → fiche pénalités (fin 2027-01-01), fiche révision des prix, L441-10 (fin 2027-01-01) ; conformité → fiche transferts, RGPD art. 46, fiche sous-traitance ; opérationnel → fiche durée et préavis, L442-1, 1211, 1210. La fin de validité remonte bien jusqu'au CRAG.
+
+### J3 tâche 10 : gardes d'échec de nœud
+
+- **`guard`** (`orchestrator.py`) enveloppe chaque nœud sauf `human_review`. Une exception devient un `NodeFailure` (nœud, type et message, tentatives, domaine d'un analyste) dans `failures`, clé à réducteur. `GraphBubbleUp` (interruption, commande) passe au travers.
+- **Selon le nœud** : les nœuds à plusieurs sorties (`validate_input`, `verify_extraction`, `decision_gate`) routent vers l'humain en `ESCALADE`, d'où une nouvelle arête `validate_input → human_review` ; l'échec d'`extract_clauses` est escaladé par `verify_extraction`, qui le lit en premier ; un analyste en échec laisse les autres finir et `decision_gate` escalade ; `explain`, `audit_seal` et `reject` consignent l'échec et vont à leur terme.
+- **`decision_gate`** : l'analyste en échec vient en 2ᵉ position, après le blocage dur. `failure_report` : `{"stage": "noeuds", "failures": [...]}`, budget compris s'il est dépassé.
+- **Reprise avant la garde** : `RetryPolicy` de LangGraph sur le nœud `analyst`, réglée par la section `analyst_retry` (3 tentatives, 1 s, facteur 2, plafond 10 s, sans gigue). La garde lit `get_runtime().execution_info.node_attempt` : une erreur que la politique reprend est relancée tant qu'il reste des tentatives, et n'est consignée qu'après la dernière (testé : 2 échecs réseau puis réussite ; échec réseau persistant, 3 tentatives ; `ValueError`, 1 seule).
+- **Statut d'un thread** : `failures` exposé par `thread_status`, donc par la CLI.
+- **Changement de comportement voulu** : au J2, une exception de nœud arrêtait l'exécution (erreur JSON, code 1). Le test CLI correspondant vérifie désormais l'escalade avec rapport, puis la reprise par `resume`.
+
+**Choix.**
+- **Blocage dur avant l'analyste en échec.** La spec dit « `decision_gate` escalade dès que `failures` n'est pas vide », mais aussi que le blocage établi suffit (étape 1, « un `INSUFFISANT` simultané ne change rien »). J'ai gardé l'ordre des étapes : un blocage dur établi par un autre verdict donne `NO_GO`, avec le rapport d'échec tracé. À valider.
+- **Pas de garde sur `human_review`** : tous les échecs y aboutissent, il ne peut pas se router vers lui-même. Une exception y arrête l'exécution, comme au J2.
+- **Pas de `RetryPolicy` sur `extract_clauses`** (la spec la prévoit pour les analystes seulement). Les SDK reprennent déjà certaines erreurs (Anthropic : 2 reprises par défaut). Une extraction en échec part donc chez l'humain. À reconsidérer si les tests réels le montrent utile.
+
+**Piège.** Une garde qui capte l'exception empêcherait `RetryPolicy` de la voir : la reprise de LangGraph enveloppe le nœud, donc la garde. D'où la lecture du numéro de tentative dans la garde, plutôt qu'une boucle de reprise maison.
+
+### J3 tâche 11 : CLI sans le mode stub-j2
+
+- `stub_j2.py` et ses tests supprimés ; plus d'option `--clauses` ni de clé `mode` dans les sorties.
+- **`build_deps`** (racine de composition) : fournisseur LLM de la configuration, puis embedding local (`FastembedEmbedder`), puis `PgvectorRetriever` sur `rag_chunks` avec le rôle applicatif ; extracteur `LLMExtractor`, CRAG `crag_runner`. Le fournisseur d'abord : une clé absente échoue avant tout chargement de modèle et avant la création du thread (testé : aucun thread en base).
+- **`resume`, `history`, `expire`** reçoivent des dépendances qui échouent explicitement si on les appelle : le graphe n'y repasse ni par l'extraction ni par le CRAG, donc aucune clé ni aucun modèle ne sont exigés (testé : `resume` ne construit pas les dépendances d'analyse).
+- **`--analysis-date AAAA-MM-JJ`**, par défaut le jour légal en France ; `analysis_date` dans le statut.
+- **Tests** : les dépendances réelles sont remplacées par des doublures (`cli.build_deps` substitué) ; `ingest` testé de bout en bout avec l'embedder de test ; le test de reprise après `SIGKILL` construit ses doublures dans le processus tué.
+- README : démarrage complet (poids, ingestion, analyse, reprise).
+
+### J3 tâche 12 : tests llm, série 1 (en cours, décision attendue)
+
+`tests/test_llm_criteres.py`, marqueur `llm`, lancés par `uv run pytest --llm -m llm -s`. Chaque critère est paramétré 5 fois, sans relance automatique ; chaque essai imprime une ligne `LLM-RESULT`.
+- **Critère 10** : extraction réelle (modèle `main`) d'un contrat synthétique réaliste (`tests/fixtures/contrat-synthetique-llm.txt`, parties masquées, **sans clause de pénalités de retard**, pour tenter une invention). Réussite : aucun échec de nœud ; si les analystes ont tourné, toutes les citations sont retrouvées dans le texte masqué ; sinon `ESCALADE` avec rapport d'extraction après 2 essais.
+- **Critère 3** : vrai juge et vraie réécriture (modèle `light`) ; la recherche du domaine financier ne rend que des extraits réels hors sujet (RGPD art. 32 et 33, C. civ. 1211). Réussite : `INSUFFISANT` après 2 passes, sans référence, puis `ESCALADE` ; aucune référence retenue qui n'ait été rendue par la recherche. Témoin : le juridique, avec des extraits pertinents, doit rester `OK`.
+
+**Série 1 : 2026-09-25, 09:18 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 3 | **5/5** | Financier : 2 passes, `INSUFFISANT`, aucune référence, `ESCALADE` à chaque essai. Réécritures variées (« clauses contractuelles : révision des prix… »). Témoin juridique `OK` à chaque essai, en ne retenant que la fiche (jamais C. civ. 1231-3 ni 1170). 3 388 à 4 357 tokens par essai. |
+| 10 | **0/5** | Chaque essai : HTTP 429 « Rate limit exceeded » dès le premier appel d'extraction. La garde l'a transformé en `NodeFailure` (`SDKError`, 1 tentative) et le contrat est parti en `ESCALADE` : comportement correct, mais le vrai modèle n'a jamais répondu, donc le test refuse de compter l'essai. |
+
+**Analyse de l'échec du critère 10** (sans relancer la série) : liste des modèles et appels de 1 token, en lisant les en-têtes `x-ratelimit-*` :
+- `mistral-small-2603` : listé, mais `x-ratelimit-limit-req-minute = 0` ;
+- `mistral-medium-3-5` : 0 requête par minute aussi ; `mistral-large-2512` : 403, absent de la liste ;
+- `ministral-8b-2512` : 188 requêtes et 625 000 tokens par minute ; `ministral-14b-2512` : 30 requêtes et 937 500 tokens par minute.
+
+Ce n'est ni une erreur transitoire (aucune reprise n'y changerait rien) ni un défaut du code : le compte n'accorde aucun quota au modèle principal configuré. Correction soumise au propriétaire du repo : relever la limite de `mistral-small-2603` dans la console Mistral, ou changer `llm.models.mistral.main`. Série 2 du critère 10 ensuite.
+
+**Observation.** Le juge léger est prudent : sur le témoin juridique, il ne retient que la fiche, jamais les articles 1231-3 et 1170, pourtant liés à la responsabilité. Sans effet sur les critères, mais à suivre au J4 (qualité des références citées par `explain`).
+
+### J3 : rangement des couches (décision du 25/09, point 4)
+
+Sans changement de comportement : les tests existants ne changent que par leurs imports, plus 3 tests qui appellent directement la nouvelle API du domaine.
+- **`domain/state.py` scindé** : modèles métier (`Clause`, `AgentVerdict`, `HumanDecision`, `Usage`, `RetrievalTrace`, `NodeFailure`, types et constantes) dans `domain/models.py` ; `ContractState`, réducteurs, `Route` et `AnalystInput` dans `application/state.py`.
+- **Logique des nœuds sortie vers le domaine** :
+  - `domain/decision.py` : `aggregate`, `conflict`, `total_tokens`, `failure_report`, et `decide`, qui rend un `GateOutcome` (décision proposée, revue humaine ou non, marge, rapport d'échec ; décision finale sans revue humaine) ;
+  - `domain/verification.py` : `normalize`, `problems_of`, et `check_extraction`, qui rend `verified`, `retry` ou `escalate` avec son rapport ;
+  - `domain/input_checks.py` : mots-outils, `french_ratio`, et `rejection`, qui rend un motif de rejet ou `None`.
+  Les nœuds `decision_gate`, `verify_extraction` et `validate_input` ne gardent que l'adaptation état → domaine → état ; la route reste un concept du graphe, le domaine rend une issue.
+- **`domain/policy.build_request`** lit l'état comme un `Mapping` : le domaine n'importe plus `ContractState`.
+- **ADR 002** : nouvelles couches, et écarts assumés (`config.py` qui lit un fichier et porte des réglages techniques, `ingestion.py` qui lit le corpus sans port, `ChunkRow` dans le domaine faute de port d'écriture, `build_request` sur un `Mapping`).
+
+**Piège évité.** Un checkpoint enregistre le module de chaque objet sérialisé (`cdg.domain.state.Clause`, puis `cdg.domain.models.Clause`). Déplacer un modèle rend illisibles les threads écrits avant. Vérifié avant chacune des deux refontes : aucun thread en base. À retenir pour la suite : tout déplacement de modèle après le J4 exigera une migration des checkpoints, ou un alias de module.
+
+### J3 : reprise de l'extraction sur erreur passagère (décision du 25/09, point 3)
+
+- **Port** : `LLMTransientError` dans `ports/llm.py`, pour les erreurs passagères du fournisseur (429, 5xx, délai dépassé).
+- **Adaptateurs** : Mistral la lève sur `MistralError` de statut 429 ou 5xx, et sur un délai dépassé ; Anthropic sur `APIStatusError` de statut 429 ou 5xx (dont 529, surcharge), et sur `APITimeoutError`. L'erreur du SDK reste la cause (`from`). Pour un 429 Mistral, le message reprend la limite du compte lue dans `x-ratelimit-limit-req-minute` (« limite du compte : 0 requête par minute » : le cas de la série 1).
+- **Reprise** : `RetryPolicy` sur `extract_clauses` (section `extraction_retry` : 3 tentatives, 2 s, facteur 2, plafond 20 s, sans gigue), avec pour seul `retry_on` le test `isinstance(exc, LLMTransientError)`. La garde relance l'erreur tant qu'il reste des tentatives, comme pour les analystes. Une erreur non passagère (400, 401, connexion refusée, sortie non structurée) est consignée dès le premier essai. Le modèle de configuration `AnalystRetry` devient `RetrySettings`, commun aux deux sections.
+- **Pas de reprise cachée** : les SDK ne reprennent rien (Anthropic `max_retries=0`, au lieu de 2 par défaut ; Mistral `retry_config=None`, déjà sans reprise par défaut). Les reprises ne se règlent que dans la configuration.
+- **Tests** : traduction testée pour chaque statut et chaque SDK, sans réseau ; graphe : 2 erreurs passagères puis réussite (3 appels, aucun échec) ; erreur passagère persistante (3 tentatives, puis `ESCALADE`) ; `ConnectionError` et `ValueError` sans reprise.
+
+**Choix.**
+- **Connexion refusée non reprise.** Elle n'est pas dans la liste demandée (429, 5xx, délai dépassé), donc l'extraction part chez l'humain dès le premier essai. À élargir si les tests réels le justifient.
+- **Délai dépassé côté Mistral reconnu par sa classe.** Le SDK transmet l'exception httpx telle quelle. Importer httpx, dépendance du SDK mais pas du projet, reviendrait à s'appuyer sur une dépendance non déclarée : l'adaptateur reconnaît `httpx.TimeoutException` dans la hiérarchie de l'exception, par son nom et son module.
+- **Un 429 à quota nul est quand même repris.** Il est passager par son statut, mais permanent dans les faits : les 3 tentatives coûtent 6 s d'attente, puis l'échec est consigné avec la limite du compte dans le message.
+
+### J3 tâche 12 : mesure du critère 10 (décision du 25/09, point 2)
+
+Un système qui escaladerait toujours passerait le critère 10 : l'invariant (« aucun analyste sur une citation non vérifiée ») est vrai aussi quand rien n'aboutit. D'où une mesure, sans seuil jusqu'à la série 2 :
+- **Taux d'aboutissement** : sur le contrat valide de test, nombre d'essais sur 5 qui aboutissent aux analystes avec toutes les citations vérifiées. Le contrat est valide : chaque clause stipulée se cite mot pour mot, et les pénalités de retard n'y figurent pas, donc une extraction correcte les déclare absentes.
+- **Ligne `LLM-SERIE`** imprimée en fin de série : taux, aboutissements au premier essai, issue de chaque essai (`analystes`, `escalade`, `echec_de_noeud`), et nombre d'extractions exactes.
+- **Écarts de valeur**, à titre d'information : chaque essai compare présence, valeur et catégorie de chaque clause aux valeurs attendues du contrat (par exemple `duree_engagement` = 24). Ils ne comptent pas dans le critère, qui porte sur les citations.
+- **Vérifié sans réseau**, avec un faux fournisseur : une extraction exacte aboutit aux analystes sans écart ; une citation inventée pour les pénalités donne une ré-extraction avec le retour « citation introuvable: penalites_retard », puis `ESCALADE`. La ligne de série indique bien un taux de 1/2.
+
+La série 1 (0/5, quota nul) n'entre pas dans la mesure : le vrai modèle n'a jamais répondu. Le taux sera consigné à partir de la série 2.
+
+### J3 : connexion refusée reprise, quota nul non repris (décisions du 25/09)
+
+- **Connexion refusée ou impossible** : ajoutée aux erreurs passagères. Mistral : `httpx.ConnectError`, reconnue par sa classe comme le délai dépassé ; Anthropic : `APIConnectionError` (hors `APITimeoutError`, testée d'abord).
+- **Quota nul** : nouvelle erreur du port, `LLMQuotaError`, pour un 429 dont une limite du compte vaut 0. Mistral : `x-ratelimit-limit-req-minute` ou `x-ratelimit-limit-tokens-minute` ; Anthropic : `anthropic-ratelimit-requests-limit` ou `anthropic-ratelimit-tokens-limit`, noms vérifiés dans la documentation officielle (« Rate limits », platform.claude.com, 2026-09-25). Le message cite l'en-tête à 0 et dit de vérifier l'offre du compte, ou de changer de modèle dans la configuration. Elle n'est jamais reprise, ni sur l'extraction ni sur un analyste : la `RetryPolicy` des analystes garde le prédicat par défaut de LangGraph, qui reprendrait presque toute exception, mais l'exclut explicitement.
+- **Tests** : traduction par en-tête et par fournisseur ; limite non nulle toujours passagère ; graphe : quota nul consigné dès la première tentative, sur l'extraction comme sur un analyste.
+
+**Écart signalé, non traité.** La même page de la documentation Anthropic décrit un autre 429 non passager : le plafond de dépenses mensuel atteint (`error.details.error_code = enforced_spend_limit_reached`, sans en-tête `retry-after`). Il reste traité comme passager (3 tentatives, puis échec consigné). À traduire en `LLMQuotaError` si le propriétaire du repo le souhaite.
+
+**Fichier en cours hors commit.** `data/corpus/raw/code-civil/1231-5.txt`, non suivi, contient la commande de création au lieu du texte de l'article ; `test_manifeste_couvre_tout_le_corpus` échoue tant qu'il n'est ni corrigé et admis dans le manifeste, ni retiré. Sans lui : 508 tests au vert.
+
+### J3 : pénalités d'exécution et délai de paiement (décisions du 25/09)
+
+**Ce que désignait `penalites_retard`.** Trois lectures incompatibles :
+- **Règle financière** : « pénalités absentes ou plafond < 5 % → pénalité de score », une valeur nulle (non plafonnées) étant favorable. C'est l'intérêt de l'acheteur, donc des pénalités dues par le **fournisseur** qui exécute en retard.
+- **Prompt d'extraction** : « plafond des pénalités de retard, en pourcentage », sans dire qui les doit ni en pourcentage de quoi. Dans un contrat qui prévoit aussi des intérêts de retard de paiement (obligatoires selon L441-10, II), le modèle pouvait extraire l'une ou l'autre clause.
+- **Fiche et corpus** : la fiche « pénalités de retard » et la requête du CRAG (« pénalités de retard ») menaient à L441-10, qui vise les pénalités dues par l'**acheteur** en retard de paiement. Le domaine financier était donc étayé par un texte sur l'autre partie.
+
+**Correction.**
+- **`penalites_execution`** remplace `penalites_retard` : pénalités du fournisseur (clause pénale, C. civ. 1231-5), plafond en % du montant du contrat, règle inchangée (clés de configuration `execution_penalties_*`).
+- **`delai_paiement`** : délai de paiement par l'acheteur, en jours, catégorie `date_facture` ou `fin_de_mois`. Pénalité de 0,2 au-delà de 60 jours après la facture ou de 45 jours fin de mois, ou si le délai est présent mais non chiffré, avec le constat « délai non conforme, à renégocier ». Absent : aucune pénalité, mais un constat qui cite le délai supplétif du texte.
+- **Délai supplétif** : L441-10, I, 1er alinéa, « sauf dispositions contraires […], le délai de règlement des sommes dues ne peut dépasser trente jours après la date de réception des marchandises ou d'exécution de la prestation demandée ». Cité dans le constat (constante de la règle, liée à la version en vigueur jusqu'au 01/01/2027).
+- **Catégories par type** (`KIND_CATEGORIES`) : un délai chiffré exige son point de départ ; un délai non chiffré peut s'en passer. Une catégorie d'un autre type est signalée « catégorie invalide ». Sans point de départ (impossible après vérification), la règle applique le seuil le plus strict (45 jours).
+- **Corpus** : C. civ. 1231-5 admis dans le manifeste (financier, récupéré le 25/09/2026 : nouvelle clé `retrieved_at_overrides`, date propre à un article) et dans `SOURCES.md`.
+
+**Pire cumul recalculé : 0,505** (juridique 0,5, financier 0,4, conformité 0,7, opérationnel 0,4), soit `GO_RESERVES` avec une marge de 0,005, donc en revue humaine. `NO_GO` reste réservé aux blocages durs, mais de justesse ; un test fige ce calcul.
+
+**Écart relevé dans L441-10, non couvert par la règle** : « en cas de facture périodique […], le délai convenu […] ne peut dépasser quarante-cinq jours après la date d'émission de la facture » (I, 4e alinéa). Un délai de 50 jours date de facture sur factures périodiques passe la règle.
+
+### J3 : transferts, clauses types et clauses ad hoc (relecture des fiches, 25/09)
+
+- **Deux sortes de clauses contractuelles**, que la règle confondait :
+  - les clauses types de protection des données, adoptées par la Commission, ou par une autorité de contrôle puis approuvées par la Commission, qui valent garantie sans autorisation (RGPD, art. 46, par. 2, c et d) : catégorie `clauses_contractuelles_types`, inchangée ;
+  - les clauses contractuelles ad hoc, soumises à l'autorisation de l'autorité de contrôle (par. 3, a) : deux nouvelles catégories, `clauses_contractuelles_ad_hoc` (autorisation non mentionnée) et `clauses_contractuelles_ad_hoc_autorisees` (autorisation mentionnée).
+- **Règle** : les clauses ad hoc autorisées sont une garantie reconnue (`transfer_safeguards`) ; les clauses ad hoc sans mention d'autorisation (`transfer_authorization_to_verify`) donnent une pénalité et le constat « autorisation de l'autorité de contrôle à vérifier ». La configuration refuse une catégorie à la fois reconnue et à vérifier.
+- **Montant de la pénalité : 0,3**, non fixé par le propriétaire du repo. Choisi égal à celui de la localisation non précisée, autre constat « à vérifier » du même domaine ; les deux portent sur la même clause et ne se cumulent pas, donc le pire cumul (0,505) ne change pas. À valider.
+- **Dérogations de l'art. 49** (hors corpus) : le prompt les classe en `aucune_garantie`, donc bloquées ; limite ajoutée au README.
+
+### J3 : relecture des fiches, deux sections, vérification mot à mot (25/09)
+
+**Structure.** Chaque fiche a deux sections : « Ce que dit le texte », uniquement des paraphrases fidèles, chacune sourcée ; « Comment le projet l'applique », les règles et seuils du projet, présentés comme des choix de politique d'achat. Tests : structure exacte (deux sections, dans cet ordre, aucune affirmation hors section), source admise obligatoire dans la première section, citations facultatives mais admises dans la seconde. 7 fiches : `penalites-retard.md` devient `delais-paiement.md` (L441-10), et `penalites-execution.md` est créée (C. civ. 1231-5).
+
+**Écarts trouvés à la vérification mot à mot** (au-delà de ceux signalés par le propriétaire du repo) :
+- **sous-traitance-rgpd** : la fin de prestation omettait la destruction des copies existantes et la réserve d'une conservation exigée par le droit (art. 28, par. 3, g) ; l'exception « à moins qu'il ne soit tenu d'y procéder » manquait pour les instructions (par. 3, a) ; l'obligation d'informer immédiatement d'une instruction illicite (fin du par. 3), rattachée par le texte au point h, n'était pas reprise ; la définition du sous-traitant était abrégée (art. 4, point 8).
+- **transferts-hors-ue** : en plus du « destinataire », la liste des garanties sans autorisation (art. 46, par. 2) est limitative dans le texte ; la paraphrase ne dit plus « notamment » (le « notamment » du par. 3 est, lui, dans le texte).
+- **responsabilite-plafonds** : « entre professionnels » ne figure pas dans L442-1, qui vise « toute personne exerçant des activités de production, de distribution ou de services », « dans le cadre de la négociation commerciale, de la conclusion ou de l'exécution d'un contrat » : la paraphrase reprend ces termes.
+- **duree-preavis, L442-1 (version du 20/08/2026)** : la paraphrase du II omettait la référence aux usages du commerce ou aux accords interprofessionnels, la détermination du prix pendant le préavis par référence aux conditions économiques du marché, et le nouvel alinéa sur la réduction substantielle des volumes de commandes ; les trois sont repris.
+- **penalites-retard (devenue delais-paiement)** : « un délai de quarante-cinq jours fin de mois » au lieu d'« un délai maximal » ; le délai supplétif de trente jours (I, 1er alinéa) et le plafond de quarante-cinq jours pour les factures périodiques (I, 4e alinéa) manquaient ; « une analyse postérieure doit s'appuyer sur la version suivante » n'est pas dans le texte et passe dans l'application.
+- **revision-prix** : conforme ; seulement restructurée. La 2e puce (« doit donc s'appuyer sur un indice… ») est une déduction du texte plutôt qu'une paraphrase ; laissée dans la première section, puisque la fiche a été jugée conforme.
+
+**Formulations demandées, rendues autrement par fidélité au texte** :
+- « un plafond ne joue pas en cas de faute lourde ou dolosive (art. 1231-3) » : l'article écarte la limitation aux dommages prévisibles en cas de faute lourde ou dolosive ; il ne dit rien d'un plafond conventionnel. La fiche le dit ainsi, et renvoie la conséquence sur un plafond à la jurisprudence, hors corpus.
+- « L442-1 vise les relations entre professionnels » : rendu par les termes du texte (personnes exerçant des activités de production, de distribution ou de services).
+- « engagement de confidentialité » : le texte ajoute « ou soient soumises à une obligation légale appropriée de confidentialité », repris.
+
+**Défaut de corpus signalé, non corrigé** : `raw/rgpd/art-32.txt` répète sa ligne de titre (« Article 32 » deux fois). L'intitulé ingéré est donc « Article 32 », et « Sécurité du traitement » passe dans le texte. Correction du fichier par le propriétaire du repo, ou règle de nettoyage testée, à décider.
+
+**Réingestion réelle** (modèle réel, hors ligne) : 67 extraits (17 insérés, 7 supprimés, 50 inchangés). Recherches de contrôle avec les requêtes initiales du CRAG : juridique → fiche responsabilité, L442-1, 1231-3 ; financier → fiche délais de paiement (fin 2027-01-01), fiche pénalités d'exécution, L441-10 ; conformité → fiches transferts et sous-traitance, RGPD art. 46 ; opérationnel → fiche durée et préavis, L442-1, 1211.
+
+**Observation** : le domaine financier porte désormais trois sujets dans une seule requête. Avec `crag.top_k` = 4, la fiche sur la révision des prix et L112-2 sortent des 4 premiers extraits, et l'art. 1231-5 n'y entre pas (sa fiche, si). À suivre dans les séries `llm` : relever `top_k` ou faire une requête par clause, si le juge manque de références.
+
+### J3 : délai de paiement, factures périodiques (décision du 25/09, point 3)
+
+Nouvelle catégorie `facture_periodique` pour `delai_paiement` : plafond de 45 jours après la facture (L441-10, I, 4e alinéa), réglé par `payment_delay_max_days_periodic_invoice`, même pénalité et même constat. Le prompt la place en premier : un délai sur facture périodique est classé ainsi, même s'il est compté « fin de mois ». Point de départ inconnu : le plus bas des trois seuils. Fiche `delais-paiement` mise à jour (application).
+
+### J3 : titre en double dans RGPD art. 32 (décision du 25/09, point 4)
+
+`raw/rgpd/art-32.txt` commençait par deux lignes « Article 32 ». Seule la seconde est supprimée : diff d'une ligne, texte inchangé. L'intitulé ingéré redevient « Sécurité du traitement ». Nouveau test : `test_aucun_fichier_brut_ne_repete_sa_ligne_de_titre` échoue si la première ligne d'un fichier brut y apparaît une seconde fois (vérifié rouge sur l'ancien fichier, et seulement sur lui).
+
+### J3 : CRAG, une requête par type de clause (décision du 25/09, point 5)
+
+- **Une requête par type de clause** du domaine, construite à partir de la seule clause (type, valeur, catégorie). Le sous-graphe traite une clause ; `crag.per_clause` l'invoque pour chaque type de `DOMAIN_KINDS`, dans l'ordre, et `crag.combine` rassemble les résultats. Le juge et la réécriture voient le sujet de la clause ; leurs nœuds de consommation sont nommés par clause (`crag_grade:financier:delai_paiement`).
+- **Rattachement** : `RetrievalTrace` contient une entrée `ClauseRetrieval` par type de clause (requêtes, passes, références retenues, références expirées). Les `evidence_ids` du verdict sont l'union des références retenues. `ClauseRetrieval` est ajouté à la liste des types autorisés du sérialiseur.
+- **Statut du domaine** (non précisé par la décision, choix à valider) : `INSUFFISANT` dès qu'une clause du domaine n'a aucune référence en vigueur, avec un constat qui nomme la clause. C'est la lecture prudente : chaque clause jugée par une règle doit être étayée. Conséquence : plus d'escalades qu'avant, où une seule référence suffisait pour tout le domaine.
+- **`top_k` par requête** : inchangé dans la configuration (4) ; commentaire précisé.
+- **Coût** : 10 recherches par contrat au lieu de 4, donc jusqu'à 10 appels au juge, et 20 en cas de réécriture partout.
+- **Doublure `FakeLLM`** : une réponse prévue pour un nœud vaut pour ses sous-nœuds (`crag_grade:financier` pour chaque clause du domaine) ; une réponse propre à une clause reste possible.
+- **Test `llm` du critère 3** adapté (2 passes par clause financière ; témoin juridique justifié clause par clause), vérifié sans réseau avec un faux juge.
+
+**Réingestion réelle après les corrections du corpus** (art. 32, fiches `delais-paiement` et `revision-prix`) : 3 extraits remplacés, 64 inchangés, 67 au total.
+
+### J3 tâche 12 : second contrat de mesure du critère 10 (décision du 25/09)
+
+- **`tests/fixtures/contrat-synthetique-complet.txt`** : les 10 types présents. Valeurs attendues : responsabilités 100 % et 120 %, révision 2 %, pénalités d'exécution plafonnées à 8 % du montant du contrat, paiement à 45 jours fin de mois, durée 36 mois, préavis 6 mois, données personnelles et accord de traitement présents, transfert encadré par les clauses types de la Commission.
+- **Un piège** : des pénalités de retard de paiement dues par l'acheteur (trois fois le taux d'intérêt légal, indemnité forfaitaire), qu'une extraction correcte ne prend ni pour des pénalités d'exécution ni pour un délai de paiement.
+- **Mesure séparée** : le test du critère 10 est paramétré par contrat (`valide`, `complet`) ; une ligne `LLM-SERIE` par contrat. 15 tests `llm` en tout.
+- **Vérifié sans réseau** : une extraction exacte simulée du contrat complet aboutit aux analystes au premier essai, sans écart de valeur ; le masquage des parties ne casse aucune citation.
+
+### J3 tâche 12 : diagnostic du quota après activation du paiement à l'usage, série 2
+
+**Diagnostic (25/09/2026, 12:52 UTC).** Le propriétaire du repo a activé le paiement à l'usage (limite de dépenses de 5 € par mois ; console : 20 000 tokens par minute et 1 requête par seconde pour `mistral-small-2603`). Un appel d'un token répond : HTTP 200. Les en-têtes de l'API annoncent 100 requêtes et 100 000 tokens par minute. **Option A : la configuration ne change pas.** Les calculs retiennent la limite la plus stricte, celle de la console.
+
+**Taille d'une extraction** (vrais prompts avec leur schéma, un seul token de sortie) : 1 535 tokens d'entrée pour le contrat valide, 1 706 pour le contrat complet. `max_tokens` n'est pas réservé : l'API ne compte que les tokens consommés (23 pour une réponse courte avec `max_tokens` = 4096). Une extraction coûte donc environ 2 100 à 2 400 tokens, bien sous la limite. Pour ne pas provoquer soi-même un 429 en enchaînant les essais, le critère 10 est cadencé : après un essai qui a consommé t tokens, attente de t × 60 / 20 000 s.
+
+**Série 2 : 2026-09-25, 12:53 à 12:55 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 15 réussites sur 15, sans relance, en 1 min 59 s.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 10, contrat valide | **5/5** | Taux d'aboutissement : **5/5**, tous au premier essai, 5 extractions exactes (pénalités d'exécution et délai de paiement déclarés absents). 2 063 à 2 080 tokens par essai. |
+| 10, contrat complet | **5/5** | Taux d'aboutissement : **5/5**, tous au premier essai, 5 extractions exactes, piège évité à chaque essai (les pénalités de retard de paiement de l'acheteur ne sont prises ni pour des pénalités d'exécution ni pour un délai de paiement). 2 356 à 2 365 tokens par essai. |
+| 3 | **5/5** | Financier : chacune des 3 clauses fait 2 passes, aucune référence, `INSUFFISANT`, puis `ESCALADE`. Témoin juridique `OK` : responsabilité de l'acheteur justifiée par la fiche, C. civ. 1231-3 et 1170 ; responsabilité du fournisseur par la fiche. Environ 10 200 tokens par essai (11 appels au modèle léger). |
+
+Consommation de la série : environ 22 000 tokens du modèle principal et 51 000 du modèle léger, moins de 0,02 €.
+
+**Observations.**
+- La requête par clause règle l'observation de la série 1 : le juge retient désormais les articles 1231-3 et 1170 pour la responsabilité de l'acheteur.
+- **La réécriture comprend « domaine : financier » comme « services financiers »** (« prestataire de services financiers », « contrat financier »). C'est sans effet sur le critère, mais la reformulation part hors sujet. Piste : nommer le domaine par ce qu'il couvre (« conditions financières du contrat ») dans la requête et dans le prompt de réécriture.
+- **Seuil du taux d'aboutissement** : à fixer par le propriétaire du repo, maintenant que la série 2 est faite.
+
+### J3 : seuil du taux d'aboutissement du critère 10 (décision du 26/09, point 1)
+
+- **Seuil** : au moins 4 essais sur 5 aboutissent aux analystes, par contrat de mesure. L'invariant de sûreté (aucun analyste sur une citation non vérifiée) reste exigé à chaque essai : 5 sur 5.
+- **Test** : `test_10_taux_d_aboutissement_aux_analystes`, paramétré par contrat, défini après les essais et donc exécuté après eux ; il juge la série qui vient de tourner. Une série incomplète (essais désélectionnés ou interrompus) échoue explicitement, « taux non jugé ». 17 tests `llm` au lieu de 15.
+- **Vérifié sans réseau** : 5/5 et 4/5 passent, 3/5 échoue avec le taux et le seuil dans le message ; lancé seul, le test échoue sur une série vide.
+
+### J3 : domaines nommés par ce qu'ils couvrent dans le CRAG (décision du 26/09, point 2)
+
+- **`crag.DOMAIN_LABELS`**, dans la requête (« libellé ; sujet de la clause : valeur ») et dans les messages du juge et de la réécriture (« Domaine : libellé ») :
+  - financier : « conditions financières du contrat : prix, paiement, pénalités » (libellé de la décision) ;
+  - juridique : « responsabilité contractuelle des parties : plafonds de responsabilité » ;
+  - conformité : « protection des données personnelles : sous-traitance, transferts hors de l'Union européenne » ;
+  - opérationnel : « durée et fin du contrat : engagement, préavis de résiliation ».
+- **Les quatre noms sont jugés ambigus** : dans un corpus entièrement juridique, « juridique » ne dit rien du sujet ; « conformité » ne dit pas à quoi ; « opérationnel » peut désigner l'exploitation ou la logistique.
+- **Étendu au juge** (non demandé explicitement) : il recevait aussi « Domaine : financier », avec le même risque de lecture.
+- Les noms des nœuds de consommation gardent la clé du domaine (`crag_grade:financier:delai_paiement`).
+
+### J3 : règles d'abord, CRAG sur les seules clauses qui portent un constat (décision du 26/09, point 3)
+
+**Constat de départ.** La règle `INSUFFISANT` du 25/09 exigeait une référence pour chaque clause du domaine, même sans constat. Mesurée sur le contrat valide, elle escaladait un contrat sans aucun constat en juridique ni en opérationnel : le juge ne retenait rien pour la responsabilité de l'acheteur ni pour la durée d'engagement.
+
+**Étude de l'inversion.** Les règles lisaient le statut de récupération pour deux choses seulement : ajouter le constat « référentiel insuffisant » et remplir `retrieval_status`. Aucun score, aucune pénalité, aucun blocage n'en dépendait. L'inversion est donc propre :
+- **Règles** : signature `(clauses, config) -> Assessment`, sans statut. Chaque constat (`RuleFinding`) porte la clause qui le déclenche et son effet : `blocage`, `penalite` (avec son montant) ou `information`. Score et blocage se déduisent des constats. Rattachements choisis : « données personnelles sans accord » va à `accord_traitement_donnees`, la clause manquante ; « localisation non précisée » va à `transfert_hors_ue`.
+- **Analyste** : règles, puis CRAG sur les clauses qui portent un constat (dans l'ordre des clauses), puis `justification.justify`. Le CRAG est toujours appelé : avec aucune clause, il ne fait aucune recherche et rend un résumé vide. Les tests des gardes, qui injectent les pannes par le CRAG, en dépendent.
+- **Justification** (`domain/justification.py`, pur) :
+  - un constat qui bloque ou pénalise, sans référence en vigueur : `INSUFFISANT`, avec « référentiel insuffisant : aucune référence en vigueur pour justifier le constat de la clause … » ;
+  - une clause à justifier absente du résumé du CRAG compte comme non justifiée, par prudence ;
+  - une clause sans constat n'exige rien.
+- **Choix à valider** : **constat d'information** (délai supplétif de L441-10, transfert encadré par une garantie). La décision ne tranche pas ce cas. Il est recherché, puisqu'il a un constat. Sans référence, il est signalé (« information seule, sans effet sur le statut ») mais ne rend pas le domaine `INSUFFISANT`, car il ne déclenche ni pénalité ni blocage.
+- **CRAG** : il ne décide plus de statut. `RetrievalResult` perd `status` et `evidence_ids` ; le résumé devient obligatoire. `per_clause` cherche les clauses reçues, dans l'ordre reçu ; une clause hors du domaine ou répétée lève une erreur.
+- **Doublure `FakeCrag`** : une référence par clause reçue, aucune pour les domaines `empty` ; elle enregistre les clauses reçues. Les tests qui voulaient un domaine `INSUFFISANT` avec un contrat favorable passent désormais une clause qui porte un constat (`PENALIZED`, ou pénalités d'exécution absentes) : sans constat, plus d'`INSUFFISANT` possible.
+- **Critère 1** : fan-out avec une pénalité par domaine, pour que chaque verdict porte sa propre référence (`GO_RESERVES`, 0,615). Nouveau test : un contrat sans constat, corpus vide partout, rend `GO` sans aucune recherche.
+- **Critère 3** : libellé « constat sans référence ». Test `llm` adapté : financier avec deux pénalités (pénalités d'exécution absentes, délai de 90 jours date de facture), la révision n'étant pas recherchée ; témoin juridique sur le plafond fournisseur à 50 %. Vérifié sans réseau avec un faux juge sur les extraits réels.
+
+**Nombre de recherches sur les deux contrats de mesure** (CRAG réel : pgvector, e5, juge `ministral-8b-2512`, clauses attendues, date d'analyse 26/09/2026) :
+
+| Contrat | Avant (une recherche par type) | Après (clauses à constat) |
+| --- | --- | --- |
+| valide | **15** recherches, 24 573 tokens ; juridique et opérationnel `INSUFFISANT`, donc `ESCALADE` | **2** recherches (pénalités d'exécution absentes, délai de paiement absent), 3 695 tokens ; tout `OK` |
+| complet | **13** recherches, 22 335 tokens ; tout `OK` | **1** recherche (transfert encadré par les clauses types), 1 854 tokens ; tout `OK` |
+
+La mesure « avant » précède aussi les libellés de domaine : les deux changements jouent sur les références retenues, pas sur le nombre de clauses recherchées. Sur le contrat complet, le juge retient l'art. 28 et la fiche sur la sous-traitance pour la clause de transfert, un rattachement lâche.
+
+### J3 tâche 12 : série 3 des tests `llm`, critère 3 seul (CRAG modifié)
+
+**Série 3 : 2026-09-26, 03:54:45 à 03:55:00 UTC, fournisseur Mistral, `light` = `ministral-8b-2512` (seul modèle appelé : l'extraction est en doublure). 5 réussites sur 5, sans relance, en 15 s.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 3 | **5/5** | Financier : seules les deux clauses qui portent un constat sont recherchées (pénalités d'exécution absentes, délai de 90 jours date de facture), la révision de prix ne l'est pas. Chacune fait 2 passes, aucune référence, d'où `INSUFFISANT` avec un constat par clause, puis `ESCALADE`. Témoin juridique `OK` : plafond fournisseur à 50 %, justifié par la fiche sur les plafonds de responsabilité. Environ 6 600 tokens par essai (7 appels au modèle léger), contre 10 200 en série 2. |
+
+**Observations.**
+- **Réécriture dans le sujet** : avec les libellés de domaine, plus aucune dérive vers « services financiers ». Reformulations obtenues : « sanctions contractuelles pour retard ou inexécution par le fournisseur… » et « modalités de règlement contractuel : échéance de paiement à la charge de l'acquéreur… ».
+- **Stabilité** : quatre essais sur cinq donnent des reformulations identiques mot pour mot (température 0) ; l'essai 3 varie légèrement.
+- **Témoin juridique** : pour le plafond du fournisseur, le juge ne retient que la fiche, pas les articles 1231-3 ni 1170, comme en série 2 pour cette clause.
+
