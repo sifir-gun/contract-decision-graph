@@ -1986,3 +1986,11 @@ Tableau et texte du gain de latence mis à jour avec la série 8 : 29 essais à 
   6. activer les alertes Dependabot (les mises à jour hebdomadaires sont déjà configurées) ;
   7. se souvenir que l'audit planifié du lundi est désactivé par GitHub après 60 jours sans activité sur un dépôt public ;
   8. les journaux de la CI deviennent publics : ils ne contiennent aucun secret (la CI n'en a aucun).
+
+### J5 tâche 7 : README final
+
+- **README réécrit**, pour une lecture de quelques minutes : ce que fait le système (les quatre décisions, un exemple réel de la série 8 sur le contrat piégé) ; le parti pris (le code décide, toute sortie d'un LLM est contrôlée, « le modèle devine, le code refuse la devinette », et, en bonne place, **même modèle, température 0, erreurs différentes d'une série à l'autre : la sûreté repose sur les contrôles par code**) ; un schéma Mermaid ; une démo sans clé ni base (`pytest tests/test_demo.py -m "not pg"`, vérifiée) et une démo réelle sur le contrat réaliste ; les résultats de la série 8, contrat par contrat, avec la série 4 en échec et ce que les séries ne prouvent pas ; les limites (dont les clauses floues : une seule quantité non fixée donne un `GO` automatique, un plafond flou un `NO_GO` prudent) ; l'architecture en bref avec les deux ADR ; la feuille de route (phases 2 à 4) ; la licence. Un résumé de cinq lignes en anglais en tête.
+- **`docs/exploitation.md`** : le détail opérationnel de l'ancien README, repris presque tel quel (installation et commandes, explication, journal d'audit et rejeu, changement de configuration, migrations, corpus et versions, souveraineté, tests et CI, `git blame`).
+- **`SOURCES.md`** : la liste des renvois non suivis et la note sur les dérogations de l'art. 49 y passent ; `SOURCES.md` y renvoyait depuis le README.
+- **Spec** : ligne du J5 dans le tableau des jours, arborescence (`LICENSE`, `docs/exploitation.md`), historique.
+- Le schéma Mermaid est vérifié dans le rendu de GitHub après le push.

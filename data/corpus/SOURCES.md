@@ -4,7 +4,18 @@ Textes publics uniquement, plus des fiches rédigées pour le projet. Chaque sou
 
 ## Règle de périmètre
 
-Un article est admis s'il **sert une règle** (`src/cdg/domain/rules/`), ou s'il est **cité directement** par un article qui sert une règle, ou s'il **définit un terme utilisé par une règle**. Les renvois de second degré ne sont pas suivis. Les renvois non récupérés sont listés dans le README (« Limites connues »).
+Un article est admis s'il **sert une règle** (`src/cdg/domain/rules/`), ou s'il est **cité directement** par un article qui sert une règle, ou s'il **définit un terme utilisé par une règle**. Les renvois de second degré ne sont pas suivis. Les renvois non récupérés sont listés ci-dessous (« Renvois non suivis »).
+
+### Renvois non suivis
+
+Conséquence de la règle de périmètre, ne sont pas dans le corpus :
+- RGPD, art. 79 (renvoi de second degré, fichier conservé mais non ingéré) ;
+- RGPD, art. 34, 35, 43, 47 à 49, 63 et 93 ;
+- C. com., art. L441-1, L441-3, L441-4, L441-16 et L441-17 ;
+- C. civ., art. 759 ;
+- le règlement (UE) 2019/1150.
+
+Les dérogations de l'art. 49 du RGPD (consentement explicite, exécution d'un contrat, motifs d'intérêt public…) ne sont donc pas couvertes : un contrat qui fonde un transfert sur une dérogation est classé « aucune garantie », donc bloqué. Erreur dans le sens prudent, à lever par un humain.
 
 ## Règle de rattachement (J4)
 
