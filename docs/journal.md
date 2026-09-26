@@ -940,3 +940,8 @@ La mesure « avant » précède aussi les libellés de domaine : les deux change
 - **Stabilité** : quatre essais sur cinq donnent des reformulations identiques mot pour mot (température 0) ; l'essai 3 varie légèrement.
 - **Témoin juridique** : pour le plafond du fournisseur, le juge ne retient que la fiche, pas les articles 1231-3 ni 1170, comme en série 2 pour cette clause.
 
+### Décision du 26/09 : constat d'information
+
+- **Traitement validé** : un constat d'information (délai supplétif de L441-10, transfert encadré par une garantie) est recherché ; sans référence, il est signalé (« information seule, sans effet sur le statut ») et ne rend jamais le domaine `INSUFFISANT`.
+- **Noté pour le J4** : le juge léger rattache l'art. 28 du RGPD à la clause de transfert, un rattachement lâche. C'est à surveiller pour `explain`, qui ne doit citer que des références pertinentes.
+
