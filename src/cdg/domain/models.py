@@ -32,7 +32,11 @@ REQUIRED_KINDS = (
 DOMAIN_KINDS: dict[Domain, tuple[str, ...]] = {
     "juridique": ("responsabilite_acheteur", "responsabilite_fournisseur"),
     "financier": ("revision_prix", "penalites_execution", "delai_paiement"),
-    "conformite": ("donnees_personnelles", "accord_traitement_donnees", "transfert_hors_ue"),
+    "conformite": (
+        "donnees_personnelles",
+        "accord_traitement_donnees",
+        "transfert_hors_ue",
+    ),
     "operationnel": ("duree_engagement", "preavis_resiliation"),
 }
 
@@ -73,7 +77,9 @@ class Clause(BaseModel):
     present: bool  # la clause figure-t-elle dans le contrat ?
     quote: str  # citation exacte si present, "" sinon (alors non vérifiée)
     value: float | None  # quantité utile à la règle, voir « Règles par domaine »
-    category: str | None = None  # types de CATEGORY_KINDS seulement, voir KIND_CATEGORIES
+    category: str | None = (
+        None  # types de CATEGORY_KINDS seulement, voir KIND_CATEGORIES
+    )
 
     @model_validator(mode="after")
     def _citation_selon_presence(self) -> "Clause":
@@ -133,10 +139,14 @@ class HumanDecision(BaseModel):
     def _decision_systeme(self) -> "HumanDecision":
         system_reviewer = self.reviewer.startswith(SYSTEM_REVIEWER_PREFIX)
         if self.source == "systeme":
-            if self.decision != "NO_GO":  # échec fermé : jamais d'approbation automatique
+            if (
+                self.decision != "NO_GO"
+            ):  # échec fermé : jamais d'approbation automatique
                 raise ValueError("une décision système ne peut être que NO_GO")
             if not system_reviewer:
-                raise ValueError(f"décision système : relecteur {SYSTEM_REVIEWER_PREFIX}…")
+                raise ValueError(
+                    f"décision système : relecteur {SYSTEM_REVIEWER_PREFIX}…"
+                )
         elif system_reviewer:
             raise ValueError(
                 f"le préfixe {SYSTEM_REVIEWER_PREFIX} est réservé aux décisions système"
@@ -150,7 +160,9 @@ class NodeFailure(BaseModel):
     node: str
     error: str  # type de l'exception
     message: str
-    attempts: int = Field(ge=1)  # tentatives, reprises comprises (RetryPolicy des analystes)
+    attempts: int = Field(
+        ge=1
+    )  # tentatives, reprises comprises (RetryPolicy des analystes)
     domain: Domain | None = None  # analyste en échec
 
 

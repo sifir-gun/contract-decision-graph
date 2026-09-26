@@ -33,7 +33,9 @@ class Weights(_Strict):
 
     @model_validator(mode="after")
     def _somme_egale_a_un(self) -> "Weights":
-        total = rounded(self.juridique + self.financier + self.conformite + self.operationnel)
+        total = rounded(
+            self.juridique + self.financier + self.conformite + self.operationnel
+        )
         if total != 1.0:
             raise ValueError(f"la somme des poids vaut {total}, attendu 1")
         return self
@@ -96,10 +98,16 @@ class ConformiteRules(_Strict):
             if len(set(values)) != len(values):
                 raise ValueError(f"{name} contient un doublon")
             if {"sans_transfert", "aucune_garantie"} & set(values):
-                raise ValueError("sans_transfert et aucune_garantie ne sont pas des garanties")
-        both = set(self.transfer_safeguards) & set(self.transfer_authorization_to_verify)
+                raise ValueError(
+                    "sans_transfert et aucune_garantie ne sont pas des garanties"
+                )
+        both = set(self.transfer_safeguards) & set(
+            self.transfer_authorization_to_verify
+        )
         if both:
-            raise ValueError(f"catégories à la fois reconnues et à vérifier : {sorted(both)}")
+            raise ValueError(
+                f"catégories à la fois reconnues et à vérifier : {sorted(both)}"
+            )
         return self
 
 
@@ -134,7 +142,9 @@ class InputConfig(_Strict):
 
 class EmbeddingConfig(_Strict):
     model: Annotated[str, Field(min_length=1)]
-    dimension: Annotated[int, Field(gt=0)]  # = colonne rag_chunks.embedding, contrôlé par setup-db
+    dimension: Annotated[
+        int, Field(gt=0)
+    ]  # = colonne rag_chunks.embedding, contrôlé par setup-db
     query_prefix: str  # préfixes exigés par la famille e5
     passage_prefix: str
 
@@ -171,7 +181,9 @@ class TierModels(_Strict):
         # un alias mouvant changerait de modèle sans changer la config : rejeu faussé
         for model in (self.main, self.light):
             if "latest" in model:
-                raise ValueError(f"alias mouvant refusé : {model} (identifiant figé attendu)")
+                raise ValueError(
+                    f"alias mouvant refusé : {model} (identifiant figé attendu)"
+                )
         return self
 
 
@@ -188,7 +200,9 @@ class LLMConfig(_Strict):
     @model_validator(mode="after")
     def _modeles_du_fournisseur(self) -> "LLMConfig":
         if self.provider not in self.models:
-            raise ValueError(f"aucun modèle configuré pour le fournisseur {self.provider}")
+            raise ValueError(
+                f"aucun modèle configuré pour le fournisseur {self.provider}"
+            )
         return self
 
     def model(self, tier: Tier, provider: str | None = None) -> str:

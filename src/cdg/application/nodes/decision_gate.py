@@ -8,16 +8,23 @@ from cdg.domain.config import DecisionConfig
 from cdg.domain.decision import decide
 
 
-def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict[str, Any]:
+def decision_gate(
+    state: ContractState, decision_config: DecisionConfig
+) -> dict[str, Any]:
     # pas « config » : LangGraph réserve ce nom de paramètre au RunnableConfig
     outcome = decide(
-        state["verdicts"], state.get("failures", []), state.get("usage", []), decision_config
+        state["verdicts"],
+        state.get("failures", []),
+        state.get("usage", []),
+        decision_config,
     )
     update: dict[str, Any] = {
         "proposed_decision": outcome.proposed,
         "route": "human_review" if outcome.human_review else "explain",
     }
-    if outcome.final is not None:  # decision_gate n'écrit la décision finale que vers explain
+    if (
+        outcome.final is not None
+    ):  # decision_gate n'écrit la décision finale que vers explain
         update["final_decision"] = outcome.final
     if outcome.margin is not None:
         update["margin"] = outcome.margin

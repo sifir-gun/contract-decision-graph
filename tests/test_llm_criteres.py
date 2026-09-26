@@ -11,7 +11,14 @@ import time
 from pathlib import Path
 
 import pytest
-from doubles import ABSENT, ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import (
+    ABSENT,
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FakeCrag,
+    FixedExtractor,
+    clauses,
+)
 from langgraph.checkpoint.memory import InMemorySaver
 
 from cdg import settings
@@ -32,7 +39,9 @@ RUNS = range(1, 6)
 FIXTURES = Path(__file__).parent / "fixtures"
 CONTRACT = (FIXTURES / "contrat-synthetique-llm.txt").read_text(encoding="utf-8")
 PARTIES = ["Alpha Services Synthétiques", "Bêta Achats Synthétiques"]
-CONTRACT_FULL = (FIXTURES / "contrat-synthetique-complet.txt").read_text(encoding="utf-8")
+CONTRACT_FULL = (FIXTURES / "contrat-synthetique-complet.txt").read_text(
+    encoding="utf-8"
+)
 PARTIES_FULL = ["Gamma Transports Synthétiques", "Delta Industries Synthétiques"]
 
 
@@ -43,7 +52,12 @@ def llm():
 
 
 def report(criterion: str, run: int, **fields) -> None:
-    line = {"critere": criterion, "essai": run, "fournisseur": CONFIG.llm.provider, **fields}
+    line = {
+        "critere": criterion,
+        "essai": run,
+        "fournisseur": CONFIG.llm.provider,
+        **fields,
+    }
     print("LLM-RESULT " + json.dumps(line, ensure_ascii=False, default=str))
 
 
@@ -159,7 +173,9 @@ def value_gaps(clauses, expected: dict) -> list[str]:
 
 @pytest.mark.parametrize("contract", CONTRACTS)
 @pytest.mark.parametrize("run", RUNS)
-def test_10_vrai_modele_aucune_citation_non_verifiee(llm, series_10, pace, contract, run):
+def test_10_vrai_modele_aucune_citation_non_verifiee(
+    llm, series_10, pace, contract, run
+):
     """L'extraction réelle ne doit mener aux analystes qu'avec des citations toutes
     retrouvées mot pour mot dans le texte masqué ; sinon ré-extraction avec retour ciblé,
     puis ESCALADE avec rapport d'échec. L'issue de chaque essai entre dans la mesure."""
@@ -309,21 +325,34 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
     fin = by_domain["financier"]
     assert fin.retrieval_status == "INSUFFISANT" and fin.evidence_ids == []
     # une requête par clause qui porte un constat, chacune épuise ses passes
-    assert [c.kind for c in fin.retrieval.clauses] == ["penalites_execution", "delai_paiement"]
+    assert [c.kind for c in fin.retrieval.clauses] == [
+        "penalites_execution",
+        "delai_paiement",
+    ]
     assert all(c.passes == CONFIG.crag.max_passes for c in fin.retrieval.clauses)
     assert len(financier.queries) == CONFIG.crag.max_passes * 2
     lacking = [f for f in fin.findings if f.startswith("référentiel insuffisant")]
-    assert [f.rsplit(" ", 1)[-1] for f in lacking] == ["penalites_execution", "delai_paiement"]
-    assert (values["proposed_decision"], values["route"]) == ("ESCALADE", "human_review")
+    assert [f.rsplit(" ", 1)[-1] for f in lacking] == [
+        "penalites_execution",
+        "delai_paiement",
+    ]
+    assert (values["proposed_decision"], values["route"]) == (
+        "ESCALADE",
+        "human_review",
+    )
     # aucune réponse inventée : toute référence retenue a été rendue par la recherche
     returned = {"financier": off_topic, "juridique": on_topic}
     for verdict in values["verdicts"]:
         if verdict.domain in returned:
-            assert set(verdict.evidence_ids) <= {p.reference for p in returned[verdict.domain]}
+            assert set(verdict.evidence_ids) <= {
+                p.reference for p in returned[verdict.domain]
+            }
     jur = by_domain["juridique"]
     # témoin : le juge n'écarte pas tout, la clause qui porte un constat est justifiée
     assert [c.kind for c in jur.retrieval.clauses] == ["responsabilite_fournisseur"]
-    assert jur.retrieval_status == "OK" and all(c.retained for c in jur.retrieval.clauses)
+    assert jur.retrieval_status == "OK" and all(
+        c.retained for c in jur.retrieval.clauses
+    )
     report(
         "3",
         run,

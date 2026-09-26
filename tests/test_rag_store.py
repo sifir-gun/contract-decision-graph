@@ -41,7 +41,10 @@ def test_dimension_divergente_erreur_explicite(pg):
 
 
 def test_app_role_ne_peut_pas_ecrire_dans_le_corpus(pg):
-    with psycopg.connect(pg.app) as conn, pytest.raises(psycopg.errors.InsufficientPrivilege):
+    with (
+        psycopg.connect(pg.app) as conn,
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+    ):
         conn.execute("DELETE FROM rag_chunks WHERE false")
 
 

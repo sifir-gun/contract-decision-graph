@@ -36,7 +36,9 @@ def build_request(state: Mapping[str, Any], config: DecisionConfig) -> dict[str,
     }
 
 
-def check(human: HumanDecision, verdicts: list[AgentVerdict], config: DecisionConfig) -> str | None:
+def check(
+    human: HumanDecision, verdicts: list[AgentVerdict], config: DecisionConfig
+) -> str | None:
     """None si la décision est recevable, sinon le motif du refus."""
     rules = config.human_policy
     if human.decision not in rules.allowed_decisions:
@@ -64,7 +66,8 @@ def review(
         human = HumanDecision.model_validate(payload)
     except ValidationError as exc:
         details = "; ".join(
-            f"{'.'.join(map(str, e['loc'])) or 'réponse'} : {e['msg']}" for e in exc.errors()
+            f"{'.'.join(map(str, e['loc'])) or 'réponse'} : {e['msg']}"
+            for e in exc.errors()
         )
         return None, f"réponse invalide : {details}"
     error = check(human, verdicts, config)

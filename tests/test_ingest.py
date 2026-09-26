@@ -22,7 +22,9 @@ def ingested(pg):
     summary = rag_store.sync(pg.admin, rows, EMBEDDER.model)
     yield rows, summary
     with psycopg.connect(pg.admin) as conn:
-        conn.execute("DELETE FROM rag_chunks WHERE embedding_model = %s", (EMBEDDER.model,))
+        conn.execute(
+            "DELETE FROM rag_chunks WHERE embedding_model = %s", (EMBEDDER.model,)
+        )
 
 
 def query(pg, sql, *params):
@@ -34,7 +36,11 @@ def test_ingestion_rejouable(pg, ingested):
     rows, first = ingested
     assert first["inserted"] == len(rows) > 0
     again = rag_store.sync(pg.admin, rows, EMBEDDER.model)
-    assert (again["inserted"], again["deleted"], again["unchanged"]) == (0, 0, len(rows))
+    assert (again["inserted"], again["deleted"], again["unchanged"]) == (
+        0,
+        0,
+        len(rows),
+    )
 
 
 def test_version_bornee_stockee(pg, ingested):
@@ -58,7 +64,8 @@ def test_note_stockee_hors_du_texte(pg, ingested):
         EMBEDDER.model,
     )
     assert rows and all(
-        "Conformément" not in text and note.startswith("Conformément") for text, note in rows
+        "Conformément" not in text and note.startswith("Conformément")
+        for text, note in rows
     )
 
 
@@ -93,7 +100,9 @@ def test_hors_perimetre_et_domaines(pg, ingested):
 
 def test_extrait_disparu_supprime(pg, ingested):
     rows, _ = ingested
-    obsolete = rows[0].model_copy(update={"text": "ancienne rédaction nettoyée autrement"})
+    obsolete = rows[0].model_copy(
+        update={"text": "ancienne rédaction nettoyée autrement"}
+    )
     rag_store.insert(pg.admin, [obsolete])
     summary = rag_store.sync(pg.admin, rows, EMBEDDER.model)
     assert (summary["inserted"], summary["deleted"]) == (0, 1)
@@ -103,7 +112,8 @@ def test_sync_remplace_un_extrait_dont_la_validite_change(pg, ingested):
     rows, _ = ingested
     target = next(r for r in rows if r.reference == "C. com., art. L441-10")
     changed = [
-        r.model_copy(update={"valid_until": date(2028, 1, 1)}) if r is target else r for r in rows
+        r.model_copy(update={"valid_until": date(2028, 1, 1)}) if r is target else r
+        for r in rows
     ]
     summary = rag_store.sync(pg.admin, changed, EMBEDDER.model)
     assert (summary["inserted"], summary["deleted"]) == (1, 1)

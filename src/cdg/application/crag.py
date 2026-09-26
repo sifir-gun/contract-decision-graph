@@ -81,7 +81,11 @@ _SUBJECTS = {
     "duree_engagement": ("durée d'engagement", "mois", "non chiffrée"),
     "preavis_resiliation": ("préavis de résiliation", "mois", "non chiffré"),
     "donnees_personnelles": ("traitement de données à caractère personnel", None, None),
-    "accord_traitement_donnees": ("accord de sous-traitance des données personnelles", None, None),
+    "accord_traitement_donnees": (
+        "accord de sous-traitance des données personnelles",
+        None,
+        None,
+    ),
     "transfert_hors_ue": (
         "transfert de données personnelles hors de l'Union européenne",
         None,
@@ -133,7 +137,11 @@ def _describe(clause: Clause) -> str:
         detail = "clause absente"
     elif clause.value is None:
         # catégorie seule (transfert), sinon sens d'une valeur nulle
-        category = _CATEGORY_LABELS.get(clause.category) if clause.category is not None else None
+        category = (
+            _CATEGORY_LABELS.get(clause.category)
+            if clause.category is not None
+            else None
+        )
         detail = category or none_label or "clause présente"
     else:
         detail = f"{clause.value:g} {unit}"
@@ -196,7 +204,9 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict[str, Any]
             node=_node(state, "grade"),
         )
         numbers = output.relevant
-        if len(set(numbers)) != len(numbers) or not all(1 <= n <= len(docs) for n in numbers):
+        if len(set(numbers)) != len(numbers) or not all(
+            1 <= n <= len(docs) for n in numbers
+        ):
             raise LLMOutputError(
                 f"juge CRAG ({state['domain']}, {state['clause'].kind}) : numéro d'extrait "
                 "invalide ou répété : "
@@ -225,12 +235,18 @@ def rewrite(state: CragState, llm: LLMProvider) -> dict[str, Any]:
 def generate(state: CragState) -> dict[str, Any]:
     """Références retenues pour la clause, sans LLM ; les versions expirées sont signalées,
     jamais retenues."""
-    on, relevant, kind = state["analysis_date"], state.get("relevant", []), state["clause"].kind
+    on, relevant, kind = (
+        state["analysis_date"],
+        state.get("relevant", []),
+        state["clause"].kind,
+    )
     valid = [p for p in relevant if not expired(p.valid_until, on)]
     retained = list(dict.fromkeys(p.reference for p in valid))
     old: dict[str, date] = {}
     for p in relevant:
-        if p.valid_until is not None and expired(p.valid_until, on):  # sans fin : jamais expiré
+        if p.valid_until is not None and expired(
+            p.valid_until, on
+        ):  # sans fin : jamais expiré
             old.setdefault(p.reference, p.valid_until)
     findings = [
         f"référence expirée à la date d'analyse ({on.isoformat()}) : {reference}, "
@@ -249,7 +265,9 @@ def generate(state: CragState) -> dict[str, Any]:
         retained=retained,
         expired=list(old),
     )
-    return {"result": ClauseResult(trace=trace, findings=findings, usage=state["usage"])}
+    return {
+        "result": ClauseResult(trace=trace, findings=findings, usage=state["usage"])
+    }
 
 
 def combine(results: list[ClauseResult]) -> RetrievalResult:
@@ -271,5 +289,7 @@ def per_clause(
     Une clause hors du domaine ou répétée est une erreur explicite."""
     kinds = [c.kind for c in clauses]
     if len(set(kinds)) != len(kinds) or not set(kinds) <= set(DOMAIN_KINDS[domain]):
-        raise ValueError(f"CRAG {domain} : clauses hors du domaine ou répétées : {kinds}")
+        raise ValueError(
+            f"CRAG {domain} : clauses hors du domaine ou répétées : {kinds}"
+        )
     return combine([run_clause(start(domain, c, analysis_date)) for c in clauses])

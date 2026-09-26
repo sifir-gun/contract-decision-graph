@@ -44,7 +44,8 @@ def _methods(port) -> list[str]:
     return [
         name
         for name, member in vars(port).items()
-        if inspect.isfunction(member) and (not name.startswith("_") or name == "__call__")
+        if inspect.isfunction(member)
+        and (not name.startswith("_") or name == "__call__")
     ]
 
 

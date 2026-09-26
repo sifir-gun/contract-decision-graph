@@ -15,7 +15,9 @@ def parse_duration(text: str) -> timedelta:
     """« 24h », « 30m », « 2d », « 90s » : entier positif ou nul, une unité."""
     match = re.fullmatch(r"(\d+)([smhd])", text)
     if not match:
-        raise ValueError(f"durée invalide : {text!r} (attendu par exemple 24h, 30m, 2d)")
+        raise ValueError(
+            f"durée invalide : {text!r} (attendu par exemple 24h, 30m, 2d)"
+        )
     return timedelta(**{_UNITS[match[2]]: int(match[1])})
 
 
@@ -30,7 +32,9 @@ def expired(
     """Threads en attente depuis strictement plus que `older_than`."""
     if now.tzinfo is None:
         raise ValueError("horloge sans fuseau horaire : comparaison ambiguë")
-    return [(thread_id, since) for thread_id, since in pending if now - since > older_than]
+    return [
+        (thread_id, since) for thread_id, since in pending if now - since > older_than
+    ]
 
 
 def system_decision(waited: timedelta, older_than: timedelta) -> dict[str, Any]:

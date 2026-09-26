@@ -41,14 +41,21 @@ def build_deps(config: DecisionConfig) -> Deps:
     modèle et avant la création du thread.
     """
     llm = build_provider(config.llm)
-    embedder = fastembed.FastembedEmbedder(config.embedding, settings.embedding_cache_dir())
+    embedder = fastembed.FastembedEmbedder(
+        config.embedding, settings.embedding_cache_dir()
+    )
     retriever = rag_store.PgvectorRetriever(conninfo.app_conninfo(), embedder)
-    return Deps(extractor=LLMExtractor(llm), crag=orchestrator.crag_runner(retriever, llm, config))
+    return Deps(
+        extractor=LLMExtractor(llm),
+        crag=orchestrator.crag_runner(retriever, llm, config),
+    )
 
 
 def _not_needed(what: str):
     def fail(*args):
-        raise RuntimeError(f"{what} indisponible : cette commande n'analyse pas de contrat")
+        raise RuntimeError(
+            f"{what} indisponible : cette commande n'analyse pas de contrat"
+        )
 
     return fail
 
@@ -74,12 +81,18 @@ def _fetch_embedding_model(args: argparse.Namespace) -> dict:
     config = load_config().embedding
     cache_dir = settings.embedding_cache_dir()
     fastembed.fetch_model(config, cache_dir)
-    return {"fetch_embedding_model": "ok", "model": config.model, "cache_dir": str(cache_dir)}
+    return {
+        "fetch_embedding_model": "ok",
+        "model": config.model,
+        "cache_dir": str(cache_dir),
+    }
 
 
 def _ingest(args: argparse.Namespace) -> dict:
     config = load_config()
-    embedder = fastembed.FastembedEmbedder(config.embedding, settings.embedding_cache_dir())
+    embedder = fastembed.FastembedEmbedder(
+        config.embedding, settings.embedding_cache_dir()
+    )
     rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
     summary = rag_store.sync(conninfo.admin_conninfo(), rows, embedder.model)
     return {"ingest": "ok", "model": embedder.model, **summary}
@@ -170,7 +183,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="nom d'une partie, masqué avant analyse (option répétable)",
     )
     run.add_argument(
-        "--contract-id", help="identifiant du contrat et du thread (défaut : nom du fichier)"
+        "--contract-id",
+        help="identifiant du contrat et du thread (défaut : nom du fichier)",
     )
     run.add_argument(
         "--analysis-date",
@@ -186,7 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
     resume.add_argument("--reviewer", required=True)
     resume.add_argument("--reason", required=True)
     resume.add_argument(
-        "--overrides-block", action="store_true", help="lève un blocage dur (motif obligatoire)"
+        "--overrides-block",
+        action="store_true",
+        help="lève un blocage dur (motif obligatoire)",
     )
     resume.set_defaults(handler=_resume)
 
@@ -215,7 +231,9 @@ def main(argv: list[str] | None = None) -> int:
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
         print(
-            json.dumps({"erreur": type(exc).__name__, "detail": str(exc)}, ensure_ascii=False),
+            json.dumps(
+                {"erreur": type(exc).__name__, "detail": str(exc)}, ensure_ascii=False
+            ),
             file=sys.stderr,
         )
         return 1

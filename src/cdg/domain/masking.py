@@ -68,7 +68,9 @@ def mask(text: str, parties: Sequence[str] = ()) -> MaskResult:
 
         text = pattern.sub(replace, text)
     # noms déclarés, du plus long au plus court, en mot entier, sans tenir compte de la casse
-    numbered = {name: f"[PARTIE_{i}]" for i, name in enumerate(parties, start=1) if name}
+    numbered = {
+        name: f"[PARTIE_{i}]" for i, name in enumerate(parties, start=1) if name
+    }
     for name in sorted(numbered, key=len, reverse=True):
         pattern = re.compile(rf"(?<!\w){re.escape(name)}(?!\w)", re.IGNORECASE)
         text, n = pattern.subn(numbered[name], text)

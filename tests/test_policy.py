@@ -21,7 +21,10 @@ def human(
     overrides_block=False,
 ) -> HumanDecision:
     return HumanDecision(
-        decision=decision, reviewer=reviewer, reason=reason, overrides_block=overrides_block
+        decision=decision,
+        reviewer=reviewer,
+        reason=reason,
+        overrides_block=overrides_block,
     )
 
 
@@ -100,14 +103,20 @@ def test_no_go_sur_blocage_accepte_sans_levee():
 
 
 def test_overrides_block_sans_blocage_a_lever_refuse():
-    assert "overrides_block" in policy.check(human("GO", overrides_block=True), CLEAN, CONFIG)
-    assert "overrides_block" in policy.check(human("NO_GO", overrides_block=True), BLOCKED, CONFIG)
+    assert "overrides_block" in policy.check(
+        human("GO", overrides_block=True), CLEAN, CONFIG
+    )
+    assert "overrides_block" in policy.check(
+        human("NO_GO", overrides_block=True), BLOCKED, CONFIG
+    )
 
 
 def test_levee_interdite_par_la_configuration():
     cfg = CONFIG.model_copy(
         update={
-            "human_policy": CONFIG.human_policy.model_copy(update={"allow_block_override": False})
+            "human_policy": CONFIG.human_policy.model_copy(
+                update={"allow_block_override": False}
+            )
         }
     )
     h = human("GO", overrides_block=True)
@@ -119,7 +128,11 @@ def test_levee_interdite_par_la_configuration():
 
 
 def test_review_accepte_une_reponse_valide():
-    payload = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "risque trop élevé"}
+    payload = {
+        "decision": "NO_GO",
+        "reviewer": "relecteur-synth",
+        "reason": "risque trop élevé",
+    }
     decision, error = policy.review(payload, CLEAN, CONFIG)
     assert error is None and decision == HumanDecision(**payload)
 

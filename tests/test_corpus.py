@@ -24,16 +24,27 @@ def real(path: str) -> str:
 def test_version_bornee_et_texte_modificateur_en_metadonnees():
     article = corpus.parse_legifrance(real("code-commerce/L441-10.txt"))
     assert article.article == "L441-10"
-    assert (article.valid_from, article.valid_until) == (date(2019, 4, 26), date(2027, 1, 1))
-    assert article.amendment == ("modification", "Ordonnance n°2019-359 du 24 avril 2019 - art. 1")
-    assert "Version en vigueur" not in article.text and "Modifié par" not in article.text
+    assert (article.valid_from, article.valid_until) == (
+        date(2019, 4, 26),
+        date(2027, 1, 1),
+    )
+    assert article.amendment == (
+        "modification",
+        "Ordonnance n°2019-359 du 24 avril 2019 - art. 1",
+    )
+    assert (
+        "Version en vigueur" not in article.text and "Modifié par" not in article.text
+    )
     assert article.text.startswith("I.-Sauf dispositions contraires")
 
 
 def test_version_ouverte_et_creation():
     article = corpus.parse_legifrance(real("code-civil/1231-3.txt"))
     assert (article.valid_from, article.valid_until) == (date(2016, 10, 1), None)
-    assert article.amendment == ("création", "Ordonnance n°2016-131 du 10 février 2016 - art. 2")
+    assert article.amendment == (
+        "création",
+        "Ordonnance n°2016-131 du 10 février 2016 - art. 2",
+    )
     assert article.text.startswith("Le débiteur n'est tenu")
 
 
@@ -47,7 +58,9 @@ def test_lignes_d_interface_supprimees():
         + "\nVoir les versions\n\nComparer les versions\nTextes liés\n"
     )
     article = corpus.parse_legifrance(raw)
-    assert article.text == corpus.parse_legifrance(real("code-commerce/L441-10.txt")).text
+    assert (
+        article.text == corpus.parse_legifrance(real("code-commerce/L441-10.txt")).text
+    )
     for line in ("Voir les versions", "Comparer les versions", "Textes liés"):
         assert line not in article.text
 
@@ -68,7 +81,9 @@ def test_note_conformement_sortie_du_texte():
 def test_validite_a_la_date_d_analyse():
     article = corpus.parse_legifrance(real("code-commerce/L441-10.txt"))
     assert not corpus.expired(article.valid_until, date(2026, 12, 31))
-    assert corpus.expired(article.valid_until, date(2027, 1, 1))  # fin de validité atteinte
+    assert corpus.expired(
+        article.valid_until, date(2027, 1, 1)
+    )  # fin de validité atteinte
     assert not corpus.expired(None, date(2099, 1, 1))  # version ouverte
 
 
@@ -131,7 +146,9 @@ def test_date_de_recuperation_propre_a_un_article():
     by_ref = {a.reference: (a, domains) for a, domains in ingestion.articles()}
     clause_penale, domains = by_ref["C. civ., art. 1231-5"]
     assert (clause_penale.retrieved_at, domains) == (date(2026, 9, 25), ["financier"])
-    assert by_ref["C. civ., art. 1231-3"][0].retrieved_at == date(2026, 9, 24)  # date de la source
+    assert by_ref["C. civ., art. 1231-3"][0].retrieved_at == date(
+        2026, 9, 24
+    )  # date de la source
 
 
 # --- Fiches : avertissement, et aucune affirmation sans source du corpus ------------------
@@ -156,10 +173,14 @@ def test_fiches_avertissement_et_deux_sections():
     for fiche in ingestion.load_fiches():
         assert fiche.body.startswith(corpus.FICHE_DISCLAIMER), fiche.id
         sections = corpus.fiche_sections(fiche.body)
-        assert list(sections) == [corpus.TEXT_SECTION, corpus.APPLICATION_SECTION], fiche.id
+        assert list(sections) == [corpus.TEXT_SECTION, corpus.APPLICATION_SECTION], (
+            fiche.id
+        )
         assert all(sections.values()), f"{fiche.id} : section vide"
         # aucune affirmation hors des deux sections
-        assert sum(map(len, sections.values())) == len(corpus.claim_lines(fiche.body)), fiche.id
+        assert sum(map(len, sections.values())) == len(
+            corpus.claim_lines(fiche.body)
+        ), fiche.id
 
 
 def test_ce_que_dit_le_texte_chaque_paraphrase_cite_un_article_admis():
@@ -198,8 +219,12 @@ def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     for row in rows:
         validity.setdefault(row.source_id, set()).add(row.valid_until)
     assert validity["fiche-delais-paiement"] == {date(2027, 1, 1)}
-    assert validity["fiche-penalites-execution"] == {None}  # C. civ. 1231-5, version ouverte
-    assert validity["fiche-sous-traitance-rgpd"] == {None}  # articles sans fin de validité
+    assert validity["fiche-penalites-execution"] == {
+        None
+    }  # C. civ. 1231-5, version ouverte
+    assert validity["fiche-sous-traitance-rgpd"] == {
+        None
+    }  # articles sans fin de validité
     assert validity["code-commerce"] >= {date(2027, 1, 1)}
 
 

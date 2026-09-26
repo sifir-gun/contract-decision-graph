@@ -41,7 +41,9 @@ def justify(
         score=assessment.score,
         hard_block=assessment.hard_block,
         findings=findings,
-        evidence_ids=list(dict.fromkeys(ref for c in trace.clauses for ref in c.retained)),
+        evidence_ids=list(
+            dict.fromkeys(ref for c in trace.clauses for ref in c.retained)
+        ),
         retrieval_status="INSUFFISANT" if lacking else "OK",
         retrieval=trace,
     )

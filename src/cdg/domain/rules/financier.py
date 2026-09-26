@@ -61,7 +61,9 @@ def financier(clauses: list[Clause], config: DecisionConfig) -> Assessment:
 
     revision = clause(clauses, "revision_prix")
     if revision.present and revision.value is None:
-        findings.append(block("revision_prix", "blocage : révision de prix non plafonnée"))
+        findings.append(
+            block("revision_prix", "blocage : révision de prix non plafonnée")
+        )
 
     execution = clause(clauses, "penalites_execution")
     kind, penalty = "penalites_execution", cfg.execution_penalties_score_penalty

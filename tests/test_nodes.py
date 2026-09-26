@@ -1,7 +1,14 @@
 """Nœuds purs, testés sans LangGraph."""
 
 import pytest
-from doubles import ABSENT, ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import (
+    ABSENT,
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FakeCrag,
+    FixedExtractor,
+    clauses,
+)
 
 from cdg.application.deps import RetrievalResult
 from cdg.application.nodes.analyst import analyst
@@ -12,7 +19,12 @@ from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.domain.config import load_config
 from cdg.domain.input_checks import rejection
-from cdg.domain.models import REQUIRED_KINDS, AgentVerdict, ClauseRetrieval, RetrievalTrace
+from cdg.domain.models import (
+    REQUIRED_KINDS,
+    AgentVerdict,
+    ClauseRetrieval,
+    RetrievalTrace,
+)
 
 CONFIG = load_config()
 
@@ -88,14 +100,18 @@ def test_extract_clauses_incremente_les_essais_et_transmet_le_retour():
         extractor=extractor,
     )
     assert set(out) == {"clauses", "extraction_attempts", "usage"}
-    assert out["extraction_attempts"] == 2 and len(out["clauses"]) == len(REQUIRED_KINDS)
+    assert out["extraction_attempts"] == 2 and len(out["clauses"]) == len(
+        REQUIRED_KINDS
+    )
     assert out["usage"][0].tokens_in == 100
     assert extractor.calls == [("Contrat.", ["citation introuvable: revision_prix"])]
 
 
 def test_extract_clauses_premier_essai_sans_retour():
     extractor = FixedExtractor(clauses())
-    out = extract_clauses({"raw_text": "Contrat.", "extraction_attempts": 0}, extractor=extractor)
+    out = extract_clauses(
+        {"raw_text": "Contrat.", "extraction_attempts": 0}, extractor=extractor
+    )
     assert out["extraction_attempts"] == 1 and extractor.calls == [("Contrat.", [])]
 
 
@@ -103,7 +119,11 @@ def test_extract_clauses_premier_essai_sans_retour():
 
 
 def analyse(domain, crag, **overrides):
-    inp = {"domain": domain, "clauses": clauses(**overrides), "analysis_date": ANALYSIS_DATE}
+    inp = {
+        "domain": domain,
+        "clauses": clauses(**overrides),
+        "analysis_date": ANALYSIS_DATE,
+    }
     return analyst(inp, crag=crag, decision_config=CONFIG)
 
 
@@ -118,19 +138,31 @@ def test_analyst_ne_renvoie_que_verdicts_et_usage():
 
 
 def test_analyst_sans_constat_ne_cherche_rien_et_reste_ok():
-    crag = FakeCrag(empty={"financier"})  # même un corpus vide ne gêne pas : rien à justifier
+    crag = FakeCrag(
+        empty={"financier"}
+    )  # même un corpus vide ne gêne pas : rien à justifier
     [v] = analyse("financier", crag)["verdicts"]
     assert crag.kinds == {"financier": []}
-    assert (v.retrieval_status, v.score, v.findings, v.evidence_ids) == ("OK", 1.0, [], [])
+    assert (v.retrieval_status, v.score, v.findings, v.evidence_ids) == (
+        "OK",
+        1.0,
+        [],
+        [],
+    )
     assert v.retrieval.clauses == []
 
 
 def test_analyst_crag_sur_les_seules_clauses_qui_portent_un_constat():
     crag = FakeCrag()
     # pénalités d'exécution absentes (pénalité), délai absent (information), révision plafonnée
-    [v] = analyse("financier", crag, penalites_execution=ABSENT, delai_paiement=ABSENT)["verdicts"]
+    [v] = analyse("financier", crag, penalites_execution=ABSENT, delai_paiement=ABSENT)[
+        "verdicts"
+    ]
     assert crag.kinds == {"financier": ["penalites_execution", "delai_paiement"]}
-    assert [c.kind for c in v.retrieval.clauses] == ["penalites_execution", "delai_paiement"]
+    assert [c.kind for c in v.retrieval.clauses] == [
+        "penalites_execution",
+        "delai_paiement",
+    ]
     assert v.retrieval_status == "OK" and v.score == 0.6
 
 
@@ -162,7 +194,9 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
         assert analysis_date == ANALYSIS_DATE
         received.extend(c.kind for c in clauses)
         return RetrievalResult(
-            trace=trace, usage=[], findings=["référence expirée à la date d'analyse : L441-10"]
+            trace=trace,
+            usage=[],
+            findings=["référence expirée à la date d'analyse : L441-10"],
         )
 
     [v] = analyse("financier", crag, penalites_execution=2.0)["verdicts"]

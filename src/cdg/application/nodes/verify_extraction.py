@@ -12,7 +12,9 @@ from cdg.domain.config import DecisionConfig
 from cdg.domain.verification import check_extraction
 
 
-def verify_extraction(state: ContractState, decision_config: DecisionConfig) -> dict[str, Any]:
+def verify_extraction(
+    state: ContractState, decision_config: DecisionConfig
+) -> dict[str, Any]:
     failures = state.get("failures", [])
     if failures:  # extraction en échec (garde de l'orchestrateur) : rien à vérifier
         return escalate(failures)

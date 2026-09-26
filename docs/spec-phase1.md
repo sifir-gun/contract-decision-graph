@@ -176,7 +176,9 @@ class Usage(BaseModel):
 class ContractState(TypedDict, total=False):
     contract_id: str
     raw_text: str
-    analysis_date: date  # versions des textes jugées à cette date (J3) ; fixée par run_contract
+    analysis_date: (
+        date  # versions des textes jugées à cette date (J3) ; fixée par run_contract
+    )
     reject_reason: str | None
     clauses: list[Clause]
     extraction_attempts: int
@@ -227,7 +229,10 @@ def decide(verdicts, failures, usage, config) -> GateOutcome: ...
 # src/cdg/application/nodes/decision_gate.py : adaptation état -> domaine -> état
 def decision_gate(state: ContractState, decision_config: DecisionConfig) -> dict:
     outcome = decide(
-        state["verdicts"], state.get("failures", []), state.get("usage", []), decision_config
+        state["verdicts"],
+        state.get("failures", []),
+        state.get("usage", []),
+        decision_config,
     )
     update = {
         "proposed_decision": outcome.proposed,
@@ -254,7 +259,9 @@ def read_route(state: ContractState) -> str:
 
 def route_after_verify(state: ContractState):
     if state["route"] == "analysts":  # décision lue dans l'état
-        return [Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS]
+        return [
+            Send("analyst", {"domain": d, "clauses": state["clauses"]}) for d in DOMAINS
+        ]
     return state["route"]
 
 
@@ -263,13 +270,17 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
     request = policy.build_request(state, decision_config)
     while True:
         # review : validation Pydantic de la réponse brute, puis politique versionnée
-        human, error = policy.review(interrupt(request), state.get("verdicts", []), decision_config)
+        human, error = policy.review(
+            interrupt(request), state.get("verdicts", []), decision_config
+        )
         if error is None:
             return {"human": human, "final_decision": human.decision}
         request = {**request, "error": error}  # mal formée ou refusée : redemandée
 
 
-def build_graph(config: DecisionConfig, deps: Deps):  # les tests injectent des doublures
+def build_graph(
+    config: DecisionConfig, deps: Deps
+):  # les tests injectent des doublures
     builder = StateGraph(ContractState)
     ...  # add_node des 9 nœuds, dépendances liées
     builder.add_edge(START, "validate_input")
@@ -278,10 +289,14 @@ def build_graph(config: DecisionConfig, deps: Deps):  # les tests injectent des 
     )  # human_review : garde d'échec (J3)
     builder.add_edge("extract_clauses", "verify_extraction")
     builder.add_conditional_edges(
-        "verify_extraction", route_after_verify, ["extract_clauses", "analyst", "human_review"]
+        "verify_extraction",
+        route_after_verify,
+        ["extract_clauses", "analyst", "human_review"],
     )
     builder.add_edge("analyst", "decision_gate")
-    builder.add_conditional_edges("decision_gate", read_route, ["human_review", "explain"])
+    builder.add_conditional_edges(
+        "decision_gate", read_route, ["human_review", "explain"]
+    )
     builder.add_edge("human_review", "explain")
     builder.add_edge("explain", "audit_seal")
     builder.add_edge("audit_seal", END)
@@ -314,7 +329,9 @@ with PostgresSaver.from_conn_string(DB_URI) as checkpointer:
         run_config,
     )
 
-    history = list(graph.get_state_history(run_config))  # tous les checkpoints du thread
+    history = list(
+        graph.get_state_history(run_config)
+    )  # tous les checkpoints du thread
 ```
 
 Points à maîtriser :

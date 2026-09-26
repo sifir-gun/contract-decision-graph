@@ -62,7 +62,9 @@ def aggregate(verdicts: list[AgentVerdict], config: DecisionConfig) -> Aggregate
         decision = "GO_RESERVES"
     else:
         decision = "NO_GO"
-    return Aggregate(decision=decision, score=score, margin=margin, hard_block=hard_block)
+    return Aggregate(
+        decision=decision, score=score, margin=margin, hard_block=hard_block
+    )
 
 
 def failure_report(failures: list[NodeFailure]) -> dict[str, Any]:
@@ -114,14 +116,19 @@ def decide(
             report["budget"] = {"tokens": used, "limit": limit}
         if any(v.hard_block for v in verdicts):  # 1. le blocage établi suffit
             return _hard_block(config, None, report)
-        return GateOutcome(proposed="ESCALADE", human_review=True, failure_report=report)
+        return GateOutcome(
+            proposed="ESCALADE", human_review=True, failure_report=report
+        )
 
     d = aggregate(verdicts, config)
     if d.hard_block:  # 1. NO_GO établi, marge ignorée
         return _hard_block(config, d.margin, budget_report if over else None)
     if over:  # 3. budget
         return GateOutcome(
-            proposed="ESCALADE", human_review=True, margin=d.margin, failure_report=budget_report
+            proposed="ESCALADE",
+            human_review=True,
+            margin=d.margin,
+            failure_report=budget_report,
         )
     # 4. INSUFFISANT, 5. conflit, 6. seuils : déjà ordonnés par aggregate
     low_margin = rounded(d.margin) < rounded(config.min_margin)

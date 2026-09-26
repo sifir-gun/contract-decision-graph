@@ -10,7 +10,10 @@ from contextlib import contextmanager
 from typing import Any
 
 from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.serde.event_hooks import SerdeEvent, register_serde_event_listener
+from langgraph.checkpoint.serde.event_hooks import (
+    SerdeEvent,
+    register_serde_event_listener,
+)
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
@@ -70,7 +73,11 @@ class StrictSerializer(JsonPlusSerializer):
         finally:
             _serde_watch.events = previous
         blocked = sorted(
-            {f"{e['module']}.{e['name']}" for e in events if e["kind"] in _BLOCKED_KINDS}
+            {
+                f"{e['module']}.{e['name']}"
+                for e in events
+                if e["kind"] in _BLOCKED_KINDS
+            }
         )
         if blocked:
             raise BlockedDeserialization(
@@ -115,7 +122,9 @@ def setup_database(admin_conninfo: str) -> None:
     with open_saver(admin_conninfo) as saver:
         saver.setup()
         conn = saver.conn
-        if not isinstance(conn, Connection):  # open_saver passe une connexion, jamais un pool
+        if not isinstance(
+            conn, Connection
+        ):  # open_saver passe une connexion, jamais un pool
             raise TypeError(f"connexion psycopg attendue, reçu {type(conn).__name__}")
         for statement in _CHECKPOINT_GRANTS:
             conn.execute(statement.format(role=sql.Identifier(APP_ROLE)))

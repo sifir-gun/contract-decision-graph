@@ -15,7 +15,9 @@ SRC = Path(__file__).resolve().parent.parent / "src" / "cdg"
 # bibliothèque -> seuls chemins (relatifs à src/cdg) où elle peut être importée
 LIBRARIES = {
     "langgraph": ("adapters/langgraph/",),
-    "langchain_core": ("adapters/langgraph/",),  # RunnableConfig, type des appels au graphe
+    "langchain_core": (
+        "adapters/langgraph/",
+    ),  # RunnableConfig, type des appels au graphe
     # PostgresSaver exige une connexion psycopg
     "psycopg": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
     "pgvector": ("adapters/postgres/",),
@@ -43,7 +45,9 @@ def _targets(path: Path) -> list[str]:
             targets += [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
             if node.level:
-                raise AssertionError(f"{path} : import relatif interdit (nom absolu attendu)")
+                raise AssertionError(
+                    f"{path} : import relatif interdit (nom absolu attendu)"
+                )
             targets.append(node.module)
             targets += [f"{node.module}.{alias.name}" for alias in node.names]
     return targets
@@ -134,10 +138,16 @@ def _tree(tmp_path: Path, files: dict[str, str]) -> Path:
 
 @pytest.mark.parametrize(
     "code",
-    ["import langgraph", "from langgraph.types import Send", "import langgraph.graph as g"],
+    [
+        "import langgraph",
+        "from langgraph.types import Send",
+        "import langgraph.graph as g",
+    ],
 )
 def test_detection_bibliotheque(tmp_path, code):
-    root = _tree(tmp_path, {"application/nodes/x.py": code, "adapters/langgraph/ok.py": code})
+    root = _tree(
+        tmp_path, {"application/nodes/x.py": code, "adapters/langgraph/ok.py": code}
+    )
     assert library_offenders(root, "langgraph", LIBRARIES["langgraph"]) == [
         "application/nodes/x.py"
     ]
@@ -149,7 +159,9 @@ def test_detection_bibliotheque_import_local(tmp_path):
 
 
 def test_nom_voisin_non_confondu(tmp_path):
-    root = _tree(tmp_path, {"domain/x.py": "import langgraphx\nfrom pydantic import BaseModel"})
+    root = _tree(
+        tmp_path, {"domain/x.py": "import langgraphx\nfrom pydantic import BaseModel"}
+    )
     assert library_offenders(root, "langgraph", LIBRARIES["langgraph"]) == []
 
 

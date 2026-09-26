@@ -49,7 +49,9 @@ def problems_of(raw_text: str, clauses: list[Clause]) -> list[str]:
     counts = Counter(c.kind for c in clauses)
     problems = [f"clause manquante: {k}" for k in REQUIRED_KINDS if counts[k] == 0]
     problems += [f"clause en double: {k}" for k in counts if counts[k] > 1]
-    problems += [f"type de clause inconnu: {k}" for k in counts if k not in REQUIRED_KINDS]
+    problems += [
+        f"type de clause inconnu: {k}" for k in counts if k not in REQUIRED_KINDS
+    ]
     problems += [
         f"catégorie manquante: {c.kind}"
         for c in clauses

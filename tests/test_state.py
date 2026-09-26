@@ -31,7 +31,9 @@ from cdg.domain.models import (
 
 
 def test_clause_presente_avec_citation():
-    c = Clause(kind="duree_engagement", present=True, quote="Durée : 24 mois.", value=24)
+    c = Clause(
+        kind="duree_engagement", present=True, quote="Durée : 24 mois.", value=24
+    )
     assert c.value == 24.0
 
 
@@ -81,7 +83,9 @@ def test_verdict_score_entre_0_et_1(score):
         AgentVerdict(**_verdict(score=score))
 
 
-@pytest.mark.parametrize("field,value", [("domain", "fiscal"), ("retrieval_status", "PARTIEL")])
+@pytest.mark.parametrize(
+    "field,value", [("domain", "fiscal"), ("retrieval_status", "PARTIEL")]
+)
 def test_verdict_valeurs_fermees(field, value):
     with pytest.raises(ValidationError):
         AgentVerdict(**_verdict(**{field: value}))
@@ -97,7 +101,13 @@ def test_decision_humaine_par_defaut_ne_leve_pas_de_blocage():
 
 @pytest.mark.parametrize("field", ["tokens_in", "tokens_out", "latency_ms"])
 def test_usage_refuse_les_valeurs_negatives(field):
-    base = {"node": "analyst", "model": "m", "tokens_in": 1, "tokens_out": 1, "latency_ms": 1}
+    base = {
+        "node": "analyst",
+        "model": "m",
+        "tokens_in": 1,
+        "tokens_out": 1,
+        "latency_ms": 1,
+    }
     with pytest.raises(ValidationError):
         Usage(**(base | {field: -1}))
 
@@ -165,7 +175,10 @@ def test_etat_prive_des_analystes():
 
 
 def test_source_humaine_par_defaut():
-    assert HumanDecision(decision="GO", reviewer="relecteur-synth", reason="m").source == "humain"
+    assert (
+        HumanDecision(decision="GO", reviewer="relecteur-synth", reason="m").source
+        == "humain"
+    )
 
 
 def test_decision_systeme_no_go_acceptee():
@@ -179,14 +192,20 @@ def test_decision_systeme_no_go_acceptee():
 def test_decision_systeme_ne_peut_etre_que_no_go(decision):
     with pytest.raises(ValidationError, match="NO_GO"):
         HumanDecision(
-            decision=decision, reviewer="systeme:expire", reason="timeout", source="systeme"
+            decision=decision,
+            reviewer="systeme:expire",
+            reason="timeout",
+            source="systeme",
         )
 
 
 def test_decision_systeme_exige_un_relecteur_systeme():
     with pytest.raises(ValidationError, match="systeme:"):
         HumanDecision(
-            decision="NO_GO", reviewer="relecteur-synth", reason="timeout", source="systeme"
+            decision="NO_GO",
+            reviewer="relecteur-synth",
+            reason="timeout",
+            source="systeme",
         )
 
 
@@ -218,7 +237,11 @@ def test_verdict_sans_resume_du_crag_par_defaut():
 
 def test_resume_du_crag_par_clause():
     clause = ClauseRetrieval(
-        kind="delai_paiement", queries=["q1", "q2"], passes=2, retained=[], expired=["L441-10"]
+        kind="delai_paiement",
+        queries=["q1", "q2"],
+        passes=2,
+        retained=[],
+        expired=["L441-10"],
     )
     assert RetrievalTrace(clauses=[clause]).model_dump() == {
         "clauses": [
@@ -236,9 +259,14 @@ def test_resume_du_crag_par_clause():
 
 
 def test_echec_de_noeud():
-    f = NodeFailure(node="analyst", error="ValueError", message="m", attempts=1, domain="financier")
+    f = NodeFailure(
+        node="analyst", error="ValueError", message="m", attempts=1, domain="financier"
+    )
     assert f.model_dump()["domain"] == "financier"
-    assert NodeFailure(node="extract_clauses", error="E", message="m", attempts=1).domain is None
+    assert (
+        NodeFailure(node="extract_clauses", error="E", message="m", attempts=1).domain
+        is None
+    )
     with pytest.raises(ValidationError):
         NodeFailure(node="analyst", error="E", message="m", attempts=0)
     with pytest.raises(ValidationError):

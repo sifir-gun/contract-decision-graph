@@ -101,10 +101,14 @@ def test_categorie_de_transfert_obligatoire_si_presente():
 
 def test_categorie_inattendue_sur_un_autre_type():
     items = [
-        c if c.kind != "revision_prix" else c.model_copy(update={"category": "certification"})
+        c
+        if c.kind != "revision_prix"
+        else c.model_copy(update={"category": "certification"})
         for c in clauses()
     ]
-    assert verify(items)["extraction_feedback"] == ["catégorie inattendue: revision_prix"]
+    assert verify(items)["extraction_feedback"] == [
+        "catégorie inattendue: revision_prix"
+    ]
 
 
 def _with(kind, **update):
@@ -117,7 +121,9 @@ def test_delai_chiffre_exige_son_point_de_depart():
 
 
 def test_delai_non_chiffre_sans_point_de_depart_accepte():
-    assert verify(_with("delai_paiement", value=None, category=None)) == {"route": "analysts"}
+    assert verify(_with("delai_paiement", value=None, category=None)) == {
+        "route": "analysts"
+    }
 
 
 @pytest.mark.parametrize(
@@ -130,7 +136,9 @@ def test_categorie_d_un_autre_type_refusee(kind, category):
 
 
 def test_extraction_en_echec_escalade_sans_verification():
-    failure = NodeFailure(node="extract_clauses", error="LLMOutputError", message="m", attempts=1)
+    failure = NodeFailure(
+        node="extract_clauses", error="LLMOutputError", message="m", attempts=1
+    )
     state = {"raw_text": CONTRACT_TEXT, "extraction_attempts": 0, "failures": [failure]}
     out = verify_extraction(state, decision_config=CONFIG)
     assert out == {

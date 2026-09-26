@@ -12,7 +12,10 @@ def juridique(clauses: list[Clause], config: DecisionConfig) -> Assessment:
     acheteur = clause(clauses, "responsabilite_acheteur")
     if acheteur.present and acheteur.value is None:
         findings.append(
-            block("responsabilite_acheteur", "blocage : responsabilité de l'acheteur illimitée")
+            block(
+                "responsabilite_acheteur",
+                "blocage : responsabilité de l'acheteur illimitée",
+            )
         )
 
     fournisseur = clause(clauses, "responsabilite_fournisseur")

@@ -7,7 +7,10 @@ from doubles import clauses, usage, verdict
 from langgraph.types import Interrupt, Send
 from pydantic import BaseModel
 
-from cdg.adapters.langgraph.checkpointer import BlockedDeserialization, strict_serializer
+from cdg.adapters.langgraph.checkpointer import (
+    BlockedDeserialization,
+    strict_serializer,
+)
 from cdg.domain.models import HumanDecision
 
 

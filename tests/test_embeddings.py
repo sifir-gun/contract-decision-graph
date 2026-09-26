@@ -32,7 +32,10 @@ def test_vecteurs_en_listes_de_la_bonne_dimension():
     embedder = fastembed.FastembedEmbedder(CONFIG, model=FakeModel())
     [vector] = embedder.embed_passages(["texte"])
     assert isinstance(vector, list) and len(vector) == 1024
-    assert (embedder.model, embedder.dimension) == ("intfloat/multilingual-e5-large", 1024)
+    assert (embedder.model, embedder.dimension) == (
+        "intfloat/multilingual-e5-large",
+        1024,
+    )
 
 
 def test_dimension_inattendue_erreur_explicite():

@@ -27,7 +27,9 @@ BUDGET = CONFIG.budget.max_tokens_per_contract
 
 
 def make(clause_overrides=None, empty=(), crag_tokens=0):
-    extractor = FixedExtractor(clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100)
+    extractor = FixedExtractor(
+        clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100
+    )
     crag = FakeCrag(empty, tokens_in=crag_tokens)
     graph = build_graph(CONFIG, Deps(extractor=extractor, crag=crag)).compile()
     return graph, extractor, crag
@@ -36,7 +38,11 @@ def make(clause_overrides=None, empty=(), crag_tokens=0):
 def run(raw_text=CONTRACT_TEXT, **kwargs):
     graph, extractor, crag = make(**kwargs)
     out = graph.invoke(
-        {"contract_id": "c-synth-001", "raw_text": raw_text, "analysis_date": ANALYSIS_DATE}
+        {
+            "contract_id": "c-synth-001",
+            "raw_text": raw_text,
+            "analysis_date": ANALYSIS_DATE,
+        }
     )
     return out, extractor, crag
 
@@ -44,7 +50,11 @@ def run(raw_text=CONTRACT_TEXT, **kwargs):
 def updates(raw_text=CONTRACT_TEXT, **kwargs) -> list[tuple[str, dict]]:
     graph, _, _ = make(**kwargs)
     steps = graph.stream(
-        {"contract_id": "c-synth-001", "raw_text": raw_text, "analysis_date": ANALYSIS_DATE},
+        {
+            "contract_id": "c-synth-001",
+            "raw_text": raw_text,
+            "analysis_date": ANALYSIS_DATE,
+        },
         stream_mode="updates",
     )
     return [(node, update) for step in steps for node, update in step.items()]
@@ -88,7 +98,9 @@ def test_1_quatre_analystes_puis_un_seul_decision_gate():
     ups = updates()
     names = [node for node, _ in ups]
     assert names.count("analyst") == 4 and names.count("decision_gate") == 1
-    assert max(i for i, n in enumerate(names) if n == "analyst") < names.index("decision_gate")
+    assert max(i for i, n in enumerate(names) if n == "analyst") < names.index(
+        "decision_gate"
+    )
     # un analyste ne renvoie que verdicts et usage
     assert all(set(u) == {"verdicts", "usage"} for n, u in ups if n == "analyst")
 
@@ -117,18 +129,28 @@ def test_2_blocage_dur_no_go_dans_le_graphe():
 # juridique 0,5 et opérationnel 0,7 : score 0,79, marge 0,04 < 0,05
 LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 THREAD = {"configurable": {"thread_id": "c-synth-001"}}
-VALID = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "marge trop faible"}
+VALID = {
+    "decision": "NO_GO",
+    "reviewer": "relecteur-synth",
+    "reason": "marge trop faible",
+}
 
 
 def start(clause_overrides=None, empty=(), crag_tokens=0, config=CONFIG):
     """Graphe avec checkpointer mémoire, lancé jusqu'à sa première suspension."""
-    extractor = FixedExtractor(clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100)
+    extractor = FixedExtractor(
+        clauses(**(clause_overrides or {})), tokens_in=500, tokens_out=100
+    )
     crag = FakeCrag(empty, tokens_in=crag_tokens)
     graph = build_graph(config, Deps(extractor=extractor, crag=crag)).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
     out = graph.invoke(
-        {"contract_id": "c-synth-001", "raw_text": CONTRACT_TEXT, "analysis_date": ANALYSIS_DATE},
+        {
+            "contract_id": "c-synth-001",
+            "raw_text": CONTRACT_TEXT,
+            "analysis_date": ANALYSIS_DATE,
+        },
         THREAD,
     )
     return graph, out
@@ -141,11 +163,19 @@ def request_of(out) -> dict:
 
 def test_4_marge_faible_suspend_et_expose_la_charge_utile():
     graph, out = start(clause_overrides=LOW_MARGIN)
-    assert (out["route"], out["proposed_decision"], out["margin"]) == ("human_review", "GO", 0.04)
+    assert (out["route"], out["proposed_decision"], out["margin"]) == (
+        "human_review",
+        "GO",
+        0.04,
+    )
     assert "final_decision" not in out
     assert graph.get_state(THREAD).next == ("human_review",)
     request = request_of(out)
-    assert (request["contract_id"], request["proposed_decision"], request["margin"]) == (
+    assert (
+        request["contract_id"],
+        request["proposed_decision"],
+        request["margin"],
+    ) == (
         "c-synth-001",
         "GO",
         0.04,
@@ -214,15 +244,21 @@ def test_par_defaut_un_blocage_dur_n_atteint_jamais_human_review(domain):
     graph, out = start(clause_overrides=BLOCKS[domain])  # avec checkpointer
     assert "__interrupt__" not in out and graph.get_state(THREAD).next == ()
     assert (out["route"], out["final_decision"]) == ("explain", "NO_GO")
-    assert "human_review" not in [n for n, _ in updates(clause_overrides=BLOCKS[domain])]
+    assert "human_review" not in [
+        n for n, _ in updates(clause_overrides=BLOCKS[domain])
+    ]
 
 
 def test_12_blocage_dur_en_revue_suspend_avec_no_go_propose():
     graph, out = start(clause_overrides=BLOCKED, config=hard_block_review_config())
     assert (out["route"], out["proposed_decision"]) == ("human_review", "NO_GO")
-    assert "final_decision" not in out and graph.get_state(THREAD).next == ("human_review",)
+    assert "final_decision" not in out and graph.get_state(THREAD).next == (
+        "human_review",
+    )
     request = request_of(out)
-    assert [v["domain"] for v in request["verdicts"] if v["hard_block"]] == ["juridique"]
+    assert [v["domain"] for v in request["verdicts"] if v["hard_block"]] == [
+        "juridique"
+    ]
 
 
 def test_12_levee_sans_overrides_block_refusee_puis_acceptee_avec_motif():
@@ -256,7 +292,11 @@ def test_rejet_scelle_sans_decision_finale():
     # les canaux à réducteur valent [] même sans écriture
     assert out.get("final_decision") is None and out["verdicts"] == []
     assert extractor.calls == [] and crag.calls == []
-    assert [n for n, _ in updates(raw_text="   ")] == ["validate_input", "reject", "audit_seal"]
+    assert [n for n, _ in updates(raw_text="   ")] == [
+        "validate_input",
+        "reject",
+        "audit_seal",
+    ]
 
 
 # --- Structure : arêtes conformes à la spec -------------------------------------------
@@ -295,7 +335,11 @@ def test_run_contract_masque_avant_le_graphe():
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
     status = orchestrator.run_contract(
-        graph, "c-pii", CONTRACT_TEXT + PII, parties=["Acme Industrie"], analysis_date=ANALYSIS_DATE
+        graph,
+        "c-pii",
+        CONTRACT_TEXT + PII,
+        parties=["Acme Industrie"],
+        analysis_date=ANALYSIS_DATE,
     )
     assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
     raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
@@ -311,11 +355,15 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
     from cdg.application.extraction import LLMExtractor
 
     llm = FakeLLM({"extract_clauses": {"clauses": [c.model_dump() for c in clauses()]}})
-    graph = build_graph(CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())).compile(
-        checkpointer=InMemorySaver(serde=strict_serializer())
-    )
+    graph = build_graph(
+        CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())
+    ).compile(checkpointer=InMemorySaver(serde=strict_serializer()))
     orchestrator.run_contract(
-        graph, "c-llm", CONTRACT_TEXT + PII, parties=["Acme Industrie"], analysis_date=ANALYSIS_DATE
+        graph,
+        "c-llm",
+        CONTRACT_TEXT + PII,
+        parties=["Acme Industrie"],
+        analysis_date=ANALYSIS_DATE,
     )
     [call] = llm.calls
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
@@ -330,9 +378,9 @@ def extraction_graph(answers):
     from cdg.application.extraction import LLMExtractor
 
     llm = FakeLLM({"extract_clauses": answers})
-    graph = build_graph(CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())).compile(
-        checkpointer=InMemorySaver(serde=strict_serializer())
-    )
+    graph = build_graph(
+        CONFIG, Deps(extractor=LLMExtractor(llm), crag=FakeCrag())
+    ).compile(checkpointer=InMemorySaver(serde=strict_serializer()))
     return graph, llm
 
 
@@ -344,7 +392,9 @@ def with_invented_quote():
 
 def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
     graph, llm = extraction_graph([with_invented_quote(), with_invented_quote()])
-    status = orchestrator.run_contract(graph, "c-10", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
+    status = orchestrator.run_contract(
+        graph, "c-10", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+    )
     assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
     assert status["failure_report"] == {
         "stage": "extraction",
@@ -360,5 +410,7 @@ def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
 def test_10_citation_corrigee_au_second_essai():
     good = {"clauses": [c.model_dump() for c in clauses()]}
     graph, llm = extraction_graph([with_invented_quote(), good])
-    status = orchestrator.run_contract(graph, "c-10b", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE)
+    status = orchestrator.run_contract(
+        graph, "c-10b", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE
+    )
     assert len(llm.calls) == 2 and len(status["verdicts"]) == 4

@@ -43,7 +43,9 @@ def test_2_un_seul_blocage_dur_donne_no_go_quel_que_soit_le_score(blocked):
 def test_2_blocage_dur_ignore_une_marge_faible():
     # sans le blocage : 0,79, soit GO avec une marge de 0,04, qui partirait en revue humaine
     vs = verdicts(
-        juridique={"score": 0.5}, operationnel={"score": 0.7}, conformite={"hard_block": True}
+        juridique={"score": 0.5},
+        operationnel={"score": 0.7},
+        conformite={"hard_block": True},
     )
     out = gate(vs)
     assert out["route"] == "explain" and out["final_decision"] == "NO_GO"
@@ -94,7 +96,11 @@ def test_total_des_tokens_entrants_et_sortants():
 
 def test_insuffisant_escalade_sans_decision_finale():
     out = gate(verdicts(conformite={"status": "INSUFFISANT"}))
-    assert out == {"proposed_decision": "ESCALADE", "margin": 0.25, "route": "human_review"}
+    assert out == {
+        "proposed_decision": "ESCALADE",
+        "margin": 0.25,
+        "route": "human_review",
+    }
 
 
 def test_conflit_escalade():
@@ -108,7 +114,9 @@ def test_ecart_egal_au_seuil_n_est_pas_un_conflit():
 
 
 def test_conflit_calcule_sur_les_seuls_domaines_ok():
-    assert not conflict(verdicts(conformite={"score": 0.0, "status": "INSUFFISANT"}), 0.5)
+    assert not conflict(
+        verdicts(conformite={"score": 0.0, "status": "INSUFFISANT"}), 0.5
+    )
     assert conflict(verdicts(conformite={"score": 0.0}), 0.5)
 
 
@@ -139,7 +147,12 @@ def test_scenarios_de_controle(scores, score, decision, margin, route):
 
 
 def test_score_pile_au_seuil_malgre_le_bruit_flottant():
-    scores = {"juridique": 0.41, "financier": 0.47, "conformite": 0.47, "operationnel": 0.71}
+    scores = {
+        "juridique": 0.41,
+        "financier": 0.47,
+        "conformite": 0.47,
+        "operationnel": 0.71,
+    }
     raw = sum(CONFIG.weight(d) * s for d, s in scores.items())
     assert raw == 0.49999999999999994  # sans arrondi : NO_GO
     a = aggregate(verdicts(**{d: {"score": s} for d, s in scores.items()}), CONFIG)
@@ -159,7 +172,9 @@ def test_score_juste_sous_le_seuil_go():
 
 
 def test_marge_egale_au_minimum_va_a_explain():
-    vs = verdicts(juridique={"score": 0.5}, financier={"score": 0.8})  # 0,80 : marge 0,05
+    vs = verdicts(
+        juridique={"score": 0.5}, financier={"score": 0.8}
+    )  # 0,80 : marge 0,05
     out = gate(vs)
     assert (out["margin"], out["route"]) == (0.05, "explain")
 
@@ -185,7 +200,9 @@ def test_seuil_no_go_atteignable_par_une_autre_configuration():
 
 
 def test_ordre_des_verdicts_sans_effet():
-    vs = verdicts(juridique={"score": 0.5}, financier={"score": 0.6}, operationnel={"score": 0.7})
+    vs = verdicts(
+        juridique={"score": 0.5}, financier={"score": 0.6}, operationnel={"score": 0.7}
+    )
     assert aggregate(vs, CONFIG) == aggregate(list(reversed(vs)), CONFIG)
 
 
@@ -209,8 +226,14 @@ def with_hard_block_review() -> DecisionConfig:
 
 
 def test_blocage_dur_en_revue_humaine_si_configure():
-    out = gate(verdicts(juridique={"hard_block": True}), config=with_hard_block_review())
-    assert out == {"proposed_decision": "NO_GO", "margin": 0.25, "route": "human_review"}
+    out = gate(
+        verdicts(juridique={"hard_block": True}), config=with_hard_block_review()
+    )
+    assert out == {
+        "proposed_decision": "NO_GO",
+        "margin": 0.25,
+        "route": "human_review",
+    }
 
 
 def test_blocage_dur_en_revue_humaine_conserve_le_rapport_budget():
@@ -220,7 +243,11 @@ def test_blocage_dur_en_revue_humaine_conserve_le_rapport_budget():
         config=with_hard_block_review(),
     )
     assert (out["route"], out["proposed_decision"]) == ("human_review", "NO_GO")
-    assert out["failure_report"] == {"stage": "budget", "tokens": BUDGET + 1, "limit": BUDGET}
+    assert out["failure_report"] == {
+        "stage": "budget",
+        "tokens": BUDGET + 1,
+        "limit": BUDGET,
+    }
     assert "final_decision" not in out
 
 
@@ -273,7 +300,9 @@ def test_analyste_en_echec_blocage_dur_en_revue_si_configure():
             "hard_block_review": True,
         }
     )
-    out = gate_with_failure(three_verdicts(juridique={"hard_block": True}), config=config)
+    out = gate_with_failure(
+        three_verdicts(juridique={"hard_block": True}), config=config
+    )
     assert (out["proposed_decision"], out["route"]) == ("NO_GO", "human_review")
     assert "final_decision" not in out
 
@@ -283,9 +312,17 @@ def test_analyste_en_echec_blocage_dur_en_revue_si_configure():
 
 def test_decide_rend_une_proposition_que_le_noeud_traduit():
     outcome = decide(verdicts(), [], [], CONFIG)
-    assert (outcome.proposed, outcome.human_review, outcome.final) == ("GO", False, "GO")
+    assert (outcome.proposed, outcome.human_review, outcome.final) == (
+        "GO",
+        False,
+        "GO",
+    )
     outcome = decide(verdicts(financier={"status": "INSUFFISANT"}), [], [], CONFIG)
-    assert (outcome.proposed, outcome.human_review, outcome.final) == ("ESCALADE", True, None)
+    assert (outcome.proposed, outcome.human_review, outcome.final) == (
+        "ESCALADE",
+        True,
+        None,
+    )
 
 
 # --- Choix de conception : NO_GO réservé aux blocages durs --------------------------------
@@ -318,7 +355,9 @@ def _justified(assessment):
     """Verdict dont chaque constat est justifié par une référence : statut OK."""
     trace = RetrievalTrace(
         clauses=[
-            ClauseRetrieval(kind=k, queries=["q"], passes=1, retained=["réf"], expired=[])
+            ClauseRetrieval(
+                kind=k, queries=["q"], passes=1, retained=["réf"], expired=[]
+            )
             for k in assessment.kinds_to_justify()
         ]
     )

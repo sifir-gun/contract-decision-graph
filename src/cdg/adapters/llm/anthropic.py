@@ -13,15 +13,26 @@ from anthropic import Anthropic, APIConnectionError, APIStatusError, APITimeoutE
 
 from cdg.domain.config import LLMConfig
 from cdg.domain.models import Usage
-from cdg.ports.llm import LLMOutputError, LLMQuotaError, LLMTransientError, SchemaT, Tier
+from cdg.ports.llm import (
+    LLMOutputError,
+    LLMQuotaError,
+    LLMTransientError,
+    SchemaT,
+    Tier,
+)
 
 # limites du compte (documentation Anthropic, « Rate limits », vérifiée le 2026-09-25)
-QUOTA_HEADERS = ("anthropic-ratelimit-requests-limit", "anthropic-ratelimit-tokens-limit")
+QUOTA_HEADERS = (
+    "anthropic-ratelimit-requests-limit",
+    "anthropic-ratelimit-tokens-limit",
+)
 
 
 def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
     """Erreur du port qui remplace l'erreur du SDK, ou None si elle reste telle quelle."""
-    if isinstance(exc, APITimeoutError):  # sous-classe d'APIConnectionError : avant elle
+    if isinstance(
+        exc, APITimeoutError
+    ):  # sous-classe d'APIConnectionError : avant elle
         reason = "délai dépassé"
     elif isinstance(exc, APIConnectionError):
         reason = "connexion refusée ou impossible"
@@ -35,7 +46,9 @@ def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
                 f"changer de modèle dans config/decision.yaml ({node})"
             )
         reason = "HTTP 429"
-    elif isinstance(exc, APIStatusError) and exc.status_code >= 500:  # dont 529, surcharge
+    elif (
+        isinstance(exc, APIStatusError) and exc.status_code >= 500
+    ):  # dont 529, surcharge
         reason = f"HTTP {exc.status_code}"
     else:
         return None
@@ -73,7 +86,9 @@ class AnthropicProvider:
         if response.parsed_output is None:
             raise LLMOutputError(f"{model} : réponse vide ou non structurée ({node})")
         if response.usage is None:
-            raise LLMOutputError(f"{model} : consommation absente de la réponse ({node})")
+            raise LLMOutputError(
+                f"{model} : consommation absente de la réponse ({node})"
+            )
         usage = Usage(
             node=node,
             model=model,

@@ -11,7 +11,13 @@ from mistralai.client import Mistral, errors
 
 from cdg.domain.config import LLMConfig
 from cdg.domain.models import Usage
-from cdg.ports.llm import LLMOutputError, LLMQuotaError, LLMTransientError, SchemaT, Tier
+from cdg.ports.llm import (
+    LLMOutputError,
+    LLMQuotaError,
+    LLMTransientError,
+    SchemaT,
+    Tier,
+)
 
 # limites du compte renvoyées avec un 429 ; l'une à 0 : quota nul, pas un débit dépassé
 QUOTA_HEADERS = ("x-ratelimit-limit-req-minute", "x-ratelimit-limit-tokens-minute")
@@ -36,7 +42,11 @@ def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
                     f"changer de modèle dans config/decision.yaml ({node})"
                 )
             limit = exc.headers.get("x-ratelimit-limit-req-minute")
-            detail = "" if limit is None else f", limite du compte : {limit} requêtes par minute"
+            detail = (
+                ""
+                if limit is None
+                else f", limite du compte : {limit} requêtes par minute"
+            )
             reason = f"HTTP 429{detail}"
         elif exc.status_code >= 500:
             reason = f"HTTP {exc.status_code}"
@@ -44,9 +54,13 @@ def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
             return None
     else:
         httpx_classes = [
-            c.__name__ for c in type(exc).__mro__ if c.__module__.split(".")[0] == "httpx"
+            c.__name__
+            for c in type(exc).__mro__
+            if c.__module__.split(".")[0] == "httpx"
         ]
-        known = next((_HTTPX_TRANSIENT[n] for n in httpx_classes if n in _HTTPX_TRANSIENT), None)
+        known = next(
+            (_HTTPX_TRANSIENT[n] for n in httpx_classes if n in _HTTPX_TRANSIENT), None
+        )
         if known is None:
             return None
         reason = known
@@ -89,7 +103,9 @@ class MistralProvider:
         if parsed is None:
             raise LLMOutputError(f"{model} : réponse vide ou non structurée ({node})")
         if response.usage is None:
-            raise LLMOutputError(f"{model} : consommation absente de la réponse ({node})")
+            raise LLMOutputError(
+                f"{model} : consommation absente de la réponse ({node})"
+            )
         usage = Usage(
             node=node,
             model=model,

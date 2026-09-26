@@ -25,7 +25,9 @@ class RuleFinding(BaseModel):
     kind: str  # clause qui déclenche le constat
     text: str
     effect: Effect
-    penalty: Penalty | None = None  # pénalité de score, pour l'effet « penalite » seulement
+    penalty: Penalty | None = (
+        None  # pénalité de score, pour l'effet « penalite » seulement
+    )
 
     @model_validator(mode="after")
     def _penalite_selon_l_effet(self) -> "RuleFinding":
@@ -64,7 +66,9 @@ class Assessment(BaseModel):
         return list(dict.fromkeys(f.kind for f in self.findings))
 
     def kinds_requiring_reference(self) -> list[str]:
-        return list(dict.fromkeys(f.kind for f in self.findings if f.requires_reference))
+        return list(
+            dict.fromkeys(f.kind for f in self.findings if f.requires_reference)
+        )
 
 
 RuleFn = Callable[[list[Clause], DecisionConfig], Assessment]
@@ -85,7 +89,9 @@ def note(kind: str, text: str) -> RuleFinding:
 def clause(clauses: list[Clause], kind: str) -> Clause:
     matches = [c for c in clauses if c.kind == kind]
     if len(matches) != 1:
-        raise ValueError(f"clause {kind} : {len(matches)} occurrence(s), une seule attendue")
+        raise ValueError(
+            f"clause {kind} : {len(matches)} occurrence(s), une seule attendue"
+        )
     return matches[0]
 
 
