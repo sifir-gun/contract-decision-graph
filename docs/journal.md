@@ -1109,3 +1109,11 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 - **Exception mypy retirée** : `ignore_missing_imports` sur `yaml`. mypy ne signale aucune nouvelle erreur, car `yaml.safe_load` est typé comme rendant `Any`, et ce qu'il rend est validé par pydantic.
 - **Vérifié que les stubs sont lus**, sur un fichier d'essai hors du dépôt : `yaml.safe_load(1)` est refusé par mypy (`arg-type`, type attendu `str | bytes | SupportsRead[…]`). Contrôle sans les stubs : mypy s'arrête à `import-untyped`. Une première tentative par `mypy -c` n'avait pas tourné, car `files` dans `pyproject.toml` l'interdit.
 
+### Image PostgreSQL : même empreinte en local et en CI
+
+- **Décision du 26/09** : pas de Dependabot sur l'image. Sa mise à jour reste manuelle et délibérée.
+- **`tests/test_ci.py`** lit `docker-compose.yml` et le workflow, puis vérifie deux choses :
+  - chaque image est figée par empreinte (`nom@sha256:` suivi de 64 caractères hexadécimaux) ;
+  - l'empreinte et le nom de l'image sont les mêmes dans les deux fichiers.
+- **Vérifié** : un seul caractère changé dans l'empreinte du workflow fait échouer le test, avec les deux empreintes dans le message. Le workflow est ensuite restauré à l'identique.
+

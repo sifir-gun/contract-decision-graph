@@ -619,6 +619,7 @@ Tests : ceux qui exigent PostgreSQL portent le marqueur `pg` et **échouent** si
 - **Job `audit`** : pip-audit (PyPA), installé depuis le groupe `audit` de `uv.lock`, audite toutes les dépendances de `uv.lock`, groupes compris, exportées avec leurs empreintes par `uv export` : pip-audit 2.10 ne lit pas `uv.lock`. Aucune résolution de dépendances (`--require-hashes`, `--disable-pip`). Le job échoue sur toute faille connue (base de PyPI) et sur tout paquet introuvable (`--strict`). Il tourne aussi chaque lundi à 7 h 17 (heure de Paris) sur `main`, seul job de ce déclenchement planifié : une faille publiée entre deux commits est vue sans attendre le suivant. GitHub désactive un déclenchement planifié après 60 jours sans activité sur un dépôt public.
 - **Job `tests`** : service PostgreSQL avec l'image de `docker-compose.yml`, figée par la même empreinte ; migrations par `docker/initdb/00_migrate.sh`, exécuté dans le conteneur (un conteneur de service démarre avant le checkout et ne peut pas monter le script) ; `setup-db` ; puis toute la suite, tests `pg` compris, avec la couverture (`pytest --cov`, lignes et branches) : le job échoue sous le seuil `fail_under` de `pyproject.toml` (96 %, pour 96,81 % mesurés le 26/09). Le badge de couverture du README est statique et affiche ce seuil ; `tests/test_couverture.py` échoue s'il en diverge.
 - **Dependabot** (`.github/dependabot.yml`) : chaque lundi à 6 h (heure de Paris), pull requests de mise à jour des dépendances Python (`uv.lock`) et des actions GitHub (empreintes et commentaires de version). Chacune passe par la CI.
+- **Image PostgreSQL + pgvector** : hors de Dependabot, sa mise à jour reste manuelle et délibérée. `tests/test_ci.py` échoue si elle n'est pas figée par empreinte, ou si l'empreinte diffère entre `docker-compose.yml` et le workflow.
 - **Tests `llm` exclus** : ils sont payants, exigent une clé d'API alors que la CI n'a aucun secret, et dépendent d'un service externe (quotas, disponibilité, modèle). Leur échec ne dirait rien du code. On les lance à la main, et chaque série est consignée au journal.
 - **Aucun téléchargement du modèle d'embedding** : les tests utilisent des doublures, et `HF_HUB_OFFLINE=1` ferait échouer tout téléchargement.
 - **Pas de `.env`** : la CI ne définit que les variables de la base jetable. Un test qui dépend en silence de l'environnement du poste y échoue : on corrige le test, on ne l'exclut pas.
@@ -713,7 +714,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - couverture par pytest-cov (lignes et branches), seuil de 96 % en CI pour 96,81 % mesurés, badge statique du seuil dans le README ;
   - longueur de ligne à 88 (valeur par défaut de Ruff et de Black) : reformatage dans un commit à part, listé dans `.git-blame-ignore-revs` ;
   - audit des dépendances aussi planifié, chaque lundi sur `main` (décision du 26/09) ;
-  - `types-PyYAML` en dépendance de développement ; plus d'exception mypy sur `yaml`.
+  - `types-PyYAML` en dépendance de développement ; plus d'exception mypy sur `yaml` ;
+  - image PostgreSQL + pgvector hors de Dependabot, mise à jour manuelle ; test d'égalité des empreintes entre `docker-compose.yml` et le workflow.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
