@@ -1094,3 +1094,12 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
   - `EmbeddingError` qui cite `EMBEDDING_CACHE_DIR` ;
   - `RagStoreError`, `ThreadError`, `RuntimeError` et `TypeError` explicites dans les adaptateurs.
 - **Commentaires rejetés par ruff** (`8fbe5b6`) : les 8 commentaires placés après une parenthèse fermante sont remontés sur leur propre ligne, texte inchangé.
+
+### Audit planifié
+
+- `schedule` dans `ci.yml` : chaque lundi à 7 h 17, heure de Paris. C'est après Dependabot (6 h), et hors du début d'heure, que GitHub signale comme chargé.
+- Syntaxe `cron` et `timezone` lue dans la source de la documentation de GitHub. Un déclenchement planifié tourne sur le dernier commit de la branche par défaut.
+- Seul `audit` tourne sur ce déclenchement : `lint`, `types` et `tests` portent `if: github.event_name != 'schedule'`. Le job d'audit reste défini une seule fois.
+- Un échec planifié rend rouge le badge CI de `main` : une faille connue y est alors présente.
+- **Limite documentée** : sur un dépôt public, GitHub désactive un déclenchement planifié après 60 jours sans activité.
+

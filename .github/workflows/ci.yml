@@ -7,6 +7,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # audit hebdomadaire de main : une faille publiée entre deux commits est vue sans
+  # attendre le suivant ; lint, types et tests ne tournent pas sur ce déclenchement
+  schedule:
+    - cron: "17 7 * * 1" # lundi 7 h 17, après Dependabot, hors du début d'heure chargé
+      timezone: "Europe/Paris"
 
 permissions:
   contents: read
@@ -14,6 +19,7 @@ permissions:
 jobs:
   lint:
     name: lint (ruff)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -32,6 +38,7 @@ jobs:
 
   types:
     name: types (mypy)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -77,6 +84,7 @@ jobs:
 
   tests:
     name: tests (PostgreSQL + pgvector)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
