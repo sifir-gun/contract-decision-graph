@@ -1566,3 +1566,15 @@ Quatre corrections sont retenues, et l'explication change aussi ; chacune fait l
   - chaque parcours décrit par le code ;
   - aucun appel sans constat ;
   - la tentative d'instruction figure dans la synthèse de P1.
+
+### J4 tâche 8 : limites documentées
+
+README, « Limites connues » (décision du 26/09) :
+- **cinq couches de défense**, aucune suffisante seule : prompt, vérification de l'extraction, détection d'instructions, règles, revue humaine ;
+- **limites qui restent** :
+  - le modèle reste probabiliste ;
+  - les listes de termes d'absence sont imparfaites : omission silencieuse d'une clause rédigée sans aucun terme listé, ou faux positif qui escalade un contrat correct ;
+  - la valeur est seulement cherchée dans la citation (« 1 % par semaine, dans la limite de 10 % » laisserait passer 1 % comme plafond) ;
+  - la détection d'instructions se contourne par paraphrase ;
+  - les contrôles de l'explication ne vérifient pas chaque phrase ;
+- **jeu de démonstration** : rédigé sans ambiguïté ; contrat réaliste prévu au J5.
