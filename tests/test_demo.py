@@ -95,6 +95,7 @@ def test_citations_attendues_dans_le_texte_masque(contract):
             masked,
             contract.clauses,
             absence_terms=CONFIG.extraction.absence_terms,
+            category_terms=CONFIG.extraction.category_terms,
             instruction_patterns=CONFIG.input.instruction_patterns,
         )
         == []
@@ -311,6 +312,7 @@ def test_p1_paragraphe_injecte_et_version_propre():
             masked,
             contract.clauses,
             absence_terms=CONFIG.extraction.absence_terms,
+            category_terms=CONFIG.extraction.category_terms,
             instruction_patterns=CONFIG.input.instruction_patterns,
         )
         == []

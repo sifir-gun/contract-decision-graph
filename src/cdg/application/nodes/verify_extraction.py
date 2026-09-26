@@ -24,6 +24,7 @@ def verify_extraction(
         state["extraction_attempts"],  # incrémenté par extract_clauses
         decision_config.extraction.max_attempts,
         absence_terms=decision_config.extraction.absence_terms,
+        category_terms=decision_config.extraction.category_terms,
         instruction_patterns=decision_config.input.instruction_patterns,
     )
     if check.outcome == "verified":

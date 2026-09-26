@@ -587,7 +587,8 @@ contract-decision-graph/
 │   │   ├── justification.py    # justification des constats par le corpus, statut du domaine
 │   │   ├── decision.py         # décision du gate (ordre, agrégat, marge, budget)
 │   │   ├── verification.py     # vérification de l'extraction : citations, types, absences
-│   │   │                       # évoquées, valeur dans la citation, citation hors consigne
+│   │   │                       # évoquées, valeur et catégorie dans la citation, citation
+│   │   │                       # hors consigne
 │   │   ├── text.py             # J4 : normalisation commune des textes
 │   │   ├── instructions.py     # J4 : détection des tentatives d'instruction (motifs)
 │   │   ├── explanation.py      # J4 : constats à expliquer, contrôles, gabarit, parcours
@@ -781,6 +782,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - signal « clause ambiguë » de l'extraction en phase 2 ;
   - télémétrie d'onnxruntime coupée dans l'adaptateur d'embedding (`ORT_DISABLE_TELEMETRY`, puis `disable_telemetry_events()`) ; aucune connexion sortante au chargement ni au calcul, vérifiée par un test dans un bac à sable macOS ;
   - cohérence entre valeur et citation : une durée ou un préavis en années est compté en mois (x 12), en chiffres comme en lettres ; une quantité suivie d'une demie (« un an et demi ») n'est pas lue ; le prompt d'extraction précise que durée et préavis s'expriment en mois ;
+  - cohérence entre catégorie et citation (après la série 6) : pour chaque type à catégorie, des termes par catégorie dans `extraction.category_terms`, de la plus spécifique à la moins spécifique ; si la catégorie la plus spécifique évoquée par la citation n'est pas celle rendue, nouvelle extraction avec retour ciblé, puis `ESCALADE` ; une citation qui n'évoque aucune catégorie n'est pas contrôlée ;
   - données fictives réservées (T2) : courriels sur des domaines de la RFC 2606, téléphones dans les blocs que l'Arcep réserve aux œuvres audiovisuelles, vérifiés par `tests/test_donnees_fictives.py` ; l'IBAN d'exemple de P2 reste, avec une note.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;

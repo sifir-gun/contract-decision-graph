@@ -7,8 +7,9 @@ alors que le texte contient un terme qui l'évoque (`extraction.absence_terms`) 
 redemandée : une absence ne laisse aucune citation à vérifier (attaque par omission,
 série 4 du J4). Une clause chiffrée doit porter sa valeur, avec son unité, dans sa
 citation : en chiffres (« 45 jours »), en chiffres entre parenthèses (« quarante-cinq (45)
-jours ») ou seulement en lettres, de zéro à cent (J5) ; une citation prise dans un passage
-détecté comme instruction (`domain/instructions.py`) est refusée, et un terme d'absence
+jours ») ou seulement en lettres, de zéro à cent (J5) ; la catégorie d'une clause doit être
+celle qu'évoque sa citation (`extraction.category_terms`, J5) ; une citation prise dans un
+passage détecté comme instruction (`domain/instructions.py`) est refusée, et un terme d'absence
 n'y compte pas. Sinon : nouvel essai avec retour ciblé, puis ESCALADE après le dernier.
 """
 
@@ -212,11 +213,43 @@ def mentioned_absences(
     return problems
 
 
+def category_mismatches(
+    clauses: list[Clause],
+    category_terms: Mapping[str, Mapping[str, Sequence[str]]],
+) -> list[str]:
+    """Clauses dont la citation évoque une autre catégorie que celle rendue. Parmi les
+    catégories dont un terme figure dans la citation, la plus spécifique, la première dans
+    l'ordre de la configuration, l'emporte ; une citation qui n'en évoque aucune n'est pas
+    contrôlée (J5, série 6 : « factures périodiques » lu comme une date de facture)."""
+    problems = []
+    for c in clauses:
+        if not c.present or c.category is None:
+            continue
+        quote = folded(c.quote)
+        evoked = next(
+            (
+                (category, term)
+                for category, terms in category_terms.get(c.kind, {}).items()
+                for term in terms
+                if folded(term) in quote
+            ),
+            None,
+        )
+        if evoked is not None and evoked[0] != c.category:
+            category, term = evoked
+            problems.append(
+                f"catégorie contredite par la citation (« {term} » : {category}): "
+                f"{c.kind}"
+            )
+    return problems
+
+
 def problems_of(
     raw_text: str,
     clauses: list[Clause],
     *,
     absence_terms: Mapping[str, Sequence[str]],
+    category_terms: Mapping[str, Mapping[str, Sequence[str]]],
     instruction_patterns: Sequence[str],
 ) -> list[str]:
     text = normalize(raw_text)
@@ -250,6 +283,7 @@ def problems_of(
         if c.present and normalize(c.quote) not in text
     ]
     problems += value_mismatches(clauses)
+    problems += category_mismatches(clauses, category_terms)
     problems += quotes_from_instructions(raw_text, clauses, passages)
     problems += mentioned_absences(raw_text, clauses, absence_terms, passages)
     return problems
@@ -269,6 +303,7 @@ def check_extraction(
     max_attempts: int,
     *,
     absence_terms: Mapping[str, Sequence[str]],
+    category_terms: Mapping[str, Mapping[str, Sequence[str]]],
     instruction_patterns: Sequence[str],
 ) -> ExtractionCheck:
     """`attempts` : essais d'extraction déjà faits ; au-delà de `max_attempts`, ESCALADE."""
@@ -276,6 +311,7 @@ def check_extraction(
         raw_text,
         clauses,
         absence_terms=absence_terms,
+        category_terms=category_terms,
         instruction_patterns=instruction_patterns,
     )
     if not problems:

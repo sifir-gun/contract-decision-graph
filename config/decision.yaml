@@ -85,6 +85,65 @@ extraction:
       - transfert des données
       - pays tiers
       - hors de l'union
+  # Cohérence entre catégorie et citation (J5, après la série 6) : pour chaque type à
+  # catégorie, des termes par catégorie, de la plus spécifique à la moins spécifique.
+  # Parmi les catégories dont un terme figure dans la citation (casse et typographie
+  # ignorées), la première l'emporte ; si ce n'est pas la catégorie rendue, la clause est
+  # redemandée avec un retour ciblé, puis escaladée. Une citation qui n'évoque aucune
+  # catégorie n'est pas contrôlée. Listes imparfaites : une couche de défense parmi d'autres.
+  category_terms:
+    delai_paiement:
+      facture_periodique:
+        - factures périodiques
+        - facture périodique
+        - factures récapitulatives
+        - facture récapitulative
+        - facturation périodique
+      fin_de_mois:
+        - jours fin de mois
+        - jours fin du mois
+      date_facture:
+        - date d'émission
+        - date de facture
+        - date de la facture
+        - date de facturation
+    transfert_hors_ue:
+      clauses_contractuelles_ad_hoc_autorisees:
+        - autorisées par l'autorité de contrôle
+        - autorisation de l'autorité de contrôle
+        - autorisées par la cnil
+        - autorisation de la cnil
+      clauses_contractuelles_types:
+        - clauses types
+        - clauses contractuelles types
+        - clauses contractuelles standard
+      clauses_contractuelles_ad_hoc:
+        - clauses ad hoc
+        - clauses contractuelles ad hoc
+        - négociées entre les parties
+        - clauses contractuelles spécifiques
+      regles_entreprise_contraignantes:
+        - règles d'entreprise contraignantes
+      code_conduite:
+        - code de conduite
+      certification:
+        - mécanisme de certification
+        - mécanismes de certification
+      decision_adequation:
+        - décision d'adéquation
+        - niveau de protection adéquat
+      aucune_garantie:
+        - sans garantie particulière
+        - sans garantie appropriée
+        - sans garanties appropriées
+        - aucune garantie appropriée
+        - consentement explicite
+      sans_transfert:
+        - aucun transfert
+        - exclusivement dans l'union
+        - exclusivement dans l'espace économique européen
+        - exclusivement en france
+        - aucun pays tiers
 
 # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
 rules:

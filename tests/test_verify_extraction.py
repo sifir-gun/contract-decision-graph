@@ -26,6 +26,7 @@ def check(items, attempts, text=CONTRACT_TEXT):
         attempts,
         2,
         absence_terms=CONFIG.extraction.absence_terms,
+        category_terms=CONFIG.extraction.category_terms,
         instruction_patterns=CONFIG.input.instruction_patterns,
     )
 
@@ -440,3 +441,224 @@ def test_terme_d_absence_ignore_dans_une_consigne():
     # le seul passage qui évoque la révision est la consigne : pas de retour qui y renvoie
     text = CONTRACT_TEXT + INJECTION + "\n"
     assert verify(clauses(revision_prix=ABSENT), text=text) == {"route": "analysts"}
+
+
+# --- Cohérence entre catégorie et citation (J5, après la série 6) ----------------------------
+
+PERIODIC = (
+    "Les factures périodiques mensuelles sont payables à 60 jours à compter de leur date "
+    "d'émission."
+)
+END_OF_MONTH = "Les factures sont payables à 45 jours fin de mois à compter de leur date d'émission."
+INVOICE_DATE = (
+    "Les factures sont payables à 30 jours à compter de leur date d'émission."
+)
+STANDARD_CLAUSES = (
+    "Les données sont hébergées dans l'Union européenne ; le support, assuré depuis un "
+    "pays tiers, y accède dans le cadre des clauses types de protection des données "
+    "adoptées par la Commission européenne."
+)
+AD_HOC = (
+    "Les sauvegardes sont répliquées hors de l'Union européenne, dans le cadre de clauses "
+    "contractuelles de protection des données négociées entre les parties."
+)
+AD_HOC_AUTHORIZED = (
+    "Les sauvegardes sont répliquées hors de l'Union européenne, dans le cadre de clauses "
+    "contractuelles négociées entre les parties et autorisées par l'autorité de contrôle."
+)
+NO_SAFEGUARD = (
+    "Les données sont hébergées chez un sous-traitant ultérieur établi dans un pays tiers, "
+    "sans garantie particulière."
+)
+NO_TRANSFER = (
+    "Les données sont hébergées exclusivement dans l'Union européenne et ne font l'objet "
+    "d'aucun transfert hors de l'Union."
+)
+
+
+def with_category(kind, quote, category, value=None):
+    items, text = with_quote(kind, quote, value)
+    return [
+        c.model_copy(update={"category": category}) if c.kind == kind else c
+        for c in items
+    ], text
+
+
+def test_contrat_07_categorie_contredite_par_la_citation_reextraction_puis_escalade():
+    # série 6 : « factures périodiques » lu comme date_facture, 5 fois sur 5 ; la pénalité
+    # du délai disparaissait (60 jours ne dépassent pas le seuil de date_facture)
+    items, text = with_category("delai_paiement", PERIODIC, "date_facture", 60.0)
+    problem = (
+        "catégorie contredite par la citation (« factures périodiques » : "
+        "facture_periodique): delai_paiement"
+    )
+    assert verify(items, attempts=1, text=text)["extraction_feedback"] == [problem]
+    out = verify(items, attempts=2, text=text)
+    assert out["proposed_decision"] == "ESCALADE"
+    assert out["failure_report"]["problems"] == [problem]
+    right, text = with_category("delai_paiement", PERIODIC, "facture_periodique", 60.0)
+    assert verify(right, text=text) == {"route": "analysts"}
+
+
+@pytest.mark.parametrize(
+    ("kind", "quote", "category", "value"),
+    [
+        # plusieurs catégories évoquées : la plus spécifique l'emporte
+        ("delai_paiement", PERIODIC, "facture_periodique", 60.0),
+        ("delai_paiement", END_OF_MONTH, "fin_de_mois", 45.0),
+        ("delai_paiement", INVOICE_DATE, "date_facture", 30.0),
+        ("transfert_hors_ue", STANDARD_CLAUSES, "clauses_contractuelles_types", None),
+        ("transfert_hors_ue", AD_HOC, "clauses_contractuelles_ad_hoc", None),
+        (
+            "transfert_hors_ue",
+            AD_HOC_AUTHORIZED,
+            "clauses_contractuelles_ad_hoc_autorisees",
+            None,
+        ),
+        ("transfert_hors_ue", NO_SAFEGUARD, "aucune_garantie", None),
+        ("transfert_hors_ue", NO_TRANSFER, "sans_transfert", None),
+        # citation qui n'évoque aucune catégorie : pas de contrôle possible (limite)
+        (
+            "delai_paiement",
+            "Les factures sont payables à 30 jours.",
+            "fin_de_mois",
+            30.0,
+        ),
+    ],
+)
+def test_categorie_coherente_avec_la_citation(kind, quote, category, value):
+    items, text = with_category(kind, quote, category, value)
+    assert verify(items, text=text) == {"route": "analysts"}
+
+
+@pytest.mark.parametrize(
+    ("kind", "quote", "category", "value", "evoked"),
+    [
+        (
+            "delai_paiement",
+            END_OF_MONTH,
+            "date_facture",
+            45.0,
+            "« jours fin de mois » : fin_de_mois",
+        ),
+        (
+            "delai_paiement",
+            PERIODIC,
+            "fin_de_mois",
+            60.0,
+            "« factures périodiques » : facture_periodique",
+        ),
+        (
+            "transfert_hors_ue",
+            STANDARD_CLAUSES,
+            "sans_transfert",
+            None,
+            "« clauses types » : clauses_contractuelles_types",
+        ),
+        (
+            "transfert_hors_ue",
+            AD_HOC,
+            "clauses_contractuelles_types",
+            None,
+            "« négociées entre les parties » : clauses_contractuelles_ad_hoc",
+        ),
+        (
+            "transfert_hors_ue",
+            AD_HOC_AUTHORIZED,
+            "clauses_contractuelles_ad_hoc",
+            None,
+            (
+                "« autorisées par l'autorité de contrôle » : "
+                "clauses_contractuelles_ad_hoc_autorisees"
+            ),
+        ),
+        (
+            "transfert_hors_ue",
+            NO_SAFEGUARD,
+            "sans_transfert",
+            None,
+            "« sans garantie particulière » : aucune_garantie",
+        ),
+        (
+            "transfert_hors_ue",
+            NO_TRANSFER,
+            "aucune_garantie",
+            None,
+            "« aucun transfert » : sans_transfert",
+        ),
+    ],
+)
+def test_categorie_contredite_par_la_citation(kind, quote, category, value, evoked):
+    items, text = with_category(kind, quote, category, value)
+    expected = f"catégorie contredite par la citation ({evoked}): {kind}"
+    assert verify(items, text=text)["extraction_feedback"] == [expected]
+
+
+@pytest.mark.parametrize(
+    ("kind", "quote", "category", "value"),
+    [
+        # « périodique » seul ne désigne pas une facture périodique
+        (
+            "delai_paiement",
+            (
+                "Les factures sont payables à 30 jours à compter de leur date d'émission ; "
+                "un bilan périodique en est fait chaque trimestre."
+            ),
+            "date_facture",
+            30.0,
+        ),
+        # « fin du mois suivant » n'est pas un délai en jours fin de mois
+        (
+            "delai_paiement",
+            (
+                "Les factures sont payables à 30 jours à compter de leur date d'émission, "
+                "et au plus tard à la fin du mois suivant."
+            ),
+            "date_facture",
+            30.0,
+        ),
+        # une garantie de disponibilité n'est pas une garantie de transfert
+        (
+            "transfert_hors_ue",
+            (
+                "Les données sont hébergées exclusivement en France ; le prestataire ne "
+                "donne aucune garantie de disponibilité au-delà de 99,5 %."
+            ),
+            "sans_transfert",
+            None,
+        ),
+        # une certification de sécurité n'est pas un mécanisme de certification (art. 42)
+        (
+            "transfert_hors_ue",
+            (
+                "Les données sont hébergées exclusivement en France, chez un hébergeur "
+                "titulaire d'une certification ISO 27001."
+            ),
+            "sans_transfert",
+            None,
+        ),
+    ],
+)
+def test_categorie_faux_positifs_evites(kind, quote, category, value):
+    items, text = with_category(kind, quote, category, value)
+    assert verify(items, text=text) == {"route": "analysts"}
+
+
+def test_termes_de_categorie_valides_dans_la_configuration():
+    def invalid(change, message):
+        data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+        change(data["extraction"]["category_terms"])
+        with pytest.raises(ValidationError, match=message):
+            DecisionConfig.model_validate(data)
+
+    invalid(lambda terms: terms.pop("delai_paiement"), "types manquants")
+    invalid(
+        lambda terms: terms["delai_paiement"].update({"sans_transfert": ["x"]}),
+        "catégorie inconnue pour delai_paiement : sans_transfert",
+    )
+    invalid(
+        lambda terms: terms["delai_paiement"]["date_facture"].append(
+            "Jours fin de mois"
+        ),
+        "terme répété pour delai_paiement",
+    )

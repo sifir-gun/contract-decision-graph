@@ -7,7 +7,13 @@ from typing import Annotated, Literal, cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from cdg.domain.models import REQUIRED_KINDS, Decision, Domain, TransferCategory
+from cdg.domain.models import (
+    KIND_CATEGORIES,
+    REQUIRED_KINDS,
+    Decision,
+    Domain,
+    TransferCategory,
+)
 from cdg.domain.numeric import rounded
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "decision.yaml"
@@ -64,6 +70,9 @@ class Extraction(_Strict):
     max_attempts: Annotated[int, Field(ge=1)]
     # vérification des absences : termes qui évoquent chaque type de clause
     absence_terms: dict[str, Annotated[list[Term], Field(min_length=1)]]
+    # cohérence entre catégorie et citation (J5) : pour chaque type à catégorie, des termes
+    # par catégorie, de la plus spécifique à la moins spécifique (l'ordre fait foi)
+    category_terms: dict[str, dict[str, Annotated[list[Term], Field(min_length=1)]]]
 
     @model_validator(mode="after")
     def _un_jeu_de_termes_par_type(self) -> "Extraction":
@@ -77,6 +86,26 @@ class Extraction(_Strict):
         for kind, terms in self.absence_terms.items():
             if len({t.casefold() for t in terms}) != len(terms):
                 raise ValueError(f"absence_terms : terme répété pour {kind}")
+        return self
+
+    @model_validator(mode="after")
+    def _termes_par_categorie(self) -> "Extraction":
+        kinds = set(self.category_terms)
+        if kinds != set(KIND_CATEGORIES):
+            missing = sorted(set(KIND_CATEGORIES) - kinds)
+            unknown = sorted(kinds - set(KIND_CATEGORIES))
+            raise ValueError(
+                f"category_terms : types manquants {missing}, types inconnus {unknown}"
+            )
+        for kind, by_category in self.category_terms.items():
+            for category in by_category:
+                if category not in KIND_CATEGORIES[kind]:
+                    raise ValueError(
+                        f"category_terms : catégorie inconnue pour {kind} : {category}"
+                    )
+            terms = [t.casefold() for ts in by_category.values() for t in ts]
+            if len(set(terms)) != len(terms):
+                raise ValueError(f"category_terms : terme répété pour {kind}")
         return self
 
 

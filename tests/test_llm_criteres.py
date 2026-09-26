@@ -199,6 +199,7 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(
                 values["raw_text"],
                 values["clauses"],
                 absence_terms=CONFIG.extraction.absence_terms,
+                category_terms=CONFIG.extraction.category_terms,
                 instruction_patterns=CONFIG.input.instruction_patterns,
             )
             == []
