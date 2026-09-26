@@ -1198,3 +1198,33 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 - **Mise en œuvre** : une seule fonction, `audit.decision_report`, sert au scellement et au rejeu : les deux restent alignés par construction.
 - **Troncature** : limite documentée dans la spec et le README. `verify --expect-head <empreinte>` arrive au T4 ; l'ancrage externe (horodatage certifié de la tête) est ajouté aux évolutions de la phase 2.
 
+### J4 tâche 2 : journal d'audit dans PostgreSQL
+
+**Fait.**
+- **Migration `004_audit_integrite.sql`**, idempotente : index uniques sur `thread_id` (un contrat = un thread = un enregistrement) et sur `prev_hash` (deux maillons ne peuvent pas suivre le même prédécesseur, donc pas de fourche).
+- **`adapters/postgres/migrations.py`** applique les migrations idempotentes (`002` et suivantes). `setup-db` l'appelle, puis `rag_store.check_dimension`, qui remplace `rag_store.setup` : le corpus n'applique plus les migrations des autres tables. La sortie de `setup-db` liste les migrations et le journal.
+- **Adaptateur `PostgresAuditStore`** (port `AuditStore`), dans une seule transaction :
+  - verrou consultatif de transaction, dont la clé de 64 bits est dérivée du nom de la table par SHA-256, stable d'une version de PostgreSQL à l'autre, contrairement à `hashtext` ;
+  - lecture de la tête de chaîne ;
+  - scellement par le domaine ;
+  - insertion.
+- **Ajout rejoué** : un `audit_seal` relancé après un arrêt rend l'enregistrement existant si la décision est la même. Une autre décision pour le même thread lève `AuditStoreError`, erreur du port.
+- **Doublure `MemoryAuditStore`**, soumise aux mêmes règles.
+
+**Choix.**
+- **Verrou consultatif** (décision 4) : `app_role` n'a que `SELECT` et `INSERT`. D'après la documentation de PostgreSQL 16 (`LOCK`), `INSERT` n'autorise que `ROW EXCLUSIVE`, qui n'exclut pas un autre `ROW EXCLUSIVE`, et `FOR UPDATE` exige `UPDATE`. Le verrou consultatif ne demande aucun droit sur la table. Il est vérifié sous `app_role` par un test direct, et par 8 ajouts concurrents : sans lui, deux ajouts liraient la même tête et l'index sur `prev_hash` en rejetterait un.
+- **Table en paramètre, réservée aux tests** : ils tournent sur la base de développement, où vit le vrai journal, et un enregistrement de test ne peut pas en être retiré sans casser la chaîne. Chaque test crée donc un journal jetable (`LIKE audit_decisions INCLUDING ALL` : colonnes, identité, index uniques), avec les mêmes droits, puis le supprime. Même logique que le filtre `thread_ids` d'`expire` (J2).
+
+**Tests** (`test_audit_store.py`, 14) :
+- le contrat du port, joué sur PostgreSQL et sur la doublure : genèse, chaînage puis vérification après relecture du JSONB, ajout rejoué idempotent, autre décision refusée ;
+- sur PostgreSQL :
+  - ajouts concurrents sous `app_role` ;
+  - verrou permis à `app_role` ;
+  - fourche et thread en double refusés par la base, même à l'administrateur ;
+  - ni `UPDATE` ni `DELETE` pour `app_role` ;
+  - index uniques présents sur le vrai journal.
+
+Le port et la doublure sont ajoutés à `test_ports`. Au total, 673 tests ; couverture de 97,9 %.
+
+**Piège.** Après un aller-retour par le JSONB, l'enregistrement redonne les mêmes empreintes, parce que les empreintes sont recalculées sur la forme canonique (clés triées, flottants arrondis) et non sur le texte stocké : JSONB réordonne les clés.
+

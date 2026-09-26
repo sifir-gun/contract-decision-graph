@@ -1,9 +1,9 @@
-"""Table rag_chunks : migration 002 idempotente, dimension, droits d'app_role."""
+"""Table rag_chunks : migrations idempotentes, dimension, droits d'app_role."""
 
 import psycopg
 import pytest
 
-from cdg.adapters.postgres import rag_store
+from cdg.adapters.postgres import migrations, rag_store
 from cdg.domain.config import load_config
 
 pytestmark = pytest.mark.pg
@@ -29,15 +29,23 @@ def test_dimension_de_la_colonne_conforme_a_la_configuration(pg):
     assert rag_store.column_dimension(pg.admin) == CONFIG.embedding.dimension == 1024
 
 
-def test_migration_idempotente(pg):
-    rag_store.setup(pg.admin, CONFIG.embedding.dimension)
-    rag_store.setup(pg.admin, CONFIG.embedding.dimension)
+def test_migrations_idempotentes(pg):
+    migrations.apply(pg.admin)
+    migrations.apply(pg.admin)
     assert grants(pg, "rag_chunks") == {"SELECT"}
+    rag_store.check_dimension(pg.admin, CONFIG.embedding.dimension)
+
+
+def test_migrations_rejouables_sans_la_001():
+    # 001 exige la variable psql app_password : seul l'init Docker l'applique
+    names = [m.name for m in migrations.IDEMPOTENT]
+    assert names[0].startswith("002_") and not any(n.startswith("001_") for n in names)
+    assert names == sorted(names)
 
 
 def test_dimension_divergente_erreur_explicite(pg):
     with pytest.raises(rag_store.RagStoreError, match="768"):
-        rag_store.setup(pg.admin, 768)
+        rag_store.check_dimension(pg.admin, 768)
 
 
 def test_app_role_ne_peut_pas_ecrire_dans_le_corpus(pg):

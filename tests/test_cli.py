@@ -34,7 +34,13 @@ def test_setup_db(pg, capsys):
         "role": "app_role",
         "tables": ["checkpoints", "checkpoint_blobs", "checkpoint_writes"],
         "droits": ["SELECT", "INSERT", "UPDATE"],
+        "migrations": [
+            "002_rag.sql",
+            "003_rag_versions.sql",
+            "004_audit_integrite.sql",
+        ],
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
+        "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
     }
 
 

@@ -8,10 +8,11 @@ from dataclasses import dataclass
 
 import psycopg
 import pytest
+from psycopg import sql
 
 from cdg import settings
 from cdg.adapters.langgraph import checkpointer
-from cdg.adapters.postgres import conninfo, rag_store
+from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.domain.config import load_config
 
 
@@ -66,9 +67,8 @@ def pg() -> Pg:
             pytrace=False,
         )
     checkpointer.setup_database(admin)  # idempotent : tables du checkpointer et droits
-    rag_store.setup(
-        admin, load_config().embedding.dimension
-    )  # migration 002, idempotente
+    migrations.apply(admin)  # 002 et suivantes, idempotentes
+    rag_store.check_dimension(admin, load_config().embedding.dimension)
     return Pg(admin=admin, app=app)
 
 
@@ -78,3 +78,22 @@ def thread_id(pg) -> str:
     tid = f"test-{uuid.uuid4()}"
     yield tid
     checkpointer.delete_thread(pg.admin, tid)
+
+
+@pytest.fixture
+def journal(pg) -> str:
+    """Journal d'audit jetable : même structure (index uniques compris) et mêmes droits
+    qu'`audit_decisions`. Les tests ne touchent jamais au vrai journal, qu'on ne peut pas
+    purger sans casser la chaîne."""
+    name = f"audit_test_{uuid.uuid4().hex[:12]}"
+    table, role = sql.Identifier(name), sql.Identifier(settings.APP_ROLE)
+    with psycopg.connect(pg.admin, autocommit=True) as conn:
+        conn.execute(
+            sql.SQL("CREATE TABLE {} (LIKE audit_decisions INCLUDING ALL)").format(
+                table
+            )
+        )
+        conn.execute(sql.SQL("GRANT SELECT, INSERT ON {} TO {}").format(table, role))
+    yield name
+    with psycopg.connect(pg.admin, autocommit=True) as conn:
+        conn.execute(sql.SQL("DROP TABLE {}").format(table))

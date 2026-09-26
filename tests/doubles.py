@@ -1,8 +1,9 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
-from datetime import date
+from datetime import date, datetime
 
 from cdg.application.deps import ExtractionResult, RetrievalResult
+from cdg.domain.audit import StoredAuditEntry
 from cdg.domain.models import (
     DOMAINS,
     REQUIRED_KINDS,
@@ -12,6 +13,7 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.ports.audit_store import AuditStoreError
 from cdg.ports.retriever import Passage
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
@@ -249,3 +251,30 @@ class FakeRetriever:
     def search(self, domain, query: str, *, k: int) -> list[Passage]:
         self.calls.append((domain, query, k))
         return list(self.passages.get(domain, []))[:k]
+
+
+class MemoryAuditStore:
+    """Doublure du port AuditStore : journal en mémoire, mêmes règles que PostgreSQL
+    (un enregistrement par thread, ajout rejoué idempotent à décision égale)."""
+
+    def __init__(self):
+        self.stored: list[StoredAuditEntry] = []
+
+    def append(self, seal) -> StoredAuditEntry:
+        entry = seal(self.stored[-1].chain_hash if self.stored else None)
+        for stored in self.stored:
+            if stored.thread_id == entry.thread_id:
+                if stored.decision_hash != entry.decision_hash:
+                    raise AuditStoreError(
+                        f"thread {entry.thread_id} déjà scellé avec une autre décision"
+                    )
+                return stored
+        created_at = datetime.fromisoformat(entry.record["sealed_at"])
+        stored = StoredAuditEntry(
+            **entry.model_dump(), id=len(self.stored) + 1, created_at=created_at
+        )
+        self.stored.append(stored)
+        return stored
+
+    def entries(self) -> list[StoredAuditEntry]:
+        return list(self.stored)

@@ -54,11 +54,11 @@ Le sens des dépendances et le confinement de chaque bibliothèque dans son adap
 
 Les fichiers `migrations/*.sql` sont appliqués par `docker/initdb/00_migrate.sh`, monté dans `docker-entrypoint-initdb.d`.
 
-- **Ils ne s'exécutent que sur un volume vide**, au tout premier démarrage du conteneur. Une migration ajoutée ensuite n'est pas appliquée à une base existante.
+- **Ils ne s'exécutent que sur un volume vide**, au tout premier démarrage du conteneur. Sur une base existante, `setup-db` applique les migrations idempotentes (`002` et suivantes) ; la `001`, qui crée le rôle applicatif, reste réservée à l'init.
 - Le script échoue explicitement si `APP_DB_PASSWORD` est absent ou vide.
 - Si l'initialisation échoue, le volume n'est plus vide et l'init ne sera pas rejouée : il faut recréer le volume (`docker compose down -v`, qui **détruit toutes les données** de la base).
 
-Le rôle applicatif `app_role` n'a que `SELECT` et `INSERT` sur `audit_decisions` : le journal d'audit est en ajout seul.
+Le rôle applicatif `app_role` n'a que `SELECT` et `INSERT` sur `audit_decisions` : le journal d'audit est en ajout seul. La migration `004` y ajoute deux index uniques : un enregistrement par thread (`thread_id`) et une chaîne sans fourche (`prev_hash`).
 
 ## Corpus et versions des textes
 

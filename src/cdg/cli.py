@@ -18,7 +18,7 @@ from cdg import settings
 from cdg.adapters import fastembed
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.llm import build_provider
-from cdg.adapters.postgres import conninfo, rag_store
+from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.application import ingestion
 from cdg.application.deps import Deps
 from cdg.application.extraction import LLMExtractor
@@ -66,14 +66,18 @@ REVIEW_DEPS = Deps(extractor=_not_needed("extraction"), crag=_not_needed("CRAG")
 
 
 def _setup_db(args: argparse.Namespace) -> dict:
-    checkpointer.setup_database(conninfo.admin_conninfo())
-    rag_store.setup(conninfo.admin_conninfo(), load_config().embedding.dimension)
+    admin = conninfo.admin_conninfo()
+    checkpointer.setup_database(admin)
+    applied = migrations.apply(admin)
+    rag_store.check_dimension(admin, load_config().embedding.dimension)
     return {
         "setup_db": "ok",
         "role": settings.APP_ROLE,
         "tables": list(checkpointer.CHECKPOINT_TABLES),
         "droits": ["SELECT", "INSERT", "UPDATE"],
+        "migrations": applied,
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
+        "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
     }
 
 

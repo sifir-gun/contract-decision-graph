@@ -11,9 +11,17 @@ from typing import Protocol
 from cdg.domain.audit import AuditEntry, StoredAuditEntry
 
 
+class AuditStoreError(Exception):
+    """Ajout refusé : thread déjà scellé avec une autre décision."""
+
+
 class AuditStore(Protocol):
     def append(self, seal: Callable[[str | None], AuditEntry]) -> StoredAuditEntry:
-        """Lit la tête de chaîne (None si le journal est vide), appelle `seal`, insère."""
+        """Lit la tête de chaîne (None si le journal est vide), appelle `seal`, insère.
+
+        Un seul enregistrement par thread : un ajout rejoué (même thread, même
+        `decision_hash`) rend l'enregistrement existant sans rien insérer ; une autre
+        décision pour le même thread lève `AuditStoreError`."""
         ...
 
     def entries(self) -> list[StoredAuditEntry]:

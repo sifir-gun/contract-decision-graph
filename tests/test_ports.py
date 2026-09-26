@@ -2,22 +2,31 @@
 les méthodes de son interface, avec la même signature.
 
 Un `Protocol` n'est pas contrôlé à l'exécution, et le projet n'a pas de vérificateur
-de types : ce test en tient lieu. AuditStore s'y ajoutera avec son implémentation (J4).
+de types : ce test en tient lieu, en plus de mypy.
 """
 
 import inspect
 
 import pytest
-from doubles import FakeCrag, FakeLLM, FakeRetriever, FixedExtractor, HashEmbedder
+from doubles import (
+    FakeCrag,
+    FakeLLM,
+    FakeRetriever,
+    FixedExtractor,
+    HashEmbedder,
+    MemoryAuditStore,
+)
 
 from cdg.adapters.fastembed import FastembedEmbedder
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
+from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.rag_store import PgvectorRetriever
 from cdg.application.deps import Crag, Extractor
 from cdg.application.extraction import LLMExtractor
 from cdg.domain.config import load_config
+from cdg.ports.audit_store import AuditStore
 from cdg.ports.embedder import Embedder
 from cdg.ports.llm import LLMProvider
 from cdg.ports.retriever import Retriever
@@ -37,6 +46,8 @@ IMPLEMENTATIONS = [
     (Extractor, lambda: FixedExtractor([])),
     (Crag, FakeCrag),
     (Crag, lambda: orchestrator.crag_runner(FakeRetriever(), FakeLLM(), CONFIG)),
+    (AuditStore, lambda: PostgresAuditStore("")),
+    (AuditStore, MemoryAuditStore),
 ]
 
 

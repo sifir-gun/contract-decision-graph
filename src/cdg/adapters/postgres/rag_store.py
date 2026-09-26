@@ -1,7 +1,5 @@
-"""Corpus RAG dans PostgreSQL (table rag_chunks) : migrations, contrôle de dimension,
-insertion, synchronisation et recherche exacte filtrée."""
-
-from pathlib import Path
+"""Corpus RAG dans PostgreSQL (table rag_chunks) : contrôle de dimension, insertion,
+synchronisation et recherche exacte filtrée. Les migrations sont dans `migrations.py`."""
 
 import psycopg
 from pgvector import Vector
@@ -11,12 +9,6 @@ from cdg.domain.corpus import ChunkRow
 from cdg.domain.models import Domain
 from cdg.ports.embedder import Embedder
 from cdg.ports.retriever import Passage
-
-MIGRATIONS = Path(__file__).resolve().parents[4] / "migrations"
-# 001 exige la variable psql `app_password` : appliquée seulement par l'init Docker
-RAG_MIGRATIONS = sorted(
-    p for p in MIGRATIONS.glob("0*.sql") if not p.name.startswith("001_")
-)
 
 
 class RagStoreError(Exception):
@@ -37,13 +29,8 @@ def column_dimension(conninfo: str) -> int:
     return row[0]
 
 
-def setup(admin_conninfo: str, dimension: int) -> None:
-    """Applique les migrations du corpus (002, 003…, idempotentes), puis vérifie la dimension."""
-    with psycopg.connect(admin_conninfo, autocommit=True) as conn:
-        for (
-            migration
-        ) in RAG_MIGRATIONS:  # plusieurs commandes par fichier, sans paramètre
-            conn.execute(migration.read_text(encoding="utf-8"))
+def check_dimension(admin_conninfo: str, dimension: int) -> None:
+    """Vérifie que rag_chunks.embedding a la dimension de la configuration."""
     actual = column_dimension(admin_conninfo)
     if actual != dimension:
         raise RagStoreError(

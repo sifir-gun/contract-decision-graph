@@ -1,0 +1,186 @@
+"""Journal d'audit : contrat du port `AuditStore` (PostgreSQL et doublure en mémoire), puis
+verrou, index uniques et droits d'`app_role` sur PostgreSQL.
+
+Chaque test PostgreSQL travaille sur un journal jetable (fixture `journal`), de même
+structure et mêmes droits qu'`audit_decisions`.
+"""
+
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+
+import psycopg
+import pytest
+from doubles import MemoryAuditStore
+from psycopg import sql
+
+from cdg.adapters.postgres import migrations
+from cdg.adapters.postgres.audit_store import PostgresAuditStore
+from cdg.domain import audit
+from cdg.domain.config import load_config
+from cdg.ports.audit_store import AuditStoreError
+
+CONFIG = load_config()
+SEALED_AT = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)
+
+
+def record(contract_id, reason="texte trop court", sealed_at=SEALED_AT):
+    """Enregistrement minimal : un rejet, scellé comme les autres."""
+    return audit.build_record(
+        {"contract_id": contract_id, "reject_reason": reason},
+        thread_id=contract_id,
+        config_hash=audit.config_hash(CONFIG),
+        models=audit.models_of(CONFIG),
+        sealed_at=sealed_at,
+    )
+
+
+class Sealer:
+    """Fonction de scellement passée à `append` ; garde les têtes de chaîne reçues."""
+
+    def __init__(self, record_):
+        self.record, self.heads = record_, []
+
+    def __call__(self, head):
+        self.heads.append(head)
+        return audit.seal(self.record, head)
+
+
+@pytest.fixture(params=["memoire", pytest.param("postgres", marks=pytest.mark.pg)])
+def store(request):
+    if request.param == "memoire":
+        return MemoryAuditStore()
+    pg = request.getfixturevalue("pg")
+    return PostgresAuditStore(pg.app, table=request.getfixturevalue("journal"))
+
+
+# --- Contrat du port, sur les deux implémentations -----------------------------------------
+
+
+def test_premier_ajout_depuis_la_genese(store):
+    sealer = Sealer(record("c-1"))
+    stored = store.append(sealer)
+    assert sealer.heads == [None] and stored.prev_hash == audit.GENESIS
+    assert stored.id >= 1 and stored.created_at.tzinfo is not None
+    assert store.entries() == [stored]
+
+
+def test_ajouts_chaines_puis_verifies(store):
+    sealers = [Sealer(record(f"c-{i}")) for i in range(1, 4)]
+    stored = [store.append(s) for s in sealers]
+    assert [s.heads for s in sealers] == [
+        [None],
+        [stored[0].chain_hash],
+        [stored[1].chain_hash],
+    ]
+    entries = store.entries()
+    assert [e.id for e in entries] == sorted(e.id for e in stored)
+    # l'enregistrement relu tel que stocké (JSONB) redonne les mêmes empreintes
+    report = audit.verify_chain(entries)
+    assert (report.ok, report.count) == (True, 3)
+
+
+def test_ajout_rejoue_pour_un_meme_thread_idempotent(store):
+    first = store.append(Sealer(record("c-1")))
+    # audit_seal rejoué après un arrêt : autre horodatage, même décision
+    later = datetime(2026, 9, 26, 9, 0, tzinfo=UTC)
+    again = store.append(Sealer(record("c-1", sealed_at=later)))
+    assert again == first and len(store.entries()) == 1
+
+
+def test_meme_thread_autre_decision_refusee(store):
+    store.append(Sealer(record("c-1")))
+    with pytest.raises(AuditStoreError, match="c-1"):
+        store.append(Sealer(record("c-1", reason="texte en anglais")))
+    assert len(store.entries()) == 1
+
+
+# --- PostgreSQL : verrou, index uniques, droits ----------------------------------------------
+
+
+@pytest.mark.pg
+def test_ajouts_concurrents_sous_app_role_chaine_lineaire(pg, journal):
+    store = PostgresAuditStore(pg.app, table=journal)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        stored = list(
+            pool.map(lambda i: store.append(Sealer(record(f"c-{i}"))), range(8))
+        )
+    entries = store.entries()
+    assert len(entries) == 8 and len({e.prev_hash for e in entries}) == 8
+    assert audit.verify_chain(entries).ok
+    assert {e.id for e in stored} == {e.id for e in entries}
+
+
+@pytest.mark.pg
+def test_verrou_consultatif_permis_a_app_role(pg):
+    with psycopg.connect(pg.app) as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(1)")
+
+
+def _insert_copy(pg, journal, **changes):
+    """Insère, en administrateur, une copie du dernier maillon avec des colonnes changées."""
+    columns = [
+        "contract_id",
+        "thread_id",
+        "record",
+        "config_hash",
+        "decision_hash",
+        "prev_hash",
+        "chain_hash",
+    ]
+    table = sql.Identifier(journal)
+    with psycopg.connect(pg.admin) as conn:
+        row = conn.execute(
+            sql.SQL("SELECT {} FROM {} ORDER BY id DESC LIMIT 1").format(
+                sql.SQL(", ").join(map(sql.Identifier, columns)), table
+            )
+        ).fetchone()
+        values = {**dict(zip(columns, row, strict=True)), **changes}
+        values["record"] = psycopg.types.json.Jsonb(values["record"])
+        conn.execute(
+            sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+                table,
+                sql.SQL(", ").join(map(sql.Identifier, columns)),
+                sql.SQL(", ").join(sql.Placeholder() * len(columns)),
+            ),
+            [values[c] for c in columns],
+        )
+
+
+@pytest.mark.pg
+def test_fourche_refusee_par_la_base(pg, journal):
+    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")))
+    # même prev_hash qu'un maillon existant : une seconde branche serait une fourche
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert_copy(pg, journal, thread_id="c-2", chain_hash="f" * 64)
+
+
+@pytest.mark.pg
+def test_un_seul_enregistrement_par_thread_en_base(pg, journal):
+    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")))
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert_copy(pg, journal, prev_hash="e" * 64, chain_hash="f" * 64)
+
+
+@pytest.mark.pg
+@pytest.mark.parametrize(
+    "statement", ["UPDATE {} SET contract_id = 'x'", "DELETE FROM {}"]
+)
+def test_app_role_ni_modification_ni_suppression(pg, journal, statement):
+    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")))
+    with (
+        psycopg.connect(pg.app) as conn,
+        pytest.raises(psycopg.errors.InsufficientPrivilege),
+    ):
+        conn.execute(sql.SQL(statement).format(sql.Identifier(journal)))
+
+
+@pytest.mark.pg
+def test_index_uniques_du_vrai_journal(pg):
+    migrations.apply(pg.admin)  # idempotente
+    with psycopg.connect(pg.admin) as conn:
+        rows = conn.execute(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'audit_decisions'"
+        ).fetchall()
+    unique = [r[0] for r in rows if r[0].startswith("CREATE UNIQUE INDEX")]
+    assert any("(thread_id)" in d for d in unique)
+    assert any("(prev_hash)" in d for d in unique)

@@ -471,9 +471,11 @@ Une seule instance PostgreSQL avec pgvector, lancée par Docker Compose.
 | --- | --- | --- |
 | Checkpoints LangGraph | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | `uv run python -m cdg.cli setup-db` (identifiants administrateur) : `setup()` puis droits d'`app_role` |
 | Corpus RAG | `rag_chunks` (id, domain, source_id, reference, text, content_hash, embedding_model, embedding `vector(1024)`) | Migration `002_rag.sql`, idempotente : init Docker sur volume vide, ou `setup-db`, qui contrôle aussi la dimension par rapport à `embedding.dimension`. Ingestion par l'administrateur ; `app_role` en lecture seule |
-| Journal d'audit | `audit_decisions` | Migration `001` (J1) |
+| Journal d'audit | `audit_decisions` | Migration `001` (J1) ; index uniques sur `thread_id` et `prev_hash` : migration `004` (J4), idempotente, init Docker ou `setup-db` |
 
 Migrations en phase 1 : un script shell monté dans `docker-entrypoint-initdb.d` applique `migrations/*.sql` avec `psql -v ON_ERROR_STOP=1 -v app_password=...`. Il échoue explicitement si la variable du mot de passe applicatif est absente ou vide. Les migrations ne s'exécutent que sur un volume vide, ce que le README signale. La migration `001` (J1) crée l'extension `vector`, la table `audit_decisions` et le rôle `app_role`, qui reçoit `SELECT, INSERT` sur `audit_decisions` et rien d'autre. `rag_chunks` arrive en `002` au J3, une fois la dimension d'embedding fixée. Tables du checkpointer : `app_role` reçoit `SELECT, INSERT, UPDATE` sur `checkpoints`, `checkpoint_blobs` et `checkpoint_writes`, et rien sur `checkpoint_migrations`. C'est ce que demandent les requêtes de `PostgresSaver` 3.1.2 (`SELECT`, `INSERT ... ON CONFLICT DO NOTHING / DO UPDATE`). Pas de `DELETE` : seul `delete_thread` en a besoin, et l'application ne l'utilise pas. Un test vérifie qu'un cycle complet (run, interrupt, resume) passe avec ces seuls droits. Identifiants dans `.env` (ignoré par git), avec un `.env.example` commité.
+
+Journal d'audit (J4) : adaptateur `adapters/postgres/audit_store.py` (port `AuditStore`). `append` ouvre une transaction, prend un verrou consultatif de transaction (`pg_advisory_xact_lock`, clé de 64 bits dérivée du nom de la table), lit la tête de chaîne, fait sceller par le domaine, puis insère. Pourquoi un verrou consultatif : `app_role` n'a que `SELECT` et `INSERT`, qui ne permettent ni verrou de table exclusif (`INSERT` n'autorise que `ROW EXCLUSIVE`, PostgreSQL 16, `LOCK`) ni `SELECT … FOR UPDATE`. Les index uniques de la migration `004` garantissent en base un enregistrement par thread et une chaîne sans fourche. Un ajout rejoué (`audit_seal` relancé après un arrêt) rend l'enregistrement existant si la décision est la même, et lève `AuditStoreError` sinon. `setup-db` applique les migrations idempotentes (`adapters/postgres/migrations.py`, `002` et suivantes), puis contrôle la dimension du corpus ; sa sortie liste les migrations appliquées. Les tests travaillent sur un journal jetable de même structure et de mêmes droits (`LIKE audit_decisions INCLUDING ALL`) : le vrai journal ne peut pas être purgé sans casser la chaîne.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -543,7 +545,9 @@ contract-decision-graph/
 │   └── initdb/                 # script d'init : applique migrations/*.sql
 ├── migrations/
 │   ├── 001_audit.sql           # J1 : extension vector, audit_decisions, app_role
-│   └── 002_rag.sql             # J3 : rag_chunks, idempotente, lecture seule pour app_role
+│   ├── 002_rag.sql             # J3 : rag_chunks, idempotente, lecture seule pour app_role
+│   ├── 003_rag_versions.sql    # J3 : versions des textes du corpus, idempotente
+│   └── 004_audit_integrite.sql # J4 : index uniques du journal (thread_id, prev_hash)
 ├── data/
 │   ├── contracts/              # 10 contrats synthétiques + 2 piégés
 │   └── corpus/                 # SOURCES.md, manifest.yaml, raw/ (textes publics), fiches/
@@ -714,7 +718,8 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
 - **26 septembre 2026, J4** :
   - décisions : rattachement déclaré des sources aux types de clause ; `decision_hash` sur la partie décision, rejeu à partir des références figées ; `config_hash` sur la configuration validée et canonique ; verrou consultatif, index uniques, premier `prev_hash` à 64 zéros ; horloge injectée ; explication par le LLM pour `run`, et pour `resume` si la clé est présente, gabarit sinon et toujours pour `expire`, source scellée, jamais bloquante ; reprise sur erreur passagère puis gabarit ; explication structurée par constat, puis synthèse ; composition du jeu de démonstration, chaque règle déclenchée au moins une fois ; critère 9 comparé à la version sans le paragraphe injecté ;
   - scellement dans le domaine (`domain/audit.py`) : forme canonique, `decision_hash`, `chain_hash`, `config_hash`, `verify_chain`, `replay` ; `AuditEntry` passe du port au domaine (jamais dans l'état : aucune migration de checkpoints) ; constats du CRAG portés par `RetrievalTrace.findings`, `justify(évaluation, résumé)` ;
-  - partie décision : le fait d'un budget dépassé sans le nombre de tokens, échecs de nœuds rangés par domaine ; troncature documentée, `verify --expect-head` (J4), ancrage externe en phase 2.
+  - partie décision : le fait d'un budget dépassé sans le nombre de tokens, échecs de nœuds rangés par domaine ; troncature documentée, `verify --expect-head` (J4), ancrage externe en phase 2 ;
+  - journal d'audit PostgreSQL : migration `004` (index uniques `thread_id`, `prev_hash`), adaptateur sous verrou consultatif de transaction, ajout rejoué idempotent, `AuditStoreError` pour une autre décision ; `setup-db` applique les migrations idempotentes (`migrations.py`) et contrôle la dimension (`rag_store.check_dimension`).
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

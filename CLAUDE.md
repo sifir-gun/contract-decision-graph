@@ -34,7 +34,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 
 - `docker compose up -d` : démarre PostgreSQL + pgvector (les migrations de `docker-entrypoint-initdb.d` ne s'exécutent que sur un volume vide)
 - `uv sync` : installe les dépendances
-- `uv run python -m cdg.cli setup-db` : tables du checkpointer et droits d'app_role (une fois, après `docker compose up -d`)
+- `uv run python -m cdg.cli setup-db` : tables du checkpointer et droits d'app_role, migrations idempotentes (`002` et suivantes) ; après `docker compose up -d`, et après l'ajout d'une migration
 - `uv run pytest` : lance les tests (ceux marqués `pg` exigent PostgreSQL ; `-m "not pg"` pour les exclure volontairement)
 - `uv run pytest --cov` : tests avec couverture (lignes et branches) ; échoue sous le seuil `fail_under` de `pyproject.toml`
 - `uv run pytest --llm -m llm` : tests avec le vrai modèle (payants, 5 réussites sur 5, résultat consigné au journal)
