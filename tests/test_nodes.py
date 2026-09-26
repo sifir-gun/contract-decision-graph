@@ -16,7 +16,6 @@ from doubles import (
 from cdg.application.deps import RetrievalResult
 from cdg.application.nodes.analyst import analyst
 from cdg.application.nodes.audit_seal import audit_seal
-from cdg.application.nodes.explain import explain
 from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
@@ -212,13 +211,12 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
     assert v.retrieval_status == "OK"
 
 
-# --- bouchons -------------------------------------------------------------------
+# --- reject ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("node", [explain, reject])
-def test_bouchons_ne_modifient_rien(node):
-    # reject : rien à écrire, reject_reason (validate_input) suffit au scellement
-    assert node({"reject_reason": "texte du contrat vide"}) == {}
+def test_reject_n_ecrit_rien_de_plus():
+    # reject_reason (validate_input) suffit au scellement ; explain est testé à part
+    assert reject({"reject_reason": "texte du contrat vide"}) == {}
 
 
 # --- audit_seal ----------------------------------------------------------------------

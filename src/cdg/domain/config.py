@@ -60,6 +60,11 @@ class Extraction(_Strict):
     max_attempts: Annotated[int, Field(ge=1)]
 
 
+class ExplainConfig(_Strict):
+    # essais du LLM, le premier compris ; ensuite le gabarit
+    max_attempts: Annotated[int, Field(ge=1)]
+
+
 class JuridiqueRules(_Strict):
     supplier_cap_min_pct: Quantity
     supplier_cap_score_penalty: Penalty
@@ -173,7 +178,7 @@ ModelId = Annotated[str, Field(min_length=1)]
 
 
 class TierModels(_Strict):
-    main: ModelId  # extraction
+    main: ModelId  # extraction, explication
     light: ModelId  # juge CRAG, réécriture de requête
 
     @model_validator(mode="after")
@@ -228,6 +233,8 @@ class DecisionConfig(_Strict):
     crag: CragConfig
     analyst_retry: RetrySettings
     extraction_retry: RetrySettings
+    explain: ExplainConfig
+    explain_retry: RetrySettings
 
     def weight(self, domain: Domain) -> float:
         weight: float = getattr(self.weights, domain)

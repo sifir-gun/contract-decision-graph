@@ -12,6 +12,7 @@ from psycopg import sql
 
 from cdg import cli, settings
 from cdg.adapters.langgraph import checkpointer
+from cdg.adapters.llm import API_KEY_VARS
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.domain.config import load_config
@@ -118,6 +119,17 @@ class ForbiddenAuditStore:
 @pytest.fixture(autouse=True)
 def _journal_reel_interdit(monkeypatch):
     monkeypatch.setattr(cli, "open_audit_store", ForbiddenAuditStore)
+
+
+@pytest.fixture(autouse=True)
+def _cles_d_api_vides(request, monkeypatch):
+    """Clés d'API vides, comme en CI, quel que soit le .env du poste (load_env ne remplace
+    pas une variable exportée) : aucun test n'appelle le vrai fournisseur, et `resume`
+    explique par le gabarit, même en sous-processus. Les tests llm gardent leur clé."""
+    if request.node.get_closest_marker("llm"):
+        return
+    for var in API_KEY_VARS.values():
+        monkeypatch.setenv(var, "")
 
 
 @pytest.fixture

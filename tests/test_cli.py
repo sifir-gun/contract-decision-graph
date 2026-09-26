@@ -1,6 +1,7 @@
 """CLI : sorties JSON, erreurs structurées, dépendances réelles remplacées par des doublures."""
 
 import json
+from contextlib import contextmanager
 from datetime import date
 
 import psycopg
@@ -8,14 +9,18 @@ import pytest
 from doubles import (
     ABSENT,
     CONTRACT_TEXT,
+    TEMPLATE,
     FakeCrag,
+    FakeLLM,
     FixedExtractor,
     HashEmbedder,
     clauses,
+    faithful_explanation,
 )
 
 from cdg import cli
 from cdg.application.deps import Deps
+from cdg.application.explanation import LLMExplainer
 from cdg.domain.config import load_config
 from cdg.domain.models import REQUIRED_KINDS, Clause
 
@@ -82,6 +87,7 @@ def analysis(monkeypatch, request):
                 crag=crag,
                 audit_store=cli.open_audit_store(),
                 clock=cli.now,
+                explainer=TEMPLATE,
             )
 
         monkeypatch.setattr(cli, "build_deps", build)
@@ -230,7 +236,7 @@ def test_resume_finalise_puis_history(
 
 
 @pytest.mark.pg
-def test_resume_n_appelle_ni_llm_ni_corpus(
+def test_resume_sans_cle_n_appelle_ni_llm_ni_corpus(
     pg, thread_id, contract, analysis, capsys, monkeypatch
 ):
     analysis(*INSUFFICIENT)
@@ -450,3 +456,83 @@ def test_resume_refuse_si_la_configuration_a_change(
     assert "relancer l'analyse" in err["detail"].lower()
     assert "restaurer la configuration" in err["detail"]
     assert audit_journal.entries() == []  # rien de repris, rien de scellé
+
+
+# --- Explication (J4) : LLM pour run, et pour resume si la clé est présente ; gabarit sinon,
+# et toujours pour expire ----------------------------------------------------------------------
+
+RESUME = ["--decision", "NO_GO", "--reviewer", "relecteur-synth", "--reason", "m"]
+
+
+@pytest.mark.pg
+def test_resume_sans_cle_explication_par_le_gabarit_scellee(
+    pg, thread_id, contract, analysis, audit_journal, capsys
+):
+    analysis(*INSUFFICIENT)
+    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    code, out = run_cli(capsys, "resume", thread_id, *RESUME)
+    assert code == 0
+    explanation = out["explanation"]
+    assert (explanation["source"], explanation["decision"]) == ("gabarit", "NO_GO")
+    assert explanation["reasons"] == [
+        "clé d'API absente (MISTRAL_API_KEY) : explication par le gabarit"
+    ]
+    [entry] = audit_journal.entries()
+    assert entry.record["explanation"] == explanation
+
+
+@pytest.mark.pg
+def test_resume_avec_cle_explication_par_le_llm(
+    pg, thread_id, contract, analysis, audit_journal, capsys, monkeypatch
+):
+    analysis(*INSUFFICIENT)
+    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    monkeypatch.setenv("MISTRAL_API_KEY", "cle-de-test")
+    llm = FakeLLM({"explain": faithful_explanation})
+    monkeypatch.setattr(cli, "build_provider", lambda config: llm)
+    code, out = run_cli(capsys, "resume", thread_id, *RESUME)
+    assert code == 0 and [c["node"] for c in llm.calls] == ["explain"]
+    assert (out["explanation"]["source"], out["explanation"]["reasons"]) == ("llm", [])
+
+
+def test_expire_explication_toujours_par_le_gabarit(capsys, monkeypatch):
+    # clé présente : expire ne construit pourtant aucun fournisseur
+    monkeypatch.setenv("MISTRAL_API_KEY", "cle-de-test")
+
+    def forbidden(config):
+        raise AssertionError("expire n'appelle jamais le LLM")
+
+    monkeypatch.setattr(cli, "build_provider", forbidden)
+    seen = []
+
+    @contextmanager
+    def graph(config, deps):
+        seen.append(deps)
+        yield "graphe"
+
+    monkeypatch.setattr(cli, "_graph", graph)
+    monkeypatch.setattr(
+        cli.orchestrator, "expire_threads", lambda graph, older_than, now: []
+    )
+    assert cli.main(["expire", "--older-than", "1d"]) == 0
+    [deps] = seen
+    assert deps.explainer == cli.EXPIRE_EXPLAINER
+    assert "expire" in deps.explainer.reason
+
+
+def test_run_explication_par_le_llm_de_l_analyse(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMBEDDING_CACHE_DIR", str(tmp_path))
+    llm = FakeLLM()
+    monkeypatch.setattr(cli, "build_provider", lambda config: llm)
+    monkeypatch.setattr(
+        cli.fastembed, "FastembedEmbedder", lambda config, cache_dir: HashEmbedder()
+    )
+    deps = cli.build_deps(load_config())
+    assert isinstance(deps.explainer, LLMExplainer) and deps.explainer.provider is llm
+
+
+def test_tests_sans_cle_d_api_par_defaut():
+    # garde-fou de conftest : aucun test (hors llm) n'appelle le vrai fournisseur
+    import os
+
+    assert os.environ["MISTRAL_API_KEY"] == os.environ["ANTHROPIC_API_KEY"] == ""

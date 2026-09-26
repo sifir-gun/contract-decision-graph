@@ -123,9 +123,21 @@ class AgentVerdict(BaseModel):
     score: float = Field(ge=0.0, le=1.0)  # 1 = favorable
     hard_block: bool
     findings: list[str]
+    # clause de chaque constat, dans l'ordre de `findings` ; None : constat du CRAG. Vide
+    # pour un verdict d'avant le J4 (checkpoints) : constats non rattachés
+    finding_kinds: list[str | None] = []
     evidence_ids: list[str]
     retrieval_status: RetrievalStatus
     retrieval: RetrievalTrace | None = None  # résumé du CRAG ; None pour une doublure
+
+    @model_validator(mode="after")
+    def _un_rattachement_par_constat(self) -> "AgentVerdict":
+        if self.finding_kinds and len(self.finding_kinds) != len(self.findings):
+            raise ValueError(
+                f"verdict {self.domain} : {len(self.finding_kinds)} finding_kinds pour "
+                f"{len(self.findings)} constats"
+            )
+        return self
 
 
 SYSTEM_REVIEWER_PREFIX = "systeme:"

@@ -7,6 +7,7 @@ Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Callable
 from datetime import UTC, date, datetime
@@ -17,11 +18,12 @@ from zoneinfo import ZoneInfo
 from cdg import settings
 from cdg.adapters import fastembed
 from cdg.adapters.langgraph import checkpointer, orchestrator
-from cdg.adapters.llm import build_provider
+from cdg.adapters.llm import API_KEY_VARS, build_provider
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.application import ingestion
-from cdg.application.deps import Deps
+from cdg.application.deps import Deps, Explainer, TemplateOnly
+from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
 from cdg.domain import audit, expiry
 from cdg.domain.config import DecisionConfig, load_config
@@ -64,6 +66,7 @@ def build_deps(config: DecisionConfig) -> Deps:
         crag=orchestrator.crag_runner(retriever, llm, config),
         audit_store=open_audit_store(),
         clock=now,
+        explainer=LLMExplainer(llm),
     )
 
 
@@ -76,15 +79,34 @@ def _not_needed(what: str):
     return fail
 
 
-def review_deps(config: DecisionConfig) -> Deps:
+# expire : décision système, toujours expliquée par le gabarit (un expire planifié reste
+# sans clé d'API) ; history n'exécute aucun nœud
+EXPIRE_EXPLAINER = TemplateOnly(
+    "décision système (expire) : explication par le gabarit, sans LLM"
+)
+HISTORY_EXPLAINER = TemplateOnly("history : aucun nœud exécuté")
+
+
+def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
+    """resume : le LLM si la clé d'API du fournisseur est présente, sinon le gabarit, avec
+    le motif scellé. La clé n'est pas exigée pour reprendre un contrat."""
+    var = API_KEY_VARS[config.llm.provider]
+    if not os.environ.get(var):
+        return TemplateOnly(f"clé d'API absente ({var}) : explication par le gabarit")
+    return LLMExplainer(build_provider(config.llm))
+
+
+def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> Deps:
     """resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
-    aucun modèle chargé, aucune clé d'API exigée, un appel échouerait explicitement. Le
-    contrat repris est scellé dans le journal réel."""
+    aucun modèle d'embedding chargé, un appel échouerait explicitement. Seule
+    l'explication peut appeler le LLM (resume avec clé). Le contrat repris est scellé dans
+    le journal réel."""
     return Deps(
         extractor=_not_needed("extraction"),
         crag=_not_needed("CRAG"),
         audit_store=open_audit_store(),
         clock=now,
+        explainer=explainer,
     )
 
 
@@ -125,8 +147,7 @@ def _ingest(args: argparse.Namespace) -> dict:
     return {"ingest": "ok", "model": embedder.model, **summary}
 
 
-def _graph(config: DecisionConfig, deps: Deps | None = None):
-    deps = review_deps(config) if deps is None else deps
+def _graph(config: DecisionConfig, deps: Deps):
     return orchestrator.open_graph(config, deps, conninfo.app_conninfo())
 
 
@@ -154,7 +175,8 @@ def _resume(args: argparse.Namespace) -> dict:
         "overrides_block": args.overrides_block,
     }
     config = load_config()
-    with _graph(config) as graph:
+    deps = review_deps(config, resume_explainer(config))
+    with _graph(config, deps) as graph:
         return orchestrator.resume_thread(graph, args.thread_id, answer, config=config)
 
 
@@ -188,7 +210,8 @@ def _head(value: str) -> str:
 
 
 def _history(args: argparse.Namespace) -> dict:
-    with _graph(load_config()) as graph:
+    config = load_config()
+    with _graph(config, review_deps(config, HISTORY_EXPLAINER)) as graph:
         checkpoints = orchestrator.thread_history(graph, args.thread_id)
     return {"thread_id": args.thread_id, "checkpoints": checkpoints}
 
@@ -196,7 +219,8 @@ def _history(args: argparse.Namespace) -> dict:
 def _expire(args: argparse.Namespace) -> dict:
     older_than = expiry.parse_duration(args.older_than)
     now = datetime.now(UTC)
-    with _graph(load_config()) as graph:
+    config = load_config()
+    with _graph(config, review_deps(config, EXPIRE_EXPLAINER)) as graph:
         expired = orchestrator.expire_threads(graph, older_than, now)
     return {
         "older_than": args.older_than,
@@ -227,9 +251,9 @@ def build_parser() -> argparse.ArgumentParser:
     ).set_defaults(handler=_ingest)
 
     run_notice = (
-        "Masque le contrat, puis extrait ses clauses et interroge le juge du CRAG par le "
-        "fournisseur LLM de la configuration (appels payants, clé dans .env) ; corpus "
-        "indexé par ingest, modèle d'embedding local."
+        "Masque le contrat, puis extrait ses clauses, interroge le juge du CRAG et rédige "
+        "l'explication par le fournisseur LLM de la configuration (appels payants, clé "
+        "dans .env) ; corpus indexé par ingest, modèle d'embedding local."
     )
     run = sub.add_parser(
         "run", help="analyse un contrat (appels LLM payants)", description=run_notice
@@ -253,7 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.set_defaults(handler=_run)
 
-    resume = sub.add_parser("resume", help="reprend un thread en attente d'un humain")
+    resume = sub.add_parser(
+        "resume",
+        help="reprend un thread en attente d'un humain ; explication par le LLM si la "
+        "clé d'API est présente (appel payant), sinon par le gabarit",
+    )
     resume.add_argument("thread_id")
     resume.add_argument("--decision", required=True, choices=get_args(Decision))
     resume.add_argument("--reviewer", required=True)
@@ -274,7 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
     expire = sub.add_parser(
         "expire",
         help="NO_GO système (motif timeout) pour les threads en attente "
-        "d'un humain depuis plus que le délai ; jamais d'approbation",
+        "d'un humain depuis plus que le délai ; jamais d'approbation ; explication "
+        "par le gabarit, sans LLM",
     )
     expire.add_argument("--older-than", required=True, help="délai : 24h, 30m, 2d…")
     expire.set_defaults(handler=_expire)

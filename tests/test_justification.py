@@ -6,11 +6,13 @@ clause qui déclenche une pénalité ou un blocage sans référence en vigueur r
 INSUFFISANT, avec un constat qui la nomme.
 """
 
+import pytest
 from doubles import ABSENT, clauses
+from pydantic import ValidationError
 
 from cdg.domain.config import load_config
 from cdg.domain.justification import justify
-from cdg.domain.models import ClauseRetrieval, RetrievalTrace
+from cdg.domain.models import AgentVerdict, ClauseRetrieval, RetrievalTrace
 from cdg.domain.rules import RULES
 
 CONFIG = load_config()
@@ -113,3 +115,46 @@ def test_references_dedoublonnees_dans_l_ordre_des_clauses():
     a = assess("financier", penalites_execution=ABSENT, delai_paiement=90)
     v = justify(a, trace(penalites_execution=["A", "B"], delai_paiement=["B", "C"]))
     assert v.evidence_ids == ["A", "B", "C"]
+
+
+# --- Rattachement de chaque constat à sa clause (J4, explication par constat) -------------
+
+
+def test_chaque_constat_rattache_a_sa_clause_crag_sans_clause():
+    a = assess("financier", penalites_execution=ABSENT, delai_paiement=None)
+    v = justify(
+        a,
+        trace(
+            ["référence expirée : L441-10"],
+            penalites_execution=[],
+            delai_paiement=["X"],
+        ),
+    )
+    assert v.finding_kinds == [
+        "penalites_execution",
+        "delai_paiement",
+        None,  # constat du CRAG : propre à la recherche
+        "penalites_execution",  # référentiel insuffisant
+    ]
+    assert len(v.finding_kinds) == len(v.findings)
+
+
+def test_constat_d_information_sans_reference_rattache_a_sa_clause():
+    a = assess("financier", delai_paiement=ABSENT)
+    v = justify(a, trace(delai_paiement=[]))
+    assert v.finding_kinds == ["delai_paiement", "delai_paiement"]
+
+
+def test_rattachement_d_une_autre_longueur_que_les_constats_refuse():
+    v = justify(assess("financier", penalites_execution=ABSENT), trace())
+    with pytest.raises(ValidationError, match="finding_kinds"):
+        AgentVerdict.model_validate(
+            {**v.model_dump(), "finding_kinds": ["penalites_execution"]}
+        )
+
+
+def test_verdict_sans_rattachement_lisible():
+    # verdicts d'avant le J4 (checkpoints) : aucun rattachement, constats non rattachés
+    v = justify(assess("financier", penalites_execution=ABSENT), trace())
+    legacy = v.model_dump(exclude={"finding_kinds"})
+    assert AgentVerdict.model_validate(legacy).finding_kinds == []

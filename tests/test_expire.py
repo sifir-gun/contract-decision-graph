@@ -59,6 +59,12 @@ def test_11_thread_expire_no_go_systeme_motif_timeout(graph, thread_id):
     )
     assert human["reason"].startswith("timeout : en attente depuis 25 h")
     assert orchestrator.thread_status(graph, thread_id)["statut"] == "termine"
+    # décision système expliquée par le gabarit, sans LLM
+    assert (status["explanation"]["source"], status["explanation"]["decision"]) == (
+        "gabarit",
+        "NO_GO",
+    )
+    assert "délai de revue humaine est dépassé" in status["explanation"]["synthesis"]
 
 
 def test_thread_recent_non_expire(graph, thread_id):

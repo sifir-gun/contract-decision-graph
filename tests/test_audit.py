@@ -13,7 +13,7 @@ import yaml
 from doubles import ABSENT, ANALYSIS_DATE, clauses, usage
 from pydantic import BaseModel, ValidationError
 
-from cdg.domain import audit
+from cdg.domain import audit, explanation
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.decision import decide
 from cdg.domain.justification import justify
@@ -118,14 +118,13 @@ def _failed(failures):
     return {f.domain for f in failures}
 
 
-def record(state, thread_id=None, sealed_at=SEALED_AT, explanation=None, config=CONFIG):
+def record(state, thread_id=None, sealed_at=SEALED_AT, config=CONFIG):
     """Scellement par un processus dont la configuration est `config`."""
     return audit.build_record(
         state,
         thread_id=thread_id or state["contract_id"],
         sealing_config_hash=audit.config_hash(config),
         sealed_at=sealed_at,
-        explanation=explanation,
     )
 
 
@@ -142,12 +141,14 @@ def test_verdicts_ranges_dans_l_ordre_des_domaines():
 
 def test_decision_hash_ignore_identifiants_horodatage_consommation_et_explication():
     base = dumped(analysed())
-    other = dumped(
-        analysed(contract_id="c-2", used=[usage(5, 5, node="extract_clauses")]),
-        sealed_at=datetime(2027, 1, 1, tzinfo=UTC),
-        explanation={"source": "gabarit", "texte": "autre"},
-    )
+    state = analysed(contract_id="c-2", used=[usage(5, 5, node="extract_clauses")])
+    explained = {
+        **state,
+        "explanation": explanation.template(explanation.request(state), reasons=["m"]),
+    }
+    other = dumped(explained, sealed_at=datetime(2027, 1, 1, tzinfo=UTC))
     assert other["contract_id"] != base["contract_id"] and other != base
+    assert other["explanation"]["source"] == "gabarit"
     assert audit.decision_hash(other) == audit.decision_hash(base)
 
 

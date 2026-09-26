@@ -6,7 +6,7 @@ import uuid
 
 import psycopg
 import pytest
-from doubles import CONTRACT_TEXT, FakeCrag, FixedExtractor, clauses
+from doubles import CONTRACT_TEXT, TEMPLATE, FakeCrag, FixedExtractor, clauses
 from psycopg import sql
 
 from cdg import cli
@@ -33,6 +33,7 @@ def sealed(pg, audit_journal, tmp_path, monkeypatch, capsys):
             crag=FakeCrag(),
             audit_store=cli.open_audit_store(),
             clock=cli.now,
+            explainer=TEMPLATE,
         )
 
     monkeypatch.setattr(cli, "build_deps", build)

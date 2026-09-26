@@ -77,7 +77,8 @@ input:
   min_words: 30            # en dessous : langue non vérifiable, rejet
   min_french_ratio: 0.15   # part minimale de mots-outils français parmi les mots
 
-# LLM : extraction (modèle principal) et juge CRAG (modèle léger). Clés d'API dans .env.
+# LLM : extraction et explication (modèle principal), juge CRAG (modèle léger). Clés d'API
+# dans .env.
 # Identifiants figés, jamais d'alias « -latest » : le modèle est scellé dans l'audit.
 # Vérifiés le 2026-09-24 dans la documentation officielle (docs.mistral.ai,
 # platform.claude.com).
@@ -123,6 +124,22 @@ analyst_retry:
 # Reprise de l'extraction sur erreur passagère du fournisseur seulement : limite de débit
 # (429), erreur serveur (5xx), délai dépassé. Les SDK ne reprennent rien eux-mêmes.
 extraction_retry:
+  max_attempts: 3                 # tentatives, la première comprise
+  initial_interval_seconds: 2.0
+  backoff_factor: 2.0
+  max_interval_seconds: 20.0
+  jitter: false
+
+# Explication (J4) : rédigée par le modèle principal à partir du verdict figé, jamais du
+# contrat. Refusée si elle nomme une autre décision que la décision finale, ou cite une
+# référence non retenue pour la clause du constat ; après max_attempts essais refusés, ou
+# une erreur, gabarit sans LLM. Jamais bloquante : la source et les motifs sont scellés.
+explain:
+  max_attempts: 2                 # le premier essai, puis une régénération
+
+# Reprise de l'explication sur erreur passagère du fournisseur seulement (429, 5xx, délai
+# dépassé), puis gabarit.
+explain_retry:
   max_attempts: 3                 # tentatives, la première comprise
   initial_interval_seconds: 2.0
   backoff_factor: 2.0

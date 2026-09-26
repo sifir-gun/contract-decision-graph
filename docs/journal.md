@@ -1322,3 +1322,41 @@ Décision du 26/09 : l'empreinte scellée est celle de la configuration qui a pr
 
 **Tests** : 713 ; couverture de 97,9 %. Journal réel toujours vide, et aucune table jetable restante.
 
+
+### J4 tâche 5 : `explain`, critère 7
+
+**Constat de départ.** Les constats d'un verdict sont des textes : leur clause, connue des règles (`RuleFinding.kind`), était perdue dans `AgentVerdict.findings`. Or l'explication par constat doit savoir quelles références chaque constat peut citer. Deux façons de la retrouver :
+- recalculer les règles dans `explain`, comme le rejeu. Mais `expire` peut tourner sous une autre configuration que l'analyse : le recalcul pourrait alors ne plus redonner les constats du verdict ;
+- **retenue** : garder la clause dans le verdict. `AgentVerdict.finding_kinds` donne la clause de chaque constat, dans l'ordre de `findings` : `None` pour un constat du CRAG, qui est propre à la recherche. `justify` le remplit. Un validateur exige la même longueur que `findings`, ou une liste vide pour un verdict d'avant le J4 (checkpoints), dont les constats sont alors non rattachés, donc sans référence citable (issue la plus prudente). Le champ est dans la partie décision, donc scellé et rejoué ; aucun enregistrement n'existe encore dans le journal réel.
+
+**Fait.**
+- **Domaine** (`domain/explanation.py`, fonctions pures) :
+  - `request(state)` : décision finale (exigée, sinon erreur explicite), décision proposée, marge, revue humaine, étape en échec, et constats rattachés (`FindingToExplain` : `domaine-rang`, clause, texte, références retenues pour la clause) ;
+  - `refusals(draft, request)` : autre libellé de décision que la décision finale (variantes comprises), synthèse qui ne nomme pas la décision finale, référence non retenue pour la clause du constat, article cité hors de ces références (sauf s'il figure dans le texte du constat, écrit par les règles), constat manquant, inconnu, répété, ou de clause changée, texte vide ;
+  - `template(request, reasons)` : chaque constat avec ses références, puis une synthèse qui nomme la décision finale et le parcours sans autre libellé. Ni relecteur ni motif humain : c'est du texte libre, déjà scellé avec la décision humaine ;
+  - `Explanation` : source (`llm` ou `gabarit`), décision, constats expliqués, synthèse, essais, motifs.
+- **Application** :
+  - `LLMExplainer` (`application/explanation.py`, `prompts/explain_system.md`) : modèle principal, sortie structurée `Draft`. Il reçoit un dossier JSON délimité comme donnée : décision finale, marge, revue humaine (source, levée, accord avec la proposition, motif ; pas le relecteur), étape en échec, constats. Ni le texte du contrat, ni les citations des clauses. Le libellé de la décision proposée n'y figure pas non plus : le modèle ne peut pas le recopier. Les motifs d'un refus sont donnés au second essai, hors du dossier ;
+  - nœud `explain` : `TemplateOnly` donne directement le gabarit, avec son motif. Sinon, jusqu'à `explain.max_attempts` essais (2), puis le gabarit. Une erreur du LLM mène au gabarit, sauf une erreur passagère que la reprise du nœud relance encore (`retrying`, fourni par l'orchestrateur) ;
+  - `Deps.explainer` : `Explainer` ou `TemplateOnly`.
+- **Orchestrateur** : `RetryPolicy` sur `explain` (`explain_retry`, erreurs passagères seulement) ; `will_retry` dit au nœud si la politique relancera l'erreur (même règle que la garde, factorisée dans `_retried`) ; `thread_status` expose l'explication.
+- **Scellement** : `build_record` lit l'explication dans l'état, `AuditRecord.explanation` est typé. `Explanation` et `ExplainedFinding` entrent dans le sérialiseur des checkpoints.
+- **CLI** : `run` explique par le LLM de l'analyse. `resume` utilise le LLM si la clé du fournisseur est présente, sinon le gabarit avec le motif « clé d'API absente ». `expire` utilise toujours le gabarit (`EXPIRE_EXPLAINER`). L'aide de `run`, `resume` et `expire` le dit. `review_deps` reçoit l'explicateur.
+- **Configuration** : sections `explain` (`max_attempts: 2`) et `explain_retry` (comme `extraction_retry`). L'empreinte de configuration change : un thread suspendu avant ce commit ne peut plus être repris par `resume` (refus de T3), seulement relancé ou expiré.
+
+**Garde-fou des tests.** Le `.env` du poste contient une clé Mistral, et `resume` l'utiliserait désormais. Une fixture automatique vide donc les clés d'API pour tout test hors `llm`, comme en CI, quel que soit le poste. Le sous-processus de reprise du critère 5 hérite de cet environnement : il explique par le gabarit, sans appel.
+
+**Limites assumées.**
+- Les articles sont comparés par leur numéro normalisé, sans la source : « art. 28 » cité pour le RGPD passerait si seul l'article 28 d'un autre texte était retenu. Aucun numéro n'est commun à deux sources du corpus actuel.
+- Les libellés sont détectés par règles : « Go » au sens de gigaoctet serait pris pour un GO. L'erreur va dans le sens prudent : un refus, puis au pire le gabarit.
+- Une reprise après erreur passagère refait l'explication depuis le premier essai, et la consommation de la tentative interrompue n'est pas comptée, comme pour les analystes. Cette consommation vient après le gate et ne pèse pas sur la décision.
+
+**Tests** (`test_explanation.py`, `test_explain_graph.py`, CLI, justification, expiration) :
+- critère 7 : une synthèse qui nomme GO pour un `NO_GO` est rejetée, un autre libellé dans un constat aussi, une escalade nommée aussi ;
+- une référence non retenue est rejetée, et une référence d'une autre clause aussi : l'art. 28 retenu pour l'accord de traitement, cité pour le transfert. Un article cité dans le texte hors des références est rejeté ; un article déjà cité par le texte du constat reste citable ;
+- une régénération acceptée, deux refus puis le gabarit, une erreur puis le gabarit, une erreur passagère relancée puis le gabarit ;
+- le prompt ne contient ni le texte du contrat ni les citations des clauses ;
+- le gabarit passe ses propres contrôles, dans six parcours ;
+- sur le graphe : l'explication est scellée avec sa source, et `decision_hash` est identique, qu'elle vienne du LLM ou du gabarit. Pour une erreur passagère, deux tentatives du nœud puis le gabarit, ou l'acceptation ;
+- CLI : `resume` sans clé passe par le gabarit, avec clé par le LLM (doublure) ; `expire` passe par le gabarit même avec une clé ; `run` explique par le fournisseur de l'analyse ;
+- au total, 775 tests ; couverture de 98,15 %. Journal réel toujours vide, et aucune table jetable restante.

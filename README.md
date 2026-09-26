@@ -26,7 +26,9 @@ uv run python -m cdg.cli run contrat.txt --party "Nom de la partie"
 uv run python -m cdg.cli resume <thread_id> --decision NO_GO --reviewer … --reason …
 ```
 
-`run` rend un statut JSON : décision proposée ou finale, verdicts par domaine avec le résumé du CRAG, rapport d'échec le cas échéant. Une revue humaine suspend le thread jusqu'à `resume`. `--analysis-date AAAA-MM-JJ` juge les versions des textes à une autre date que celle du jour.
+`run` rend un statut JSON : décision proposée ou finale, verdicts par domaine avec le résumé du CRAG, rapport d'échec le cas échéant, explication. Une revue humaine suspend le thread jusqu'à `resume`. `--analysis-date AAAA-MM-JJ` juge les versions des textes à une autre date que celle du jour.
+
+L'explication est rédigée par le LLM à partir du verdict figé, jamais du texte du contrat, puis contrôlée : elle est refusée si elle nomme une autre décision que la décision finale, ou cite une référence que la recherche n'a pas retenue pour la clause concernée. Après une régénération refusée, ou une erreur, un gabarit la remplace. `resume` n'utilise le LLM que si la clé d'API est présente ; `expire` utilise toujours le gabarit. La source de l'explication (`llm` ou `gabarit`) et les motifs de refus sont scellés dans le journal d'audit, hors de l'empreinte de décision.
 
 ### Historique et `git blame`
 

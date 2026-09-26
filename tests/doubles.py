@@ -1,8 +1,9 @@
 """Fabriques de données synthétiques et doublures pour les tests."""
 
+import json
 from datetime import UTC, date, datetime
 
-from cdg.application.deps import Deps, ExtractionResult, RetrievalResult
+from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, TemplateOnly
 from cdg.domain import audit
 from cdg.domain.audit import StoredAuditEntry
 from cdg.domain.config import load_config
@@ -290,14 +291,41 @@ def fixed_clock() -> datetime:
     return FIXED_NOW
 
 
-def make_deps(extractor=None, crag=None, audit_store=None, clock=fixed_clock) -> Deps:
-    """Dépendances de test : doublures, journal d'audit en mémoire, horloge fixe."""
+# explication des tests par défaut : le gabarit, sans LLM, motif scellé
+TEMPLATE = TemplateOnly("tests : explication par le gabarit")
+
+
+def make_deps(
+    extractor=None, crag=None, audit_store=None, clock=fixed_clock, explainer=TEMPLATE
+) -> Deps:
+    """Dépendances de test : doublures, journal d'audit en mémoire, horloge fixe,
+    explication par le gabarit."""
     return Deps(
         extractor=extractor if extractor is not None else FixedExtractor(clauses()),
         crag=crag if crag is not None else FakeCrag(),
         audit_store=audit_store if audit_store is not None else MemoryAuditStore(),
         clock=clock,
+        explainer=explainer,
     )
+
+
+def faithful_explanation(user: str) -> dict:
+    """Réponse fidèle d'un LLM d'explication (FakeLLM, nœud `explain`) : chaque constat du
+    dossier reçu, avec sa clause et ses références, et une synthèse qui nomme la décision
+    finale."""
+    data, _ = json.JSONDecoder().raw_decode(user, user.index("{"))
+    return {
+        "findings": [
+            {
+                "id": f["id"],
+                "kind": f["kind"],
+                "references": f["references"],
+                "text": f["text"],
+            }
+            for f in data["findings"]
+        ],
+        "synthesis": f"Décision finale : {data['final_decision']}.",
+    }
 
 
 def context(config=None) -> dict:

@@ -146,6 +146,26 @@ def retries(policy: RetryPolicy, exc: Exception) -> bool:
     return bool(retry_on(exc))
 
 
+def _retried(policy: RetryPolicy, exc: Exception, attempt: int) -> bool:
+    """La RetryPolicy relancera-t-elle le nœud après cette tentative (1 à la première) ?"""
+    return retries(policy, exc) and attempt < policy.max_attempts
+
+
+def _attempt(name: str) -> int:
+    """Tentative en cours du nœud, 1 à la première ; renseignée par LangGraph pendant
+    l'exécution d'un nœud."""
+    info = get_runtime().execution_info
+    if info is None:
+        raise RuntimeError(f"{name} : hors d'une exécution de nœud")
+    return info.node_attempt
+
+
+def will_retry(name: str, policy: RetryPolicy) -> Callable[[Exception], bool]:
+    """Prédicat donné à un nœud qui se replie lui-même après la dernière tentative
+    (`explain`) : l'erreur sera-t-elle reprise par la RetryPolicy du nœud ?"""
+    return lambda exc: _retried(policy, exc, _attempt(name))
+
+
 def guard(
     name: str,
     fn: Callable[[Any], dict[str, Any]],
@@ -160,6 +180,8 @@ def guard(
       la RetryPolicy du nœud la reprend, et la garde n'intervient qu'après la dernière ;
     - `on_failure` complète la mise à jour d'un nœud à plusieurs sorties (route vers
       l'humain), à partir de tous les échecs connus.
+    `explain` se replie lui-même sur le gabarit : sa garde ne voit qu'une erreur d'avant
+    l'appel au LLM.
     """
 
     def node(state: Any) -> dict[str, Any]:
@@ -175,11 +197,7 @@ def guard(
                 ) from exc
             attempt = info.node_attempt  # 1 à la première
             # retry_on : prédicat par défaut de RetryPolicy (erreurs réseau, 5xx...)
-            if (
-                retry is not None
-                and retries(retry, exc)
-                and attempt < retry.max_attempts
-            ):
+            if retry is not None and _retried(retry, exc, attempt):
                 raise
             failure = NodeFailure(
                 node=name,
@@ -244,6 +262,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     """
     retry = retry_policy(config.analyst_retry, retry_on=analyst_retryable)
     extraction_retry = retry_policy(config.extraction_retry, retry_on=transient)
+    explain_retry = retry_policy(config.explain_retry, retry_on=transient)
     builder = StateGraph(ContractState)
     builder.add_node(
         "validate_input",
@@ -291,7 +310,21 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
         ),
     )
     builder.add_node("human_review", partial(human_review, decision_config=config))
-    builder.add_node("explain", guard("explain", explain))
+    # explain se replie sur le gabarit, sauf pour une erreur passagère encore reprise
+    builder.add_node(
+        "explain",
+        guard(
+            "explain",
+            partial(
+                explain,
+                explainer=deps.explainer,
+                decision_config=config,
+                retrying=will_retry("explain", explain_retry),
+            ),
+            retry=explain_retry,
+        ),
+        retry_policy=explain_retry,
+    )
     builder.add_node(
         "audit_seal",
         guard(
@@ -360,7 +393,7 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
     """État d'un thread, sérialisable en JSON ; `demande` : charge utile en attente."""
     snapshot = graph.get_state(_thread(thread_id))
     values = snapshot.values
-    human = values.get("human")
+    human, explanation = values.get("human"), values.get("explanation")
     pending = [i.value for i in snapshot.interrupts]
     return {
         "thread_id": thread_id,
@@ -379,6 +412,7 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "decision_hash": values.get("decision_hash"),
         "chain_hash": values.get("chain_hash"),
         "human": human.model_dump() if human else None,
+        "explanation": explanation.model_dump(mode="json") if explanation else None,
         "verdicts": [
             v.model_dump(exclude={"evidence_ids"}) for v in values.get("verdicts", [])
         ],

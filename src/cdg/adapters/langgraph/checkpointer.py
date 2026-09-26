@@ -18,6 +18,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection, sql
 from psycopg.rows import dict_row
 
+from cdg.domain.explanation import ExplainedFinding, Explanation
 from cdg.domain.models import (
     AgentVerdict,
     Clause,
@@ -37,6 +38,8 @@ CHECKPOINT_TYPES = (
     Clause,
     AgentVerdict,
     ClauseRetrieval,
+    ExplainedFinding,
+    Explanation,
     HumanDecision,
     NodeFailure,
     RetrievalTrace,

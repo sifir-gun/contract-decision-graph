@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from cdg.domain.config import DecisionConfig
 from cdg.domain.decision import decide
+from cdg.domain.explanation import Explanation
 from cdg.domain.justification import justify
 from cdg.domain.models import (
     DOMAINS,
@@ -190,7 +191,7 @@ class AuditRecord(BaseModel):
     failure_report: dict[str, Any] | None  # complet, mesures comprises
     sealing_config_hash: str  # configuration du processus qui scelle
     sealing_findings: list[str]  # constats du scellement (configuration modifiée…)
-    explanation: dict[str, Any] | None
+    explanation: Explanation | None  # source, essais et motifs ; None après un rejet
     failures: list[NodeFailure]  # tous les échecs de nœud, dans l'ordre de l'état
     usage: list[Usage]
     models: dict[str, str]
@@ -210,7 +211,6 @@ def build_record(
     thread_id: str,
     sealing_config_hash: str,
     sealed_at: datetime,
-    explanation: dict[str, Any] | None = None,
 ) -> AuditRecord:
     """Enregistrement d'un contrat à partir de son état final. Une clé absente de l'état
     (rejet, escalade avant les analystes) est scellée vide ou nulle ; le contexte
@@ -244,7 +244,7 @@ def build_record(
         sealing_findings=[]
         if sealing_config_hash == analysed_with
         else [CONFIG_CHANGED],
-        explanation=explanation,
+        explanation=state.get("explanation"),
         failures=state.get("failures", []),
         usage=state.get("usage", []),
         models=state["models"],
