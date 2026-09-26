@@ -685,3 +685,49 @@ def test_categorie_sur_une_clause_absente_refusee():
     assert out["failure_report"]["problems"] == [problem]
     # absente et sans catégorie : acceptée
     assert verify(clauses(transfert_hors_ue=ABSENT)) == {"route": "analysts"}
+
+
+# --- Transfert omis : localisation et hébergement des données (J5, après la série 7) ---------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # série 7, contrat 07, essai 5 : omis sans signalement
+        "Les données sont traitées et hébergées exclusivement en France.",
+        "Localisation des données : centres de données du Prestataire en Irlande.",
+        "Les serveurs sont situés aux États-Unis.",
+        (
+            "Les données sont stockées dans un centre de données situé hors de l'Espace "
+            "économique européen."
+        ),
+        "Les données ne quittent pas le territoire de l'Union européenne.",
+    ],
+)
+def test_transfert_omis_localisation_evoquee_redemande(line):
+    out = verify(clauses(transfert_hors_ue=ABSENT), text=CONTRACT_TEXT + line + "\n")
+    [problem] = out["extraction_feedback"]
+    assert problem.startswith("clause déclarée absente, mais le contrat contient « ")
+    assert problem.endswith("»: transfert_hors_ue")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # contrats d'hébergement qui ne disent pas où sont les données : absence juste
+        (
+            "Le Prestataire héberge l'application de gestion des stocks de l'Acheteur et "
+            "en assure la maintenance."
+        ),
+        "Les applications hébergées par le Prestataire sont sauvegardées chaque nuit.",
+        (
+            "Le Prestataire assure l'hébergement et l'infogérance de la messagerie de "
+            "l'Acheteur."
+        ),
+        # stockage de marchandises
+        "Les marchandises sont stockées dans l'entrepôt de l'Acheteur, situé à Lyon.",
+    ],
+)
+def test_transfert_absent_hebergement_sans_localisation_accepte(line):
+    out = verify(clauses(transfert_hors_ue=ABSENT), text=CONTRACT_TEXT + line + "\n")
+    assert out == {"route": "analysts"}

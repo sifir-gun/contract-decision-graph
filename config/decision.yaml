@@ -99,6 +99,18 @@ extraction:
       - transfert des données
       - pays tiers
       - hors de l'union
+      # localisation et hébergement des données (J5, série 7) : ancrés sur les données
+      # ou les serveurs, jamais sur « hébergement » seul, objet d'un contrat d'hébergement
+      - sont traitées et hébergées
+      - données sont stockées
+      - localisation des données
+      - serveurs sont situés
+      - centre de données situé
+      - centres de données situés
+      - territoire de l'union
+      - hors de l'ue
+      - hors de l'espace économique européen
+      - en dehors de l'union
   # Cohérence entre catégorie et citation (J5, après la série 6) : pour chaque type à
   # catégorie, des termes par catégorie, de la plus spécifique à la moins spécifique.
   # Parmi les catégories dont un terme figure dans la citation (casse et typographie
