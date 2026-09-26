@@ -5,18 +5,24 @@ Chaque test PostgreSQL travaille sur un journal jetable (fixture `journal`), de 
 structure et mêmes droits qu'`audit_decisions`.
 """
 
+import argparse
+import ast
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg
 import pytest
 from doubles import MemoryAuditStore
 from psycopg import sql
+from pydantic import BaseModel
 
+from cdg import cli
+from cdg.adapters.postgres import audit_store as audit_store_module
 from cdg.adapters.postgres import migrations
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.domain import audit
-from cdg.domain.config import load_config
+from cdg.domain.config import DecisionConfig, load_config
 from cdg.ports.audit_store import AuditStoreError
 
 CONFIG = load_config()
@@ -184,3 +190,109 @@ def test_index_uniques_du_vrai_journal(pg):
     unique = [r[0] for r in rows if r[0].startswith("CREATE UNIQUE INDEX")]
     assert any("(thread_id)" in d for d in unique)
     assert any("(prev_hash)" in d for d in unique)
+
+
+# --- Nom de table : réservé aux tests, jamais hors de psycopg.sql.Identifier -------------
+
+SOURCE = Path(audit_store_module.__file__)
+
+
+def _names(node) -> set[str]:
+    """Noms et attributs lus dans un sous-arbre (table, self._table…)."""
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} | {
+        n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)
+    }
+
+
+def _is_sql(call, name) -> bool:
+    return (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == name
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "sql"
+    )
+
+
+def test_nom_de_table_seulement_par_sql_identifier():
+    tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+    # le texte SQL est constant : jamais formaté ni concaténé comme une chaîne
+    for call in calls:
+        if _is_sql(call, "SQL"):
+            assert all(
+                isinstance(a, ast.Constant) and isinstance(a.value, str)
+                for a in call.args
+            ), ast.unparse(call)
+    executed = [
+        c.args[0]
+        for c in calls
+        if isinstance(c.func, ast.Attribute) and c.func.attr == "execute" and c.args
+    ]
+    assert executed, "aucune requête trouvée : test à revoir"
+    for query in executed:
+        for node in ast.walk(query):
+            assert not isinstance(node, ast.JoinedStr), ast.unparse(query)
+            assert not (
+                isinstance(node, ast.BinOp)
+                and isinstance(node.op, ast.Mod)
+                and isinstance(node.left, ast.Constant)
+            ), ast.unparse(query)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "format"
+            ):
+                assert _is_sql(node.func.value, "SQL"), ast.unparse(query)
+        # le nom de la table n'entre dans une requête que déjà passé par Identifier
+        assert not {"table", "_table"} & _names(query), ast.unparse(query)
+    identifiers = [c for c in calls if _is_sql(c, "Identifier")]
+    assert any(ast.unparse(c) == "sql.Identifier(table)" for c in identifiers)
+
+
+@pytest.mark.pg
+def test_nom_de_table_hostile_reste_un_identifiant(pg):
+    hostile = 'audit_decisions"; DROP TABLE audit_decisions; --'
+    store = PostgresAuditStore(
+        pg.admin, table=hostile
+    )  # administrateur : pourrait tout
+    with pytest.raises(psycopg.errors.UndefinedTable):
+        store.entries()
+    with pytest.raises(psycopg.errors.UndefinedTable):
+        store.append(Sealer(record("c-1")))
+    with psycopg.connect(pg.admin) as conn:
+        assert conn.execute("SELECT to_regclass('audit_decisions')").fetchone()[0]
+
+
+def test_nom_de_table_ni_dans_la_cli_ni_dans_la_configuration():
+    # CLI : aucune option, dans aucune sous-commande, ne désigne une table
+    parser = cli.build_parser()
+    subparsers = [
+        a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+    ]
+    options = [
+        option
+        for group in subparsers
+        for command in group.choices.values()
+        for action in command._actions
+        for option in [action.dest, *action.option_strings]
+    ]
+    assert options and not [o for o in options if "table" in o.lower()]
+
+    # configuration : aucun champ, à aucun niveau, ne désigne une table
+    def fields(model, prefix=""):
+        for name, info in model.model_fields.items():
+            yield prefix + name
+            annotation = info.annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                yield from fields(annotation, f"{prefix}{name}.")
+
+    assert not [f for f in fields(DecisionConfig) if "table" in f.lower()]
+
+    # code applicatif : l'adaptateur n'est jamais construit avec un nom de table
+    for path in (Path(cli.__file__).parent).rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and ast.unparse(node.func).endswith(
+                "PostgresAuditStore"
+            ):
+                assert not [k for k in node.keywords if k.arg == "table"], path

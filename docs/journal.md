@@ -1228,3 +1228,18 @@ Le port et la doublure sont ajoutés à `test_ports`. Au total, 673 tests ; couv
 
 **Piège.** Après un aller-retour par le JSONB, l'enregistrement redonne les mêmes empreintes, parce que les empreintes sont recalculées sur la forme canonique (clés triées, flottants arrondis) et non sur le texte stocké : JSONB réordonne les clés.
 
+### J4 tâche 2 (suite) : nom de table réservé aux tests, deux garde-fous
+
+Validé à deux conditions, chacune testée (`test_audit_store.py`) :
+- **Seulement par `psycopg.sql.Identifier`**, vérifié de deux façons :
+  - **analyse de la source de l'adaptateur** : le texte passé à `sql.SQL` est constant ; aucune requête n'est une f-string, un `%` sur une chaîne ou un `.format` hors de `sql.SQL` ; le nom de table n'entre dans une requête que déjà passé par `sql.Identifier(table)` ;
+  - **nom hostile** (`audit_decisions"; DROP TABLE audit_decisions; --`), essayé avec les droits administrateur : l'adaptateur échoue par `UndefinedTable`, et `audit_decisions` existe toujours.
+- **Ni CLI ni configuration** :
+  - aucune option d'aucune sous-commande ne désigne une table ;
+  - aucun champ de `DecisionConfig`, à aucun niveau, n'en désigne une ;
+  - aucun appel à `PostgresAuditStore` dans `src/` ne passe `table=`.
+
+**Vérifié par mutation** : une f-string injectée dans une requête de l'adaptateur, puis un `PostgresAuditStore(…, table=…)` ajouté à `cli.py`, font chacun échouer le test correspondant. Sources restaurées ensuite.
+
+**Phase 2** (spec) : une base de test séparée de la base de développement, pour que les tests ne partagent jamais la base du vrai journal.
+
