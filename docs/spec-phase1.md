@@ -23,7 +23,7 @@ Ce que la phase 1 doit démontrer, et rien de plus :
 
 ## Justification multi-agents
 
-Le fan-out à 4 analystes se défend sur la latence et l'audit par domaine, pas sur la qualité. L'ADR du repo doit le dire explicitement.
+Le fan-out à 4 analystes se défend sur l'audit par domaine, et un peu sur la latence, pas sur la qualité : voir `docs/adr-001-fan-out.md` (J5), qui le dit explicitement, avec le gain de latence mesuré à la série 7 (au mieux une seconde par contrat, sur six).
 
 - **Mur concret** : parallélisme réel, les 4 recherches CRAG sont indépendantes ; spécialisation réelle, chaque domaine a ses règles et son corpus filtré. Pas de débordement de contexte : un agent unique avec 4 appels RAG séquentiels ferait probablement aussi bien en qualité.
 - **Pattern retenu** : Fan-out / Fan-in avec gate déterministe, plus un vérificateur sur l'extraction. Écartés : Supervisor piloté par LLM (routage fixe connu d'avance, un routeur LLM ajoute coût et surface d'attaque sans gain), Debate et Council par vote (les analystes ne répondent pas à la même question).
@@ -784,6 +784,7 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - cohérence entre valeur et citation : une durée ou un préavis en années est compté en mois (x 12), en chiffres comme en lettres ; une quantité suivie d'une demie (« un an et demi ») n'est pas lue ; le prompt d'extraction précise que durée et préavis s'expriment en mois ;
   - cohérence entre catégorie et citation (après la série 6) : pour chaque type à catégorie, des termes par catégorie dans `extraction.category_terms`, de la plus spécifique à la moins spécifique ; si la catégorie la plus spécifique évoquée par la citation n'est pas celle rendue, nouvelle extraction avec retour ciblé, puis `ESCALADE` ; une citation qui n'évoque aucune catégorie n'est pas contrôlée ;
   - termes d'absence des formulations indirectes du contrat réaliste (après la série 6) : « réfaction » pour les pénalités d'exécution, « le client ne répond » pour la responsabilité de l'acheteur, « prix sont indexés » pour la révision, « annuaire » et des désignations de personnes pour les données personnelles ; chaque clause du contrat réaliste déclarée absente est redemandée (testé) ;
+  - ADR 001 (`docs/adr-001-fan-out.md`, T5) : fan-out et décision déterministe, argument honnête (l'audit par domaine, pas la qualité ; latence mesurée), point faible commun de l'extraction, alternatives écartées, `NO_GO` sur blocage dur seulement ;
   - données fictives réservées (T2) : courriels sur des domaines de la RFC 2606, téléphones dans les blocs que l'Arcep réserve aux œuvres audiovisuelles, vérifiés par `tests/test_donnees_fictives.py` ; l'IBAN d'exemple de P2 reste, avec une note.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;

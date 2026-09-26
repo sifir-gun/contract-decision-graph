@@ -1885,3 +1885,15 @@ Stabilité : issue identique aux 5 essais pour les 13 contrats. Chaque essai est
 - **Au mieux environ une seconde gagnée par contrat, sur une analyse de six.** Même conclusion qu'à la série 6.
 
 **Ce que la série ne prouve pas.** Cinq essais à température 0, un seul fournisseur, un seul poste, les limites d'un compte ; un seul contrat réaliste, écrit pour le projet ; les décisions humaines sont écrites d'avance ; la concordance mesure l'accord avec des attendus rédigés par le projet, pas la justesse juridique. Entre deux séries, le même modèle à température 0 ne fait pas les mêmes erreurs (contrat 04 exact à la série 6, durée omise aux 5 essais de la série 7) : la stabilité mesurée vaut pour une série, pas d'une série à l'autre.
+
+### J5 tâche 5 : ADR 001, fan-out et décision déterministe
+
+`docs/adr-001-fan-out.md`, sur le modèle de l'ADR 002 :
+- **Décision** : fan-out et fan-in par `Send` vers quatre analystes, outils bornés (règles en Python, puis CRAG sur les seules clauses qui portent un constat), décision du gate en code, vérificateur d'extraction en amont.
+- **Argument honnête** : le découpage ne se justifie pas par la qualité (les verdicts sont des fonctions déterministes des clauses ; un analyste unique rendrait les mêmes), mais par l'audit par domaine (verdict scellé avec ses constats, ses références et sa recherche ; corpus filtré par domaine et par clause ; échec isolé et repris par domaine ; rejeu par domaine), et un peu par la latence.
+- **Latence mesurée à la série 7** : sur les 30 essais qui appellent le LLM dans au moins deux domaines, 52,3 s d'étape réelle contre 73,0 s de latences cumulées (28 % de moins ; borne idéale 36,6 s) ; sur les 55 essais, 10 % de moins ; 25 essais n'appellent qu'un domaine. Au mieux une seconde gagnée par contrat, sur six.
+- **Point faible commun** : l'extraction partagée ; la série 4 (omission) et les cinq couches ; l'exemple du trimestre, « le modèle devine, le code refuse la devinette ».
+- **Alternatives écartées** : agent LLM unique qui décide (audit), analyste unique en code (même qualité ; isolement des échecs et verdict par domaine), superviseur LLM, débat ou vote, agrégation par un LLM.
+- **`NO_GO` sur blocage dur seulement** (demandé par la spec depuis le J1) : pire cumul 0,505, réserve de 0,005, choix de configuration.
+- Chiffres vérifiés sur les lignes `LLM-RESULT` de la série 7 (médianes par contrat de 0,8 s à 2,5 s pour l'étape des analystes ; répartition 25, 15, 10 et 5 essais pour un à quatre domaines appelés).
+- La spec renvoie à l'ADR (« Justification multi-agents ») ; le README le fera à la tâche 7.
