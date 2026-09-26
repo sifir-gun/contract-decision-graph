@@ -17,9 +17,17 @@ Un article est rattaché aux clauses des règles qu'il sert ; un article admis p
 - Manuelle, depuis un navigateur, le **24/09/2026**. EUR-Lex et Légifrance bloquent les requêtes automatiques par une vérification anti-robots, que l'agent n'a pas contournée.
 - Un fichier `.txt` UTF-8 par article, texte copié tel qu'affiché. Le nettoyage (métadonnées de version, notes, lignes d'interface) se fait à l'ingestion, par des règles testées (`src/cdg/domain/corpus.py`).
 
-Licences, indiquées d'après les conditions publiées par chaque site, non vérifiées par l'agent (sites inaccessibles aux requêtes automatiques) :
-- **EUR-Lex** : réutilisation autorisée avec mention de la source (« © Union européenne, https://eur-lex.europa.eu »), selon la Décision 2011/833/UE ;
-- **Légifrance** : données publiées sous Licence Ouverte / Open Licence (Etalab 2.0).
+## Licences et mentions (vérifiées le 26/09/2026)
+
+Les textes publics de `raw/` gardent leurs conditions d'origine : ils ne sont pas couverts par la licence du dépôt (AGPL-3.0, fichier `LICENSE`), qui s'applique au code, aux fiches de `fiches/` et aux contrats synthétiques de `data/contracts/`. Conditions lues sur les pages officielles, dans un navigateur, sans vérification anti-robots.
+
+- **EUR-Lex** (RGPD). Avis juridique d'EUR-Lex, « Copyright notice » : « © European Union, 1998-2026 » ; la politique de réutilisation de la Commission repose sur la Décision 2011/833/UE ; sauf mention contraire, les documents juridiques publiés dans EUR-Lex sont réutilisables, à des fins commerciales ou non ; les textes consolidés et le contenu éditorial sont sous licence Creative Commons Attribution 4.0 : citer la source et indiquer les modifications.
+  - **Mention** : © Union européenne, https://eur-lex.europa.eu, 1998-2026.
+  - **Modifications** : texte copié tel qu'affiché, puis nettoyé à l'ingestion (métadonnées de version, notes, lignes d'interface : `src/cdg/domain/corpus.py`) et découpé en extraits ; les fiches en paraphrasent des passages.
+- **Légifrance** (Code civil, Code de commerce, Code monétaire et financier). Pied de page du site : « Sauf mention contraire, tous les contenus de ce site sont sous licence etalab-2.0 » (Licence Ouverte 2.0). Elle exige de mentionner la paternité : la source, au moins le nom du concédant, et la date de la dernière mise à jour de l'information réutilisée, sans suggérer de caution officielle.
+  - **Mention** : source Légifrance, https://www.legifrance.gouv.fr (Secrétariat général du Gouvernement, direction de l'information légale et administrative).
+  - **Date de la dernière mise à jour** : la ligne « Version en vigueur… » de Légifrance, conservée dans chaque fichier de `raw/` (métadonnée de version à l'ingestion) ; date de récupération dans le tableau ci-dessous.
+  - **Aucune caution** : le projet est indépendant ; ni Légifrance, ni l'État, ni l'Union européenne ne l'approuvent.
 
 ## Textes publics
 

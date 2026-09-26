@@ -1966,3 +1966,23 @@ Stabilité : issue identique aux 5 essais pour 12 contrats sur 13. Chaque essai 
 ### J5 : ADR 001, chiffres de la série 8
 
 Tableau et texte du gain de latence mis à jour avec la série 8 : 29 essais à plusieurs domaines, 53,0 s contre 71,3 s (26 % de moins, borne idéale 35,8 s) ; 54 essais, 6 % de moins ; étape des analystes de 0,9 s à 2,4 s en médiane par contrat ; analyse médiane de 6,1 s. Conclusion inchangée : au mieux une seconde par contrat, sur six ; séries 6 et 7 citées pour l'ordre de grandeur. Ajout : d'une série à l'autre, le même modèle à température 0 ne commet pas les mêmes erreurs (contrat 04) ; la sûreté repose sur les contrôles par code. La spec renvoie aux chiffres de la série 8.
+
+### J5 tâche 6 : préparation de la mise en public
+
+- **Licence** : `LICENSE`, texte officiel de l'AGPL-3.0 pris sur gnu.org (`agpl-3.0.txt`, SHA-256 `0d96a4ff…`), comparé mot à mot au texte de la liste SPDX : identiques, à l'exception de trois adresses en `http` au lieu de `https`. `pyproject.toml` : `license = "AGPL-3.0-only"`, identifiant SPDX de la version 3 seule, ce que dit la décision (« AGPL-3.0 ») ; `AGPL-3.0-or-later` accepterait aussi les versions futures de la FSF. Accepté par hatchling 1.32 (PEP 639) ; `uv sync --locked` inchangé.
+- **Exception écrite** : `data/corpus/raw/` garde ses licences d'origine, dans `SOURCES.md`, le README (section « Licence ») et un commentaire de `pyproject.toml`. Le README indique qu'une licence commerciale, hors AGPL, est possible sur demande.
+- **Licences du corpus vérifiées** (26/09, dans le navigateur intégré, sans vérification anti-robots, contrairement au J3) :
+  - EUR-Lex, avis juridique : « © European Union, 1998-2026 » ; politique de réutilisation fondée sur la Décision 2011/833/UE ; documents juridiques réutilisables à des fins commerciales ou non ; textes consolidés et contenu éditorial sous CC BY 4.0 (citer la source, indiquer les modifications) ;
+  - Légifrance, pied de page : « Sauf mention contraire, tous les contenus de ce site sont sous licence etalab-2.0 » ; la Licence Ouverte 2.0 (texte officiel, dépôt d'Etalab) exige la source, au moins le nom du concédant, et la date de dernière mise à jour, sans suggérer de caution officielle.
+  - `SOURCES.md` porte désormais, pour chaque source, la mention à faire, les modifications apportées (nettoyage à l'ingestion, découpage, paraphrases des fiches), la date de dernière mise à jour (ligne « Version en vigueur » conservée dans chaque fichier brut) et l'absence de caution.
+- **`.claude/`** (réglages locaux de l'assistant) : ignoré par git.
+- **Audit de l'historique** (toutes les branches, 121 commits au moment de l'audit, après les corrections du J5) : aucun motif de secret (clés Mistral, Anthropic, GitHub, AWS, clés privées) ; seules les valeurs factices de `.env.example` et de la CI ; aucun `.env` jamais suivi ; aucun nom d'utilisateur, nom de machine, chemin personnel ni chemin du dossier temporaire de l'assistant ; des chemins génériques en `~/` dans le journal. L'e-mail personnel reste dans 100 commits (décision du 26/09 : historique gardé) ; les commits du J5 utilisent l'adresse `noreply` de GitHub. Descriptions des PR 1 à 7 sur GitHub : rien de personnel ; aucune issue.
+- **Liste de contrôle du jour de la mise en public** (gestes du propriétaire, dans les réglages GitHub) :
+  1. fusionner la PR 7, CI verte sur `main` ;
+  2. rendre le dépôt public ;
+  3. activer l'application de la règle de protection de `main` (elle n'est appliquée que sur un dépôt public) ;
+  4. activer CodeQL (analyse du code) ;
+  5. activer la détection de secrets, avec la protection des pushes ;
+  6. activer les alertes Dependabot (les mises à jour hebdomadaires sont déjà configurées) ;
+  7. se souvenir que l'audit planifié du lundi est désactivé par GitHub après 60 jours sans activité sur un dépôt public ;
+  8. les journaux de la CI deviennent publics : ils ne contiennent aucun secret (la CI n'en a aucun).
