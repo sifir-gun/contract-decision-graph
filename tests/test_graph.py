@@ -392,7 +392,10 @@ def extraction_graph(answers):
 
 def with_invented_quote():
     items = [c.model_dump() for c in clauses()]
-    items[2].update(quote="Les prix sont révisés librement par le fournisseur.")
+    # sans valeur : seule la citation est en cause
+    items[2].update(
+        quote="Les prix sont révisés librement par le fournisseur.", value=None
+    )
     return {"clauses": items}
 
 

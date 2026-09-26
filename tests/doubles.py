@@ -17,6 +17,7 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.verification import VALUE_UNITS
 from cdg.ports.audit_store import AuditStoreError
 from cdg.ports.retriever import Passage
 
@@ -48,13 +49,37 @@ PENALIZED = {
     "duree_engagement": 48.0,  # engagement au-delà de 36 mois
 }
 
+
+def quote_of(kind: str, value) -> str:
+    """Citation synthétique d'une clause présente : avec sa valeur et son unité quand elle
+    est chiffrée, comme l'exige la vérification (correction 4 de la série 4)."""
+    unit = VALUE_UNITS.get(kind)
+    if value is None or unit is None:
+        return f"Article synthétique : {kind}."
+    return f"Article synthétique : la clause {kind} est fixée à {value:g} {unit}."
+
+
+# Valeurs d'essai des tests qui passent par la vérification de l'extraction : le contrat
+# synthétique en contient la citation. Une autre valeur donne « citation introuvable » :
+# l'ajouter ici.
+TEST_VALUES = {
+    "responsabilite_fournisseur": (50.0,),
+    "delai_paiement": (90.0,),
+    "duree_engagement": (48.0,),
+    "preavis_resiliation": (12.0,),
+}
+
 # Contrat synthétique en français, sans donnée réelle : contient la citation de chaque
-# clause rendue par `clauses()` (« Article synthétique : <kind>. »).
+# clause rendue par `clauses()`, sans valeur puis pour chaque valeur d'essai.
 CONTRACT_TEXT = (
     "CONTRAT DE PRESTATION DE SERVICES (document synthétique)\n\n"
     "Entre la société cliente, ci-après dénommée l'Acheteur, et la société prestataire, "
     "ci-après dénommée le Fournisseur, il est convenu ce qui suit.\n\n"
-    + "".join(f"Article synthétique : {kind}.\n" for kind in REQUIRED_KINDS)
+    + "".join(
+        f"{quote_of(kind, value)}\n"
+        for kind in REQUIRED_KINDS
+        for value in dict.fromkeys((None, FAVORABLE[kind], *TEST_VALUES.get(kind, ())))
+    )
     + "\nLe présent contrat est soumis au droit français. Les parties s'engagent à exécuter "
     "leurs obligations de bonne foi et dans les délais convenus. Toute modification du "
     "présent contrat fera l'objet d'un avenant écrit signé par les deux parties.\n"
@@ -87,7 +112,7 @@ def clauses(categories: dict | None = None, **overrides) -> list[Clause]:
                 Clause(
                     kind=kind,
                     present=True,
-                    quote=f"Article synthétique : {kind}.",
+                    quote=quote_of(kind, value),
                     value=value,
                     category=categories.get(kind),
                 )

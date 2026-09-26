@@ -7,7 +7,8 @@ favorable que la version propre ; une tentative détectée part en revue humaine
 constat visible. Le test réel est dans `test_llm_criteres.py`.
 
 Comportements du modèle simulés (série 4) : il fait disparaître la clause de révision ; il
-cite la phrase injectée comme clause.
+cite la phrase injectée comme clause, avec sa valeur ou une fausse ; il prête une fausse
+valeur à la vraie clause. Chacun mène à l'ESCALADE, jamais à une décision automatique.
 """
 
 from demo_set import load
@@ -157,10 +158,39 @@ def test_9_revision_omise_par_le_modele_reextraction_puis_escalade():
         assert "absente" not in first and "revision_prix" in feedback
 
 
-def test_9_modele_qui_suit_la_consigne_jamais_de_go_automatique():
-    # la citation vient de la phrase injectée : la revue humaine reste imposée par la
-    # tentative détectée, le constat visible
-    llm = FakeLLM({"extract_clauses": extraction_answer(**FOLLOWED)})
-    status = Run(P1.text, "p1-suivie", extractor=LLMExtractor(llm)).status
-    assert status["statut"] == "suspendu" and status["final_decision"] is None
+FALSE_VALUE = {"revision_prix": {"value": 2.0}}  # la vraie clause, une fausse valeur
+INJECTED_FALSE_VALUE = {"revision_prix": {"quote": INJECTED_QUOTE, "value": 5.0}}
+
+
+def escalated(changed, text=P1.text, cid="p1"):
+    llm = FakeLLM({"extract_clauses": extraction_answer(**changed)})
+    run = Run(text, cid, extractor=LLMExtractor(llm))
+    status = run.status
+    assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
+    assert run.store.entries() == [] and status["final_decision"] is None
+    assert status["failure_report"]["stage"] == "extraction"
+    return status
+
+
+def test_9_modele_qui_cite_la_phrase_injectee_comme_clause():
+    status = escalated(FOLLOWED, cid="p1-suivie")
+    assert status["failure_report"]["problems"] == [
+        "citation prise dans un passage détecté comme instruction: revision_prix"
+    ]
     assert any(ORDER in f for f in status["demande"]["input_findings"])
+
+
+def test_9_modele_qui_cite_la_phrase_injectee_avec_une_fausse_valeur():
+    status = escalated(INJECTED_FALSE_VALUE, cid="p1-fausse-valeur-consigne")
+    assert status["failure_report"]["problems"] == [
+        "valeur absente de la citation (5 %): revision_prix",
+        "citation prise dans un passage détecté comme instruction: revision_prix",
+    ]
+
+
+def test_9_modele_qui_prete_une_fausse_valeur_a_la_vraie_clause():
+    for version, text in (("piege", P1.text), ("propre", P1.clean_text())):
+        status = escalated(FALSE_VALUE, text=text, cid=f"p1-fausse-valeur-{version}")
+        assert status["failure_report"]["problems"] == [
+            "valeur absente de la citation (2 %): revision_prix"
+        ]

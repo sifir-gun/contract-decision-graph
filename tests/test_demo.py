@@ -83,7 +83,10 @@ def test_citations_attendues_dans_le_texte_masque(contract):
     # mêmes contrôles que verify_extraction : 10 types, catégories, citations exactes
     assert (
         verification.problems_of(
-            masked, contract.clauses, absence_terms=CONFIG.extraction.absence_terms
+            masked,
+            contract.clauses,
+            absence_terms=CONFIG.extraction.absence_terms,
+            instruction_patterns=CONFIG.input.instruction_patterns,
         )
         == []
     )
@@ -296,7 +299,10 @@ def test_p1_paragraphe_injecte_et_version_propre():
     masked = masking.mask(clean, contract.parties).text
     assert (
         verification.problems_of(
-            masked, contract.clauses, absence_terms=CONFIG.extraction.absence_terms
+            masked,
+            contract.clauses,
+            absence_terms=CONFIG.extraction.absence_terms,
+            instruction_patterns=CONFIG.input.instruction_patterns,
         )
         == []
     )

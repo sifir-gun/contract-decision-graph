@@ -1533,3 +1533,19 @@ Quatre corrections sont retenues, et l'explication change aussi ; chacune fait l
   - critère 9 : version piégée en revue avec le constat visible, jamais plus favorable, scellée puis rejouée à l'identique ;
   - **le modèle qui cite la phrase injectée comme clause** : jamais de décision automatique, la revue reste imposée ;
   - l'omission, sur les deux versions : `ESCALADE`.
+
+### J4 tâche 8, correction 4 : cohérence entre valeur et citation
+
+- **Valeur dans la citation** (`verification.value_mismatches`) : pour une clause présente et chiffrée, la citation doit contenir la valeur, même nombre et même unité, après normalisation. L'unité dépend du type (`VALUE_UNITS`) : % pour les responsabilités, la révision et les pénalités, jours pour le délai, mois pour la durée et le préavis. La virgule décimale et « pour cent » sont admis, la casse est ignorée. Sinon, problème « valeur absente de la citation (2 %): revision_prix ».
+- **Citation prise dans une consigne** (`verification.quotes_from_instructions`) : une citation qui ne figure que dans un passage détecté comme instruction (correction 3) est refusée. Si la même phrase figure aussi dans une vraie stipulation, elle reste recevable.
+- **Termes d'absence** : ils ne comptent plus dans un passage détecté comme instruction. Un retour ciblé ne renvoie donc jamais le modèle vers la consigne injectée.
+- **Doublures** : la citation synthétique d'une clause chiffrée porte désormais sa valeur (« Article synthétique : la clause revision_prix est fixée à 3 % »). `CONTRACT_TEXT` contient la citation sans valeur, puis une citation par valeur d'essai (`TEST_VALUES`). Une valeur hors de cette liste donne « citation introuvable » : l'échec est explicite, jamais silencieux. Les tests de citation inventée passent une valeur nulle, pour qu'un seul problème soit en jeu.
+- **Tests** (doublures) :
+  - valeur absente de la citation : ré-extraction, puis escalade ;
+  - valeur et unité retrouvées (virgule décimale, « pour cent », « fin de mois », majuscules) ; autre nombre ou autre unité refusés ; clause sans valeur non contrôlée ;
+  - citation prise dans une consigne refusée, mais acceptée si elle figure aussi hors de la consigne ; terme d'absence ignoré dans une consigne ;
+  - sur P1 :
+    - **le modèle qui cite la phrase injectée comme clause** : escalade avec « citation prise dans un passage détecté comme instruction », constat de tentative visible ;
+    - **le modèle qui cite la phrase injectée avec une fausse valeur** : les deux problèmes ;
+    - **le modèle qui prête une fausse valeur à la vraie clause**, sur les deux versions : escalade.
+  - Tout le jeu de démonstration et les contrats de mesure passent la vérification, avec les quatre contrôles.
