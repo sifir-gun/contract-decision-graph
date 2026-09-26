@@ -1670,3 +1670,26 @@ Objectif du jour : rendre le dépôt prêt à être public et lisible en quelque
 - Toutes les lettres grecques étaient prises par les parties du jeu : les parties du contrat réaliste portent des noms d'étoiles.
 
 886 tests, couverture de 98,27 %.
+
+### J5 : cohérence valeur-citation, chiffres entre parenthèses et nombres en lettres (décision du 26/09)
+
+Correction de l'écart relevé au T1, avant la série réelle.
+- **Chiffre entre parenthèses** : l'expression des quantités (`verification._QUANTITY`) accepte un chiffre entre parenthèses suivi de l'unité. « quarante-cinq (45) jours », « trois (3) mois », « dix (10) % » donnent 45, 3 et 10. Le chiffre fait foi : « quarante (45) jours » donne 45.
+- **Nombres écrits seulement en lettres**, de zéro à cent : convertisseur en code pur, sans dépendance. Les écritures de 0 à 100 sont engendrées par règles (`_spellings`) : unités, dix à seize, dix-sept à dix-neuf, dizaines, soixante-dix à soixante-dix-neuf, quatre-vingts et quatre-vingt-un à quatre-vingt-dix-neuf, cent ; « un » ou « une » ; « et » d'usage (« vingt et un », « soixante et onze ») ou omis, et admis en variante (« quatre-vingt-et-un ») ; traits d'union remplacés par des espaces avant la recherche. Le nombre doit commencer un mot et être suivi de l'unité.
+- **Faux positifs évités, et testés** :
+  - un nombre dans un autre mot : « trentaine », « quarantaine », « centaine », « septembre », « chacun », « pourcentage » ;
+  - un nombre sans unité contrôlée : « une fois par mois », « le premier mois », « vingt-quatre heures », « équipement neuf » ;
+  - un nombre qui prolonge un autre nombre n'est jamais lu, ni en partie : « cent vingt jours » ne donne ni 120 ni 20 ; de même « deux cents jours », « mille trente jours » ; une fourchette (« entre trente et quarante jours ») ne donne rien.
+- **Limites qui restent** (README) : au-delà de cent en lettres, la valeur n'est pas lue, donc refusée, puis la clause escaladée ; de même pour une durée en années ou en semaines (« trois ans » pour 36 mois, « 3 ans » aussi : la conversion d'unité n'existe pas, et ce n'est pas nouveau). Les formes belges et suisses (septante, huitante, nonante) ne sont pas reconnues.
+- **Normalisation** (`domain/text.py`) : NFKC transforme le tiret insécable (U+2011) en trait d'union typographique (U+2010), que la table typographique ne connaissait pas ; son entrée pour U+2011 ne servait donc jamais. U+2010 est désormais unifié avec « - », et l'entrée morte est retirée. Cela vaut aussi pour la comparaison des citations.
+- **Contrat réaliste** : délai « à quarante-cinq (45) jours fin de mois », révision « ne peut excéder quatre pour cent », seulement en lettres ; le test des formulations l'exige.
+- **README** : limites mises à jour (formes lues, au-delà de cent, autres unités ; clauses floues : une seule quantité non fixée donne un `GO` automatique avec le constat visible, un plafond flou un `NO_GO` prudent, pas de signal « clause ambiguë »).
+- **Spec** : jeu à 13 contrats, contrat réaliste et ses limites, lecture des quantités, signal « clause ambiguë » en phase 2.
+
+### J5 : plantage à la sortie de pytest, cause trouvée (télémétrie d'onnxruntime), décision attendue
+
+- **Fréquence** : pendant cette tâche, `./scripts/check.sh` s'est terminé 4 fois sur 19 par `libc++abi: terminating due to uncaught exception of type std::__1::system_error: recursive_mutex lock failed`, code 134, toujours après le résumé « 935 passed ». Le plantage se reproduit aussi sur le commit précédent (1 fois sur 6) : il ne vient pas de la correction ci-dessus.
+- **Cause**, lue dans les rapports de plantage de macOS (`~/Library/Logs/DiagnosticReports`, 5 rapports, dont celui du J4) : le fil d'exécution fautif est un fil de travail de la **télémétrie d'onnxruntime** (`Microsoft::Applications::Events`, dans `onnxruntime_pybind11_state.so`). Il traite une réponse HTTP d'envoi d'événements (`HttpClientManager::onHttpResponse`) pendant l'arrêt de l'interpréteur, et prend un verrou déjà détruit. La piste onnxruntime du J4 était la bonne.
+- **Conséquence** : onnxruntime 1.30.0, chargé par fastembed, envoie de la télémétrie sur le réseau. C'est contraire à la configuration (« Embedding local […] sans appel réseau à l'exécution ») et au parti pris d'un hébergement souverain. Cela vaut pour les tests qui chargent onnxruntime comme pour une analyse réelle.
+- **Correction possible** : onnxruntime expose `disable_telemetry_events()` (« Disables platform-specific telemetry collection », vérifié dans le paquet installé), à appeler dans l'adaptateur `adapters/fastembed.py` avant tout chargement. Non appliquée : changement de comportement d'un adaptateur, soumis à décision.
+- La correction des quantités est commitée sur des exécutions de `check.sh` terminées avec le code 0.

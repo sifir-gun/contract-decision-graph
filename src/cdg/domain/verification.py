@@ -6,9 +6,10 @@ la catégorie n'est donnée que pour les types qui l'exigent. Une clause déclar
 alors que le texte contient un terme qui l'évoque (`extraction.absence_terms`) est
 redemandée : une absence ne laisse aucune citation à vérifier (attaque par omission,
 série 4 du J4). Une clause chiffrée doit porter sa valeur, avec son unité, dans sa
-citation ; une citation prise dans un passage détecté comme instruction
-(`domain/instructions.py`) est refusée, et un terme d'absence n'y compte pas. Sinon :
-nouvel essai avec retour ciblé, puis ESCALADE après le dernier.
+citation : en chiffres (« 45 jours »), en chiffres entre parenthèses (« quarante-cinq (45)
+jours ») ou seulement en lettres, de zéro à cent (J5) ; une citation prise dans un passage
+détecté comme instruction (`domain/instructions.py`) est refusée, et un terme d'absence
+n'y compte pas. Sinon : nouvel essai avec retour ciblé, puis ESCALADE après le dernier.
 """
 
 import re
@@ -38,16 +39,94 @@ VALUE_UNITS: dict[str, str] = {
     "duree_engagement": "mois",
     "preavis_resiliation": "mois",
 }
-_QUANTITY = re.compile(r"(\d+(?:[.,]\d+)?)\s*(%|pour\s?cents?|jours?|mois)(?!\w)")
+_UNITS = r"(%|pour\s?cents?|jours?|mois)(?!\w)"
+# chiffres, seuls ou entre parenthèses après le nombre en lettres : « quarante-cinq (45)
+# jours » ; le chiffre fait foi
+_QUANTITY = re.compile(r"(?:\(\s*(\d+(?:[.,]\d+)?)\s*\)|(\d+(?:[.,]\d+)?))\s*" + _UNITS)
 _UNIT = {"%": "%", "jour": "jours", "jours": "jours", "mois": "mois"}
+
+# nombres écrits seulement en lettres, de zéro à cent (au-delà : non lus, limite
+# documentée), mots séparés par une espace après remplacement des traits d'union
+_DIGITS = (
+    "zéro",
+    "un",
+    "deux",
+    "trois",
+    "quatre",
+    "cinq",
+    "six",
+    "sept",
+    "huit",
+    "neuf",
+)
+_TEENS = ("dix", "onze", "douze", "treize", "quatorze", "quinze", "seize")
+_TENS = {2: "vingt", 3: "trente", 4: "quarante", 5: "cinquante", 6: "soixante"}
+
+
+def _below_twenty(n: int) -> list[str]:
+    if n < 10:
+        return [_DIGITS[n], "une"] if n == 1 else [_DIGITS[n]]
+    if n < 17:
+        return [_TEENS[n - 10]]
+    return [f"dix {unit}" for unit in _below_twenty(n - 10)]
+
+
+def _spellings(n: int) -> list[str]:
+    """Écritures de n, de 0 à 100 : « quatre vingt dix », « vingt et un », « vingt un »."""
+    if n < 20:
+        return _below_twenty(n)
+    if n == 100:
+        return ["cent"]
+    if n < 70:
+        tens, rest = _TENS[n // 10], n % 10
+    elif n < 80:
+        tens, rest = "soixante", n - 60
+    else:
+        tens, rest = "quatre vingt", n - 80
+    if rest == 0:
+        return ["quatre vingts", "quatre vingt"] if n == 80 else [tens]
+    tails = _below_twenty(rest)
+    forms = [f"{tens} {tail}" for tail in tails]
+    if rest in (1, 11):  # « et » d'usage, ou en variante (« quatre-vingt-et-un »)
+        forms += [f"{tens} et {tail}" for tail in tails]
+    return forms
+
+
+_SPELLED: dict[str, int] = {form: n for n in range(101) for form in _spellings(n)}
+_NUMBER_WORDS = {word for form in _SPELLED for word in form.split()} - {"et"}
+_NUMBER_WORDS |= {"cents", "mille"}
+_SPELLED_QUANTITY = re.compile(
+    r"(?<!\w)("
+    + "|".join(re.escape(form) for form in sorted(_SPELLED, key=len, reverse=True))
+    + r")\s*"
+    + _UNITS
+)
+
+
+def _extends_a_number(before: list[str]) -> bool:
+    """Le nombre en lettres prolonge-t-il un autre nombre (« cent vingt », « trente et
+    quarante ») ? Alors il n'est pas lu : jamais « vingt » dans « cent vingt »."""
+    if before[-1:] == ["et"]:
+        before = before[:-1]
+    return bool(before) and before[-1] in _NUMBER_WORDS
 
 
 def quantities(quote: str) -> set[tuple[float, str]]:
-    """Quantités d'une citation avec leur unité : « 1,5 % » donne (1.5, "%")."""
-    return {
-        (rounded(float(number.replace(",", "."))), _UNIT.get(unit, "%"))
-        for number, unit in _QUANTITY.findall(folded(quote))
+    """Quantités d'une citation avec leur unité : « 1,5 % » donne (1.5, "%") ;
+    « quarante-cinq (45) jours » et « quarante-cinq jours » donnent (45.0, "jours")."""
+    text = folded(quote)
+    found = {
+        (
+            rounded(float((in_parentheses or number).replace(",", "."))),
+            _UNIT.get(unit, "%"),
+        )
+        for in_parentheses, number, unit in _QUANTITY.findall(text)
     }
+    words = re.sub(r"\s+", " ", text.replace("-", " "))
+    for match in _SPELLED_QUANTITY.finditer(words):
+        if not _extends_a_number(words[: match.start()].split()):
+            found.add((float(_SPELLED[match[1]]), _UNIT.get(match[2], "%")))
+    return found
 
 
 def value_mismatches(clauses: list[Clause]) -> list[str]:

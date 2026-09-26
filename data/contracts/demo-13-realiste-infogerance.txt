@@ -25,7 +25,7 @@ Un comité de pilotage réunit les Parties au moins une fois par trimestre. Il s
 
 Article 5 - Prix
 Les prestations sont rémunérées par un forfait mensuel par poste, selon la grille de l'annexe 5.
-Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 5 ; la hausse qui en résulte ne peut excéder 4 % sur une année.
+Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 5 ; la hausse qui en résulte ne peut excéder quatre pour cent sur une année.
 
 Article 6 - Niveaux de service et réfaction
 Lorsque les Niveaux de service ne sont pas atteints, le Client applique sur la facture du mois une réfaction de 0,5 % du forfait mensuel par jour ouvré de dépassement, dans la limite de dix pour cent (10 %) du prix annuel.
@@ -35,7 +35,7 @@ Article 7 - Facturation
 Le Prestataire facture chaque mois, à terme échu, les prestations du mois écoulé.
 
 Article 8 - Délai de règlement
-Les sommes dues sont réglées par virement à 45 jours fin de mois.
+Les sommes dues sont réglées par virement à quarante-cinq (45) jours fin de mois.
 
 Article 9 - Responsabilité
 Toutes causes confondues, la responsabilité du Prestataire est limitée au Plafond de responsabilité du Prestataire.

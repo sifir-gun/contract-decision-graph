@@ -366,6 +366,13 @@ def test_contrat_realiste_formulations_indirectes():
     assert "données à caractère personnel" not in text
     assert "données personnelles" not in text
     assert clauses["donnees_personnelles"].present
+    # quantités écrites comme dans un contrat réel : chiffre entre parenthèses, ou
+    # nombre seulement en lettres
+    delay, revision = clauses["delai_paiement"], clauses["revision_prix"]
+    assert "quarante-cinq (45) jours fin de mois" in delay.quote
+    assert delay.value == 45
+    assert "quatre pour cent" in revision.quote and "4 %" not in revision.quote
+    assert revision.value == 4
     # durée et préavis stipulés sans être fixés : présents, non chiffrés
     for kind, marker in (
         ("duree_engagement", "Planning directeur"),

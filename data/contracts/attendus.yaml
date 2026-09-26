@@ -562,7 +562,7 @@ contracts:
       - kind: revision_prix
         present: true
         value: 4
-        quote: "Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 5 ; la hausse qui en résulte ne peut excéder 4 % sur une année."
+        quote: "Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 5 ; la hausse qui en résulte ne peut excéder quatre pour cent sur une année."
       - kind: penalites_execution  # appelées « réfaction »
         present: true
         value: 10
@@ -571,7 +571,7 @@ contracts:
         present: true
         value: 45
         category: fin_de_mois
-        quote: "Les sommes dues sont réglées par virement à 45 jours fin de mois."
+        quote: "Les sommes dues sont réglées par virement à quarante-cinq (45) jours fin de mois."
       - kind: duree_engagement  # fin liée à un événement du planning : non chiffrée
         present: true
         value: null

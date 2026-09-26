@@ -6,6 +6,7 @@ from doubles import ABSENT, CONTRACT_TEXT, clauses
 from pydantic import ValidationError
 
 from cdg.application.nodes.verify_extraction import verify_extraction
+from cdg.domain import verification
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.models import Clause, NodeFailure
 from cdg.domain.verification import check_extraction, normalize
@@ -45,6 +46,9 @@ def invented(kind="revision_prix", quote="Les prix sont fixes pour toute la dur�
         ("L’acheteur « s’engage »  à payer", "L'acheteur \" s'engage \" à payer"),
         ("durée – 36 mois\n\tsans reconduction", "durée - 36 mois sans reconduction"),
         ("ﬁn du contrat", "fin du contrat"),  # ligature, NFKC
+        # tiret insécable : NFKC le change en trait d'union typographique (U+2010)
+        ("quarante‑cinq jours", "quarante-cinq jours"),
+        ("quarante‐cinq jours", "quarante-cinq jours"),
     ],
 )
 def test_normalisation(raw, expected):
@@ -275,6 +279,14 @@ def test_valeur_absente_de_la_citation_reextraction_puis_escalade():
         ("delai_paiement", "Factures payables à 45 jours fin de mois.", 45.0),
         ("duree_engagement", "Engagement de 24 mois, reconductible.", 24.0),
         ("preavis_resiliation", "Préavis de 1 MOIS.", 1.0),
+        # J5 : chiffre entre parenthèses, nombre écrit seulement en lettres
+        (
+            "delai_paiement",
+            "Sommes réglées à quarante-cinq (45) jours fin de mois.",
+            45.0,
+        ),
+        ("preavis_resiliation", "Préavis de trois mois.", 3.0),
+        ("revision_prix", "Révision dans la limite de quatre pour cent par an.", 4.0),
     ],
 )
 def test_valeur_et_unite_retrouvees_dans_la_citation(kind, quote, value):
@@ -293,12 +305,84 @@ def test_valeur_et_unite_retrouvees_dans_la_citation(kind, quote, value):
         ("duree_engagement", "Engagement de 24 jours.", 24.0, "mois"),  # autre unité
         ("preavis_resiliation", "Préavis de 3 mois.", 6.0, "mois"),  # autre nombre
         ("responsabilite_fournisseur", "Plafond de 150 % du montant.", 15.0, "%"),
+        # au-delà de cent, un nombre en lettres n'est pas lu : ni 120, ni 20
+        ("duree_engagement", "Engagement de cent vingt mois.", 120.0, "mois"),
+        ("duree_engagement", "Engagement de cent vingt mois.", 20.0, "mois"),
     ],
 )
 def test_autre_nombre_ou_autre_unite_refuses(kind, quote, value, unit):
     items, text = with_quote(kind, quote, value)
     expected = f"valeur absente de la citation ({value:g} {unit}): {kind}"
     assert verify(items, text=text)["extraction_feedback"] == [expected]
+
+
+# --- Quantités : chiffre entre parenthèses, nombres en lettres (J5) ----------------------
+
+
+@pytest.mark.parametrize(
+    ("quote", "expected"),
+    [
+        # chiffre entre parenthèses, après le nombre en lettres
+        ("réglées à quarante-cinq (45) jours fin de mois", {(45.0, "jours")}),
+        ("un préavis de trois (3) mois", {(3.0, "mois")}),
+        ("dans la limite de dix (10) %", {(10.0, "%")}),
+        ("dans la limite de dix (10) pour cent", {(10.0, "%")}),
+        ("dans la limite de dix pour cent (10 %)", {(10.0, "%")}),
+        ("à quarante (45) jours", {(45.0, "jours")}),  # le chiffre fait foi
+        # nombres écrits seulement en lettres, de zéro à cent
+        ("payables à trente jours", {(30.0, "jours")}),
+        ("payables à quarante-cinq jours fin de mois", {(45.0, "jours")}),
+        ("payables à quarante cinq jours", {(45.0, "jours")}),
+        ("payables à soixante jours", {(60.0, "jours")}),
+        ("payables à quatre-vingt-dix jours", {(90.0, "jours")}),
+        ("payables à quatre vingt dix jours", {(90.0, "jours")}),
+        ("un engagement de douze mois", {(12.0, "mois")}),
+        ("un engagement de dix-huit mois", {(18.0, "mois")}),
+        ("plafonnée à cent pour cent du montant", {(100.0, "%")}),
+        ("dans la limite de trois pour cent", {(3.0, "%")}),
+        ("payables à vingt et un jours", {(21.0, "jours")}),
+        ("payables à vingt-et-un jours", {(21.0, "jours")}),
+        ("payables à soixante et onze jours", {(71.0, "jours")}),
+        ("payables à soixante-onze jours", {(71.0, "jours")}),
+        ("payables à soixante-dix-sept jours", {(77.0, "jours")}),
+        ("payables à quatre-vingts jours", {(80.0, "jours")}),
+        ("payables à quatre-vingt-un jours", {(81.0, "jours")}),
+        ("payables à quatre-vingt-dix-neuf jours", {(99.0, "jours")}),
+        ("un préavis d'un mois", {(1.0, "mois")}),
+        ("un mois et quinze jours", {(1.0, "mois"), (15.0, "jours")}),
+        ("aucun délai : zéro jour", {(0.0, "jours")}),
+        ("Payables à Quarante‑Cinq Jours", {(45.0, "jours")}),  # casse, tiret
+    ],
+)
+def test_quantites_en_chiffres_ou_en_lettres(quote, expected):
+    assert verification.quantities(quote) == expected
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        # nombre en lettres dans un autre mot
+        "une trentaine de jours",
+        "une quarantaine de jours",
+        "une centaine de jours",
+        "en septembre, mois de clôture",
+        "chacun mois après mois",
+        "un pourcentage de la facture",
+        # nombre dans une autre expression, ou sans unité contrôlée
+        "une fois par mois",
+        "le premier mois",
+        "équipement neuf, livré en trois lots",
+        "vingt-quatre heures",
+        # au-delà de cent : ni lu, ni lu en partie (« vingt jours »)
+        "cent vingt jours",
+        "deux cents jours",
+        "mille trente jours",
+        # fourchette : aucune lecture
+        "entre trente et quarante jours",
+    ],
+)
+def test_nombre_en_lettres_dans_un_autre_mot_ou_une_autre_expression_non_lu(quote):
+    assert verification.quantities(quote) == set()
 
 
 def test_clause_sans_valeur_non_controlee():
