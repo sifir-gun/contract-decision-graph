@@ -23,6 +23,7 @@ def verify_extraction(
         state["clauses"],
         state["extraction_attempts"],  # incrémenté par extract_clauses
         decision_config.extraction.max_attempts,
+        absence_terms=decision_config.extraction.absence_terms,
     )
     if check.outcome == "verified":
         return {"route": "analysts"}

@@ -215,7 +215,14 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(
 
     assert failures == []  # le vrai modèle a répondu, rien n'a échoué
     if outcome == "analystes":  # les analystes ont tourné : tout est vérifié
-        assert problems_of(values["raw_text"], values["clauses"]) == []
+        assert (
+            problems_of(
+                values["raw_text"],
+                values["clauses"],
+                absence_terms=CONFIG.extraction.absence_terms,
+            )
+            == []
+        )
     else:
         assert values["proposed_decision"] == "ESCALADE"
         assert values["failure_report"]["stage"] == "extraction"

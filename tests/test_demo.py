@@ -80,7 +80,12 @@ def test_citations_attendues_dans_le_texte_masque(contract):
     masked = masking.mask(contract.text, contract.parties).text
     assert input_checks.rejection(masked, ANALYSIS_DATE, CONFIG.input) is None
     # mêmes contrôles que verify_extraction : 10 types, catégories, citations exactes
-    assert verification.problems_of(masked, contract.clauses) == []
+    assert (
+        verification.problems_of(
+            masked, contract.clauses, absence_terms=CONFIG.extraction.absence_terms
+        )
+        == []
+    )
 
 
 def test_contrat_en_anglais_rejete_avant_extraction():
@@ -288,7 +293,12 @@ def test_p1_paragraphe_injecte_et_version_propre():
         c.kind for c in contract.clauses if c.present and c.quote in contract.injected
     ]
     masked = masking.mask(clean, contract.parties).text
-    assert verification.problems_of(masked, contract.clauses) == []
+    assert (
+        verification.problems_of(
+            masked, contract.clauses, absence_terms=CONFIG.extraction.absence_terms
+        )
+        == []
+    )
 
 
 def test_p2_penalites_de_retard_de_paiement_ne_sont_pas_des_penalites_d_execution():

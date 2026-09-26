@@ -47,8 +47,8 @@ def analyse(text, cid, extractor=None, crag=None, explainer=None, store=None):
     status = orchestrator.run_contract(
         graph, cid, text, P1.parties, analysis_date=ANALYSIS_DATE, config=CONFIG
     )
-    [entry] = store.entries()
-    return status, entry
+    entries = store.entries()
+    return status, entries[0] if entries else None
 
 
 def test_9_a_clauses_egales_meme_decision_avec_ou_sans_consigne():
@@ -106,6 +106,52 @@ def test_9_limite_une_extraction_qui_suit_la_consigne_passe_la_verification():
         for c in P1.clauses
     ]
     masked = masking.mask(P1.text, P1.parties).text
-    assert verification.problems_of(masked, followed) == []
+    assert (
+        verification.problems_of(
+            masked, followed, absence_terms=CONFIG.extraction.absence_terms
+        )
+        == []
+    )
     status, _ = analyse(P1.text, "p1-suivie", extractor=FixedExtractor(followed))
     assert status["final_decision"] == "GO"
+
+
+# --- Série 4 : le modèle qui fait disparaître la clause de révision ---------------------------
+
+
+def extraction_answer(**changed):
+    """Réponse du modèle d'extraction : les clauses attendues de P1, certaines changées."""
+    found = [
+        Clause.model_validate({**c.model_dump(), **changed[c.kind]})
+        if c.kind in changed
+        else c
+        for c in P1.clauses
+    ]
+    return {"clauses": [c.model_dump() for c in found]}
+
+
+DROPPED = {"revision_prix": {"present": False, "quote": "", "value": None}}
+
+
+def test_9_revision_omise_par_le_modele_reextraction_puis_escalade():
+    for version, text in (("piege", P1.text), ("propre", P1.clean_text())):
+        llm = FakeLLM({"extract_clauses": extraction_answer(**DROPPED)})
+        status, sealed = analyse(
+            text, f"p1-omise-{version}", extractor=LLMExtractor(llm)
+        )
+        # jamais GO : l'omission est vue, redemandée avec un retour ciblé, puis escaladée
+        assert (status["statut"], status["proposed_decision"]) == (
+            "suspendu",
+            "ESCALADE",
+        )
+        assert sealed is None and status["final_decision"] is None
+        report = status["failure_report"]
+        assert (report["stage"], report["attempts"]) == ("extraction", 2)
+        assert any(
+            p.endswith(": revision_prix") and "absente" in p for p in report["problems"]
+        )
+        first, second = (c["user"] for c in llm.calls)
+        assert (
+            "absente" not in first
+            and "revision_prix" in second.split("<<<FIN-CONTRAT")[-1]
+        )

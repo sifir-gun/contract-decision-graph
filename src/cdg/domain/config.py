@@ -6,7 +6,7 @@ from typing import Annotated, Literal, cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from cdg.domain.models import Decision, Domain, TransferCategory
+from cdg.domain.models import REQUIRED_KINDS, Decision, Domain, TransferCategory
 from cdg.domain.numeric import rounded
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "decision.yaml"
@@ -56,8 +56,27 @@ class Budget(_Strict):
     max_tokens_per_contract: Annotated[int, Field(gt=0)]
 
 
+Term = Annotated[str, Field(min_length=1)]
+
+
 class Extraction(_Strict):
     max_attempts: Annotated[int, Field(ge=1)]
+    # vérification des absences : termes qui évoquent chaque type de clause
+    absence_terms: dict[str, Annotated[list[Term], Field(min_length=1)]]
+
+    @model_validator(mode="after")
+    def _un_jeu_de_termes_par_type(self) -> "Extraction":
+        kinds = set(self.absence_terms)
+        if kinds != set(REQUIRED_KINDS):
+            missing = sorted(set(REQUIRED_KINDS) - kinds)
+            unknown = sorted(kinds - set(REQUIRED_KINDS))
+            raise ValueError(
+                f"absence_terms : types manquants {missing}, types inconnus {unknown}"
+            )
+        for kind, terms in self.absence_terms.items():
+            if len({t.casefold() for t in terms}) != len(terms):
+                raise ValueError(f"absence_terms : terme répété pour {kind}")
+        return self
 
 
 class ExplainConfig(_Strict):

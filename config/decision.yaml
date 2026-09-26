@@ -25,6 +25,66 @@ budget:
 
 extraction:
   max_attempts: 2
+  # Vérification des absences (J4) : une clause déclarée absente alors que le texte masqué
+  # contient l'un de ces termes (casse et typographie ignorées) est redemandée avec un
+  # retour ciblé, puis escaladée. Listes imparfaites : une couche de défense parmi d'autres.
+  absence_terms:
+    responsabilite_acheteur:
+      - responsabilité de l'acheteur
+      - l'acheteur répond
+      - responsabilité du client
+      - le client répond
+    responsabilite_fournisseur:
+      - responsabilité du prestataire
+      - responsabilité du fournisseur
+      - responsabilité du titulaire
+      - le prestataire répond
+      - le fournisseur répond
+    revision_prix:
+      - révision des prix
+      - révision du prix
+      - révision des tarifs
+      - prix sont révisés
+      - prix peuvent être révisés
+      - peut être révisé
+      - peuvent être révisés
+      - indexation
+    penalites_execution:
+      - pénalités d'exécution
+      - clause pénale
+      - redevable de pénalités
+      - donne lieu à des pénalités
+      - pénalités de retard de livraison
+      - pénalités de retard d'exécution
+    delai_paiement:
+      - payables à
+      - payable à
+      - payables dans
+      - payable dans
+      - délai de paiement
+      - délai de règlement
+    duree_engagement:
+      - conclu pour une durée
+      - conclu pour la durée
+      - durée ferme
+      - durée d'engagement
+      - durée du contrat
+    preavis_resiliation:
+      - préavis
+    donnees_personnelles:
+      - données à caractère personnel
+      - données personnelles
+    accord_traitement_donnees:
+      - accord de traitement
+      - accord de sous-traitance
+      - article 28 du règlement
+    transfert_hors_ue:
+      - données sont hébergées
+      - hébergement des données
+      - transfert de données
+      - transfert des données
+      - pays tiers
+      - hors de l'union
 
 # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
 rules:
