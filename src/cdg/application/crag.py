@@ -270,11 +270,14 @@ def generate(state: CragState) -> dict[str, Any]:
 
 
 def combine(results: list[ClauseResult]) -> RetrievalResult:
-    """Résultat des clauses recherchées : leurs résumés, leurs constats, leur consommation."""
+    """Résultat des clauses recherchées : leurs résumés et leurs constats, réunis dans le
+    résumé du domaine, et leur consommation."""
     return RetrievalResult(
-        trace=RetrievalTrace(clauses=[r.trace for r in results]),
+        trace=RetrievalTrace(
+            clauses=[r.trace for r in results],
+            findings=[f for r in results for f in r.findings],
+        ),
         usage=[u for r in results for u in r.usage],
-        findings=[f for r in results for f in r.findings],
     )
 
 

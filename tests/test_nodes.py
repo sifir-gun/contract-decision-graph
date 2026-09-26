@@ -187,17 +187,18 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
         retained=["Fiche"],
         expired=["L441-10"],
     )
-    trace = RetrievalTrace(clauses=[clause])
+    trace = RetrievalTrace(
+        clauses=[clause],
+        findings=[
+            "référence expirée à la date d'analyse : L441-10"
+        ],  # constats du CRAG
+    )
     received = []
 
     def crag(domain, clauses, analysis_date):
         assert analysis_date == ANALYSIS_DATE
         received.extend(c.kind for c in clauses)
-        return RetrievalResult(
-            trace=trace,
-            usage=[],
-            findings=["référence expirée à la date d'analyse : L441-10"],
-        )
+        return RetrievalResult(trace=trace, usage=[])
 
     [v] = analyse("financier", crag, penalites_execution=2.0)["verdicts"]
     assert received == ["penalites_execution"]

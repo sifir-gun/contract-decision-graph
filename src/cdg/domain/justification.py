@@ -13,10 +13,9 @@ from cdg.domain.models import AgentVerdict, RetrievalTrace
 from cdg.domain.rules import Assessment
 
 
-def justify(
-    assessment: Assessment, trace: RetrievalTrace, crag_findings: list[str]
-) -> AgentVerdict:
-    """Verdict du domaine : constats des règles, puis du CRAG, puis de la justification."""
+def justify(assessment: Assessment, trace: RetrievalTrace) -> AgentVerdict:
+    """Verdict du domaine : constats des règles, puis du CRAG (portés par son résumé),
+    puis de la justification."""
     retained = {c.kind: c.retained for c in trace.clauses}
     required = assessment.kinds_requiring_reference()
     lacking = [kind for kind in required if not retained.get(kind)]
@@ -25,7 +24,7 @@ def justify(
         for kind in assessment.kinds_to_justify()
         if kind not in required and not retained.get(kind)
     ]
-    findings = [f.text for f in assessment.findings] + crag_findings
+    findings = [f.text for f in assessment.findings] + trace.findings
     findings += [
         "référentiel insuffisant : aucune référence en vigueur pour justifier le constat de "
         f"la clause {kind}"

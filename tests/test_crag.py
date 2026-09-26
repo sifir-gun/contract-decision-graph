@@ -273,13 +273,13 @@ def test_combine_rassemble_les_resumes_et_les_constats():
     )
     assert [c.kind for c in result.trace.clauses] == ["revision_prix", "delai_paiement"]
     assert result.trace.clauses[0].retained == ["A"]  # rattachées à leur clause
-    assert result.findings == ["exp"]
+    assert result.trace.findings == ["exp"]  # constats du CRAG, dans son résumé
     assert "status" not in crag.RetrievalResult.model_fields  # le CRAG ne décide pas
 
 
 def test_combine_sans_clause():
     result = crag.combine([])
-    assert (result.trace.clauses, result.usage, result.findings) == ([], [], [])
+    assert (result.trace.clauses, result.usage, result.trace.findings) == ([], [], [])
 
 
 # --- per_clause : une recherche par clause reçue -------------------------------------------

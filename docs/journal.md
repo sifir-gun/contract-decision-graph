@@ -1150,3 +1150,44 @@ Les pull requests de Dependabot ne casseront donc pas la CI pour une question de
 - **Compatibilité avec Dependabot (uv 0.11)**, testée sur une copie du dépôt : une mise à jour faite par uv 0.12.19 (`ruff` 0.16.8 → 0.16.9) réécrit le lock en révision 3, et uv 0.11.33 le relit (`uv lock --check`, `uv sync --locked`). Dans l'autre sens, uv 0.11 écrit aussi la révision 3 (essai précédent), que lit uv 0.12.
 - **Épinglage** : `version: "0.12.19"` dans les quatre jobs du workflow ; CLAUDE.md et la spec sont mis à jour.
 
+## 2026-09-26 · J4
+
+### J4 : décisions du 26/09
+
+1. **Rattachement déclaré** : le manifeste et les fiches déclarent, pour chaque source, les types de clause qu'elle peut justifier. Le filtre peut s'appliquer dans la requête du `Retriever`. Mesure avant et après sur les deux contrats de mesure ; si les `INSUFFISANT` augmentent, on élargit les déclarations, pas le juge.
+2. **`decision_hash`** sur la partie décision. Le rejeu repart des références figées.
+3. **`config_hash`** sur la configuration validée, sous forme canonique.
+4. **Journal** : verrou consultatif, index uniques, premier `prev_hash` à 64 zéros, avec un test sous `app_role`.
+5. **Horloge injectée.**
+6. **Explication** :
+   - `run` : LLM ;
+   - `resume` : LLM si la clé est présente, gabarit sinon ;
+   - `expire` : toujours le gabarit.
+
+   La source est scellée, et l'explication ne bloque jamais le scellement. Aucun écart avec le J3 : `resume` n'exige toujours pas de clé.
+7. **Échec d'`explain`** : reprise sur erreur passagère, puis gabarit ; source et motifs scellés.
+8. **Explication structurée** : une entrée par constat, puis une synthèse.
+9. **Jeu de démonstration** : composition validée, et un test qui échoue si une règle du projet ne se déclenche dans aucun contrat du jeu.
+10. **Critère 9** : la version propre est le même contrat sans le paragraphe injecté ; on compare la décision finale.
+
+### J4 tâche 1 : scellement dans le domaine
+
+**Fait.** `domain/audit.py`, en fonctions pures (mypy strict) :
+- **Forme canonique** : JSON à clés triées, sans espaces, UTF-8. Les flottants passent par `rounded`, `-0.0` compris. Contrairement au `default=str` de l'ébauche de la spec, un type non pris en charge ou une clé non textuelle lèvent une erreur : aucune conversion silencieuse.
+- **Enregistrement** : `AuditRecord`, dont une partie décision, `DecisionRecord`, seule hachée par `decision_hash`. Les verdicts y sont rangés dans l'ordre des domaines, car l'ordre d'arrivée des branches parallèles varie. L'horodatage doit porter un fuseau.
+- **Empreintes** : `decision_hash`, `chain_hash` (`prev_hash` puis l'enregistrement, forme de la spec), `config_hash`, `GENESIS` à 64 zéros, `seal`.
+- **`verify_chain`** : recalcule tout à partir de l'enregistrement **stocké tel quel**, jamais d'un modèle relu, qui pourrait avoir été complété par un champ ajouté depuis. Il signale le premier maillon fautif et la raison : maillon rompu, `decision_hash`, `chain_hash`, colonne incohérente, enregistrement mal formé.
+- **`replay`** : règles sur les clauses scellées, justification sur les résumés figés du CRAG, puis décision du gate. La décision humaine est reprise telle quelle. Une autre configuration est refusée (`ReplayError`).
+- **`AuditEntry` et `StoredAuditEntry`** passent du port au domaine, qui ne peut pas importer les ports. Ils ne sont jamais dans l'état du graphe : aucune migration de checkpoints.
+
+**Changement nécessaire au rejeu, sans effet sur le comportement.** Les constats propres au CRAG (références expirées) étaient mélangés aux autres dans `AgentVerdict.findings`, ce qui empêchait de rejouer la justification. Ils passent dans le résumé du CRAG (`RetrievalTrace.findings`, avec `[]` par défaut), et `justify` ne prend plus que l'évaluation et le résumé. Les constats du verdict restent identiques, dans le même ordre. Un résumé écrit au J3, sans ce champ, reste lisible (test).
+
+**Pièges.**
+- **Consommation et échecs d'après le gate** : `explain` consomme des tokens et peut échouer après la décision. Rejouer avec toute la consommation pourrait faire basculer le budget. Le rejeu écarte donc ce qui vient des nœuds d'après le gate (`AFTER_GATE_NODES`).
+- **Ordre des échecs** : il est gardé tel quel, car le rapport d'échec du gate le reprend. Deux analystes en échec dans des ordres différents donnent donc deux `decision_hash` différents. C'est un cas d'échec, hors du critère 6.
+- **Rapport de budget** : il contient le nombre de tokens. Au-delà du budget, deux passages qui diffèrent par leur consommation diffèrent aussi par `decision_hash`.
+- **Troncature** : supprimer le dernier maillon ne casse pas la chaîne. Il faudrait comparer la tête à une empreinte conservée hors de la base (à envisager plus tard).
+- **Datetime sans fuseau** : ruff 0.16 (DTZ001) refuse `datetime(…)` sans `tzinfo`, même dans un test. Le cas testé est construit par `replace(tzinfo=None)`.
+
+**Tests** (`test_audit.py`, 46) : forme canonique, périmètre de `decision_hash`, `config_hash`, formule des empreintes, vérification (modification dans ou hors de la partie décision, maillon supprimé, premier maillon hors genèse, colonnes incohérentes, enregistrement mal formé), rejeu (GO, pénalités, blocage, conflit, `INSUFFISANT` sur références figées, constats du CRAG, verdict falsifié, autre configuration, décision humaine, consommation d'après le gate, budget, analyste en échec, rejet, gate en échec). Au total, 652 tests ; couverture de 97,6 %, et `audit.py` à 100 %.
+

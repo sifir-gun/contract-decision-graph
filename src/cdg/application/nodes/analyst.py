@@ -19,5 +19,5 @@ def analyst(
     retrieval = RetrievalResult.model_validate(
         crag(domain, [c for c in clauses if c.kind in to_justify], inp["analysis_date"])
     )
-    verdict = justify(assessment, retrieval.trace, retrieval.findings)
+    verdict = justify(assessment, retrieval.trace)
     return {"verdicts": [verdict], "usage": retrieval.usage}

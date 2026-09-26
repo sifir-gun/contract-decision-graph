@@ -252,10 +252,16 @@ def test_resume_du_crag_par_clause():
                 "retained": [],
                 "expired": ["L441-10"],
             }
-        ]
+        ],
+        "findings": [],  # constats propres au CRAG (J4)
     }
     with pytest.raises(ValidationError):
         ClauseRetrieval(kind="x", queries=[], passes=-1, retained=[], expired=[])
+
+
+def test_resume_du_crag_du_j3_sans_constats_lisible():
+    # un checkpoint écrit avant le J4 n'a pas de clé findings : valeur par défaut
+    assert RetrievalTrace.model_validate({"clauses": []}).findings == []
 
 
 def test_echec_de_noeud():

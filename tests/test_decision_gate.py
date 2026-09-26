@@ -361,4 +361,4 @@ def _justified(assessment):
             for k in assessment.kinds_to_justify()
         ]
     )
-    return justify(assessment, trace, [])
+    return justify(assessment, trace)

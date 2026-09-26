@@ -24,9 +24,6 @@ class RetrievalResult(BaseModel):
 
     trace: RetrievalTrace  # une entrée par clause recherchée, références rattachées
     usage: list[Usage]
-    findings: list[
-        str
-    ] = []  # constats du CRAG (références expirées), ajoutés au verdict
 
 
 class Extractor(Protocol):

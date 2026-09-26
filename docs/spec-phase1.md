@@ -86,7 +86,7 @@ Sous-graphe CRAG : `retrieve` puis `grade` (juge de pertinence), puis `generate`
 - **generate** : sans LLM, pour une clause. Retient les références (dédoublonnées) des extraits pertinents en vigueur à la date d'analyse. Une référence dont la version a expiré (`valid_until` atteinte) est signalée dans les constats et jamais retenue.
 - **combine** : rassemble les résumés, les constats et la consommation des clauses recherchées. Le CRAG ne rend pas de statut.
 - **Justification** (`domain/justification.py`, décision du 26/09) : une clause dont le constat bloque ou pénalise exige au moins une référence en vigueur ; sans elle, le domaine est `INSUFFISANT`, avec le constat « référentiel insuffisant : aucune référence en vigueur pour justifier le constat de la clause … ». Une clause à justifier absente du résumé compte comme non justifiée. Un constat d'information sans référence est signalé (« information seule, sans effet sur le statut »). Une clause sans constat n'exige aucune référence. Les références retenues du domaine sont l'union de celles des clauses recherchées.
-- **Résumé** : le CRAG rend `RetrievalResult` (résumé `RetrievalTrace`, une entrée `ClauseRetrieval` par clause recherchée : chaque référence retenue est rattachée à la clause qu'elle justifie ; consommation ; constats). Le verdict porte les constats des règles, puis ceux du CRAG, puis ceux de la justification, et le résumé dans `AgentVerdict.retrieval`.
+- **Résumé** : le CRAG rend `RetrievalResult` (résumé `RetrievalTrace`, une entrée `ClauseRetrieval` par clause recherchée : chaque référence retenue est rattachée à la clause qu'elle justifie, avec les constats propres au CRAG, `RetrievalTrace.findings` (J4) ; consommation). Le verdict porte les constats des règles, puis ceux du CRAG, puis ceux de la justification, et le résumé dans `AgentVerdict.retrieval`.
 - **Fiches** : une fiche prend la plus proche des fins de validité des articles qu'elle cite (elle les paraphrase, elle expire avec).
 
 ## Schéma d'état
@@ -135,6 +135,7 @@ class ClauseRetrieval(BaseModel):  # résumé du CRAG pour une clause recherché
 
 class RetrievalTrace(BaseModel):  # résumé du CRAG, pour l'audit
     clauses: list[ClauseRetrieval]  # une entrée par clause qui porte un constat
+    findings: list[str] = []  # constats du CRAG (références expirées), J4
 
 
 class AgentVerdict(BaseModel):
@@ -451,23 +452,16 @@ Scénarios de contrôle, tous les autres domaines à 1,0 :
 | juridique + financier + un opérationnel | 0,69 → `GO_RESERVES`, marge 0,06 |
 | les deux opérationnels | domaine à 0,4 → conflit → `ESCALADE` |
 
-Contenu scellé : `contract_id`, `thread_id`, clauses, verdicts, décision proposée, décision humaine le cas échéant, rapport d'échec le cas échéant, motif de rejet le cas échéant, décision finale, consommation par nœud, `config_hash`, identifiants des modèles, horodatage.
+Scellement (`domain/audit.py`, J4), en fonctions pures : le magasin (port `AuditStore`) fournit la tête de chaîne et insère ; l'horodatage vient d'une horloge injectée.
 
-```python
-import hashlib, json
-
-
-def canonical(obj) -> bytes:
-    return json.dumps(
-        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
-    ).encode()
-
-
-def seal(record: dict, prev_hash: str) -> str:
-    return hashlib.sha256(prev_hash.encode() + canonical(record)).hexdigest()
-```
-
-Deux empreintes : `decision_hash` calculé sans horodatage, `prev_hash` ni consommation, qui sert au test de rejeu ; `chain_hash` calculé sur l'enregistrement complet plus `prev_hash`, qui rend le journal infalsifiable.
+- **Enregistrement** (`AuditRecord`) : `contract_id`, `thread_id`, partie décision, explication (source LLM ou gabarit, motifs de refus), échecs de nœud, consommation par nœud, identifiants des modèles (`llm_provider`, `llm_main`, `llm_light`, `embedding`), horodatage avec fuseau.
+- **Partie décision** (`DecisionRecord`) : date d'analyse, clauses, verdicts dans l'ordre des domaines (résumés du CRAG compris), décision proposée, marge, décision humaine, décision finale, rapport d'échec, motif de rejet, `config_hash`. Pour un rejet ou une escalade avant les analystes, les clés absentes sont scellées vides ou nulles ; `reject_reason` et le rapport d'échec distinguent ces cas.
+- **Forme canonique** : JSON à clés triées, sans espaces, UTF-8, flottants par la fonction d'arrondi commune. Un type non pris en charge ou une clé non textuelle lèvent une erreur : pas de `default=str`, aucune conversion silencieuse.
+- **`decision_hash`** : SHA-256 de la seule partie décision. Ni identifiants de contrat ou de thread, ni horodatage, ni consommation, ni explication, ni modèles : mêmes clauses, mêmes références et même configuration donnent la même empreinte (critère 6).
+- **`chain_hash`** : SHA-256 de `prev_hash` puis de l'enregistrement complet. Le premier maillon part de 64 zéros (`GENESIS`).
+- **`config_hash`** : SHA-256 de la configuration validée, sous forme canonique ; un commentaire ou une mise en forme du fichier n'y change rien.
+- **Vérification** (`verify_chain`) : du plus ancien au plus récent, chaque maillon doit suivre le précédent ; `decision_hash`, `chain_hash`, `config_hash`, `contract_id` et `thread_id` sont recalculés ou comparés à partir de l'enregistrement stocké tel quel. Rend le premier maillon fautif et la raison. Une troncature de la fin du journal ne se voit pas par la chaîne seule.
+- **Rejeu** (`replay`) : recalcule règles, justification et décision à partir de l'enregistrement scellé et des références figées (résumés du CRAG, constats du CRAG compris), sans LLM ni CRAG. La consommation et les échecs des nœuds d'après le gate (`explain`) sont écartés ; la décision humaine est reprise telle quelle. Une autre configuration que celle du scellement est refusée. Rien n'est recalculé pour un rejet, une escalade avant les analystes ou un gate en échec.
 
 ## Stockage PostgreSQL
 
@@ -717,6 +711,9 @@ Hors phase 1 : serveur MCP, Langfuse, évaluation en CI, détection des clauses 
   - `types-PyYAML` en dépendance de développement ; plus d'exception mypy sur `yaml` ;
   - image PostgreSQL + pgvector hors de Dependabot, mise à jour manuelle ; test d'égalité des empreintes entre `docker-compose.yml` et le workflow ;
   - uv 0.12.19 sur le poste et dans la CI (auparavant 0.6.10), `uv.lock` vérifié valide avec cette version.
+- **26 septembre 2026, J4** :
+  - décisions : rattachement déclaré des sources aux types de clause ; `decision_hash` sur la partie décision, rejeu à partir des références figées ; `config_hash` sur la configuration validée et canonique ; verrou consultatif, index uniques, premier `prev_hash` à 64 zéros ; horloge injectée ; explication par le LLM pour `run`, et pour `resume` si la clé est présente, gabarit sinon et toujours pour `expire`, source scellée, jamais bloquante ; reprise sur erreur passagère puis gabarit ; explication structurée par constat, puis synthèse ; composition du jeu de démonstration, chaque règle déclenchée au moins une fois ; critère 9 comparé à la version sans le paragraphe injecté ;
+  - scellement dans le domaine (`domain/audit.py`) : forme canonique, `decision_hash`, `chain_hash`, `config_hash`, `verify_chain`, `replay` ; `AuditEntry` passe du port au domaine (jamais dans l'état : aucune migration de checkpoints) ; constats du CRAG portés par `RetrievalTrace.findings`, `justify(évaluation, résumé)`.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

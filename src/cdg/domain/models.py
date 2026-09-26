@@ -109,10 +109,13 @@ class ClauseRetrieval(BaseModel):
 
 
 class RetrievalTrace(BaseModel):
-    """Résumé du CRAG d'un domaine, porté par le verdict pour l'audit : une entrée par type
-    de clause du domaine, chaque référence retenue rattachée à la clause qu'elle justifie."""
+    """Résumé du CRAG d'un domaine, porté par le verdict pour l'audit : une entrée par
+    clause recherchée, chaque référence retenue rattachée à la clause qu'elle justifie, et
+    les constats propres au CRAG (références expirées). Figé, il suffit au rejeu de la
+    justification (`domain/audit.py`)."""
 
     clauses: list[ClauseRetrieval]
+    findings: list[str] = []  # constats du CRAG ; défaut : checkpoints du J3 lisibles
 
 
 class AgentVerdict(BaseModel):
