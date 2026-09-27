@@ -19,7 +19,7 @@
     {% for e in entries %}
     <tr>
       <td>{{ e.id }}</td>
-      <td><a href="/contrats/{{ e.thread_id|urlencode }}">{{ e.thread_id }}</a></td>
+      <td><a href="{{ contract_path(e.thread_id) }}">{{ e.thread_id }}</a></td>
       <td>{% if e.final_decision %}<span class="badge badge-{{ e.final_decision|lower }}">{{ decisions[e.final_decision] }}</span>{% else %}rejet{% endif %}</td>
       <td><time datetime="{{ e.sealed_at }}">{{ e.sealed_at[:19]|replace("T", " ") }}</time></td>
       <td><code title="{{ e.chain_hash }}">{{ short_hash(e.chain_hash) }}</code></td>

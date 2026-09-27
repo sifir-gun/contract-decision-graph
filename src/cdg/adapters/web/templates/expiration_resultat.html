@@ -6,7 +6,7 @@
 {% if expired %}
 <ul>
   {% for x in expired %}
-  <li><a href="/contrats/{{ x.thread_id|urlencode }}">{{ x.thread_id }}</a> : <span class="badge badge-{{ x.final_decision|lower }}">{{ decisions[x.final_decision] }}</span> (décision système, scellée)</li>
+  <li><a href="{{ contract_path(x.thread_id) }}">{{ x.thread_id }}</a> : <span class="badge badge-{{ x.final_decision|lower }}">{{ decisions[x.final_decision] }}</span> (décision système, scellée)</li>
   {% endfor %}
 </ul>
 {% else %}

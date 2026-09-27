@@ -21,7 +21,7 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td><a href="/contrats/{{ r.thread_id|urlencode }}">{{ r.thread_id }}</a></td>
+      <td><a href="{{ contract_path(r.thread_id) }}">{{ r.thread_id }}</a></td>
       <td>{{ r.analysis_date or "—" }}</td>
       <td><time datetime="{{ r.updated_at }}">{{ r.updated_at[:16]|replace("T", " ") }}</time></td>
       <td><span class="state state-{{ r.etat }}">{{ states[r.etat] }}</span></td>

@@ -81,6 +81,7 @@ def create_app(
         quotes_of=presentation.quotes_of,
         reference_rows=presentation.reference_rows,
         short_hash=presentation.short_hash,
+        contract_path=presentation.contract_path,
     )
     templates = Jinja2Templates(env=env)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -244,7 +245,9 @@ def create_app(
                 "lancez le mode démonstration, sans clé ni coût."
             )
             return analysis_page(request, message, 503)
-        return RedirectResponse(f"/contrats/{contract_id}", status_code=303)
+        return RedirectResponse(
+            presentation.contract_path(contract_id), status_code=303
+        )
 
     # --- dossier (show), revue humaine (resume), rejeu (replay) -----------------------
 
@@ -291,7 +294,7 @@ def create_app(
         refused = status["demande"] and status["demande"].get("error")
         if refused:
             return dossier_page(request, thread_id, refused, 422)
-        return RedirectResponse(f"/contrats/{thread_id}", status_code=303)
+        return RedirectResponse(presentation.contract_path(thread_id), status_code=303)
 
     @app.get("/contrats/{thread_id}/rejeu", response_class=HTMLResponse)
     def replay(request: Request, thread_id: str) -> Response:

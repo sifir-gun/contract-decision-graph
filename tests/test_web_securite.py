@@ -11,6 +11,7 @@ import hashlib
 import logging
 import re
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlsplit
 
 import pytest
 from doubles import ABSENT, CONTRACT_TEXT, FixedExtractor, clauses
@@ -23,7 +24,7 @@ from web_helpers import (
     memory_service,
 )
 
-from cdg.adapters.web import security
+from cdg.adapters.web import presentation, security
 from cdg.adapters.web.app import WEB_ROOT, create_app
 from cdg.domain.explanation import Draft, ExplainedFinding
 from cdg.domain.models import Usage
@@ -343,6 +344,90 @@ def test_cle_d_api_absente_message_clair():
     )
     assert response.status_code == 503
     assert "MISTRAL_API_KEY" in response.text and "démonstration" in response.text
+
+
+# --- 10. adresse d'un contrat : interne, un seul segment ------------------------------------
+# alertes CodeQL py/url-redirection (27/09) : les redirections formaient l'adresse par une
+# f-string, sans encoder l'identifiant ; les liens, par le filtre urlencode de Jinja, qui
+# garde « / ». Une seule fonction forme désormais toutes les adresses d'un contrat.
+
+HOSTILE_IDS = [
+    "//evil.example",
+    "\\\\evil.example",
+    "/\\evil.example",
+    "https://evil.example/x",
+    "javascript:alert(1)",
+    "a/b",
+    "a?b=c",
+    "a#b",
+    "revue 1 é",
+    "x\r\nLocation: https://evil.example",
+    "..",
+]
+
+
+@pytest.mark.parametrize("thread_id", HOSTILE_IDS)
+@pytest.mark.parametrize("action", ["", "decision", "rejeu"])
+def test_adresse_d_un_contrat_reste_interne(thread_id, action):
+    path = presentation.contract_path(thread_id, action)
+    segment = path.removeprefix("/contrats/")
+    if action:
+        segment = segment.removesuffix(f"/{action}")
+    assert path.startswith("/contrats/")
+    assert not set(segment) & set("/\\?#: \r\n\t")  # rien ne sort du segment
+    assert unquote(segment) == thread_id  # un seul segment, sans perte
+    here = "http://127.0.0.1:8000/contrats/c-1"
+    assert urlsplit(urljoin(here, path))[:2] == ("http", "127.0.0.1:8000")
+
+
+def test_adresse_d_un_contrat_action_inconnue_refusee():
+    with pytest.raises(ValueError, match="action inconnue"):
+        presentation.contract_path("c-1", "suppression")
+
+
+def test_redirection_apres_revue_vers_le_dossier_quel_que_soit_l_identifiant():
+    thread = "revue 1#é"
+    service = memory_service()
+    service.analyse(PENDING_TEXT, contract_id=thread)
+    web = client(service)
+    data = {"decision": "GO_RESERVES", "relecteur": "Camille", "motif": "réserves"}
+    response = web.post(
+        presentation.contract_path(thread, "decision"),
+        data={"csrf": csrf(web), **data},
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == presentation.contract_path(thread)
+    page = web.get(response.headers["location"])
+    assert page.status_code == 200 and thread in page.text
+
+
+def test_redirection_apres_analyse_vers_le_dossier():
+    web = client()
+    response = web.post(
+        "/analyse",
+        data={
+            "csrf": csrf(web),
+            "source": "texte",
+            "texte": CONTRACT_TEXT,
+            "identifiant": "c-2026.09_v1",
+        },
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == presentation.contract_path("c-2026.09_v1")
+
+
+def test_liens_des_pages_par_la_meme_adresse():
+    service = memory_service()
+    for thread in ("a/b", "revue 1#é"):
+        service.analyse(PENDING_TEXT, contract_id=thread)
+    web = client(service)
+    listing = web.get("/").text
+    for thread in ("a/b", "revue 1#é"):
+        assert f'href="{presentation.contract_path(thread)}"' in listing
+    dossier = web.get(presentation.contract_path("revue 1#é")).text
+    for action in ("decision", "rejeu"):
+        assert presentation.contract_path("revue 1#é", action) in dossier
+    assert "|urlencode" not in "".join(p.read_text() for p in TEMPLATES.glob("*.html"))
 
 
 # --- cas limites ------------------------------------------------------------------------

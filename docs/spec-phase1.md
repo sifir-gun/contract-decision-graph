@@ -825,6 +825,8 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
 - **27 septembre 2026, audit de publication** (second avis ECC, décisions du propriétaire) :
   - interface : pages en fonctions ordinaires, dans le pool de threads de FastAPI ; verrou unique du service autour de l'analyse, de la décision humaine et de l'expiration, lectures concurrentes ; checkpointer et journal d'audit en mémoire sous verrou ; le verrou vaut pour un seul processus (ADR 004, `tests/test_concurrence.py`) ;
   - liste des contrats en une seule ouverture du graphe, quel que soit leur nombre : opération `overview` du port `ContractEngine`, à la place de `thread_ids` ; sur la base locale, 1 ouverture au lieu de 7 et 31 ms au lieu de 107 ms pour 3 contrats ;
+- **27 septembre 2026, préparation de la production** :
+  - adresse d'un contrat formée à un seul endroit (`presentation.contract_path`), liens et redirections : préfixe fixe, identifiant encodé comme un seul segment (alertes CodeQL `py/url-redirection`, ADR 004) ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

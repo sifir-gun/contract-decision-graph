@@ -44,7 +44,7 @@
   {% if s.demande.get("error") %}
   <p class="error" role="alert">Réponse refusée par la politique de revue : {{ s.demande.get("error") }}</p>
   {% endif %}
-  <form method="post" action="/contrats/{{ d.thread_id|urlencode }}/decision">
+  <form method="post" action="{{ contract_path(d.thread_id, 'decision') }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="decision">Décision</label>
     <select id="decision" name="decision" required>
@@ -206,8 +206,8 @@
     <dt>Décision</dt><dd><code>{{ s.decision_hash or "non scellée" }}</code></dd>
     <dt>Chaîne</dt><dd><code>{{ s.chain_hash or "non scellée" }}</code></dd>
   </dl>
-  <p><a class="button" href="/contrats/{{ d.thread_id|urlencode }}/rejeu"
-        hx-get="/contrats/{{ d.thread_id|urlencode }}/rejeu" hx-target="#rejeu" hx-push-url="false">Rejouer la décision</a></p>
+  <p><a class="button" href="{{ contract_path(d.thread_id, 'rejeu') }}"
+        hx-get="{{ contract_path(d.thread_id, 'rejeu') }}" hx-target="#rejeu" hx-push-url="false">Rejouer la décision</a></p>
   <div id="rejeu" aria-live="polite"></div>
 </section>
 {% endblock %}

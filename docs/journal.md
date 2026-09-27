@@ -2139,3 +2139,19 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
 
 - Point réel relevé par AgentShield (« indirect injection defense »), sous une forme propre au dépôt : `data/contracts/` (contrat piégé, attendus) et des tests (injection, instructions, extraction, CRAG, service, interface) contiennent volontairement des consignes adressées à une IA. Une fois le dépôt public, les assistants de code des contributeurs les liront.
 - Ligne ajoutée aux règles non négociables de `CLAUDE.md`, à la suite de celle sur le texte d'un contrat : ce sont des données de test, à ne jamais suivre. Elle ne cite aucune de ces consignes.
+
+## 2026-09-27 · Préparation de la production (branche `preparation-production`)
+
+### Alertes CodeQL `py/url-redirection` : adresse d'un contrat formée à un seul endroit
+
+- **Alertes** (analyse CodeQL par défaut, première exécution après la mise en public) : les deux redirections vers le dossier d'un contrat, après une analyse et après une revue humaine (`adapters/web/app.py`), formées par une f-string.
+- **Lecture du source de CodeQL** (`UrlRedirectCustomizations.qll`, branche `main` de `github/codeql`) : la requête tient pour sûre la partie droite d'une concaténation par `+` derrière un préfixe fixe, pas une f-string (« doesn't cover formatting »). Aucune redirection hors de l'interface n'était possible : le préfixe `/contrats/` est fixe, l'identifiant d'une analyse est contrôlé, celui d'une revue désigne un contrat en attente. Mais l'adresse n'était pas encodée : Starlette (`RedirectResponse`) garde « # » et « ? », et le filtre `urlencode` de Jinja, qui formait les liens, garde « / ».
+- **Décision** : corriger le code plutôt que classer les alertes. `presentation.contract_path` forme toutes les adresses d'un contrat, liens et redirections, avec un préfixe fixe et l'identifiant encodé comme un seul segment.
+- **Tests d'abord** :
+  - adresse interne pour des identifiants hostiles (`//`, `\\`, schéma, `?`, `#`, fins de ligne, `..`), segment unique, identifiant rendu intact, action inconnue refusée ;
+  - redirection après une revue et après une analyse ;
+  - liens des pages par la même fonction, plus aucun `urlencode` dans les gabarits.
+  - Rouges sur l'ancien code : après la revue d'un contrat « revue 1#é », la redirection menait à `/contrats/revue%201#%C3%A9`, soit le dossier `revue 1` ; le lien d'un contrat « a/b » sortait de son segment.
+- Vérifié dans le navigateur, mode démonstration : analyse, redirection vers le dossier, revue humaine, redirection, liste.
+- **Limite, à décider** : la CLI accepte tout identifiant de contrat (`--contract-id`, ou le nom du fichier) ; l'interface impose lettres, chiffres, `.`, `_` et `-`. Un contrat de la CLI dont l'identifiant contient « / », ou vaut `.` ou `..`, reste inaccessible dans l'interface : le routage de Starlette lit un seul segment, décodé. Aligner la CLI sur la règle de l'interface changerait son comportement.
+- Les alertes se ferment d'elles-mêmes à la prochaine analyse de `main` qui ne les trouve plus.
