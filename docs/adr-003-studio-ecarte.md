@@ -79,7 +79,7 @@ Même méthode que le test réseau des embeddings (`tests/test_embeddings.py`) :
 
 Les visuels du README n'en dépendent pas : le schéma est dessiné par LangGraph depuis le graphe réel (`scripts/schema_graphe.py`), et l'enregistrement du terminal montre une analyse réelle (`scripts/demo_terminal.sh`).
 
-**Alternative prévue** : un rapport HTML par contrat, premier chantier de la phase 2, puis, dans la même phase, un écran de revue humaine avec l'API. Ni l'un ni l'autre n'existe encore.
+**Alternative prévue** : un rapport HTML par contrat, premier chantier de la phase 2, puis, dans la même phase, un écran de revue humaine avec l'API. Ni l'un ni l'autre n'existe encore. *Mise à jour du 27/09/2026 : l'écran de revue humaine existe désormais, dans l'interface web locale, avancé avant l'API ([ADR 004](adr-004-interface-web.md)) ; le rapport HTML reste à faire.*
 
 ## Conséquences
 

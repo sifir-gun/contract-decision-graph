@@ -18,10 +18,16 @@ test vérifie que les deux portes appellent la même (`tests/test_parite.py`) :
 Le service ne décide rien : le graphe (port `ContractEngine`) rend les verdicts et
 applique la politique de revue ; le domaine vérifie la chaîne et rejoue. Le texte d'un
 contrat est masqué avant le graphe (`run_contract`) : le service ne le garde pas.
+
+Les actions qui modifient un état (`analyse`, `decide`, `expire`) passent l'une après
+l'autre, sous un verrou unique : l'interface web sert ses requêtes dans des threads, et
+`run_contract` vérifie qu'un thread n'existe pas avant de le créer. Les lectures restent
+concurrentes. Le verrou ne vaut que pour un processus (`docs/adr-004-interface-web.md`).
 """
 
+import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -101,6 +107,10 @@ class ContractService:
     config: DecisionConfig
     today: Callable[[], date]  # date d'analyse par défaut : jour légal en France
     now: Callable[[], datetime]  # horloge de l'expiration
+    # verrou unique des modifications : analyse, décision humaine, expiration
+    _writes: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     def analyse(
         self,
@@ -111,27 +121,28 @@ class ContractService:
         analysis_date: date | None = None,
     ) -> dict[str, Any]:
         on = analysis_date if analysis_date is not None else self.today()
-        return self.engine.run(contract_id, raw_text, parties, on)
+        with self._writes:
+            return self.engine.run(contract_id, raw_text, parties, on)
 
     def decide(self, thread_id: str, answer: Mapping[str, Any]) -> dict[str, Any]:
         """Réponse humaine brute : validée par la politique dans le graphe, redemandée
         avec son motif si elle est mal formée ou refusée."""
-        return self.engine.resume(thread_id, dict(answer))
+        with self._writes:
+            return self.engine.resume(thread_id, dict(answer))
 
     def contracts(self, *, pending_only: bool = False) -> list[dict[str, Any]]:
-        """Contrats du checkpointer, du plus récemment modifié au plus ancien."""
+        """Contrats du checkpointer, du plus récemment modifié au plus ancien ; le graphe
+        est ouvert une seule fois pour toute la liste."""
         rows = []
-        for thread_id in self.engine.thread_ids():
-            status = self.engine.status(thread_id)
-            history = self.engine.history(thread_id)
+        for status in self.engine.overview():
             row = {
-                "thread_id": thread_id,
+                "thread_id": status["thread_id"],
                 "etat": state_label(status),
                 "analysis_date": status["analysis_date"],
                 "proposed_decision": status["proposed_decision"],
                 "final_decision": status["final_decision"],
-                "started_at": history[0]["created_at"],
-                "updated_at": history[-1]["created_at"],
+                "started_at": status["started_at"],
+                "updated_at": status["updated_at"],
             }
             if not pending_only or row["etat"] == WAITING:
                 rows.append(row)
@@ -172,8 +183,9 @@ class ContractService:
         return self.engine.history(thread_id)
 
     def expire(self, older_than: timedelta) -> tuple[datetime, list[dict[str, Any]]]:
-        now = self.now()
-        return now, self.engine.expire(older_than, now)
+        with self._writes:
+            now = self.now()  # après l'attente du verrou : l'heure de l'expiration
+            return now, self.engine.expire(older_than, now)
 
     def journal(self) -> list[dict[str, Any]]:
         """Enregistrements scellés, du plus ancien au plus récent."""

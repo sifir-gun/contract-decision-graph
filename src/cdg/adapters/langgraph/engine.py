@@ -9,12 +9,21 @@ Le checkpointer est PostgreSQL (CLI, interface web) ou en mémoire (`memory_open
 démonstration, tests), avec le même sérialiseur strict.
 """
 
-from collections.abc import Callable, Iterator, Sequence
+import threading
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import (
+    ChannelVersions,
+    Checkpoint,
+    CheckpointMetadata,
+    CheckpointTuple,
+    DeltaChannelHistory,
+)
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
@@ -37,9 +46,67 @@ class EngineDeps:
     read: Callable[[], Deps]
 
 
+class LockedMemorySaver(InMemorySaver):
+    """`InMemorySaver` sous verrou. Celui de langgraph-checkpoint 4.2.0 n'en a aucun :
+    `list` parcourt son stockage pendant qu'une écriture peut y ajouter un thread, et
+    `get_tuple` y insère un thread inconnu. Or l'interface sert ses requêtes dans des
+    threads : chaque accès au stockage passe par le verrou. Les versions asynchrones
+    appellent celles-ci."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._storage_lock = threading.RLock()
+
+    def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
+        with self._storage_lock:
+            return super().get_tuple(config)
+
+    def list(
+        self,
+        config: RunnableConfig | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> Iterator[CheckpointTuple]:
+        with self._storage_lock:  # collectés sous le verrou, rendus ensuite
+            found = [*super().list(config, filter=filter, before=before, limit=limit)]
+        yield from found
+
+    def put(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
+        with self._storage_lock:
+            return super().put(config, checkpoint, metadata, new_versions)
+
+    def put_writes(
+        self,
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        with self._storage_lock:
+            super().put_writes(config, writes, task_id, task_path)
+
+    def delete_thread(self, thread_id: str) -> None:
+        with self._storage_lock:
+            super().delete_thread(thread_id)
+
+    def get_delta_channel_history(
+        self, *, config: RunnableConfig, channels: Sequence[str]
+    ) -> Mapping[str, DeltaChannelHistory]:
+        with self._storage_lock:
+            return super().get_delta_channel_history(config=config, channels=channels)
+
+
 def memory_opener(config: DecisionConfig) -> GraphOpener:
     """Graphes qui partagent un checkpointer en mémoire, le temps du processus."""
-    saver = InMemorySaver(serde=strict_serializer())
+    saver = LockedMemorySaver(serde=strict_serializer())
 
     @contextmanager
     def open_graph(deps: Deps) -> Iterator[CompiledStateGraph]:
@@ -91,9 +158,9 @@ class LangGraphEngine:
         with self._open(self._deps.read()) as graph:
             return orchestrator.thread_history(graph, thread_id)
 
-    def thread_ids(self) -> list[str]:
+    def overview(self) -> list[dict[str, Any]]:
         with self._open(self._deps.read()) as graph:
-            return orchestrator.list_threads(graph)
+            return orchestrator.threads_overview(graph)
 
     def expire(self, older_than: timedelta, now: datetime) -> list[dict[str, Any]]:
         with self._open(self._deps.expire()) as graph:

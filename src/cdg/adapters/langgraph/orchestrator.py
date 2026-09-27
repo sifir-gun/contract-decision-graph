@@ -526,6 +526,22 @@ def list_threads(graph: CompiledStateGraph) -> list[str]:
     return sorted({c.config["configurable"]["thread_id"] for c in saver.list(None)})
 
 
+def threads_overview(graph: CompiledStateGraph) -> list[dict]:
+    """Statut de chaque thread du checkpointer, avec la date de son premier et de son
+    dernier checkpoint : toute la liste des contrats sur un seul graphe ouvert."""
+    overview = []
+    for thread_id in list_threads(graph):
+        history = thread_history(graph, thread_id)
+        overview.append(
+            {
+                **thread_status(graph, thread_id),
+                "started_at": history[0]["created_at"],
+                "updated_at": history[-1]["created_at"],
+            }
+        )
+    return overview
+
+
 def _metadata(snapshot: StateSnapshot) -> CheckpointMetadata:
     if snapshot.metadata is None:  # écrites par le checkpointer à chaque étape
         raise ThreadError(f"checkpoint sans métadonnées : {snapshot.config}")

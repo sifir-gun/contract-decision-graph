@@ -15,7 +15,7 @@ Tout doit pouvoir se faire soit par la CLI, soit par une interface web, au choix
 
 ### Même moteur, deux portes
 
-Un service applicatif (`application/service.py`) porte les actions communes : `analyse`, `decide`, `contracts`, `dossier`, `history`, `expire`, `journal`, `verify`, `replay`. Il passe par un port d'exécution (`ports/engine.py`, adaptateur `adapters/langgraph/engine.py`) qui ouvre le graphe avec les dépendances de chaque opération, comme le faisait chaque commande. La CLI et l'interface appellent les mêmes méthodes ; `tests/test_parite.py` le vérifie action par action. Pour que chaque écran ait sa commande, la CLI gagne `list`, `show`, `journal` et `replay`.
+Un service applicatif (`application/service.py`) porte les actions communes : `analyse`, `decide`, `contracts`, `dossier`, `history`, `expire`, `journal`, `verify`, `replay`. Il passe par un port d'exécution (`ports/engine.py`, adaptateur `adapters/langgraph/engine.py`) qui ouvre le graphe avec les dépendances de chaque opération, comme le faisait chaque commande. La liste des contrats, elle, se lit en une seule ouverture, quel que soit leur nombre (`overview`, audit de publication du 27/09 : auparavant 1 + 2 × M ouvertures). La CLI et l'interface appellent les mêmes méthodes ; `tests/test_parite.py` le vérifie action par action. Pour que chaque écran ait sa commande, la CLI gagne `list`, `show`, `journal` et `replay`.
 
 L'interface (`adapters/web/`) ne fait que lire des formulaires et mettre en page le dossier que rend le service. FastAPI, Starlette, uvicorn, Jinja2 et MarkupSafe n'y sont importés que là (`tests/test_isolation.py`).
 
@@ -51,9 +51,18 @@ Aucune ressource externe : ni CDN, ni police web, ni outil de mesure d'audience.
   - levée d'un blocage dur seulement si la configuration l'autorise : la case n'est proposée que dans ce cas, et la politique refuse de toute façon une levée non permise ;
   - une réponse refusée est redemandée, avec son motif.
 
-### Pas d'authentification en phase 2
+### Pas d'authentification tant que l'écoute reste locale
 
 L'interface est un outil local, pour une seule personne, sur son poste. **L'authentification est obligatoire avant toute exposition réseau** : elle est notée pour l'étape du déploiement Kubernetes (phase 2), avec le chiffrement des échanges et la séparation des rôles (relecteur, administration). D'ici là, l'option d'écoute non locale existe, mais elle est refusée par défaut et assortie d'un avertissement.
+
+### Accès concurrents (audit de publication, 27/09)
+
+Relevé par le second avis ECC : les pages étaient des coroutines qui appelaient le service, synchrone. FastAPI 0.141.1 exécute une coroutine sur la boucle d'événements (`fastapi/routing.py`, `run_endpoint_function`) : pendant une analyse réelle, environ 10 s, toute autre page attendait. Décision du 27/09 :
+
+- **Pages en fonctions ordinaires** : FastAPI les exécute dans son pool de threads. Seule la lecture du formulaire, avec son contrôle CSRF, reste asynchrone, en dépendance (`Depends`).
+- **Un verrou unique pour les modifications** : l'analyse, la décision humaine et l'expiration passent l'une après l'autre, sous le verrou du service des contrats, en mode réel comme en démonstration, pour la CLI comme pour l'interface. Sans lui, deux analyses du même contrat passaient ensemble la vérification d'existence de `run_contract`, puis lançaient toutes deux le graphe sur le même thread (reproduit par `tests/test_concurrence.py`). La seconde reçoit désormais « le thread … existe déjà ». Les lectures (liste, dossier, parcours, journal, vérification, rejeu) restent concurrentes, y compris pendant une analyse.
+- **Stockages en mémoire du mode démonstration sous verrou** : le checkpointer, car `InMemorySaver` (langgraph-checkpoint 4.2.0) n'en a aucun et la liste des threads pendant une écriture levait « dictionary changed size during iteration » ; et le journal d'audit, où deux ajouts sur la même tête fourchaient la chaîne. En mode réel, chaque opération ouvre sa propre connexion, et le journal PostgreSQL a son verrou consultatif et ses index uniques.
+- **Limite : un seul processus.** Le verrou ne vaut que dans le processus qui sert l'interface (uvicorn, un seul processus : `cdg.cli web` lui passe l'application, non une chaîne d'import). En multi-réplicas (phase Kubernetes), ce sont les garanties de la base qui protègent. Le verrou consultatif et les index uniques du journal d'audit sont déjà en place. En revanche, la vérification d'existence de `run_contract` n'est pas atomique entre deux processus. À vérifier à ce moment-là.
 
 ### Mode démonstration
 

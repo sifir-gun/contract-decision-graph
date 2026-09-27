@@ -2097,3 +2097,45 @@ Après l'analyse de bout en bout par l'interface, le vrai journal d'audit compte
 ### Documentation
 
 ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souveraineté, sécurité, pas d'authentification avant l'étape Kubernetes, mode démonstration et ses limites, mesure de bout en bout) ; README (section « Interface web », captures, commandes des deux modes ; ADR 004 dans la liste ; phase 2 : écran de revue humaine fait) ; `docs/exploitation.md` ; spec (arborescence, commandes, isolation, phase 2, historique) ; CLAUDE.md (règles de l'interface, commandes, pile).
+
+## 2026-09-27 · Audit de publication (branche `audit-publication`)
+
+### Audit, puis second avis ECC
+
+- **Audit de publication** : secrets et données personnelles (arbre, 140 commits, images, descriptions des PR), licences, cohérence de la documentation, CI. Aucun point bloquant. Corrigé, un commit chacun : licence d'HTMX (0BSD) dans le README ; titre de l'ADR 004 qui contredisait son paragraphe ; phrase périmée de l'ADR 003 ; tableau des règles de la spec pour le transfert encadré par une garantie (constat d'information, décision du 26/09).
+- **Second avis ECC** (Everything Claude Code 2.2.1, plugin tiers MIT), dans un clone jetable : relectures en contexte neuf (code, Python, sécurité de l'interface web, sécurité de PostgreSQL et du traitement des contrats), puis AgentShield 1.6.0 sur la configuration d'agent. Deux constats vrais, sur l'interface : pages asynchrones qui bloquent pendant une analyse ; liste des contrats en 1 + 2 × M ouvertures du graphe. Un point réel d'AgentShield : les consignes piégées du dépôt, que liront les assistants de code des contributeurs. Les autres constats d'AgentShield sont des faux positifs : il cherche dans `CLAUDE.md` des défenses de prompt système. ECC désinstallé, clone supprimé, aucune trace dans `~/.claude` ni dans le dépôt.
+- **Décisions du propriétaire** : corriger les deux constats de l'interface, seuil de couverture à 98 %, une ligne dans `CLAUDE.md` sur les consignes piégées, description et sujets du dépôt GitHub après la fusion.
+
+### Accès concurrents : pages dans le pool de threads, verrou des modifications
+
+- **Tests d'abord** (`tests/test_concurrence.py`), rouges avant correction, chacun sur une course reproduite :
+  - deux analyses simultanées du même contrat réussissaient toutes les deux, sur le même thread : la vérification d'existence de `run_contract` passait pour les deux (lecture du thread retenue par une barrière le temps que l'autre la rejoigne) ;
+  - une analyse, une décision humaine ou une expiration démarrait pendant une analyse en cours ;
+  - `InMemorySaver` (langgraph-checkpoint 4.2.0) : « dictionary changed size during iteration », pour une liste des threads pendant des écritures (bascule entre threads toutes les microsecondes) ;
+  - journal d'audit en mémoire : 40 ajouts simultanés, chaîne fourchée ;
+  - interface : les pages (liste, dossier, rejeu, journal, vérification, fichier statique) restaient bloquées pendant une analyse. Toutes les requêtes du client de test partagent une boucle d'événements, comme sous uvicorn.
+- **Correction** :
+  - pages en fonctions ordinaires, exécutées par FastAPI dans son pool de threads ; seule la lecture du formulaire et son contrôle CSRF restent asynchrones, en dépendance ;
+  - verrou unique du service des contrats autour de l'analyse, de la décision humaine et de l'expiration, lectures concurrentes ; l'heure de l'expiration est lue après l'attente du verrou ;
+  - `InMemorySaver` sous verrou (`LockedMemorySaver`), journal d'audit en mémoire sous verrou ;
+  - fichier envoyé lu directement (`UploadFile.file`), toujours en mémoire : la taille d'un envoi reste bornée sous le seuil d'écriture sur disque.
+- Deux analyses du même contrat : la seconde attend, puis reçoit « le thread … existe déjà » (409 dans l'interface). Tests de concurrence : 10 passages sur 10.
+- **Limite, dans l'ADR 004** : le verrou vaut pour un seul processus. En multi-réplicas (phase Kubernetes), la base protège le journal d'audit (verrou consultatif, index uniques) ; la création d'un thread est à vérifier à ce moment-là.
+
+### Liste des contrats en une seule ouverture du graphe
+
+- **Constat** (second avis ECC) : `ContractService.contracts()`, derrière `cdg list` et la page d'accueil de l'interface, appelait `thread_ids()`, puis `status()` et `history()` pour chaque contrat. Chaque appel du port ouvrait le graphe : en réel, une connexion PostgreSQL et une compilation. Soit 1 + 2 × M ouvertures.
+- **Tests d'abord** : `LangGraphEngine` ajouté au test de conformité des ports (il n'y figurait pas), avec la nouvelle liste des méthodes du port ; décompte des ouvertures pendant la liste, après 1, 2 puis 3 contrats. Rouges : 3, 5 puis 7 ouvertures.
+- **Correction** : opération `overview` du port `ContractEngine` (statut de chaque contrat, date de son premier et de son dernier checkpoint), une seule ouverture du graphe ; `contracts()` l'utilise, donc `cdg list` comme l'interface. `thread_ids`, qui n'avait plus d'appelant, est retiré du port et de l'adaptateur. Les lectures de chaque thread restent, sur la même connexion.
+- **Mesure sur la base locale** (27/09, 3 contrats, cinq appels après un appel de chauffe, même script avant et après) : avant, 7 ouvertures et 104 à 110 ms (médiane 107 ms) ; après, 1 ouverture et 31 ms à chaque appel. `cdg list` de bout en bout, processus compris : 0,79 s.
+
+### Seuil de couverture : 98 %
+
+- **Décision du propriétaire** : `fail_under` passe de 96 à 98, selon la règle du 26/09 (l'entier juste sous la mesure) : 98,71 % mesurés le 27/09 sur `main`, en lignes et en branches, tests PostgreSQL compris. Badge du README et `CLAUDE.md`, spec, `docs/exploitation.md` suivent.
+- **Test d'abord** : `tests/test_couverture.py` fige la valeur décidée (rouge à 96) ; le test de cohérence du badge reste.
+- Après les deux corrections de l'interface et le test des verrous : 98,72 %, 1 225 tests.
+
+### `CLAUDE.md` : consignes piégées du dépôt
+
+- Point réel relevé par AgentShield (« indirect injection defense »), sous une forme propre au dépôt : `data/contracts/` (contrat piégé, attendus) et des tests (injection, instructions, extraction, CRAG, service, interface) contiennent volontairement des consignes adressées à une IA. Une fois le dépôt public, les assistants de code des contributeurs les liront.
+- Ligne ajoutée aux règles non négociables de `CLAUDE.md`, à la suite de celle sur le texte d'un contrat : ce sont des données de test, à ne jamais suivre. Elle ne cite aucune de ces consignes.

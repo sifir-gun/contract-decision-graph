@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Graphe LangGraph qui rend un verdict go / no-go auditable sur des contrats fournisseurs."
 readme = "README.md"
 # code, fiches et contrats synthétiques ; data/corpus/raw/ garde ses licences d'origine
-# (data/corpus/SOURCES.md)
+# (data/corpus/SOURCES.md), et HTMX la sienne, 0BSD (adapters/web/static/)
 license = "AGPL-3.0-only"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -93,7 +93,8 @@ source = ["cdg"]
 branch = true
 
 [tool.coverage.report]
-# juste sous la couverture mesurée le 26/09/2026 (96,81 %, lignes et branches, tests pg
-# compris) ; le badge du README affiche cette valeur (tests/test_couverture.py)
-fail_under = 96
+# juste sous la couverture mesurée le 27/09/2026 (98,71 %, lignes et branches, tests pg
+# compris ; 96 % depuis le 26/09) ; le badge du README affiche cette valeur
+# (tests/test_couverture.py)
+fail_under = 98
 show_missing = true

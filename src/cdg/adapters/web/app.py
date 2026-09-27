@@ -7,6 +7,12 @@ aucune logique métier ici, seulement la lecture des formulaires et la mise en p
 
 Le texte d'un contrat reçu n'est ni journalisé, ni renvoyé, ni gardé en session : il est
 passé au service, qui le masque avant le graphe, comme la CLI.
+
+Les pages sont des fonctions ordinaires : FastAPI les exécute dans son pool de threads, et
+une analyse en cours (appels au LLM, plusieurs secondes) ne bloque pas les autres pages.
+Seule la lecture du formulaire, avec son contrôle CSRF, reste asynchrone (`Depends`). Le
+service fait passer les modifications l'une après l'autre ; les lectures restent
+concurrentes.
 """
 
 import logging
@@ -15,9 +21,9 @@ import secrets
 from collections.abc import Sequence
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -124,6 +130,9 @@ def create_app(
             raise Forbidden
         return form
 
+    # formulaire lu et contrôlé (CSRF, origine) sur la boucle, avant la page
+    CheckedForm = Annotated[FormData, Depends(checked_form)]
+
     @app.middleware("http")
     async def guard(request: Request, call_next: Any) -> Response:
         name = security.host_name(request.headers.get("host", ""))
@@ -192,7 +201,7 @@ def create_app(
     # --- liste des contrats (list) ----------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
-    async def contracts(request: Request, attente: str = "") -> Response:
+    def contracts(request: Request, attente: str = "") -> Response:
         rows = service.contracts(pending_only=bool(attente))
         return page(
             request, "liste.html", {"rows": rows, "pending_only": bool(attente)}
@@ -212,14 +221,13 @@ def create_app(
         )
 
     @app.get("/analyse", response_class=HTMLResponse)
-    async def analysis_form(request: Request) -> Response:
+    def analysis_form(request: Request) -> Response:
         return analysis_page(request)
 
     @app.post("/analyse")
-    async def analyse(request: Request) -> Response:
-        form = await checked_form(request)
+    def analyse(request: Request, form: CheckedForm) -> Response:
         try:
-            text, parties, base = await _contract_input(form, demo)
+            text, parties, base = _contract_input(form, demo)
             contract_id = _identifier(form, base, service)
             on = _analysis_date(form)
         except InputError as exc:
@@ -260,12 +268,11 @@ def create_app(
         )
 
     @app.get("/contrats/{thread_id}", response_class=HTMLResponse)
-    async def dossier(request: Request, thread_id: str) -> Response:
+    def dossier(request: Request, thread_id: str) -> Response:
         return dossier_page(request, thread_id)
 
     @app.post("/contrats/{thread_id}/decision")
-    async def decision(request: Request, thread_id: str) -> Response:
-        form = await checked_form(request)
+    def decision(request: Request, thread_id: str, form: CheckedForm) -> Response:
         answer = {
             "decision": _text(form, "decision"),
             "reviewer": _text(form, "relecteur"),
@@ -287,7 +294,7 @@ def create_app(
         return RedirectResponse(f"/contrats/{thread_id}", status_code=303)
 
     @app.get("/contrats/{thread_id}/rejeu", response_class=HTMLResponse)
-    async def replay(request: Request, thread_id: str) -> Response:
+    def replay(request: Request, thread_id: str) -> Response:
         context: dict[str, Any] = {"thread_id": thread_id}
         try:
             context["report"] = service.replay(thread_id)
@@ -299,11 +306,11 @@ def create_app(
     # --- journal d'audit (journal, verify) --------------------------------------------
 
     @app.get("/journal", response_class=HTMLResponse)
-    async def journal(request: Request) -> Response:
+    def journal(request: Request) -> Response:
         return page(request, "journal.html", {"entries": service.journal()})
 
     @app.get("/journal/verification", response_class=HTMLResponse)
-    async def verification(request: Request, tete: str = "") -> Response:
+    def verification(request: Request, tete: str = "") -> Response:
         expected = tete.strip() or None
         context: dict[str, Any]
         if expected is not None and not audit.is_hash(expected):
@@ -320,12 +327,11 @@ def create_app(
     # --- administration : expiration (expire) -----------------------------------------
 
     @app.get("/administration", response_class=HTMLResponse)
-    async def administration(request: Request) -> Response:
+    def administration(request: Request) -> Response:
         return page(request, "administration.html", {"error": None})
 
     @app.post("/administration/expiration")
-    async def expiration(request: Request) -> Response:
-        form = await checked_form(request)
+    def expiration(request: Request, form: CheckedForm) -> Response:
         raw = _text(form, "heures").strip()
         if not raw.isdigit() or int(raw) <= 0:
             return page(
@@ -355,7 +361,7 @@ def _text(form: FormData, name: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-async def _contract_input(form: FormData, demo: bool) -> tuple[str, list[str], str]:
+def _contract_input(form: FormData, demo: bool) -> tuple[str, list[str], str]:
     """Texte du contrat, parties à masquer, base de l'identifiant par défaut."""
     parties = [p.strip() for p in _text(form, "parties").splitlines() if p.strip()]
     source = _text(form, "source")
@@ -375,7 +381,7 @@ async def _contract_input(form: FormData, demo: bool) -> tuple[str, list[str], s
     if source == "texte":
         text = _text(form, "texte")
     elif source == "fichier":
-        text = await _uploaded_text(form.get("fichier"))
+        text = _uploaded_text(form.get("fichier"))
     else:
         raise InputError("source inconnue : contrat du jeu, texte collé ou fichier")
     if not text.strip():
@@ -387,12 +393,14 @@ async def _contract_input(form: FormData, demo: bool) -> tuple[str, list[str], s
     return text, parties, "contrat"
 
 
-async def _uploaded_text(upload: object) -> str:
+def _uploaded_text(upload: object) -> str:
     if not isinstance(upload, UploadFile) or not upload.filename:
         raise InputError("aucun fichier envoyé")
     if (upload.content_type or "").split(";")[0].strip() != "text/plain":
         raise InputError("le fichier doit être du texte brut (text/plain, .txt)")
-    data = await upload.read()  # borné par la taille maximale d'un envoi
+    # lecture directe, dans le pool de threads : le fichier reste en mémoire, la taille
+    # d'un envoi étant bornée sous le seuil d'écriture sur disque (check_body_limit)
+    data = upload.file.read()
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
