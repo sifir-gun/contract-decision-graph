@@ -42,6 +42,7 @@ testpaths = ["tests"]
 markers = [
     "pg: exige PostgreSQL (docker compose up -d) ; exclusion volontaire avec -m \"not pg\"",
     "llm: appelle le vrai modèle (payant) ; exclu par défaut, activé par --llm",
+    "image: vérifie l'image Docker construite ; exclu par défaut, activé par --image ÉTIQUETTE",
 ]
 
 [dependency-groups]

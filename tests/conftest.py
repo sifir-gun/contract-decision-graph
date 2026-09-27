@@ -28,6 +28,13 @@ def pytest_addoption(parser):
         action="store_true",
         help="exécute aussi les tests marqués llm (vrai modèle, payant)",
     )
+    parser.addoption(
+        "--image",
+        metavar="ÉTIQUETTE",
+        default=None,
+        help="exécute aussi les tests marqués image, sur l'image Docker déjà construite "
+        "sous cette étiquette (docker build --tag ÉTIQUETTE .)",
+    )
 
 
 def pytest_report_header(config):
@@ -38,13 +45,14 @@ def pytest_report_header(config):
 
 def pytest_collection_modifyitems(config, items):
     # exclusion par défaut, comptée comme « deselected » : jamais de saut silencieux,
-    # et -m "not pg" ne peut pas activer les tests llm par accident
-    if config.getoption("--llm"):
-        return
-    llm = [item for item in items if item.get_closest_marker("llm")]
-    if llm:
-        items[:] = [item for item in items if not item.get_closest_marker("llm")]
-        config.hook.pytest_deselected(items=llm)
+    # et -m "not pg" ne peut activer par accident ni les tests llm, ni les tests image
+    for marker, option in (("llm", "--llm"), ("image", "--image")):
+        if config.getoption(option):
+            continue
+        marked = [item for item in items if item.get_closest_marker(marker)]
+        if marked:
+            items[:] = [item for item in items if not item.get_closest_marker(marker)]
+            config.hook.pytest_deselected(items=marked)
 
 
 @dataclass(frozen=True)

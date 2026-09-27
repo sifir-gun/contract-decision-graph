@@ -12,6 +12,7 @@ Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.
 
 - [ ] **API FastAPI** : un adaptateur entrant de plus, sur le service des contrats, comme la CLI et l'interface web (ADR 004). *Fait quand* chaque action de l'API appelle la même méthode du service que sa commande, vérifié par `tests/test_parite.py`.
 - [ ] **Déploiement sur Kubernetes** (k3s, Helm), selon la feuille de route. *Fait quand* l'application se déploie depuis le chart, sans étape manuelle, et que les migrations et l'indexation du corpus tournent comme tâches de déploiement (voir plus bas).
+- [x] **Image de l'application** (28/09, PR A) : `Dockerfile` en deux étapes, bases figées par empreinte, dépendances strictement depuis uv.lock, utilisateur non root numérique, lecture seule, ni shell ni pip ; construite et vérifiée par le job `image` de la CI (ADR 005, « Image »). Publication sur ghcr.io, scan, inventaire, signature et provenance en PR B. *Fait quand* l'image construite en CI passe `tests/test_image.py`.
 
 ### Santé et arrêt des pods
 

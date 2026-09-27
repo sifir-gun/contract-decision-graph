@@ -842,6 +842,7 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - arrêt propre : ordre d'arrêt → plus prêt, modifications refusées (503), requêtes en cours finies dans `--delai-arret` ; reprise des analyses interrompues depuis leur dernier checkpoint (port `ContractEngine.resume_interrupted`), sous leur verrou, au lancement puis périodiquement, sans double scellement ;
   - checkpoints écrits avant l'étape suivante (`durability="sync"`) : un processus tué ne laisse jamais un checkpoint incomplet ;
   - `config-check` (CLI) et administration de l'interface (méthode `config_check` du service) : contrats en attente analysés sous une autre configuration, code 1 s'il y en a ;
+  - image de l'application (`Dockerfile`, job `image` de la CI) : deux étapes, bases figées par empreinte, uv.lock strict, non root 65532, lecture seule, ni shell ni pip ; en journaux JSON, messages de `web` dans le journal et résultat sur une ligne ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
