@@ -38,28 +38,49 @@ Exemple, sur le contrat piégé du jeu de démonstration (série 8, modèle rée
 
 ## Schéma
 
+<!-- schéma généré par scripts/schema_graphe.py : ne pas modifier à la main -->
 ```mermaid
-flowchart TD
-    C([Contrat<br/>texte masqué]) --> V[validate_input<br/>langue, taille,<br/>tentatives d'instruction]
-    V --> X[extract_clauses<br/>LLM]
-    X --> VX{verify_extraction<br/>code}
-    VX -- retour ciblé --> X
-    VX -- vérifiée --> A
-    subgraph A [4 analystes en parallèle : règles, puis CRAG]
-        J[juridique]
-        F[financier]
-        K[conformité]
-        O[opérationnel]
-    end
-    A --> G{decision_gate<br/>code}
-    VX -- doute --> H[revue humaine<br/>interrupt]
-    G -- doute --> H
-    G -- décision --> E[explain<br/>LLM contrôlé]
-    H --> E
-    E --> S[(audit_seal<br/>chaîne SHA-256)]
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	validate_input(validate_input)
+	extract_clauses(extract_clauses)
+	verify_extraction(verify_extraction)
+	analyst(analyst)
+	decision_gate(decision_gate)
+	human_review(human_review)
+	explain(explain)
+	audit_seal(audit_seal)
+	reject(reject)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> validate_input;
+	analyst --> decision_gate;
+	decision_gate -.-> explain;
+	decision_gate -.-> human_review;
+	explain --> audit_seal;
+	extract_clauses --> verify_extraction;
+	human_review --> explain;
+	reject --> audit_seal;
+	validate_input -.-> extract_clauses;
+	validate_input -.-> human_review;
+	validate_input -.-> reject;
+	verify_extraction -.-> analyst;
+	verify_extraction -.-> extract_clauses;
+	verify_extraction -.-> human_review;
+	audit_seal --> __end__;
+	classDef default fill:#f2f0ff,color:#1f1f1f,line-height:1.2
+	classDef first fill:#bfb6fc,color:#1f1f1f
+	classDef last fill:#bfb6fc,color:#1f1f1f
 ```
+<!-- fin du schéma généré -->
 
-Les quatre analystes tournent en parallèle (`Send`). Chacun applique les règles de son domaine, puis cherche dans le corpus, par un CRAG (recherche, juge de pertinence, réécriture), les références qui justifient ses constats. Les checkpoints PostgreSQL permettent à un contrat suspendu de reprendre après un arrêt du processus.
+Le schéma est dessiné par LangGraph à partir du graphe réel (`scripts/schema_graphe.py`) ; un test échoue s'il diverge du code. Flèches pleines : enchaînement fixe ; pointillés : arête conditionnelle, qui lit la route écrite par le nœud. `verify_extraction` renvoie vers `extract_clauses` avec un retour ciblé, ou escalade vers `human_review`, où s'arrête le graphe (`interrupt`) jusqu'à la décision humaine.
+
+`analyst` est lancé quatre fois en parallèle (`Send`), un par domaine : juridique, financier, conformité, opérationnel. Chacun applique les règles de son domaine, puis cherche dans le corpus, par un CRAG (recherche, juge de pertinence, réécriture), les références qui justifient ses constats. Les checkpoints PostgreSQL permettent à un contrat suspendu de reprendre après un arrêt du processus.
 
 ## Démo en quelques commandes
 

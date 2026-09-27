@@ -568,7 +568,8 @@ contract-decision-graph/
 ├── docker/
 │   └── initdb/                 # script d'init : applique migrations/*.sql
 ├── scripts/
-│   └── check.sh                # J4 : exactement les vérifications de la CI, avant chaque push
+│   ├── check.sh                # J4 : exactement les vérifications de la CI, avant chaque push
+│   └── schema_graphe.py        # schéma du README, dessiné par LangGraph depuis le graphe
 ├── migrations/
 │   ├── 001_audit.sql           # J1 : extension vector, audit_decisions, app_role
 │   ├── 002_rag.sql             # J3 : rag_chunks, idempotente, lecture seule pour app_role

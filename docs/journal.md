@@ -1995,3 +1995,14 @@ Tableau et texte du gain de latence mis à jour avec la série 8 : 29 essais à 
 - **Spec** : ligne du J5 dans le tableau des jours, arborescence (`LICENSE`, `docs/exploitation.md`), historique.
 - Le schéma Mermaid est vérifié dans le rendu de GitHub après le push.
 - **Schéma vérifié** : le dépôt privé n'est pas lisible sans session GitHub dans le navigateur intégré ; le schéma a été rendu en local par Mermaid 11 (page servie depuis un dossier ignoré, puis supprimée) : 13 nœuds, le sous-graphe des analystes et toutes les flèches. En largeur, il était illisible à la largeur d'une page : passé de haut en bas.
+
+## 2026-09-27 · Visuels (branche `visuels`)
+
+Dernière PR avant la mise en public. Code gelé : aucun changement de comportement.
+
+### Visuels tâche 1 : schéma du README généré depuis le code
+
+- **`scripts/schema_graphe.py`** : câble le graphe par `build_graph`, avec la configuration du projet et des dépendances inertes (le dessin ne dépend que du câblage ; une dépendance appelée lèverait une erreur), puis `get_graph().draw_mermaid()` de LangGraph ; il réécrit le bloc du README entre deux balises. Erreur explicite si les balises manquent ou se répètent.
+- **`tests/test_schema_readme.py`** (écrit d'abord, rouge avant le script) : le bloc du README est identique au dessin du graphe réel ; schéma de haut en bas (`graph TD`) ; chaque nœud présent ; écriture limitée au bloc ; balises absentes ou répétées.
+- **Rendu vérifié** en local par Mermaid 11, thèmes clair et sombre (page jetable dans le dossier temporaire de l'assistant) : 11 nœuds, de haut en bas, lisible. Styles de LangGraph gardés, avec un texte foncé en plus : sans lui, `__start__` était illisible en thème sombre.
+- **Ce que le schéma généré montre moins bien** que l'ancien, écrit à la main : `analyst` est un seul nœud, lancé quatre fois par `Send` ; le texte sous le schéma le dit, avec la légende (pointillés : arête conditionnelle). Il montre en plus ce que l'ancien omettait : `reject` et les gardes d'échec vers `human_review`.
