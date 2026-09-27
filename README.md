@@ -3,7 +3,18 @@
 [![CI](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
 [![couverture minimale](https://img.shields.io/badge/couverture-%E2%89%A5%2096%20%25-brightgreen)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
 
-Un graphe LangGraph qui rend un verdict **go / no-go auditable** sur un contrat fournisseur. Les LLM lisent et expliquent ; **le code décide**.
+Un graphe LangGraph qui rend un verdict **auditable** sur un contrat fournisseur : `GO`, `GO_RESERVES`, `NO_GO`, ou `ESCALADE` vers un humain.
+
+**Le parti pris : le code décide ; le LLM extrait et explique.** Le verdict vient de règles en Python pur. Toute sortie d'un LLM est vérifiée par du code avant usage, et le doute part en revue humaine. Chaque décision est scellée dans un journal chaîné, rejouable.
+
+Série 8, sur le modèle réel (Mistral), 13 contrats synthétiques × 5 essais :
+- **aucune décision automatique plus favorable que l'attendu**, sur 65 analyses ;
+- **64 issues sur 65 conformes**, l'autre plus prudente (revue humaine) ; en chemin, le code a refusé 22 extractions du modèle ;
+- **environ 0,0016 $ et 6 s par contrat.**
+
+![Analyse réelle du contrat 06 dans le terminal : clause de responsabilité illimitée, verdict NO_GO scellé, puis vérification de la chaîne du journal d'audit](docs/images/demo-terminal.gif)
+
+*Analyse réelle d'un contrat du jeu (`scripts/demo_terminal.sh`) : la responsabilité illimitée de l'acheteur bloque, `NO_GO` automatique ; `verify` retrouve l'empreinte scellée en tête du journal. Attentes de plus de 2 s raccourcies, durée réelle affichée.*
 
 > **In English.** A LangGraph pipeline that returns an auditable GO / GO_RESERVES / NO_GO / ESCALADE verdict on supplier contracts. LLMs only extract clauses, judge retrieved legal passages and explain; the verdict comes from deterministic Python rules, and every LLM output is checked by code before use. Doubt goes to a human reviewer (LangGraph `interrupt`), and every decision is sealed in a hash-chained, replayable audit log. Measured on 13 synthetic contracts × 5 real runs (Mistral): no automatic decision was ever more favourable than expected, at about $0.0016 and 6 s per contract. Documentation is in French; code identifiers are in English.
 
