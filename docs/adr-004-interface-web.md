@@ -51,7 +51,7 @@ Aucune ressource externe : ni CDN, ni police web, ni outil de mesure d'audience.
   - levée d'un blocage dur seulement si la configuration l'autorise : la case n'est proposée que dans ce cas, et la politique refuse de toute façon une levée non permise ;
   - une réponse refusée est redemandée, avec son motif.
 
-### Pas d'authentification en phase 2
+### Pas d'authentification tant que l'écoute reste locale
 
 L'interface est un outil local, pour une seule personne, sur son poste. **L'authentification est obligatoire avant toute exposition réseau** : elle est notée pour l'étape du déploiement Kubernetes (phase 2), avec le chiffrement des échanges et la séparation des rôles (relecteur, administration). D'ici là, l'option d'écoute non locale existe, mais elle est refusée par défaut et assortie d'un avertissement.
 
