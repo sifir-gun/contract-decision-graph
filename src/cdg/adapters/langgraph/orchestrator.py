@@ -3,8 +3,9 @@
 Le checkpointer PostgreSQL et son sérialiseur strict sont dans `checkpointer.py`.
 """
 
+import logging
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import date, datetime, timedelta
 from functools import partial
 from typing import Any, Protocol
@@ -35,6 +36,9 @@ from cdg.domain import audit, expiry, masking, policy
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.engine import ThreadError
+from cdg.ports.locks import ContractBusy
+
+log = logging.getLogger(__name__)
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
 from cdg.ports.retriever import Retriever
 
@@ -553,8 +557,14 @@ def expire_threads(
     older_than: timedelta,
     now: datetime,
     thread_ids: set[str] | None = None,
+    *,
+    hold: Callable[[str], AbstractContextManager[None]],
 ) -> list[dict]:
     """Reprend en NO_GO système les threads en attente depuis plus de `older_than`.
+
+    Chaque thread est expiré sous son verrou (`hold`), puis relu : un thread tranché ou
+    suspendu de nouveau entre-temps n'est pas expiré ; un thread verrouillé ailleurs (une
+    revue en cours) est laissé, et un avertissement le dit.
 
     `thread_ids` restreint la recherche : les tests ne touchent ainsi jamais aux
     autres threads en attente de la base. La CLI n'en passe pas.
@@ -562,17 +572,32 @@ def expire_threads(
     found = set(list_threads(graph))
     if thread_ids is not None:
         found &= thread_ids
-    pending = []
+    expired = []
     for thread_id in sorted(found):
-        snapshot = graph.get_state(_thread(thread_id))
-        if _awaits_human(snapshot):
-            # dernier checkpoint = suspension : l'attente ne bouge plus ensuite
-            if snapshot.created_at is None:  # daté par le checkpointer
-                raise ThreadError(f"thread {thread_id} : checkpoint sans date")
-            pending.append((thread_id, datetime.fromisoformat(snapshot.created_at)))
-    return [
-        # expire continue même si la configuration a changé : NO_GO système, scellé avec
-        # les deux empreintes et le constat de configuration modifiée
-        _resume(graph, thread_id, expiry.system_decision(now - since, older_than))
-        for thread_id, since in expiry.expired(pending, older_than, now)
-    ]
+        if _pending_since(graph, thread_id) is None:
+            continue
+        try:
+            with hold(thread_id):
+                since = _pending_since(graph, thread_id)  # relu sous le verrou
+                if since is None or not expiry.expired(
+                    [(thread_id, since)], older_than, now
+                ):
+                    continue
+                # expire continue même si la configuration a changé : NO_GO système,
+                # scellé avec les deux empreintes et le constat de configuration modifiée
+                answer = expiry.system_decision(now - since, older_than)
+                expired.append(_resume(graph, thread_id, answer))
+        except ContractBusy as exc:
+            log.warning("expiration : contrat %s laissé (%s)", thread_id, exc)
+    return expired
+
+
+def _pending_since(graph: CompiledStateGraph, thread_id: str) -> datetime | None:
+    """Date de la suspension d'un thread en attente d'un humain ; None sinon."""
+    snapshot = graph.get_state(_thread(thread_id))
+    if not _awaits_human(snapshot):
+        return None
+    # dernier checkpoint = suspension : l'attente ne bouge plus ensuite
+    if snapshot.created_at is None:  # daté par le checkpointer
+        raise ThreadError(f"thread {thread_id} : checkpoint sans date")
+    return datetime.fromisoformat(snapshot.created_at)

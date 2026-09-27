@@ -2221,3 +2221,15 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Constat en passant** : sous uvicorn, une erreur inattendue était journalisée avec sa pile et son message. Starlette relance l'exception après la page d'erreur ; le test existant ne le voyait pas, le client de test ne passant pas par uvicorn. Corrigé par la mise en forme, en texte comme en JSON.
 - **Tests** : `cli.main` applique la configuration à tout le processus ; une fixture la défait après chaque test, sinon les assertions « jamais dans les journaux » de `caplog` passaient à vide. Le test des erreurs inattendues vérifie désormais aussi que l'erreur est journalisée, par son type.
 - ADR 005 ouvert : contexte, références vérifiées et datées (NSA et CISA, Kubernetes, k3s, CloudNativePG, MinIO, avis sur Trivy, code installé de mistralai), et cette première décision.
+
+### Création, revue et expiration sûres entre réplicas
+
+- **Tests d'abord** (`tests/test_verrous.py`) :
+  - verrou local exclusif, relâché à la sortie comme sur exception ; clé de 64 bits stable, distincte de celle du journal d'audit ;
+  - moteur : analyse et revue refusées sous le verrou (`ContractBusy`), rien de créé ; l'expiration laisse un contrat verrouillé, le dit dans le journal, puis l'expire une fois le verrou rendu ;
+  - PostgreSQL : verrou exclusif entre deux connexions ;
+  - deux vrais processus (méthode spawn), chacun avec son moteur, son checkpointer et ses verrous PostgreSQL : la seconde analyse du même contrat est refusée pendant la première (« en cours de traitement »), la première aboutit, une troisième reçoit « existe déjà », un seul enregistrement scellé ; un processus tué pendant l'analyse relâche le verrou.
+- **Réalisation** : port `ContractLocks`, verrou PostgreSQL (`pg_try_advisory_lock` sur une connexion dédiée, chaîne de connexion lue à chaque verrou) et verrou local (démonstration, tests) ; le moteur le prend pour `run`, `resume` et, contrat par contrat, pour l'expiration, qui relit l'état sous le verrou.
+- **Au-delà de la demande, signalé** : la revue et l'expiration passent aussi sous le verrou. Sans lui, deux réplicas qui tranchent le même contrat reprennent tous deux le graphe ; le journal refuse le second scellement, mais l'état du thread peut garder la décision du second.
+- **Mise au point des tests** : en mode spawn, un événement partagé que le parent libère avant que l'enfant l'ait repris disparaît (sémaphore nommé supprimé, `FileNotFoundError` chez l'enfant, sous macOS) ; chaque réplica de test garde ses événements. Contre-épreuve sans verrou : la seconde demande reçoit « existe déjà » au lieu de « en cours de traitement ». La double création elle-même avait été reproduite en un processus, par une barrière (`tests/test_concurrence.py`).
+- **Connexions** : l'application n'a pas de pool ; une analyse tient jusqu'à 6 connexions (verrou, checkpointer, 4 recherches en parallèle), les lectures ne sont bornées que par les 40 threads de FastAPI. **Décision du propriétaire** : un pool psycopg par processus, où le verrou compte.

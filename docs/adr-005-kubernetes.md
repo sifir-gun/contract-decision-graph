@@ -36,3 +36,23 @@ Consultées dans leur version courante ; chaque choix d'outil fondé sur un fait
   - les bibliothèques ne passent qu'à partir des avertissements.
 - **Vérifié** par un vrai serveur uvicorn et un texte témoin dans le contrat : toutes les lignes sont du JSON, le témoin n'apparaît nulle part (`tests/test_journaux.py`).
 - **Limite** : les messages d'avertissement des bibliothèques (mistralai, LangGraph, httpx) passent tels quels. Aucun ne cite le contrat dans les tests, mais le code ne peut pas le prouver pour tous leurs chemins.
+
+### Création, revue et expiration sûres entre réplicas (PR A)
+
+- **Un verrou par contrat, dans PostgreSQL** (`ports/locks.py`, `adapters/postgres/locks.py`) : verrou consultatif de session, pris sans attendre (`pg_try_advisory_lock`), clé de 64 bits dérivée de l'identifiant par SHA-256, dans un espace de noms distinct de celui du journal d'audit. Le moteur le prend pour créer un contrat, trancher une revue et expirer un contrat en attente. La seconde demande, où qu'elle vienne, reçoit aussitôt « le contrat … est en cours de traitement » (409 dans l'interface, erreur JSON dans la CLI).
+- **Au-delà de la création** : sans le verrou, deux réplicas qui tranchent le même contrat en même temps reprenaient tous deux le graphe. Le journal refusait le second scellement, mais l'état du thread pouvait garder la décision du second, contraire au journal. L'expiration relit chaque contrat sous son verrou et laisse, avec un avertissement, un contrat en cours de revue ailleurs.
+- **Si le processus meurt**, sa connexion se ferme et PostgreSQL relâche le verrou (verrou de session, [documentation de PostgreSQL 16](https://www.postgresql.org/docs/16/explicit-locking.html#ADVISORY-LOCKS)) : un autre réplica peut reprendre l'analyse.
+- **Une connexion par verrou**, tenue le temps de l'opération : un verrou consultatif est réentrant pour la session qui le tient ([fonctions de verrou, PostgreSQL 16](https://www.postgresql.org/docs/16/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS)) ; deux opérations ne partagent donc jamais une session.
+- **Écarté : un regroupeur de connexions en mode transaction** (PgBouncer, ou le `Pooler` de CloudNativePG en mode `transaction`) entre l'application et la base. Il changerait la session sous l'application et ferait tenir le verrou par une autre.
+- **Vérifié** par deux vrais processus (`multiprocessing`, méthode spawn), chacun avec son moteur, son checkpointer et ses verrous PostgreSQL : un seul contrat créé et scellé, la seconde demande refusée clairement, puis « existe déjà » ; un processus tué pendant l'analyse relâche le verrou (`tests/test_verrous.py`).
+
+**Connexions à PostgreSQL, par réplica.** L'application n'a pas de pool : chaque opération ouvre sa connexion et la ferme.
+
+| Opération | Connexions tenues en même temps |
+| --- | --- |
+| Analyse (une à la fois par réplica, verrou du service) | 1 verrou + 1 checkpointer + jusqu'à 4 recherches (les quatre analystes en parallèle) = 6 ; puis 1 au scellement |
+| Revue humaine, expiration | 1 verrou + 1 checkpointer, puis 1 au scellement |
+| Lecture (liste, dossier, parcours) | 1 par requête |
+| Journal, vérification, rejeu | 1 par requête |
+
+Au plus, par réplica : 6 pour l'analyse en cours, plus une par lecture simultanée. Le nombre de lectures simultanées n'est borné que par le pool de threads de FastAPI (40 par défaut, bibliothèque AnyIO) : jusqu'à environ 46 connexions par réplica. **Décision du 28/09** : un pool de connexions psycopg par processus, de taille réglable, où le verrou compte (section suivante).

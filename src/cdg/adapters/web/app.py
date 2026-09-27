@@ -37,6 +37,7 @@ from cdg.application.service import ContractService
 from cdg.domain import audit
 from cdg.domain.identifiers import ContractIdError, check_contract_id
 from cdg.ports.engine import ThreadError
+from cdg.ports.locks import ContractBusy
 from cdg.settings import SettingsError
 
 WEB_ROOT = Path(__file__).parent
@@ -244,7 +245,7 @@ def create_app(
             service.analyse(
                 text, contract_id=contract_id, parties=parties, analysis_date=on
             )
-        except ThreadError as exc:
+        except (ThreadError, ContractBusy) as exc:
             return analysis_page(request, str(exc), 409)
         except SettingsError as exc:
             message = (
@@ -291,7 +292,7 @@ def create_app(
         }
         try:
             status = service.decide(thread_id, answer)
-        except ThreadError as exc:
+        except (ThreadError, ContractBusy) as exc:
             return page(
                 request,
                 "erreur.html",

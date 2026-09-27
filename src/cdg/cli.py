@@ -21,12 +21,14 @@ from cdg import settings
 from cdg.adapters import fastembed, journaux
 from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.adapters.demo.extraction import ExpectedExtractor
+from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.references import DeclaredCrag
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm import API_KEY_VARS, build_provider
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
+from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.web import app as web_app
 from cdg.adapters.web import security as web_security
 from cdg.adapters.web import server as web_server
@@ -174,6 +176,7 @@ def build_service(config: DecisionConfig) -> ContractService:
             expire=lambda: review_deps(config, EXPIRE_EXPLAINER),
             read=lambda: review_deps(config, HISTORY_EXPLAINER),
         ),
+        PostgresContractLocks(conninfo.app_conninfo),
     )
     return ContractService(
         engine=engine,
@@ -214,6 +217,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
             expire=lambda: deps,
             read=lambda: deps,
         ),
+        LocalContractLocks(),  # démonstration : un seul processus
     )
     return ContractService(
         engine=engine,

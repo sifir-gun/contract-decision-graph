@@ -32,6 +32,7 @@ from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application.deps import Deps
 from cdg.domain.config import DecisionConfig
 from cdg.ports.engine import ThreadError
+from cdg.ports.locks import ContractLocks
 
 GraphOpener = Callable[[Deps], AbstractContextManager[CompiledStateGraph]]
 
@@ -116,10 +117,18 @@ def memory_opener(config: DecisionConfig) -> GraphOpener:
 
 
 class LangGraphEngine:
+    """Chaque modification d'un contrat (création, revue, expiration) se fait sous son
+    verrou (`ports/locks.py`) : un seul processus à la fois, quel que soit le réplica."""
+
     def __init__(
-        self, config: DecisionConfig, open_graph: GraphOpener, deps: EngineDeps
+        self,
+        config: DecisionConfig,
+        open_graph: GraphOpener,
+        deps: EngineDeps,
+        locks: ContractLocks,
     ):
         self._config, self._open, self._deps = config, open_graph, deps
+        self._locks = locks
 
     def run(
         self,
@@ -129,7 +138,9 @@ class LangGraphEngine:
         analysis_date: date,
     ) -> dict[str, Any]:
         deps = self._deps.run()  # le fournisseur d'abord : clé absente, rien d'ouvert
-        with self._open(deps) as graph:
+        # verrou d'abord : un contrat en cours ailleurs est refusé sans rien ouvrir, et la
+        # vérification d'existence puis la création se font sous le verrou
+        with self._locks.hold(contract_id), self._open(deps) as graph:
             return orchestrator.run_contract(
                 graph,
                 contract_id,
@@ -140,7 +151,7 @@ class LangGraphEngine:
             )
 
     def resume(self, thread_id: str, answer: dict[str, Any]) -> dict[str, Any]:
-        with self._open(self._deps.resume()) as graph:
+        with self._locks.hold(thread_id), self._open(self._deps.resume()) as graph:
             return orchestrator.resume_thread(
                 graph, thread_id, answer, config=self._config
             )
@@ -164,7 +175,9 @@ class LangGraphEngine:
 
     def expire(self, older_than: timedelta, now: datetime) -> list[dict[str, Any]]:
         with self._open(self._deps.expire()) as graph:
-            return orchestrator.expire_threads(graph, older_than, now)
+            return orchestrator.expire_threads(
+                graph, older_than, now, hold=self._locks.hold
+            )
 
 
 def _known(graph: CompiledStateGraph, thread_id: str) -> dict[str, Any]:

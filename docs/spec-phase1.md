@@ -836,6 +836,7 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
 - **28 septembre 2026, Kubernetes, PR A** (ADR 005) :
   - échéances du corpus contrôlées par le job `audit` de la CI (60 jours) ;
   - journaux en texte ou en JSON sur la sortie standard (`--journaux`, `CDG_JOURNAUX`) : une exception n'y laisse que son type et sa pile, le journal d'accès la méthode, le chemin et le code ;
+  - verrou de contrat (port `ContractLocks`) : verrou consultatif de session de PostgreSQL, pris sans attendre, pour la création, la revue et l'expiration ; `ContractBusy` sinon (409 dans l'interface) ; l'expiration laisse un contrat verrouillé ailleurs ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

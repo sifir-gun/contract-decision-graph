@@ -13,6 +13,7 @@ from doubles import (
 )
 
 from cdg import cli
+from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.langgraph import orchestrator
 from cdg.domain.config import load_config
 
@@ -44,7 +45,11 @@ def graph(pg):
 def test_11_thread_expire_no_go_systeme_motif_timeout(graph, thread_id):
     since = suspend(graph, thread_id)
     [status] = orchestrator.expire_threads(
-        graph, DAY, now=since + DAY + timedelta(hours=1), thread_ids={thread_id}
+        graph,
+        DAY,
+        now=since + DAY + timedelta(hours=1),
+        thread_ids={thread_id},
+        hold=LocalContractLocks().hold,
     )
     assert (status["thread_id"], status["statut"], status["final_decision"]) == (
         thread_id,
@@ -75,6 +80,7 @@ def test_thread_recent_non_expire(graph, thread_id):
             DAY,
             now=since + DAY,  # pile au délai
             thread_ids={thread_id},
+            hold=LocalContractLocks().hold,
         )
         == []
     )
@@ -92,7 +98,10 @@ def test_thread_termine_jamais_repris(pg, thread_id):
         )
         far = datetime.now(UTC) + timedelta(days=365)
         assert (
-            orchestrator.expire_threads(g, DAY, now=far, thread_ids={thread_id}) == []
+            orchestrator.expire_threads(
+                g, DAY, now=far, thread_ids={thread_id}, hold=LocalContractLocks().hold
+            )
+            == []
         )
 
 
@@ -106,7 +115,11 @@ def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
     )
     assert refused["statut"] == "suspendu"
     [status] = orchestrator.expire_threads(
-        graph, DAY, now=since + 2 * DAY, thread_ids={thread_id}
+        graph,
+        DAY,
+        now=since + 2 * DAY,
+        thread_ids={thread_id},
+        hold=LocalContractLocks().hold,
     )
     assert status["final_decision"] == "NO_GO"
 

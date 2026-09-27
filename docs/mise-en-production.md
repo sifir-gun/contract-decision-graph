@@ -23,7 +23,7 @@ Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.
 Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans un processus (ADR 004, « Accès concurrents »).
 
 - [x] **Décision du 27/09** : plusieurs réplicas. La création d'un contrat sera rendue sûre en base, dans la phase Kubernetes ; le verrou du service reste, pour un processus.
-- [ ] **Création d'un contrat sûre en base**, dans la phase Kubernetes : rendre atomique en base la création d'un thread. Aujourd'hui, `run_contract` vérifie qu'un thread n'existe pas, puis le crée, sans verrou entre deux processus. *Fait quand* un test à deux processus lance deux analyses du même contrat et n'en obtient qu'une, la seconde refusée clairement, comme `tests/test_concurrence.py` le fait pour deux threads.
+- [x] **Création d'un contrat sûre en base** (28/09, PR A) : verrou consultatif PostgreSQL par contrat, pour la création, la revue et l'expiration ; vérifié par deux processus réels (`tests/test_verrous.py`). Avant : rendre atomique en base la création d'un thread. Aujourd'hui, `run_contract` vérifie qu'un thread n'existe pas, puis le crée, sans verrou entre deux processus. *Fait quand* un test à deux processus lance deux analyses du même contrat et n'en obtient qu'une, la seconde refusée clairement, comme `tests/test_concurrence.py` le fait pour deux threads.
 - Déjà en place, en base : le verrou consultatif et les index uniques du journal d'audit, qui empêchent un double scellement et une fourche de la chaîne.
 
 ### PostgreSQL de production
