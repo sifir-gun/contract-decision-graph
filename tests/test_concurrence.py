@@ -254,6 +254,38 @@ def test_checkpointer_en_memoire_supporte_lectures_et_ecritures_simultanees():
     assert len(threads_ids) == 300
 
 
+ACCESSES = [
+    "get_tuple",
+    "list",
+    "put",
+    "put_writes",
+    "delete_thread",
+    "get_delta_channel_history",
+]
+
+
+@pytest.mark.parametrize("access", ACCESSES)
+def test_chaque_acces_au_checkpointer_en_memoire_attend_son_verrou(access):
+    with memory_opener(CONFIG)(make_deps()) as graph:
+        saver = graph.checkpointer
+    config = {"configurable": {"thread_id": "t", "checkpoint_ns": ""}}
+    stored = saver.put(config, empty_checkpoint(), {}, {})
+    calls = {
+        "get_tuple": lambda: saver.get_tuple(stored),
+        "list": lambda: list(saver.list(None)),
+        "put": lambda: saver.put(config, empty_checkpoint(), {}, {}),
+        "put_writes": lambda: saver.put_writes(stored, [("canal", 1)], "tache"),
+        "delete_thread": lambda: saver.delete_thread("t"),
+        "get_delta_channel_history": lambda: saver.get_delta_channel_history(
+            config=stored, channels=[]
+        ),
+    }
+    with saver._storage_lock:  # tenu par le test : l'accès doit l'attendre
+        waiting = background(calls[access])
+        assert running(waiting, PAUSE / 2), f"{access} sans verrou"
+    waiting.result(timeout=WAIT)
+
+
 def test_journal_en_memoire_supporte_les_ajouts_simultanes():
     store = MemoryAuditStore()
 
