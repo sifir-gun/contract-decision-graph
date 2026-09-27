@@ -701,6 +701,8 @@ Hors phase 1 :
 - **Phase 3** : observabilité (Langfuse auto-hébergé, logs structurés), serveur MCP, évaluation en CI, et les évolutions notées pendant la phase 1 : détection des clauses qui ne correspondent à aucun type connu, signalées à l'humain comme « clause non couverte par les règles », ancrage externe de la tête de la chaîne d'audit par un horodatage certifié, base de test séparée de la base de développement, pour que les tests ne partagent jamais la base qui contient le vrai journal, cohérence entre valeur et citation qui sache quel nombre de la citation est la quantité de la clause : aujourd'hui la valeur est seulement cherchée parmi les nombres de la citation, et dans « 1 % par semaine, dans la limite de 10 % », un plafond de 1 % passerait (décision du 26/09), normalisation des unités de durée : semaines et jours pour une durée ou un préavis comptés en mois, durées composées (« trois ans et six mois ») (décision du 26/09), signal « clause ambiguë » rendu par l'extraction, qui mènerait à la revue humaine au lieu d'une lecture au pire (décision du 26/09), variabilité du juge du CRAG : à la série 6, il n'a retenu aucune référence pour la clause d'engagement du contrat 03 au 5e essai, alors qu'il en retenait aux 4 autres (`INSUFFISANT`, puis `ESCALADE`, dans le sens prudent) ; évaluer un modèle plus fort pour le juge (décision du 26/09), test d'absence d'appel réseau des embeddings en CI : aujourd'hui il ne tourne qu'en local, sur les vrais poids, et ne protège donc pas les mises à jour de Dependabot ; piste : un modèle ONNX minuscule en fixture (la télémétrie se déclenche à l'initialisation d'onnxruntime, quel que soit le modèle), exécuté en CI dans un environnement Linux sans réseau (espace de noms réseau isolé), à chaque pull request et sans les 35 secondes du test local (décision du 26/09).
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 
+Liste de contrôle de la mise en production (déploiement et durée, phases 2 et 3) : [mise-en-production.md](mise-en-production.md).
+
 Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est venue le 27/09, avant la mise en public (écran de revue humaine de la phase 2, avancé). Pas de repli web dans le CRAG.
 
 ## Historique des révisions
@@ -827,6 +829,7 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - liste des contrats en une seule ouverture du graphe, quel que soit leur nombre : opération `overview` du port `ContractEngine`, à la place de `thread_ids` ; sur la base locale, 1 ouverture au lieu de 7 et 31 ms au lieu de 107 ms pour 3 contrats ;
 - **27 septembre 2026, préparation de la production** :
   - adresse d'un contrat formée à un seul endroit (`presentation.contract_path`), liens et redirections : préfixe fixe, identifiant encodé comme un seul segment (alertes CodeQL `py/url-redirection`, ADR 004) ;
+  - liste de contrôle de la mise en production, déploiement (phase 2) et durée (phase 3) : `docs/mise-en-production.md`, à valider ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

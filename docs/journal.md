@@ -2155,3 +2155,8 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
 - Vérifié dans le navigateur, mode démonstration : analyse, redirection vers le dossier, revue humaine, redirection, liste.
 - **Limite, à décider** : la CLI accepte tout identifiant de contrat (`--contract-id`, ou le nom du fichier) ; l'interface impose lettres, chiffres, `.`, `_` et `-`. Un contrat de la CLI dont l'identifiant contient « / », ou vaut `.` ou `..`, reste inaccessible dans l'interface : le routage de Starlette lit un seul segment, décodé. Aligner la CLI sur la règle de l'interface changerait son comportement.
 - Les alertes se ferment d'elles-mêmes à la prochaine analyse de `main` qui ne les trouve plus.
+
+### Liste de contrôle de la mise en production
+
+- Périmètre retenu par le propriétaire, pour le moment : le déploiement (phase 2) et la durée (phase 3). Hors liste : authentification, données personnelles réelles, validation métier, coffre de secrets ; l'ADR 004 interdit toujours toute exposition réseau avant l'authentification.
+- `docs/mise-en-production.md` : chaque point avec sa source (feuille de route, ADR 004, spec, journal, README) et, quand il le faut, à quoi on reconnaît qu'il est fait. Une décision en tête du déploiement : un seul réplica, ou une création de thread atomique en base. Proposition à valider ; rien n'est commencé.
