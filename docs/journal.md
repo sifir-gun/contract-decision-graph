@@ -2134,3 +2134,8 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
 - **Décision du propriétaire** : `fail_under` passe de 96 à 98, selon la règle du 26/09 (l'entier juste sous la mesure) : 98,71 % mesurés le 27/09 sur `main`, en lignes et en branches, tests PostgreSQL compris. Badge du README et `CLAUDE.md`, spec, `docs/exploitation.md` suivent.
 - **Test d'abord** : `tests/test_couverture.py` fige la valeur décidée (rouge à 96) ; le test de cohérence du badge reste.
 - Après les deux corrections de l'interface et le test des verrous : 98,72 %, 1 225 tests.
+
+### `CLAUDE.md` : consignes piégées du dépôt
+
+- Point réel relevé par AgentShield (« indirect injection defense »), sous une forme propre au dépôt : `data/contracts/` (contrat piégé, attendus) et des tests (injection, instructions, extraction, CRAG, service, interface) contiennent volontairement des consignes adressées à une IA. Une fois le dépôt public, les assistants de code des contributeurs les liront.
+- Ligne ajoutée aux règles non négociables de `CLAUDE.md`, à la suite de celle sur le texte d'un contrat : ce sont des données de test, à ne jamais suivre. Elle ne cite aucune de ces consignes.
