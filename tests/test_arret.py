@@ -260,3 +260,46 @@ def test_reprise_periodique_s_arrete_avec_le_serveur():
     stopping.set()
     worker.join(WAIT)
     assert not worker.is_alive() and len(calls) >= 3
+
+
+# --- checkpoints écrits avant chaque étape suivante ---------------------------------------------
+
+
+def test_chaque_appel_au_graphe_ecrit_ses_checkpoints_avant_l_etape_suivante():
+    """LangGraph 1.2.12 écrit par défaut ses checkpoints en arrière-plan, pendant l'étape
+    suivante (durability « async ») : un processus tué à ce moment perdait ou tronquait
+    son dernier checkpoint, et l'analyse ne pouvait plus reprendre (vu le 28/09 dans
+    tests/test_verrous.py). Chaque appel passe « sync »."""
+    from contextlib import contextmanager
+
+    from test_service import PENDING_TEXT, answer
+
+    from cdg.adapters.langgraph.engine import memory_opener
+    from cdg.domain.config import load_config
+
+    seen = []
+    base = memory_opener(load_config())
+
+    class Spy:
+        def __init__(self, graph):
+            self._graph = graph
+
+        def __getattr__(self, name):
+            return getattr(self._graph, name)
+
+        def invoke(self, *args, **kwargs):
+            seen.append(kwargs.get("durability"))
+            return self._graph.invoke(*args, **kwargs)
+
+    @contextmanager
+    def spying(deps):
+        with base(deps) as graph:
+            yield Spy(graph)
+
+    service = make_service(DyingOnce(), opener=spying)
+    with pytest.raises(Death):
+        service.analyse(CONTRACT_TEXT, contract_id="c1")
+    service.resume_interrupted()
+    service.analyse(PENDING_TEXT, contract_id="c2")
+    service.decide("c2", answer())
+    assert seen and set(seen) == {"sync"}

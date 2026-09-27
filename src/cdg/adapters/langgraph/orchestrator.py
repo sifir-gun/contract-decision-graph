@@ -17,7 +17,14 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import get_runtime
-from langgraph.types import Command, RetryPolicy, Send, StateSnapshot, interrupt
+from langgraph.types import (
+    Command,
+    Durability,
+    RetryPolicy,
+    Send,
+    StateSnapshot,
+    interrupt,
+)
 
 from cdg.adapters.langgraph import checkpointer
 from cdg.application import crag
@@ -36,11 +43,17 @@ from cdg.domain import audit, expiry, masking, policy
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.engine import ThreadError
+from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
 from cdg.ports.locks import ContractBusy
+from cdg.ports.retriever import Retriever
 
 log = logging.getLogger(__name__)
-from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
-from cdg.ports.retriever import Retriever
+
+# Checkpoints écrits avant l'étape suivante (LangGraph 1.2.12, `langgraph/types.py`,
+# `Durability`) : par défaut (« async »), l'écriture court pendant l'étape suivante, et
+# un processus tué à ce moment perd ou tronque son dernier checkpoint ; l'analyse ne peut
+# plus reprendre (ADR 005, arrêt propre et reprise).
+DURABILITY: Durability = "sync"
 
 
 def read_route(state: ContractState) -> str:
@@ -458,6 +471,7 @@ def run_contract(
             **audit.analysis_context(config),
         },
         _thread(contract_id),
+        durability=DURABILITY,
     )
     return {**thread_status(graph, contract_id), "masquage": masked.counts}
 
@@ -496,7 +510,7 @@ def _awaiting(graph: CompiledStateGraph, thread_id: str) -> StateSnapshot:
 
 def _resume(graph: CompiledStateGraph, thread_id: str, answer: dict) -> dict:
     _awaiting(graph, thread_id)
-    graph.invoke(Command(resume=answer), _thread(thread_id))
+    graph.invoke(Command(resume=answer), _thread(thread_id), durability=DURABILITY)
     return thread_status(graph, thread_id)
 
 
@@ -618,7 +632,7 @@ def resume_interrupted(
                 if not _in_progress(graph, thread_id):
                     continue  # fini entre-temps
                 log.info("reprise de l'analyse interrompue %s", thread_id)
-                graph.invoke(None, _thread(thread_id))
+                graph.invoke(None, _thread(thread_id), durability=DURABILITY)
                 resumed.append(thread_status(graph, thread_id))
         except ContractBusy:
             continue  # en cours dans un autre processus
