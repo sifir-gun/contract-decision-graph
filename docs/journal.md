@@ -2203,3 +2203,10 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 ### Feuille de route : Kubernetes d'abord
 
 - Décision du propriétaire : la phase 2 commence par le déploiement Kubernetes (avec l'authentification) ; le rapport HTML par contrat vient ensuite, puis l'API. README, spec et ADR 004 suivent ; l'ADR 003 garde sa rédaction du jour.
+
+### Échéances du corpus surveillées par la CI
+
+- **Décision du propriétaire** : l'audit hebdomadaire de la CI vérifie aussi qu'aucune source du corpus n'expire dans les 60 jours, et échoue sinon, avec la source et la date.
+- **Tests d'abord** (`tests/test_echeances_corpus.py`) : bornes de l'horizon, déjà expirées comprises, tri ; fins de validité des 29 sources (22 articles, 7 fiches ; seules L441-10 et sa fiche en ont une) ; script en réussite le 27/09 et le 01/11, en échec le 02/11/2026 avec les deux sources et le 01/01/2027 ; horizon invalide refusé ; câblage du job `audit`.
+- **Réalisation** : `domain/corpus.expiring` (règle pure), `ingestion.source_validities` (une fiche expire avec les articles qu'elle cite, logique mise en commun avec l'ingestion), `scripts/echeances_corpus.py` (JSON, code 1 et la liste en cas d'échéance). Job `audit` : installation du projet sans le groupe dev, puis le contrôle ; il tourne à chaque pull request et, seul, chaque lundi. Son nom reste « audit (pip-audit) », vérification exigée par la règle de protection de `main`. `scripts/check.sh` lance la même commande.
+- **Conséquence** : à partir du 02/11/2026, le job `audit` échoue à chaque pull request tant que L441-10 et sa fiche ne sont pas mises à jour. C'est le but.

@@ -81,6 +81,11 @@ jobs:
         run: >-
           uv run --no-sync pip-audit --require-hashes --disable-pip --strict
           --requirement "$RUNNER_TEMP/requirements-audit.txt"
+      - name: Projet, sans le groupe dev, pour le contrôle des échéances du corpus
+        run: uv sync --locked --no-dev
+      - name: Échéances du corpus, échec si une source expire dans les 60 jours
+        # aussi chaque lundi : le déclenchement planifié ne lance que ce job
+        run: uv run --no-sync python scripts/echeances_corpus.py --jours 60
 
   tests:
     name: tests (PostgreSQL + pgvector)

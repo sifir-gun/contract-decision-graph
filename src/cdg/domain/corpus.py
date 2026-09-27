@@ -16,8 +16,9 @@ de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (
 
 import hashlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from pydantic import BaseModel, model_validator
@@ -68,6 +69,18 @@ def french_date(text: str) -> date:
 def expired(valid_until: date | None, on: date) -> bool:
     """Version expirée à la date `on` : sa fin de validité est atteinte."""
     return valid_until is not None and on >= valid_until
+
+
+def expiring(
+    validities: Mapping[str, date | None], on: date, days: int
+) -> list[tuple[str, date]]:
+    """Sources dont la version cesse d'être valide au plus tard `days` jours après `on`,
+    déjà expirées comprises ; de la plus proche échéance à la plus lointaine."""
+    horizon = on + timedelta(days=days)
+    return sorted(
+        ((source, end) for source, end in validities.items() if end and end <= horizon),
+        key=lambda item: (item[1], item[0]),
+    )
 
 
 @dataclass(frozen=True)

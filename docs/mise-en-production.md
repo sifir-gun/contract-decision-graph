@@ -50,7 +50,7 @@ Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans u
 
 - [ ] **Processus de mise à jour** des textes publics et des fiches, avec leurs dates de validité : récupération, nettoyage, fiches revues, `ingest`, série de contrôle.
 - [ ] **Première échéance** : la version de l'article L441-10 du corpus et la fiche qui la reprend cessent d'être valides le 01/01/2027 (journal, mode démonstration).
-- [ ] **Alerte avant l'échéance** d'une version du corpus.
+- [x] **Alerte avant l'échéance** d'une version du corpus (27/09) : le job `audit` de la CI, à chaque pull request et chaque lundi, échoue si une source cesse d'être valide dans les 60 jours, avec la source et la date (`scripts/echeances_corpus.py`).
 
 ### Évaluation en CI
 

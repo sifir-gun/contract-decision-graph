@@ -27,6 +27,9 @@ echo "==> audit (pip-audit)"
 uv export --locked --all-groups --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/requirements-audit.txt"
 uv run --no-sync pip-audit --require-hashes --disable-pip --strict --requirement "$RUNNER_TEMP/requirements-audit.txt"
 
+echo "==> échéances du corpus (60 jours)"
+uv run --no-sync python scripts/echeances_corpus.py --jours 60
+
 echo "==> tests (PostgreSQL + pgvector)"
 uv run --no-sync python -m cdg.cli setup-db
 uv run --no-sync pytest --cov --cov-report=term
