@@ -13,6 +13,11 @@ Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.
 - [ ] **API FastAPI** : un adaptateur entrant de plus, sur le service des contrats, comme la CLI et l'interface web (ADR 004). *Fait quand* chaque action de l'API appelle la même méthode du service que sa commande, vérifié par `tests/test_parite.py`.
 - [ ] **Déploiement sur Kubernetes** (k3s, Helm), selon la feuille de route. *Fait quand* l'application se déploie depuis le chart, sans étape manuelle, et que les migrations et l'indexation du corpus tournent comme tâches de déploiement (voir plus bas).
 
+### Santé et arrêt des pods
+
+- [ ] **Sondes de santé** : vie (le processus répond), disponibilité (la base répond, le modèle d'embedding est chargé), et une sonde de démarrage qui laisse le temps de charger le modèle. Aujourd'hui l'interface n'a aucun point de santé, et répond 405 à `HEAD /` (journal du serveur d'aperçu, 27/09). *Fait quand* chaque sonde a son point, sans logique métier, testé en GET et en HEAD.
+- [ ] **Arrêt propre** : à l'ordre d'arrêt, le réplica cesse d'accepter de nouvelles analyses et laisse finir celles en cours dans un délai configuré ; une analyse interrompue reprend depuis son dernier checkpoint, sans rien perdre ni sceller deux fois. Délai de grâce du pod aligné sur ce délai, et courte pause avant l'arrêt pour que le pod soit retiré du service avant de couper. *Fait quand* un test interrompt une analyse, puis la voit reprise et scellée une seule fois.
+
 ### Plusieurs copies de l'application
 
 Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans un processus (ADR 004, « Accès concurrents »).

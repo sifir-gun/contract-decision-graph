@@ -2188,3 +2188,14 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - Le navigateur demandait `/favicon.ico` et recevait un 404. L'icône est désormais un SVG écrit à la main (`static/favicon.svg`, 32 × 32, le bleu des liens de l'interface), déclaré dans l'en-tête des pages et servi aussi à `/favicon.ico`, avec les mêmes en-têtes de sécurité.
 - **Test d'abord** : icône servie aux deux adresses, en `image/svg+xml`, identique au fichier du dépôt, sans script ni lien. Le test des ressources externes lit aussi les SVG ; seul le nom de l'espace de noms SVG, exigé par un fichier autonome et jamais chargé, y est admis.
 - Vu dans le navigateur, mode démonstration : icône affichée, `/favicon.ico` et `/static/favicon.svg` en 200, console sans erreur.
+
+## 2026-09-27 · Kubernetes, PR A : application prête (branche `kubernetes`)
+
+### Plan validé
+
+- Quatre PR : A, application prête (création sûre en base, arrêt propre, santé, configuration, journaux JSON, image) ; B, chaîne d'approvisionnement (scan, inventaire, signature, provenance, image du modèle) ; C, chart et cluster, sans Ingress ; D, authentification (OIDC, oauth2-proxy en conteneur annexe, Dex en local) et Ingress. Arrêt entre deux PR pour la fusion.
+- Choix validés : CloudNativePG, SeaweedFS (le dépôt de MinIO est archivé), Syft et Grype (avis de sécurité sur Trivy), Smokescreen pour la sortie (maintenance à vérifier avant usage), volume `image` pour le modèle avec repli par copie, pas d'autoscaling, workflow à part pour l'image du modèle, CI plus longue.
+
+### Liste de contrôle : sondes de santé et arrêt propre
+
+- Décision du propriétaire : les deux points entrent dans la liste de contrôle, au déploiement. L'interface répondait 405 à `HEAD /`, et n'a aucun point de santé.
