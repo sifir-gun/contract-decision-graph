@@ -44,6 +44,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `uv run pytest` : lance les tests (ceux marqués `pg` exigent PostgreSQL ; `-m "not pg"` pour les exclure volontairement)
 - `uv run pytest --cov` : tests avec couverture (lignes et branches) ; échoue sous le seuil `fail_under` de `pyproject.toml`
 - `uv run pytest --llm -m llm` : tests avec le vrai modèle (payants, 5 réussites sur 5, résultat consigné au journal) ; critères 3, 9 et 10, et mesure de l'explication sur le jeu de démonstration (CRAG réel : base et corpus indexé requis) ; série réelle sur tout le jeu (`tests/test_llm_jeu.py`, J5 : invariant à chaque essai, concordance, stabilité, coût et latences mesurés sans seuil ; essai préalable non compté par `-k prealable`, série par `-k "not prealable"`)
+- `uv run python scripts/schema_graphe.py` : réécrit le schéma Mermaid du README, dessiné par LangGraph depuis le graphe réel ; `tests/test_schema_readme.py` échoue s'il diverge du code
 - `uv run ruff format` : formate le code (line-length 88, valeur par défaut de Ruff et de Black) ; un reformatage massif va dans son propre commit, ajouté à `.git-blame-ignore-revs`
 - `uv run ruff check` : lint (jeu de règles par défaut de ruff 0.16) ; doit passer avant chaque commit
 - `uv run mypy` : vérification des types (strict sur `domain/`, `ports/`, `application/`) ; doit passer avant chaque commit

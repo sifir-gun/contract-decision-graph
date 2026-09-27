@@ -1995,3 +1995,57 @@ Tableau et texte du gain de latence mis à jour avec la série 8 : 29 essais à 
 - **Spec** : ligne du J5 dans le tableau des jours, arborescence (`LICENSE`, `docs/exploitation.md`), historique.
 - Le schéma Mermaid est vérifié dans le rendu de GitHub après le push.
 - **Schéma vérifié** : le dépôt privé n'est pas lisible sans session GitHub dans le navigateur intégré ; le schéma a été rendu en local par Mermaid 11 (page servie depuis un dossier ignoré, puis supprimée) : 13 nœuds, le sous-graphe des analystes et toutes les flèches. En largeur, il était illisible à la largeur d'une page : passé de haut en bas.
+
+## 2026-09-27 · Visuels (branche `visuels`)
+
+Dernière PR avant la mise en public. Code gelé : aucun changement de comportement.
+
+### Visuels tâche 1 : schéma du README généré depuis le code
+
+- **`scripts/schema_graphe.py`** : câble le graphe par `build_graph`, avec la configuration du projet et des dépendances inertes (le dessin ne dépend que du câblage ; une dépendance appelée lèverait une erreur), puis `get_graph().draw_mermaid()` de LangGraph ; il réécrit le bloc du README entre deux balises. Erreur explicite si les balises manquent ou se répètent.
+- **`tests/test_schema_readme.py`** (écrit d'abord, rouge avant le script) : le bloc du README est identique au dessin du graphe réel ; schéma de haut en bas (`graph TD`) ; chaque nœud présent ; écriture limitée au bloc ; balises absentes ou répétées.
+- **Rendu vérifié** en local par Mermaid 11, thèmes clair et sombre (page jetable dans le dossier temporaire de l'assistant) : 11 nœuds, de haut en bas, lisible. Styles de LangGraph gardés, avec un texte foncé en plus : sans lui, `__start__` était illisible en thème sombre.
+- **Ce que le schéma généré montre moins bien** que l'ancien, écrit à la main : `analyst` est un seul nœud, lancé quatre fois par `Send` ; le texte sous le schéma le dit, avec la légende (pointillés : arête conditionnelle). Il montre en plus ce que l'ancien omettait : `reject` et les gardes d'échec vers `human_review`.
+
+### Visuels : LangGraph Studio, vérifications avant installation (en attente de décision)
+
+- **Documentation officielle** (docs.langchain.com, 27/09) : `langgraph-cli[inmem]`, `langgraph.json` (`dependencies`, `graphs` vers une variable ou une fabrique, `env`), `langgraph dev` sur 127.0.0.1:2024 ; l'interface est à `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`. « With tracing disabled, no data leaves your local server » (`LANGSMITH_TRACING=false`). Safari bloque `localhost` ; `--tunnel` passe par Cloudflare : exclu.
+- **L'interface est hébergée et envoie des données depuis le navigateur**, quel que soit `LANGSMITH_TRACING`, qui ne règle que le serveur. Ouverte dans le navigateur intégré, sans compte ni serveur lancé, elle a contacté Datadog (enregistrement de session à 100 %, `defaultPrivacyLevel: mask-user-input`, qui selon la documentation de Datadog masque les champs de saisie et enregistre tout autre texte tel quel), Segment, Google Analytics et DoubleClick. Tout texte affiché par Studio (contrat masqué, citations, verdicts) partirait donc chez Datadog. Aucun compte n'a été demandé pour ouvrir l'interface.
+- **Dépendances**, testées dans une copie jetable du projet, sans installation : `langgraph-cli[inmem]` 0.4.32 tire `langgraph-api` 0.15.1 et `langgraph-runtime-inmem` 0.35.1 (licence Elastic 2.0, ni libre ni open source), et une quarantaine de paquets. Dans le groupe `dev`, il rétrograde trois dépendances d'exécution du produit : protobuf 7.36.2 → 6.33.6 (onnxruntime), opentelemetry-api 1.44.0 → 1.42.1 et opentelemetry-semantic-conventions 0.65b0 → 0.63b1 (mistralai). Toutes les versions de `langgraph-api` compatibles exigent `protobuf<7`. Un groupe `studio` déclaré incompatible avec `dev` (`[tool.uv] conflicts`) garde l'environnement du produit inchangé et verrouille celui de Studio (langgraph 1.2.12 compris) ; `uv export --all-groups` échoue alors, l'audit doit exporter deux listes. pip-audit : aucune faille connue dans l'environnement de Studio.
+- **Entrée du graphe** : la CLI masque le contrat et pose le contexte d'analyse (empreinte, modèles, date de type `date`) avant d'appeler le graphe ; Studio l'appelle avec ce qu'on saisit. Un point d'entrée propre à Studio doit préparer l'entrée comme `run_contract`.
+
+### Visuels tâche 3 (partie terminal) : enregistrement d'une analyse réelle
+
+- **Outils** : asciinema 3.2.1 et agg 1.9.0 (Homebrew, installés par le propriétaire), enregistrement en local, sans envoi.
+- **`scripts/demo_terminal.sh`** affiche puis lance chaque commande : extrait du contrat 06 (articles 5 à 7), `run` filtré par `scripts/demo_terminal.jq` (issue, masquage, verdicts, explication, synthèse, empreintes), puis `verify`. Filtre testé d'abord sur des sorties de doublures.
+- **Analyse réelle** (27/09, un seul passage payant, environ 0,002 $) : `NO_GO` automatique, blocage juridique (responsabilité de l'acheteur illimitée), délai de paiement de 90 jours pénalisé au financier ; explication du LLM acceptée ; durée réelle 10,7 s. Premier enregistrement du vrai journal d'audit (les séries écrivent dans des journaux jetables) : `verify` rend 1 enregistrement, tête égale au `chain_hash` de l'analyse.
+- **Rendu** : agg, thème `github-dark`, pauses de plus de 2 s raccourcies (l'analyse : 11,7 s d'attente, affichée 2 s ; la durée réelle est imprimée). Enregistré en 100 × 34, rendu en 100 × 44 (en-tête de l'enregistrement modifié : la sortie est un texte linéaire, sans positionnement du curseur ; seul le défilement change) pour que la dernière image montre la commande, le verdict et `verify`. Le script documente désormais 100 × 44. Premier essai sans `TERM` (mode sans terminal) : `clear` a échoué avant toute analyse.
+
+### Visuels tâche 4 : haut du README
+
+- Les 20 premières lignes : ce que fait le système (les quatre décisions), le parti pris (le code décide ; le LLM extrait et explique ; toute sortie d'un LLM vérifiée par du code ; journal chaîné), trois résultats de la série 8 (aucune décision automatique plus favorable sur 65 ; 64 conformes, l'autre plus prudente, 22 extractions refusées ; environ 0,0016 $ et 6 s par contrat), l'enregistrement du terminal avec sa légende. Le résumé anglais suit ; le reste du README est inchangé.
+
+### Visuels : test par canari de LangGraph Studio, puis Studio écarté (décision du 27/09)
+
+- **Documentation relue** sur le texte source des pages (27/09) : « Data storage and privacy » dit qu'en usage anonyme Studio ne collecte pas de statistiques d'usage, et que les données envoyées au serveur local ne vont pas à LangSmith. Détail et références : `docs/adr-003-studio-ecarte.md`.
+- **Protocole** (décision du 27/09) : environnement jetable hors du dépôt (langgraph 1.2.12, langgraph-api 0.15.1, langgraph-cli 0.4.32), graphe minimal dont la sortie porte une chaîne unique, `langgraph dev` avec `LANGSMITH_TRACING=false` et `LANGGRAPH_CLI_NO_ANALYTICS=1`, Studio ouvert anonymement dans le navigateur intégré, lecture du contenu de chaque envoi.
+- **Interface** : le navigateur intégré a bloqué lui-même chaque requête de Studio vers `127.0.0.1` (`net::ERR_BLOCKED_BY_CLIENT`), sans contournement : Studio ne s'est jamais connecté au serveur, et **le canari n'a pas été mesuré**. Au chargement (06:19:38 UTC), la page a contacté Datadog (25 envois `rum`, 2 `replay`, 1 `logs`), Segment, Google Analytics et DoubleClick. Réglages de Datadog lus dans la page : enregistrement de session à 100 %, `mask-user-input`. Contenu lu à partir de 06:20:55 (fonctions d'envoi de la page enveloppées) : le segment `replay` de 06:21:22, décompressé, contient mot pour mot les textes d'un dialogue ouvert après 06:20:55, la saisie étant masquée (`***`) ; les envois `rum` portent l'adresse des requêtes vers le serveur local et un identifiant anonyme. Aucun envoi à Segment ni à Google pendant la lecture : leur contenu n'est pas mesuré.
+- **Serveur**, dans le bac à sable noyau du test des embeddings (témoins : 192.0.2.1 et example.com tués, 127.0.0.1 et ::1 permis) : avec les deux variables, tué au démarrage ; en refus sans tuer, 8 tentatives vers un port 443, adresse masquée par le journal du noyau. Le code installé lance une vérification de version vers pypi.org (8 adresses ce jour-là), coupée seulement par `LANGGRAPH_NO_VERSION_CHECK`, absente de la documentation publique. Avec cette troisième variable : aucune tentative de 06:19:00 à 06:22:40, graphe exécuté deux fois par l'API.
+- Une mesure brouillée par un lancement en trop (serveur arrêté après une seconde, dont les tentatives tombaient dans la fenêtre suivante) a été refaite proprement, en suivant le processus du serveur.
+- **Décision du propriétaire** : ce qui est observé suffit ; Studio est écarté, y compris comme outil de développement. **ADR 003** (`docs/adr-003-studio-ecarte.md`) : la documentation, les observations avec versions et heures, ce qui n'a pas été mesuré, les autres coûts (dépendances du produit rétrogradées, licence Elastic 2.0 du serveur, entrée non masquée), la décision et l'alternative prévue (rapport HTML par contrat, puis écran de revue humaine en phase 3). Une phrase du README, au paragraphe sur la souveraineté, y renvoie. Citations de la documentation limitées à un court extrait ; le reste est reformulé, section par section.
+- **Nettoyage vérifié** : dossier jetable et environnement supprimés ; `pyproject.toml` et `uv.lock` identiques à `main` ; aucun `langgraph.json` ni `.langgraph_api` dans le dépôt ; ni `langgraph_api` ni `langgraph_cli` dans l'environnement du projet. Les paquets téléchargés restent dans le cache global de uv, hors du dépôt.
+
+### Référence pour `verify --expect-head`
+
+Après l'analyse enregistrée pour le GIF du README (thread `demo-06-no-go-conseil`, scellée le 27/09/2026 à 06:02:01 UTC), le vrai journal d'audit compte 1 enregistrement ; tête de chaîne :
+
+`905e2359e1cf3a1905d877628364f345ccddf1715e3cd1367b755dc9f4b83740`
+
+`uv run python -m cdg.cli verify --expect-head 905e2359e1cf3a1905d877628364f345ccddf1715e3cd1367b755dc9f4b83740` passe le 27/09. À remplacer par la nouvelle tête après chaque analyse scellée dans le vrai journal.
+
+### Visuels : ADR 003 dans le README, feuille de route renumérotée (décision du 27/09)
+
+- **README** : l'ADR 003 rejoint la liste des ADR de la section « Architecture ».
+- **Phases renumérotées** : phase 2, d'abord un rapport HTML par contrat (premier chantier après la phase 1), puis l'API FastAPI avec un écran de revue humaine, et le déploiement Kubernetes (k3s, Helm) ; phase 3, l'observabilité (Langfuse auto-hébergé, logs structurés), le serveur MCP, l'évaluation en CI et les évolutions notées pendant la phase 1 (clauses non couvertes, signal « clause ambiguë », lecture de la quantité et unités de durée, juge du CRAG plus fort, ancrage externe de la tête du journal, base de test séparée, test réseau en CI) ; phase 4, optionnelle, inchangée.
+- **Renvois mis à jour** : README (feuille de route), spec (hors périmètre, stockage, jeu de démonstration, trois puces de l'historique, et une entrée du 27/09 qui explique la renumérotation), `docs/exploitation.md` (ancrage externe, test réseau en CI), ADR 003 (alternative prévue), un commentaire de `tests/test_verify_extraction.py`. CLAUDE.md et les ADR 001 et 002 ne citaient aucune phase au-delà de la phase 1.
+- **Le journal n'est pas réécrit** : ses entrées jusqu'au 27/09 disent « phase 2 » pour ce qui est désormais en phase 3.
