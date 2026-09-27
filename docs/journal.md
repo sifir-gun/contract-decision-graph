@@ -2097,3 +2097,27 @@ Après l'analyse de bout en bout par l'interface, le vrai journal d'audit compte
 ### Documentation
 
 ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souveraineté, sécurité, pas d'authentification avant l'étape Kubernetes, mode démonstration et ses limites, mesure de bout en bout) ; README (section « Interface web », captures, commandes des deux modes ; ADR 004 dans la liste ; phase 2 : écran de revue humaine fait) ; `docs/exploitation.md` ; spec (arborescence, commandes, isolation, phase 2, historique) ; CLAUDE.md (règles de l'interface, commandes, pile).
+
+## 2026-09-27 · Audit de publication (branche `audit-publication`)
+
+### Audit, puis second avis ECC
+
+- **Audit de publication** : secrets et données personnelles (arbre, 140 commits, images, descriptions des PR), licences, cohérence de la documentation, CI. Aucun point bloquant. Corrigé, un commit chacun : licence d'HTMX (0BSD) dans le README ; titre de l'ADR 004 qui contredisait son paragraphe ; phrase périmée de l'ADR 003 ; tableau des règles de la spec pour le transfert encadré par une garantie (constat d'information, décision du 26/09).
+- **Second avis ECC** (Everything Claude Code 2.2.1, plugin tiers MIT), dans un clone jetable : relectures en contexte neuf (code, Python, sécurité de l'interface web, sécurité de PostgreSQL et du traitement des contrats), puis AgentShield 1.6.0 sur la configuration d'agent. Deux constats vrais, sur l'interface : pages asynchrones qui bloquent pendant une analyse ; liste des contrats en 1 + 2 × M ouvertures du graphe. Un point réel d'AgentShield : les consignes piégées du dépôt, que liront les assistants de code des contributeurs. Les autres constats d'AgentShield sont des faux positifs : il cherche dans `CLAUDE.md` des défenses de prompt système. ECC désinstallé, clone supprimé, aucune trace dans `~/.claude` ni dans le dépôt.
+- **Décisions du propriétaire** : corriger les deux constats de l'interface, seuil de couverture à 98 %, une ligne dans `CLAUDE.md` sur les consignes piégées, description et sujets du dépôt GitHub après la fusion.
+
+### Accès concurrents : pages dans le pool de threads, verrou des modifications
+
+- **Tests d'abord** (`tests/test_concurrence.py`), rouges avant correction, chacun sur une course reproduite :
+  - deux analyses simultanées du même contrat réussissaient toutes les deux, sur le même thread : la vérification d'existence de `run_contract` passait pour les deux (lecture du thread retenue par une barrière le temps que l'autre la rejoigne) ;
+  - une analyse, une décision humaine ou une expiration démarrait pendant une analyse en cours ;
+  - `InMemorySaver` (langgraph-checkpoint 4.2.0) : « dictionary changed size during iteration », pour une liste des threads pendant des écritures (bascule entre threads toutes les microsecondes) ;
+  - journal d'audit en mémoire : 40 ajouts simultanés, chaîne fourchée ;
+  - interface : les pages (liste, dossier, rejeu, journal, vérification, fichier statique) restaient bloquées pendant une analyse. Toutes les requêtes du client de test partagent une boucle d'événements, comme sous uvicorn.
+- **Correction** :
+  - pages en fonctions ordinaires, exécutées par FastAPI dans son pool de threads ; seule la lecture du formulaire et son contrôle CSRF restent asynchrones, en dépendance ;
+  - verrou unique du service des contrats autour de l'analyse, de la décision humaine et de l'expiration, lectures concurrentes ; l'heure de l'expiration est lue après l'attente du verrou ;
+  - `InMemorySaver` sous verrou (`LockedMemorySaver`), journal d'audit en mémoire sous verrou ;
+  - fichier envoyé lu directement (`UploadFile.file`), toujours en mémoire : la taille d'un envoi reste bornée sous le seuil d'écriture sur disque.
+- Deux analyses du même contrat : la seconde attend, puis reçoit « le thread … existe déjà » (409 dans l'interface). Tests de concurrence : 10 passages sur 10.
+- **Limite, dans l'ADR 004** : le verrou vaut pour un seul processus. En multi-réplicas (phase Kubernetes), la base protège le journal d'audit (verrou consultatif, index uniques) ; la création d'un thread est à vérifier à ce moment-là.

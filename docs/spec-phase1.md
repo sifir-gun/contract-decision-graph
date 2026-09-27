@@ -822,6 +822,8 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - mode démonstration (`adapters/demo/`) : extraction simulée à partir des attendus, références par rattachement déclaré, explication par le gabarit, journal en mémoire ; règles, décision, revue, scellement et vérification pour de vrai ;
   - dépendances : fastapi, uvicorn, jinja2, python-multipart ;
   - ingestion : découpage du corpus séparé de l'embedding (`pending_chunks`), sans changement de comportement.
+- **27 septembre 2026, audit de publication** (second avis ECC, décisions du propriétaire) :
+  - interface : pages en fonctions ordinaires, dans le pool de threads de FastAPI ; verrou unique du service autour de l'analyse, de la décision humaine et de l'expiration, lectures concurrentes ; checkpointer et journal d'audit en mémoire sous verrou ; le verrou vaut pour un seul processus (ADR 004, `tests/test_concurrence.py`) ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;
