@@ -125,8 +125,9 @@ def _journal_reel_interdit(monkeypatch):
     monkeypatch.setattr(cli, "open_audit_store", ForbiddenAuditStore)
 
 
-# chargement réel du modèle d'embedding, gardé pour le test qui le vérifie
+# chargement réel du modèle d'embedding et reprise périodique, gardés pour leurs tests
 PROCESS_EMBEDDER = cli.process_embedder
+RESUME_PERIODICALLY = cli.resume_periodically
 
 
 @pytest.fixture(autouse=True)
@@ -134,6 +135,8 @@ def _aucun_modele_charge_en_arriere_plan(monkeypatch):
     """`web` en mode réel charge le modèle d'embedding dès le lancement : jamais dans les
     tests, qui n'ont ni les poids (CI) ni besoin de 2,2 Go en mémoire."""
     monkeypatch.setattr(cli, "process_embedder", lambda config: None)
+    # ni reprise des analyses interrompues en arrière-plan (base réelle, sortie du test)
+    monkeypatch.setattr(cli, "resume_periodically", lambda *args: None)
 
 
 @pytest.fixture(autouse=True)

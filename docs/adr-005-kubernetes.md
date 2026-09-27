@@ -73,3 +73,15 @@ Au plus, par réplica : 6 pour l'analyse en cours, plus une par lecture simultan
 - **Écarté : `http.server` de la bibliothèque standard** pour les sondes : sa documentation le déconseille en production.
 - **Modèle chargé une fois par processus** : en mode réel, `web` le charge en arrière-plan dès le lancement, et chaque analyse le réutilise. Avant, chaque analyse de l'interface rechargeait les poids depuis le disque.
 - **HEAD sur les pages de l'interface** : la RFC 9110 demande à un serveur généraliste d'accepter HEAD là où il accepte GET ; FastAPI ne l'ajoute pas de lui-même, l'interface répondait 405 à `HEAD /`.
+
+### Arrêt propre et reprise des analyses interrompues (PR A)
+
+- **Séquence d'arrêt d'un pod**, de bout en bout :
+  1. pause courte avant l'arrêt (`preStop`, dans le chart en PR C), le temps que le pod soit retiré du service ;
+  2. à l'ordre d'arrêt (SIGTERM), le drapeau d'arrêt se lève : sonde de disponibilité à 503, toute modification (analyse, décision, expiration) refusée en 503 avec `Retry-After`, à rejouer sur un autre réplica ; la reprise périodique s'arrête ;
+  3. uvicorn ferme ses sockets d'écoute et laisse finir les requêtes en cours pendant `web --delai-arret` secondes (60 par défaut), puis annule celles qui restent ;
+  4. délai de grâce du pod ≥ pause + délai d'arrêt + marge (chart, PR C).
+- **Analyse interrompue** (délai dépassé, processus tué, nœud perdu) : le dernier checkpoint reste, le verrou se libère avec la connexion. Un réplica en mode réel reprend les analyses restées « en cours » au démarrage, puis toutes les `web --reprise-intervalle` secondes (60) : chacune sous son verrou, relue sous le verrou, depuis son dernier checkpoint (`graph.invoke(None, …)`). Un contrat tenu ailleurs est laissé à son réplica.
+- **Rien de perdu, rien de scellé deux fois** : l'étape interrompue est refaite, les autres non ; le scellement est sans doublon (`audit_seal` rejoué, index uniques du journal). Vérifié en un processus (mort simulée au milieu de l'extraction) et avec un vrai processus tué, repris par un autre moteur sur PostgreSQL : un seul enregistrement scellé.
+- **Coût** : l'étape interrompue, si elle appelait le LLM, est payée deux fois. La consommation affichée ne compte que l'appel qui a abouti.
+- **Démonstration** : tout est en mémoire, perdu à l'arrêt ; ni reprise, ni délai de grâce utile.

@@ -186,7 +186,7 @@ def served(monkeypatch):
 
     seen = {}
 
-    def serve(app, host, port, *, log_config, probes=None):
+    def serve(app, host, port, *, log_config, probes=None, **_):
         seen.update(app=app, probes=probes)
 
     monkeypatch.setattr(cli.web_server, "serve", serve)

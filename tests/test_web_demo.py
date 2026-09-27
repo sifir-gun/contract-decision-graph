@@ -194,7 +194,7 @@ def test_commande_web_demo(monkeypatch, capsys):
     monkeypatch.setattr(
         server,
         "serve",
-        lambda app, host, port, *, log_config, probes=None: seen.update(app=app),
+        lambda app, host, port, **_: seen.update(app=app),
     )
     assert cli.main(["web", "--demo"]) == 0
     assert json.loads(capsys.readouterr().out) == {"web": "arrêtée"}

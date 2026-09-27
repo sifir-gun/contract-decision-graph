@@ -68,6 +68,11 @@ def app_pool() -> connexions.Source:
     return pool
 
 
+# délai laissé aux requêtes en cours à l'ordre d'arrêt ; le chart aligne dessus le délai
+# de grâce du pod (pause avant l'arrêt + ce délai + marge)
+DEFAULT_GRACE_SECONDS = 60
+# intervalle de la reprise des analyses interrompues (mode réel)
+DEFAULT_RESUME_SECONDS = 60
 _EMBEDDERS: dict[str, fastembed.FastembedEmbedder] = {}
 _EMBEDDERS_GUARD = threading.Lock()
 log = logging.getLogger(__name__)
@@ -349,8 +354,14 @@ def _web(args: argparse.Namespace) -> dict:
     )
     config = load_config()
     service = demo_service(config) if args.demo else build_service(config)
+    # ordre d'arrêt reçu : l'interface refuse toute modification, les sondes ne sont
+    # plus prêtes, la reprise des analyses interrompues s'arrête
+    stopping = threading.Event()
     app = web_app.create_app(
-        service, demo=args.demo, hosts=web_security.allowed_hosts(args.host)
+        service,
+        demo=args.demo,
+        hosts=web_security.allowed_hosts(args.host),
+        draining=stopping.is_set,
     )
     if warning:
         print(warning, file=sys.stderr)
@@ -360,19 +371,47 @@ def _web(args: argparse.Namespace) -> dict:
         f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
         file=sys.stderr,
     )
-    probes = _probes(args, config)
+    probes = _probes(args, config, stopping)
+    if not args.demo:  # démonstration : tout en mémoire, rien à reprendre
+        threading.Thread(
+            target=resume_periodically,
+            args=(service, args.reprise_intervalle, stopping),
+            name="reprise",
+            daemon=True,
+        ).start()
     web_server.serve(
         app,
         args.host,
         args.port,
         log_config=journaux.config(args.journaux),
         probes=probes,
+        on_exit=stopping.set,
+        grace_seconds=args.delai_arret,
     )
     return {"web": "arrêtée"}
 
 
+def resume_periodically(
+    service: ContractService, interval: float, stopping: threading.Event
+) -> None:
+    """Reprend les analyses interrompues au démarrage, puis toutes les `interval`
+    secondes, jusqu'à l'ordre d'arrêt. Une reprise qui échoue est journalisée, par son
+    type, et retentée au tour suivant."""
+    while not stopping.is_set():
+        try:
+            resumed = service.resume_interrupted()
+            if resumed:
+                log.info("analyses interrompues reprises : %d", len(resumed))
+        # retentée au tour suivant ; le journal dit laquelle a échoué, par son type
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                "reprise des analyses interrompues en échec (%s)", type(exc).__name__
+            )
+        stopping.wait(interval)
+
+
 def _probes(
-    args: argparse.Namespace, config: DecisionConfig
+    args: argparse.Namespace, config: DecisionConfig, stopping: threading.Event
 ) -> web_server.Probes | None:
     """En mode réel, le modèle d'embedding se charge en arrière-plan dès le lancement ;
     les sondes, si un port leur est donné, disent quand il est chargé et si la base
@@ -389,7 +428,7 @@ def _probes(
     checks = sante.Checks(
         started=started.is_set,
         database=(lambda: True) if args.demo else lambda: connexions.ping(app_pool()),
-        draining=lambda: False,
+        draining=stopping.is_set,
     )
     return web_server.Probes(
         sante.create_health_app(checks), args.hote_sante, args.port_sante
@@ -572,6 +611,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="autorise une adresse non locale : l'interface n'a pas "
         "d'authentification, avertissement affiché",
+    )
+    web.add_argument(
+        "--delai-arret",
+        type=_positive,
+        default=DEFAULT_GRACE_SECONDS,
+        help="secondes laissées aux requêtes en cours à l'ordre d'arrêt (défaut "
+        f"{DEFAULT_GRACE_SECONDS}) ; le délai de grâce du pod doit le dépasser",
+    )
+    web.add_argument(
+        "--reprise-intervalle",
+        type=_positive,
+        default=DEFAULT_RESUME_SECONDS,
+        help="secondes entre deux reprises des analyses interrompues (mode réel, "
+        f"défaut {DEFAULT_RESUME_SECONDS}) ; la première au lancement",
     )
     web.add_argument(
         "--port-sante",

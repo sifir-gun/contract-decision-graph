@@ -191,6 +191,12 @@ class ContractService:
             now = self.now()  # après l'attente du verrou : l'heure de l'expiration
             return now, self.engine.expire(older_than, now)
 
+    def resume_interrupted(self) -> list[dict[str, Any]]:
+        """Reprise des analyses interrompues : une modification, sous le verrou du
+        service. Lancée en arrière-plan par l'interface en mode réel (ADR 005)."""
+        with self._writes:
+            return self.engine.resume_interrupted()
+
     def journal(self) -> list[dict[str, Any]]:
         """Enregistrements scellés, du plus ancien au plus récent."""
         return [

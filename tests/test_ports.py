@@ -133,4 +133,5 @@ def test_chaque_port_a_ses_methodes():
         "history",
         "overview",
         "expire",
+        "resume_interrupted",
     ]

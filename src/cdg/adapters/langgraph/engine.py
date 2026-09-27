@@ -179,6 +179,11 @@ class LangGraphEngine:
                 graph, older_than, now, hold=self._locks.hold
             )
 
+    def resume_interrupted(self) -> list[dict[str, Any]]:
+        # les dépendances d'une analyse : la reprise refait les étapes interrompues
+        with self._open(self._deps.run()) as graph:
+            return orchestrator.resume_interrupted(graph, hold=self._locks.hold)
+
 
 def _known(graph: CompiledStateGraph, thread_id: str) -> dict[str, Any]:
     values = graph.get_state({"configurable": {"thread_id": thread_id}}).values

@@ -593,6 +593,44 @@ def expire_threads(
     return expired
 
 
+def resume_interrupted(
+    graph: CompiledStateGraph,
+    *,
+    hold: Callable[[str], AbstractContextManager[None]],
+    thread_ids: set[str] | None = None,
+) -> list[dict]:
+    """Reprend depuis leur dernier checkpoint les threads restés en cours (un processus
+    arrêté ou mort au milieu d'une analyse), chacun sous son verrou, relu sous le verrou.
+    Un thread verrouillé ailleurs est en cours là-bas : laissé. Le scellement est sans
+    doublon (`audit_seal` rejoué, index uniques du journal).
+
+    `thread_ids` restreint la reprise, comme pour l'expiration : les tests ne touchent
+    jamais aux autres threads de la base. La CLI et l'interface n'en passent pas."""
+    found = set(list_threads(graph))
+    if thread_ids is not None:
+        found &= thread_ids
+    resumed = []
+    for thread_id in sorted(found):
+        if not _in_progress(graph, thread_id):
+            continue
+        try:
+            with hold(thread_id):
+                if not _in_progress(graph, thread_id):
+                    continue  # fini entre-temps
+                log.info("reprise de l'analyse interrompue %s", thread_id)
+                graph.invoke(None, _thread(thread_id))
+                resumed.append(thread_status(graph, thread_id))
+        except ContractBusy:
+            continue  # en cours dans un autre processus
+    return resumed
+
+
+def _in_progress(graph: CompiledStateGraph, thread_id: str) -> bool:
+    """Analyse commencée, pas finie, et pas en attente d'un humain."""
+    snapshot = graph.get_state(_thread(thread_id))
+    return bool(snapshot.next) and not snapshot.interrupts
+
+
 def _pending_since(graph: CompiledStateGraph, thread_id: str) -> datetime | None:
     """Date de la suspension d'un thread en attente d'un humain ; None sinon."""
     snapshot = graph.get_state(_thread(thread_id))

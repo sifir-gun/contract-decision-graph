@@ -166,3 +166,38 @@ def test_verrou_relache_quand_le_processus_meurt(pg, thread_id, journal):
         except ContractBusy:
             if datetime.now(UTC) > deadline:
                 raise
+
+
+@pytest.mark.pg
+def test_analyse_d_un_processus_tue_reprise_par_un_autre_scellee_une_fois(
+    pg, thread_id, journal
+):
+    from doubles import FakeCrag, FixedExtractor, clauses, make_deps
+
+    from cdg.adapters.langgraph import orchestrator
+    from cdg.adapters.postgres.audit_store import PostgresAuditStore
+    from cdg.domain.config import load_config
+
+    results = SPAWN.Queue()
+    replica = Replica(pg, journal, thread_id, results)
+    assert replica.started.wait(WAIT), "le réplica n'a pas atteint l'extraction"
+    replica.process.kill()  # meurt au milieu de l'analyse, verrou relâché avec lui
+    replica.process.join(WAIT)
+    config = load_config()
+    deps = make_deps(
+        FixedExtractor(clauses()),
+        FakeCrag(()),
+        audit_store=PostgresAuditStore(pg.app, table=journal),
+    )
+    hold = PostgresContractLocks(lambda: pg.app).hold
+    only = {thread_id}  # jamais les autres threads de la base
+    with orchestrator.open_graph(config, deps, pg.app) as graph:
+        deadline = datetime.now(UTC) + timedelta(seconds=10)
+        resumed = orchestrator.resume_interrupted(graph, hold=hold, thread_ids=only)
+        while not resumed and datetime.now(UTC) < deadline:  # verrou vu relâché
+            resumed = orchestrator.resume_interrupted(graph, hold=hold, thread_ids=only)
+        assert [(s["thread_id"], s["statut"]) for s in resumed] == [
+            (thread_id, "termine")
+        ]
+        assert orchestrator.resume_interrupted(graph, hold=hold, thread_ids=only) == []
+    assert sealed(pg, journal) == [thread_id]  # scellé une seule fois

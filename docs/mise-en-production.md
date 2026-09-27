@@ -16,7 +16,7 @@ Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.
 ### Santé et arrêt des pods
 
 - [x] **Sondes de santé**, côté application (28/09, PR A : `web --port-sante`) ; leur déclaration dans le chart vient en PR C : vie (le processus répond), disponibilité (la base répond, le modèle d'embedding est chargé), et une sonde de démarrage qui laisse le temps de charger le modèle. Aujourd'hui l'interface n'a aucun point de santé, et répond 405 à `HEAD /` (journal du serveur d'aperçu, 27/09). *Fait quand* chaque sonde a son point, sans logique métier, testé en GET et en HEAD.
-- [ ] **Arrêt propre** : à l'ordre d'arrêt, le réplica cesse d'accepter de nouvelles analyses et laisse finir celles en cours dans un délai configuré ; une analyse interrompue reprend depuis son dernier checkpoint, sans rien perdre ni sceller deux fois. Délai de grâce du pod aligné sur ce délai, et courte pause avant l'arrêt pour que le pod soit retiré du service avant de couper. *Fait quand* un test interrompt une analyse, puis la voit reprise et scellée une seule fois.
+- [x] **Arrêt propre**, côté application (28/09, PR A : `--delai-arret`, reprise des analyses interrompues) ; la pause avant l'arrêt et le délai de grâce du pod viennent avec le chart (PR C) : à l'ordre d'arrêt, le réplica cesse d'accepter de nouvelles analyses et laisse finir celles en cours dans un délai configuré ; une analyse interrompue reprend depuis son dernier checkpoint, sans rien perdre ni sceller deux fois. Délai de grâce du pod aligné sur ce délai, et courte pause avant l'arrêt pour que le pod soit retiré du service avant de couper. *Fait quand* un test interrompt une analyse, puis la voit reprise et scellée une seule fois.
 
 ### Plusieurs copies de l'application
 

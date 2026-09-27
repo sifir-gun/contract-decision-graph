@@ -18,7 +18,7 @@ concurrentes.
 import logging
 import re
 import secrets
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -63,6 +63,7 @@ def create_app(
     demo: bool = False,
     hosts: Sequence[str] | None = security.LOOPBACK_NAMES,
     csrf_secret: bytes | None = None,
+    draining: Callable[[], bool] = lambda: False,
 ) -> FastAPI:
     """`hosts` : noms admis dans l'en-tête Host (None : tous, écoute non locale
     explicite). `demo` : bandeau permanent, contrats du jeu seulement."""
@@ -154,6 +155,18 @@ def create_app(
             response: Response = HTMLResponse("Hôte non admis.", status_code=400)
         elif posted and not length:
             response = HTMLResponse("Longueur de l'envoi requise.", status_code=411)
+        elif posted and draining():
+            # arrêt en cours : toute modification est à rejouer sur un autre réplica
+            response = page(
+                request,
+                "erreur.html",
+                {
+                    "title": "Arrêt en cours",
+                    "message": "Ce serveur s'arrête : réessayez dans quelques secondes.",
+                },
+                503,
+            )
+            response.headers["Retry-After"] = "5"
         elif posted and (not length.isdigit() or int(length) > limit):
             response = page(
                 request,
