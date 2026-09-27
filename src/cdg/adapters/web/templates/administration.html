@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Administration{% endblock %}
+{% block content %}
+<h1>Administration</h1>
+<section aria-labelledby="expiration-titre">
+  <h2 id="expiration-titre">Expiration des contrats en attente</h2>
+  <p>Les contrats en attente d'une revue humaine depuis plus longtemps que le délai sont clos en NO GO système, jamais approuvés, expliqués par le gabarit, puis scellés. Aucun retour n'est possible.</p>
+  {% if error %}
+  <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/administration/expiration">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="heures">Délai d'attente, en heures</label>
+    <input type="number" id="heures" name="heures" min="1" step="1" value="24" required>
+    <button type="submit">Continuer</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Confirmer l'expiration{% endblock %}
+{% block content %}
+<h1>Confirmer l'expiration</h1>
+<p class="warning-text">Les contrats en attente de revue depuis plus de {{ hours }} heure{{ "s" if hours != 1 else "" }} seront clos en NO GO système et scellés. Aucun retour n'est possible.</p>
+<form method="post" action="/administration/expiration">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="heures" value="{{ hours }}">
+  <input type="hidden" name="confirme" value="oui">
+  <button type="submit">Confirmer l'expiration</button>
+  <a href="/administration">Annuler</a>
+</form>
+{% endblock %}

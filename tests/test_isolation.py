@@ -26,6 +26,13 @@ LIBRARIES = {
     "onnxruntime": ("adapters/fastembed.py",),
     "mistralai": ("adapters/llm/mistral.py",),
     "anthropic": ("adapters/llm/anthropic.py",),
+    # interface web (décision du 27/09) : adaptateur entrant, comme la CLI
+    "fastapi": ("adapters/web/",),
+    "starlette": ("adapters/web/",),
+    "uvicorn": ("adapters/web/",),
+    "jinja2": ("adapters/web/",),
+    "markupsafe": ("adapters/web/",),
+    # python-multipart n'est jamais importé : Starlette s'en sert pour lire les formulaires
 }
 
 # couche -> modules internes (cdg.<nom>) qu'elle peut importer, en plus d'elle-même ;

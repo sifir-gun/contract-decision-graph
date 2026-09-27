@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Journal d'audit{% endblock %}
+{% block content %}
+<h1>Journal d'audit</h1>
+<p class="hint">Chaque contrat terminé est scellé une fois, en ajout seul, chaîné au précédent par SHA-256.</p>
+<form class="inline" method="get" action="/journal/verification"
+      hx-get="/journal/verification" hx-target="#verification" hx-push-url="false">
+  <label for="tete">Tête de chaîne attendue (facultatif)</label>
+  <input type="text" id="tete" name="tete" maxlength="64" spellcheck="false" autocomplete="off" aria-describedby="tete-aide">
+  <p id="tete-aide" class="hint">Empreinte conservée hors de la base : la vérification détecte alors aussi une fin de journal tronquée.</p>
+  <button type="submit">Vérifier la chaîne</button>
+</form>
+<div id="verification" aria-live="polite"></div>
+{% if entries %}
+<table>
+  <caption class="visually-hidden">Enregistrements scellés, du plus ancien au plus récent</caption>
+  <thead><tr><th scope="col">N°</th><th scope="col">Contrat</th><th scope="col">Décision finale</th><th scope="col">Scellé le</th><th scope="col">Empreinte de chaîne</th></tr></thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td>{{ e.id }}</td>
+      <td><a href="/contrats/{{ e.thread_id|urlencode }}">{{ e.thread_id }}</a></td>
+      <td>{% if e.final_decision %}<span class="badge badge-{{ e.final_decision|lower }}">{{ decisions[e.final_decision] }}</span>{% else %}rejet{% endif %}</td>
+      <td><time datetime="{{ e.sealed_at }}">{{ e.sealed_at[:19]|replace("T", " ") }}</time></td>
+      <td><code title="{{ e.chain_hash }}">{{ short_hash(e.chain_hash) }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>Aucun enregistrement scellé.</p>
+{% endif %}
+{% endblock %}

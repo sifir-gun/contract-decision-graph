@@ -3,7 +3,7 @@ analyse, revue humaine, liste, dossier, expiration, journal, vérification et re
 vrai graphe avec un checkpointer en mémoire, doublures à la place du LLM et du CRAG."""
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from doubles import (
@@ -265,10 +265,12 @@ def test_dossier_d_un_thread_inconnu():
 
 
 def test_expiration_des_contrats_en_attente():
-    later = replace(pending_service(), now=lambda: FIXED_NOW + timedelta(days=3))
-    assert later.expire(timedelta(days=5)) == (FIXED_NOW + timedelta(days=3), [])
+    # les checkpoints sont datés à l'heure réelle : « plus tard » part d'elle
+    at = datetime.now(UTC) + timedelta(days=3)
+    later = replace(pending_service(), now=lambda: at)
+    assert later.expire(timedelta(days=5)) == (at, [])
     now, expired = later.expire(timedelta(hours=24))
-    assert now == FIXED_NOW + timedelta(days=3)
+    assert now == at
     (status,) = expired
     assert status["final_decision"] == "NO_GO"
     assert status["human"]["source"] == "systeme"

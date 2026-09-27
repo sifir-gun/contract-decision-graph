@@ -23,6 +23,9 @@ from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine
 from cdg.adapters.llm import API_KEY_VARS, build_provider
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
+from cdg.adapters.web import app as web_app
+from cdg.adapters.web import security as web_security
+from cdg.adapters.web import server as web_server
 from cdg.application import ingestion
 from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
@@ -259,6 +262,26 @@ def _expire(args: argparse.Namespace) -> dict:
     }
 
 
+def _web(args: argparse.Namespace) -> dict:
+    """Interface web, sur le même service que les autres commandes ; jusqu'à Ctrl+C."""
+    warning = web_security.bind_warning(
+        args.host, allow_non_local=args.ecoute_non_locale
+    )
+    config = load_config()
+    app = web_app.create_app(
+        build_service(config), hosts=web_security.allowed_hosts(args.host)
+    )
+    if warning:
+        print(warning, file=sys.stderr)
+    shown = f"[{args.host}]" if ":" in args.host else args.host
+    print(
+        f"Interface : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
+        file=sys.stderr,
+    )
+    web_server.serve(app, args.host, args.port)
+    return {"web": "arrêtée"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cdg", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -383,6 +406,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show.add_argument("thread_id")
     show.set_defaults(handler=_show)
+
+    web = sub.add_parser(
+        "web",
+        help="interface web : mêmes actions que la CLI, par le même service ; écoute "
+        "locale par défaut, sans authentification",
+    )
+    web.add_argument("--host", default="127.0.0.1", help="adresse d'écoute")
+    web.add_argument("--port", type=int, default=8000, help="port d'écoute")
+    web.add_argument(
+        "--ecoute-non-locale",
+        action="store_true",
+        help="autorise une adresse non locale : l'interface n'a pas "
+        "d'authentification, avertissement affiché",
+    )
+    web.set_defaults(handler=_web)
     return parser
 
 

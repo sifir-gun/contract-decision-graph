@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Contrats{% endblock %}
+{% block content %}
+<h1>Contrats</h1>
+<p class="filters">
+  <a href="/"{% if not pending_only %} aria-current="page"{% endif %}>Tous</a>
+  <a href="/?attente=1"{% if pending_only %} aria-current="page"{% endif %}>En attente de revue</a>
+</p>
+{% if rows %}
+<table>
+  <caption class="visually-hidden">Contrats{% if pending_only %} en attente de revue{% endif %}, du plus récemment modifié au plus ancien</caption>
+  <thead>
+    <tr>
+      <th scope="col">Contrat</th>
+      <th scope="col">Date d'analyse</th>
+      <th scope="col">Dernière étape</th>
+      <th scope="col">État</th>
+      <th scope="col">Décision</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><a href="/contrats/{{ r.thread_id|urlencode }}">{{ r.thread_id }}</a></td>
+      <td>{{ r.analysis_date or "—" }}</td>
+      <td><time datetime="{{ r.updated_at }}">{{ r.updated_at[:16]|replace("T", " ") }}</time></td>
+      <td><span class="state state-{{ r.etat }}">{{ states[r.etat] }}</span></td>
+      <td>
+        {% if r.final_decision %}
+        <span class="badge badge-{{ r.final_decision|lower }}">{{ decisions[r.final_decision] }}</span>
+        {% elif r.proposed_decision %}
+        proposée : <span class="badge badge-{{ r.proposed_decision|lower }}">{{ decisions[r.proposed_decision] }}</span>
+        {% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>Aucun contrat{% if pending_only %} en attente de revue{% endif %}. <a href="/analyse">Lancer une analyse</a>.</p>
+{% endif %}
+{% endblock %}
