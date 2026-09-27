@@ -1,7 +1,8 @@
-"""CLI phase 1 : `uv run python -m cdg.cli <commande>`.
+"""CLI : `uv run python -m cdg.cli <commande>`.
 
 Racine de composition : lit .env et la configuration, instancie les adaptateurs
-(fournisseur LLM, embedding local, corpus PostgreSQL) et lance le graphe.
+(fournisseur LLM, embedding local, corpus PostgreSQL) et le service des contrats
+(`application/service.py`), commun à la CLI et à l'interface web.
 Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 """
 
@@ -18,6 +19,7 @@ from zoneinfo import ZoneInfo
 from cdg import settings
 from cdg.adapters import fastembed
 from cdg.adapters.langgraph import checkpointer, orchestrator
+from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine
 from cdg.adapters.llm import API_KEY_VARS, build_provider
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
@@ -25,6 +27,7 @@ from cdg.application import ingestion
 from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
+from cdg.application.service import ContractService
 from cdg.domain import audit, expiry
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
@@ -151,20 +154,38 @@ def _graph(config: DecisionConfig, deps: Deps):
     return orchestrator.open_graph(config, deps, conninfo.app_conninfo())
 
 
+def build_service(config: DecisionConfig) -> ContractService:
+    """Service des contrats sur la base PostgreSQL. Chaque opération construit ses
+    dépendances à l'appel, comme chaque commande : le fournisseur LLM pour run, qui échoue
+    d'abord si la clé manque ; l'explication seule pour resume ; rien pour la lecture."""
+    engine = LangGraphEngine(
+        config,
+        lambda deps: _graph(config, deps),
+        EngineDeps(
+            run=lambda: build_deps(config),
+            resume=lambda: review_deps(config, resume_explainer(config)),
+            expire=lambda: review_deps(config, EXPIRE_EXPLAINER),
+            read=lambda: review_deps(config, HISTORY_EXPLAINER),
+        ),
+    )
+    return ContractService(
+        engine=engine,
+        audit_store=lambda: open_audit_store(),
+        config=config,
+        today=lambda: today(),
+        now=lambda: now(),
+    )
+
+
 def _run(args: argparse.Namespace) -> dict:
     contract = Path(args.contract)
     raw_text = contract.read_text(encoding="utf-8")
-    config = load_config()
-    deps = build_deps(config)
-    with _graph(config, deps) as graph:
-        return orchestrator.run_contract(
-            graph,
-            args.contract_id or contract.stem,
-            raw_text,
-            parties=args.party,
-            analysis_date=args.analysis_date or today(),
-            config=config,
-        )
+    return build_service(load_config()).analyse(
+        raw_text,
+        contract_id=args.contract_id or contract.stem,
+        parties=args.party,
+        analysis_date=args.analysis_date,
+    )
 
 
 def _resume(args: argparse.Namespace) -> dict:
@@ -174,10 +195,7 @@ def _resume(args: argparse.Namespace) -> dict:
         "reason": args.reason,
         "overrides_block": args.overrides_block,
     }
-    config = load_config()
-    deps = review_deps(config, resume_explainer(config))
-    with _graph(config, deps) as graph:
-        return orchestrator.resume_thread(graph, args.thread_id, answer, config=config)
+    return build_service(load_config()).decide(args.thread_id, answer)
 
 
 class ChaineRompue(Exception):
@@ -195,10 +213,27 @@ class ChaineRompue(Exception):
 
 def _verify(args: argparse.Namespace) -> dict:
     """Vérifie la chaîne du journal d'audit (rôle applicatif, lecture seule)."""
-    report = audit.verify_chain(open_audit_store().entries(), args.expect_head)
+    report = build_service(load_config()).verify(args.expect_head)
     if not report.ok:
         raise ChaineRompue(report)
     return {"verify": "ok", "enregistrements": report.count, "tete": report.head}
+
+
+def _journal(args: argparse.Namespace) -> dict:
+    return {"enregistrements": build_service(load_config()).journal()}
+
+
+def _replay(args: argparse.Namespace) -> dict:
+    return build_service(load_config()).replay(args.thread_id)
+
+
+def _list(args: argparse.Namespace) -> dict:
+    service = build_service(load_config())
+    return {"contrats": service.contracts(pending_only=args.en_attente)}
+
+
+def _show(args: argparse.Namespace) -> dict:
+    return build_service(load_config()).dossier(args.thread_id)
 
 
 def _head(value: str) -> str:
@@ -210,21 +245,16 @@ def _head(value: str) -> str:
 
 
 def _history(args: argparse.Namespace) -> dict:
-    config = load_config()
-    with _graph(config, review_deps(config, HISTORY_EXPLAINER)) as graph:
-        checkpoints = orchestrator.thread_history(graph, args.thread_id)
+    checkpoints = build_service(load_config()).history(args.thread_id)
     return {"thread_id": args.thread_id, "checkpoints": checkpoints}
 
 
 def _expire(args: argparse.Namespace) -> dict:
     older_than = expiry.parse_duration(args.older_than)
-    now = datetime.now(UTC)
-    config = load_config()
-    with _graph(config, review_deps(config, EXPIRE_EXPLAINER)) as graph:
-        expired = orchestrator.expire_threads(graph, older_than, now)
+    at, expired = build_service(load_config()).expire(older_than)
     return {
         "older_than": args.older_than,
-        "now": now.isoformat(),
+        "now": at.isoformat(),
         "expired": expired,
     }
 
@@ -320,6 +350,39 @@ def build_parser() -> argparse.ArgumentParser:
         "tête diffère (fin du journal tronquée)",
     )
     verify.set_defaults(handler=_verify)
+
+    sub.add_parser(
+        "journal",
+        help="enregistrements scellés du journal d'audit, du plus ancien au plus récent "
+        "(lecture seule)",
+    ).set_defaults(handler=_journal)
+
+    replay = sub.add_parser(
+        "replay",
+        help="rejoue la décision scellée d'un thread, sans LLM ni corpus : règles, "
+        "justification et décision recalculées, empreintes comparées",
+    )
+    replay.add_argument("thread_id")
+    replay.set_defaults(handler=_replay)
+
+    listing = sub.add_parser(
+        "list",
+        help="contrats du checkpointer, du plus récemment modifié au plus ancien",
+    )
+    listing.add_argument(
+        "--en-attente",
+        action="store_true",
+        help="seulement les contrats en attente d'une revue humaine",
+    )
+    listing.set_defaults(handler=_list)
+
+    show = sub.add_parser(
+        "show",
+        help="dossier d'un contrat : statut, texte masqué, clauses, verdicts et "
+        "références, alertes, parcours, consommation, empreintes",
+    )
+    show.add_argument("thread_id")
+    show.set_defaults(handler=_show)
     return parser
 
 
