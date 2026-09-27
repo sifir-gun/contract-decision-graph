@@ -193,7 +193,7 @@ Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règl
 
 ## Feuille de route
 
-- **Phase 2** : d'abord un rapport HTML par contrat ; puis l'API (FastAPI) et le déploiement sur Kubernetes (k3s, Helm), avec l'authentification, obligatoire avant toute exposition réseau. L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
+- **Phase 2** : d'abord le déploiement sur Kubernetes (k3s, Helm), avec l'authentification, obligatoire avant toute exposition réseau ; ensuite un rapport HTML par contrat ; puis l'API (FastAPI). L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
 - **Phase 3** : observabilité (Langfuse auto-hébergé, logs structurés) ; serveur MCP ; évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 

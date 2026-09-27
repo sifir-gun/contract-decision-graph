@@ -96,4 +96,4 @@ Détail au journal.
 
 - **Dépendances** : quatre directes (fastapi, uvicorn, jinja2, python-multipart), trois transitives (starlette, markupsafe, annotated-doc). Licences MIT, BSD-3-Clause et Apache-2.0. Aucune dépendance du produit rétrogradée, aucune faille connue selon pip-audit, le 27/09/2026.
 - **L'interface affiche le texte masqué du contrat**, que le checkpointer conserve par conception ; jamais le texte original.
-- **Pour la suite** : le rapport HTML par contrat (premier chantier de la phase 2) pourra reprendre les gabarits du dossier ; l'API JSON et le déploiement Kubernetes viendront avec l'authentification.
+- **Pour la suite** : le rapport HTML par contrat pourra reprendre les gabarits du dossier ; l'API JSON et le déploiement Kubernetes viendront avec l'authentification. *Ordre décidé le 27/09 : la phase 2 commence par le déploiement Kubernetes, le rapport HTML vient ensuite.*

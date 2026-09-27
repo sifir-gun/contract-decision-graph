@@ -2199,3 +2199,7 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 ### Liste de contrôle : sondes de santé et arrêt propre
 
 - Décision du propriétaire : les deux points entrent dans la liste de contrôle, au déploiement. L'interface répondait 405 à `HEAD /`, et n'a aucun point de santé.
+
+### Feuille de route : Kubernetes d'abord
+
+- Décision du propriétaire : la phase 2 commence par le déploiement Kubernetes (avec l'authentification) ; le rapport HTML par contrat vient ensuite, puis l'API. README, spec et ADR 004 suivent ; l'ADR 003 garde sa rédaction du jour.
