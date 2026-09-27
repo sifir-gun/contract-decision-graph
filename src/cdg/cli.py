@@ -7,6 +7,8 @@ Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 """
 
 import argparse
+import atexit
+import functools
 import json
 import logging.config
 import os
@@ -26,7 +28,7 @@ from cdg.adapters.demo.references import DeclaredCrag
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm import API_KEY_VARS, build_provider
-from cdg.adapters.postgres import conninfo, migrations, rag_store
+from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.web import app as web_app
@@ -50,10 +52,23 @@ def today() -> date:
     return datetime.now(LEGAL_TIMEZONE).date()
 
 
+# taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
+POOL = {"size": connexions.DEFAULT_SIZE}
+
+
+@functools.cache
+def app_pool() -> connexions.Source:
+    """Pool d'app_role du processus : ouvert au premier usage, fermé à la sortie. Le
+    checkpointer, le journal, la recherche et les verrous y prennent leurs connexions."""
+    pool = connexions.open_pool(conninfo.app_conninfo(), max_size=POOL["size"])
+    atexit.register(pool.close)
+    return pool
+
+
 def open_audit_store() -> AuditStore:
     """Journal d'audit réel, avec le rôle applicatif. Les tests le remplacent par un
     journal jetable : aucune option de la CLI ni de la configuration n'en change la table."""
-    return PostgresAuditStore(conninfo.app_conninfo())
+    return PostgresAuditStore(app_pool())
 
 
 def now() -> datetime:
@@ -72,7 +87,7 @@ def build_deps(config: DecisionConfig) -> Deps:
     embedder = fastembed.FastembedEmbedder(
         config.embedding, settings.embedding_cache_dir()
     )
-    retriever = rag_store.PgvectorRetriever(conninfo.app_conninfo(), embedder)
+    retriever = rag_store.PgvectorRetriever(app_pool(), embedder)
     return Deps(
         extractor=LLMExtractor(llm),
         crag=orchestrator.crag_runner(retriever, llm, config),
@@ -160,7 +175,7 @@ def _ingest(args: argparse.Namespace) -> dict:
 
 
 def _graph(config: DecisionConfig, deps: Deps):
-    return orchestrator.open_graph(config, deps, conninfo.app_conninfo())
+    return orchestrator.open_graph(config, deps, app_pool())
 
 
 def build_service(config: DecisionConfig) -> ContractService:
@@ -176,7 +191,7 @@ def build_service(config: DecisionConfig) -> ContractService:
             expire=lambda: review_deps(config, EXPIRE_EXPLAINER),
             read=lambda: review_deps(config, HISTORY_EXPLAINER),
         ),
-        PostgresContractLocks(conninfo.app_conninfo),
+        PostgresContractLocks(app_pool),
     )
     return ContractService(
         engine=engine,
@@ -334,6 +349,13 @@ def _web(args: argparse.Namespace) -> dict:
     return {"web": "arrêtée"}
 
 
+def _positive(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"entier ≥ 1 attendu : {text}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cdg", description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -342,6 +364,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("CDG_JOURNAUX", "texte"),
         help="format des journaux sur la sortie standard : texte (défaut) ou json "
         "(Kubernetes) ; défaut aussi lu dans CDG_JOURNAUX",
+    )
+    parser.add_argument(
+        "--connexions",
+        type=_positive,
+        default=os.environ.get("CDG_CONNEXIONS", str(connexions.DEFAULT_SIZE)),
+        help="taille maximale du pool de connexions d'app_role à PostgreSQL (défaut "
+        f"{connexions.DEFAULT_SIZE}, ou CDG_CONNEXIONS) ; budget dans l'ADR 005",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
@@ -495,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     settings.load_env()
     args = build_parser().parse_args(argv)
     handler: Callable[[argparse.Namespace], dict] = args.handler
+    POOL["size"] = args.connexions
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
         logging.config.dictConfig(journaux.config(args.journaux))

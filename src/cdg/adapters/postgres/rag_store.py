@@ -4,7 +4,9 @@ synchronisation et recherche exacte filtrée. Les migrations sont dans `migratio
 import psycopg
 from pgvector import Vector
 from pgvector.psycopg import register_vector
+from psycopg.rows import tuple_row
 
+from cdg.adapters.postgres.connexions import Source, connection
 from cdg.domain.corpus import ChunkRow
 from cdg.domain.models import Domain
 from cdg.ports.embedder import Embedder
@@ -74,14 +76,15 @@ def insert(admin_conninfo: str, rows: list[ChunkRow]) -> int:
 
 
 def search(
-    conninfo: str, domain: Domain, query: list[float], *, kind: str, k: int, model: str
+    source: Source, domain: Domain, query: list[float], *, kind: str, k: int, model: str
 ) -> list[Passage]:
     """Recherche exacte : filtre (domaine, type de clause, modèle) AVANT l'ordre par
     distance cosinus. Des extraits du modèle sans rattachement (indexés avant la migration
     005) sont une erreur explicite : ils ne sont jamais ignorés en silence."""
-    with psycopg.connect(conninfo) as conn:
+    with connection(source) as conn:
         register_vector(conn)
-        unattached = conn.execute(
+        cur = conn.cursor(row_factory=tuple_row)
+        unattached = cur.execute(
             "SELECT count(*) FROM rag_chunks WHERE embedding_model = %s AND kinds IS NULL",
             (model,),
         ).fetchone()
@@ -90,7 +93,7 @@ def search(
                 f"{unattached[0]} extrait(s) du modèle {model} sans rattachement aux types "
                 "de clause (indexés avant la migration 005) : relancer ingest"
             )
-        rows = conn.execute(
+        rows = cur.execute(
             "SELECT id, domain, source_id, reference, text, embedding <=> %s AS distance,"
             " valid_until, note, kinds"
             " FROM rag_chunks WHERE domain = %s AND %s = ANY(kinds)"
@@ -118,14 +121,14 @@ class PgvectorRetriever:
     """Adaptateur du port Retriever : vecteur de la requête par l'Embedder, puis recherche
     exacte filtrée sur le domaine, le type de clause et le modèle de cet Embedder."""
 
-    def __init__(self, conninfo: str, embedder: Embedder):
-        self._conninfo = conninfo
+    def __init__(self, source: Source, embedder: Embedder):
+        self._source = source
         self._embedder = embedder
 
     def search(self, domain: Domain, query: str, *, kind: str, k: int) -> list[Passage]:
         vector = self._embedder.embed_query(query)
         return search(
-            self._conninfo, domain, vector, kind=kind, k=k, model=self._embedder.model
+            self._source, domain, vector, kind=kind, k=k, model=self._embedder.model
         )
 
 

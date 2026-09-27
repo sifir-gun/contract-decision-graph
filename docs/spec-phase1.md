@@ -542,7 +542,7 @@ Jeu de démonstration : 10 contrats synthétiques couvrant au moins un cas par d
 
 ## Structure du repo et stack
 
-Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `pytest-cov`, `ruff` (line-length 88), `mypy` et `types-PyYAML` (dev), `pip-audit` (groupe `audit`), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
+Stack : Python 3.12, uv, `langgraph`, `langgraph-checkpoint-postgres`, `langchain-core`, `pydantic` v2, `pyyaml`, `python-dotenv`, `psycopg`, `psycopg-pool` (28/09), `pgvector`, `mistralai`, `anthropic`, `fastembed`, `pytest`, `pytest-cov`, `ruff` (line-length 88), `mypy` et `types-PyYAML` (dev), `pip-audit` (groupe `audit`), Docker Compose. Modèles configurables dans `decision.yaml` (section `llm`), avec tiering : modèle léger pour le juge CRAG, modèle principal pour l'extraction et l'explication.
 
 ```
 contract-decision-graph/
@@ -837,6 +837,7 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - échéances du corpus contrôlées par le job `audit` de la CI (60 jours) ;
   - journaux en texte ou en JSON sur la sortie standard (`--journaux`, `CDG_JOURNAUX`) : une exception n'y laisse que son type et sa pile, le journal d'accès la méthode, le chemin et le code ;
   - verrou de contrat (port `ContractLocks`) : verrou consultatif de session de PostgreSQL, pris sans attendre, pour la création, la revue et l'expiration ; `ContractBusy` sinon (409 dans l'interface) ; l'expiration laisse un contrat verrouillé ailleurs ;
+  - pool psycopg par processus pour `app_role` (`--connexions`, 10 par défaut, mesuré) : checkpointer, journal, recherche, verrous ; verrous de session relâchés au retour de chaque connexion ; pool épuisé : `ConnectionsExhausted`, 503 ; dépendance `psycopg-pool` ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

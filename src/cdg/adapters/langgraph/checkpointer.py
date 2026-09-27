@@ -16,7 +16,8 @@ from langgraph.checkpoint.serde.event_hooks import (
 )
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg import Connection, sql
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from cdg.domain.explanation import ExplainedFinding, Explanation
 from cdg.domain.models import (
@@ -28,7 +29,11 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.ports.connections import ConnectionsExhausted
 from cdg.settings import APP_ROLE
+
+# une chaîne de connexion (administration, tests) ou le pool du processus
+Source = str | ConnectionPool[Connection[DictRow]]
 
 # --- Sérialiseur des checkpoints ---------------------------------------------------
 
@@ -112,10 +117,19 @@ _CHECKPOINT_GRANTS = [
 
 
 @contextmanager
-def open_saver(conninfo: str) -> Iterator[PostgresSaver]:
+def open_saver(source: Source) -> Iterator[PostgresSaver]:
+    """Checkpointer sur le pool du processus (réglé par `adapters/postgres/connexions.py`
+    comme l'exige PostgresSaver), ou sur une connexion directe ouverte depuis une chaîne
+    (administration, tests). Pool épuisé : `ConnectionsExhausted`."""
+    if isinstance(source, ConnectionPool):
+        try:
+            yield PostgresSaver(source, serde=strict_serializer())
+        except PoolTimeout as exc:
+            raise ConnectionsExhausted() from exc
+        return
     # paramètres de PostgresSaver.from_conn_string, qui n'accepte pas de serde
     with Connection.connect(
-        conninfo, autocommit=True, prepare_threshold=0, row_factory=dict_row
+        source, autocommit=True, prepare_threshold=0, row_factory=dict_row
     ) as conn:
         yield PostgresSaver(conn, serde=strict_serializer())
 

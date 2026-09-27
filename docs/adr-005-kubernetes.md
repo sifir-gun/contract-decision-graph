@@ -46,7 +46,7 @@ Consultées dans leur version courante ; chaque choix d'outil fondé sur un fait
 - **Écarté : un regroupeur de connexions en mode transaction** (PgBouncer, ou le `Pooler` de CloudNativePG en mode `transaction`) entre l'application et la base. Il changerait la session sous l'application et ferait tenir le verrou par une autre.
 - **Vérifié** par deux vrais processus (`multiprocessing`, méthode spawn), chacun avec son moteur, son checkpointer et ses verrous PostgreSQL : un seul contrat créé et scellé, la seconde demande refusée clairement, puis « existe déjà » ; un processus tué pendant l'analyse relâche le verrou (`tests/test_verrous.py`).
 
-**Connexions à PostgreSQL, par réplica.** L'application n'a pas de pool : chaque opération ouvre sa connexion et la ferme.
+**Connexions à PostgreSQL, par réplica**, avant le pool (état au 28/09, commit du verrou) : chaque opération ouvrait sa connexion et la fermait.
 
 | Opération | Connexions tenues en même temps |
 | --- | --- |
@@ -56,3 +56,11 @@ Consultées dans leur version courante ; chaque choix d'outil fondé sur un fait
 | Journal, vérification, rejeu | 1 par requête |
 
 Au plus, par réplica : 6 pour l'analyse en cours, plus une par lecture simultanée. Le nombre de lectures simultanées n'est borné que par le pool de threads de FastAPI (40 par défaut, bibliothèque AnyIO) : jusqu'à environ 46 connexions par réplica. **Décision du 28/09** : un pool de connexions psycopg par processus, de taille réglable, où le verrou compte (section suivante).
+
+### Pool de connexions (PR A, décision du 28/09)
+
+- **Un pool psycopg par processus** pour `app_role` (`adapters/postgres/connexions.py`, psycopg-pool 3.3.3, LGPL-3.0, déclaré en dépendance directe le 28/09 ; il était déjà dans `uv.lock`, tiré par langgraph-checkpoint-postgres). Le checkpointer (`PostgresSaver` accepte un pool), le journal d'audit, la recherche, les verrous de contrat et la sonde de disponibilité y empruntent leurs connexions. Les commandes d'administration (migrations, ingestion) gardent une connexion directe, avec les identifiants administrateur.
+- **Réglages** : ceux qu'exige `PostgresSaver` (autocommit, lignes en dictionnaires, pas de requêtes préparées côté serveur) ; les autres usagers ouvrent leurs transactions eux-mêmes et lisent leurs lignes en tuples. Chaque connexion est vérifiée avant d'être prêtée (`check`), pour survivre à un redémarrage ou une bascule de la base. Au retour de chaque connexion, `pg_advisory_unlock_all()` : un verrou de session ne suit jamais une connexion rendue, même si son usager a échoué (vérifié par un test).
+- **Pool épuisé** : attente bornée (10 s), puis `ConnectionsExhausted`, rendue en 503 par l'interface, avec `Retry-After: 5`. Jamais une attente sans fin, jamais une erreur 500 sans explication.
+- **Taille** : `--connexions` (ou `CDG_CONNEXIONS`), 10 par défaut. Mesure du 28/09 sur la base locale, trois essais, vraie recherche pgvector, vrais poids d'embedding, LLM et extraction en doublures, les quatre domaines à justifier : 29 connexions empruntées par analyse, au plus 4 en même temps. Plafond théorique : 9 (verrou, quatre recherches, quatre écritures du checkpointer en parallèle). Avec 10, une analyse (une seule à la fois par réplica) laisse de la place aux lectures, qui tiennent chacune une connexion quelques millisecondes et attendent leur tour plutôt que d'échouer.
+- **Côté PostgreSQL** : `max_connections` ≥ réplicas × taille du pool + tâches (migrations, ingestion) + connexions réservées au superutilisateur. Avec 3 réplicas : 30 + 2 + 3 = 35, sous la valeur par défaut de 100 (réglée dans le chart, PR C).

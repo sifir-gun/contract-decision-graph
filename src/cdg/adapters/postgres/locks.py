@@ -11,14 +11,17 @@ tenue le temps de l'opération.
   du même processus ne partagent donc jamais une session.
 - Pas de regroupeur de connexions en mode transaction (PgBouncer) entre l'application et
   la base : il ferait tenir le verrou par une session qui change sous l'application.
+- Connexion empruntée au pool du processus : le verrou compte dans sa taille. Au retour,
+  le pool relâche tout verrou de session qui resterait (`connexions.py`).
 """
 
 import hashlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-import psycopg
+from psycopg.rows import tuple_row
 
+from cdg.adapters.postgres.connexions import Source, connection
 from cdg.ports.locks import ContractBusy
 
 
@@ -30,20 +33,22 @@ def contract_lock_key(thread_id: str) -> int:
 
 
 class PostgresContractLocks:
-    """`conninfo` : chaîne de connexion lue à chaque verrou, comme les autres
-    dépendances des opérations (une variable absente n'empêche pas de lire)."""
+    """`source` : le pool du processus (ou une chaîne de connexion), obtenu à chaque
+    verrou, comme les autres dépendances des opérations : une variable absente
+    n'empêche pas de lire."""
 
-    def __init__(self, conninfo: Callable[[], str]):
-        self._conninfo = conninfo
+    def __init__(self, source: Callable[[], Source]):
+        self._source = source
 
     @contextmanager
     def hold(self, thread_id: str) -> Iterator[None]:
         key = contract_lock_key(thread_id)
-        with psycopg.connect(self._conninfo(), autocommit=True) as conn:
-            row = conn.execute("SELECT pg_try_advisory_lock(%s)", (key,)).fetchone()
+        with connection(self._source()) as conn:
+            cur = conn.cursor(row_factory=tuple_row)
+            row = cur.execute("SELECT pg_try_advisory_lock(%s)", (key,)).fetchone()
             if row is None or not row[0]:
                 raise ContractBusy(thread_id)
             try:
                 yield
             finally:
-                conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
+                cur.execute("SELECT pg_advisory_unlock(%s)", (key,))

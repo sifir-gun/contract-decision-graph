@@ -368,10 +368,11 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
 
 @contextmanager
 def open_graph(
-    config: DecisionConfig, deps: Deps, conninfo: str
+    config: DecisionConfig, deps: Deps, source: checkpointer.Source
 ) -> Iterator[CompiledStateGraph]:
-    """Graphe compilé avec le checkpointer PostgreSQL et le sérialiseur strict."""
-    with checkpointer.open_saver(conninfo) as saver:
+    """Graphe compilé avec le checkpointer PostgreSQL (pool du processus, ou chaîne de
+    connexion) et le sérialiseur strict."""
+    with checkpointer.open_saver(source) as saver:
         yield build_graph(config, deps).compile(checkpointer=saver)
 
 

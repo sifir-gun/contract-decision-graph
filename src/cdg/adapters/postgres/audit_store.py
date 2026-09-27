@@ -10,10 +10,11 @@ enregistrement par thread et une chaîne sans fourche.
 import hashlib
 from collections.abc import Callable
 
-import psycopg
 from psycopg import sql
+from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
+from cdg.adapters.postgres.connexions import Source, connection
 from cdg.domain.audit import AuditEntry, StoredAuditEntry
 from cdg.ports.audit_store import AuditStoreError
 
@@ -41,25 +42,27 @@ def lock_key(table: str) -> int:
 class PostgresAuditStore:
     """`table` n'est changé que par les tests (journal jetable de même structure)."""
 
-    def __init__(self, conninfo: str, *, table: str = TABLE) -> None:
-        self._conninfo, self._table = conninfo, table
+    """`source` : le pool du processus, ou une chaîne de connexion (tests)."""
+
+    def __init__(self, source: Source, *, table: str = TABLE) -> None:
+        self._source, self._table = source, table
         self._ident = sql.Identifier(table)
         self._select = sql.SQL("SELECT {} FROM {}").format(
             sql.SQL(", ").join(map(sql.Identifier, _COLUMNS)), self._ident
         )
 
     def append(self, seal: Callable[[str | None], AuditEntry]) -> StoredAuditEntry:
-        with psycopg.connect(
-            self._conninfo
-        ) as conn:  # une transaction, validée à la fin
-            conn.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key(self._table),))
-            head = conn.execute(
+        # une transaction, validée à la fin ; lignes en tuples
+        with connection(self._source) as conn, conn.transaction():
+            cur = conn.cursor(row_factory=tuple_row)
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key(self._table),))
+            head = cur.execute(
                 sql.SQL("SELECT chain_hash FROM {} ORDER BY id DESC LIMIT 1").format(
                     self._ident
                 )
             ).fetchone()
             entry = seal(None if head is None else head[0])
-            existing = conn.execute(
+            existing = cur.execute(
                 self._select + sql.SQL(" WHERE thread_id = %s"), (entry.thread_id,)
             ).fetchone()
             if existing is not None:  # audit_seal rejoué : même thread
@@ -70,7 +73,7 @@ class PostgresAuditStore:
                         f"({stored.decision_hash}, reçu {entry.decision_hash})"
                     )
                 return stored
-            row = conn.execute(
+            row = cur.execute(
                 sql.SQL(
                     "INSERT INTO {} (contract_id, thread_id, record, config_hash, "
                     "decision_hash, prev_hash, chain_hash) "
@@ -91,8 +94,9 @@ class PostgresAuditStore:
         return StoredAuditEntry(**entry.model_dump(), id=row[0], created_at=row[1])
 
     def entries(self) -> list[StoredAuditEntry]:
-        with psycopg.connect(self._conninfo) as conn:
-            rows = conn.execute(self._select + sql.SQL(" ORDER BY id")).fetchall()
+        with connection(self._source) as conn:
+            cur = conn.cursor(row_factory=tuple_row)
+            rows = cur.execute(self._select + sql.SQL(" ORDER BY id")).fetchall()
         return [_stored(r) for r in rows]
 
 

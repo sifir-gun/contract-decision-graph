@@ -36,6 +36,7 @@ from cdg.application import demo_set
 from cdg.application.service import ContractService
 from cdg.domain import audit
 from cdg.domain.identifiers import ContractIdError, check_contract_id
+from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
 from cdg.ports.locks import ContractBusy
 from cdg.settings import SettingsError
@@ -179,6 +180,17 @@ def create_app(
             },
             403,
         )
+
+    @app.exception_handler(ConnectionsExhausted)
+    async def exhausted(request: Request, exc: ConnectionsExhausted) -> Response:
+        response = page(
+            request,
+            "erreur.html",
+            {"title": "Base de données saturée", "message": str(exc)},
+            503,
+        )
+        response.headers["Retry-After"] = "5"
+        return response
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> Response:
