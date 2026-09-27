@@ -833,6 +833,9 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - identifiant d'un contrat : une seule règle, dans le domaine (`domain/identifiers.py`), appliquée à la création par le service, donc par la CLI comme par l'interface : lettres, chiffres, `.`, `_` et `-`, 100 caractères au plus, en commençant par une lettre ou un chiffre ; les contrats existants restent lisibles ;
   - icône de l'interface servie localement (`static/favicon.svg`, aussi à `/favicon.ico`) : plus de 404 ;
   - feuille de route : la phase 2 commence par le déploiement Kubernetes, le rapport HTML par contrat vient ensuite ;
+- **28 septembre 2026, Kubernetes, PR A** (ADR 005) :
+  - échéances du corpus contrôlées par le job `audit` de la CI (60 jours) ;
+  - journaux en texte ou en JSON sur la sortie standard (`--journaux`, `CDG_JOURNAUX`) : une exception n'y laisse que son type et sa pile, le journal d'accès la méthode, le chemin et le code ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

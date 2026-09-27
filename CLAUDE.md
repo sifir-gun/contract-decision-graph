@@ -52,7 +52,7 @@ Projet R&D personnel : graphe LangGraph qui rend un verdict go / no-go auditable
 - `uv run ruff format` : formate le code (line-length 88, valeur par défaut de Ruff et de Black) ; un reformatage massif va dans son propre commit, ajouté à `.git-blame-ignore-revs`
 - `uv run ruff check` : lint (jeu de règles par défaut de ruff 0.16) ; doit passer avant chaque commit
 - `uv run mypy` : vérification des types (strict sur `domain/`, `ports/`, `application/`) ; doit passer avant chaque commit
-- `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify, list, show, journal, replay, web)
+- `uv run python -m cdg.cli <commande>` : CLI (run, resume, history, expire, verify, list, show, journal, replay, web) ; `--journaux json` (ou `CDG_JOURNAUX=json`) avant la commande : journaux en JSON sur la sortie standard, jamais le texte d'un contrat, ni un secret, ni le message d'une exception
 - `uv run python -m cdg.cli web [--demo]` : interface web sur http://127.0.0.1:8000 ; `--demo` sans clé d'API, sans coût, sans base (extraction simulée pour les contrats du jeu, journal en mémoire)
 - `uv run python -m cdg.cli verify [--expect-head <empreinte>]` : vérifie la chaîne du journal d'audit ; code 1 et premier maillon fautif si elle est rompue
 

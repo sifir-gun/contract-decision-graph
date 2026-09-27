@@ -492,6 +492,7 @@ def test_erreur_inattendue_page_sobre_avec_en_tetes(caplog):
     assert response.status_code == 500
     assert "RuntimeError" in response.text
     assert "détail qui ne doit pas sortir" not in response.text + caplog.text
+    assert "erreur inattendue (RuntimeError)" in caplog.text  # journalisée, type seul
     assert response.headers["content-security-policy"] == security.CSP
 
 
@@ -519,6 +520,6 @@ def test_serveur_uvicorn_sans_en_tetes_de_mandataire(monkeypatch):
 
     seen = {}
     monkeypatch.setattr(server.uvicorn, "run", lambda app, **kw: seen.update(kw))
-    server.serve(object(), "127.0.0.1", 8000)
+    server.serve(object(), "127.0.0.1", 8000, log_config={})
     assert seen["proxy_headers"] is False and seen["server_header"] is False
     assert (seen["host"], seen["port"]) == ("127.0.0.1", 8000)

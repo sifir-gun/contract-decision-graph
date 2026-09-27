@@ -2210,3 +2210,14 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Tests d'abord** (`tests/test_echeances_corpus.py`) : bornes de l'horizon, déjà expirées comprises, tri ; fins de validité des 29 sources (22 articles, 7 fiches ; seules L441-10 et sa fiche en ont une) ; script en réussite le 27/09 et le 01/11, en échec le 02/11/2026 avec les deux sources et le 01/01/2027 ; horizon invalide refusé ; câblage du job `audit`.
 - **Réalisation** : `domain/corpus.expiring` (règle pure), `ingestion.source_validities` (une fiche expire avec les articles qu'elle cite, logique mise en commun avec l'ingestion), `scripts/echeances_corpus.py` (JSON, code 1 et la liste en cas d'échéance). Job `audit` : installation du projet sans le groupe dev, puis le contrôle ; il tourne à chaque pull request et, seul, chaque lundi. Son nom reste « audit (pip-audit) », vérification exigée par la règle de protection de `main`. `scripts/check.sh` lance la même commande.
 - **Conséquence** : à partir du 02/11/2026, le job `audit` échoue à chaque pull request tant que L441-10 et sa fiche ne sont pas mises à jour. C'est le but.
+
+### Journaux structurés, sans texte de contrat
+
+- **Tests d'abord** (`tests/test_journaux.py`) :
+  - mise en forme : JSON d'une ligne, horodatage UTC ; journal d'accès réduit à la méthode, au chemin et au code, sans l'adresse du client ; exception réduite à son type et sa pile, en JSON comme en texte ;
+  - configuration : tout sur la sortie standard, bibliothèques à partir des avertissements, format inconnu refusé ;
+  - CLI : `--journaux`, défaut lu dans `CDG_JOURNAUX` ;
+  - de bout en bout, un vrai serveur uvicorn : une analyse par le formulaire avec un texte témoin dans le contrat, puis une erreur inattendue dont le message cite le témoin ; toutes les lignes sont du JSON, le témoin n'apparaît nulle part.
+- **Constat en passant** : sous uvicorn, une erreur inattendue était journalisée avec sa pile et son message. Starlette relance l'exception après la page d'erreur ; le test existant ne le voyait pas, le client de test ne passant pas par uvicorn. Corrigé par la mise en forme, en texte comme en JSON.
+- **Tests** : `cli.main` applique la configuration à tout le processus ; une fixture la défait après chaque test, sinon les assertions « jamais dans les journaux » de `caplog` passaient à vide. Le test des erreurs inattendues vérifie désormais aussi que l'erreur est journalisée, par son type.
+- ADR 005 ouvert : contexte, références vérifiées et datées (NSA et CISA, Kubernetes, k3s, CloudNativePG, MinIO, avis sur Trivy, code installé de mistralai), et cette première décision.

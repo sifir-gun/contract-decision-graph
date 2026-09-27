@@ -3,6 +3,7 @@
 Aucun saut silencieux. Pour les exclure volontairement : `uv run pytest -m "not pg"`.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ from doubles import CONTRACT_TEXT, TEMPLATE, FakeCrag, FixedExtractor, clauses
 from psycopg import sql
 
 from cdg import cli, settings
+from cdg.adapters import journaux
 from cdg.adapters.langgraph import checkpointer
 from cdg.adapters.llm import API_KEY_VARS
 from cdg.adapters.postgres import conninfo, migrations, rag_store
@@ -121,6 +123,31 @@ class ForbiddenAuditStore:
 @pytest.fixture(autouse=True)
 def _journal_reel_interdit(monkeypatch):
     monkeypatch.setattr(cli, "open_audit_store", ForbiddenAuditStore)
+
+
+@pytest.fixture(autouse=True)
+def _journaux_du_processus_restaures():
+    """`cli.main` applique sa configuration de journaux à tout le processus ; elle est
+    défaite après chaque test, pour que `caplog` voie encore les journaux des suivants
+    (sinon « jamais dans les journaux » passerait à vide)."""
+    names = ("cdg", "uvicorn", "uvicorn.error", "uvicorn.access")
+    saved = {
+        n: (lg.level, lg.handlers[:], lg.propagate)
+        for n in names
+        if (lg := logging.getLogger(n))
+    }
+    root_level = logging.getLogger().level
+    yield
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        if isinstance(handler.formatter, tuple(journaux.FORMATTERS.values())):
+            root.removeHandler(handler)
+    root.setLevel(root_level)
+    for name, (level, handlers, propagate) in saved.items():
+        logger = logging.getLogger(name)
+        logger.setLevel(level)
+        logger.handlers[:] = handlers
+        logger.propagate = propagate
 
 
 @pytest.fixture(autouse=True)

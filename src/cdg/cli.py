@@ -8,6 +8,7 @@ Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 
 import argparse
 import json
+import logging.config
 import os
 import sys
 from collections.abc import Callable
@@ -17,7 +18,7 @@ from typing import get_args
 from zoneinfo import ZoneInfo
 
 from cdg import settings
-from cdg.adapters import fastembed
+from cdg.adapters import fastembed, journaux
 from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.adapters.demo.extraction import ExpectedExtractor
 from cdg.adapters.demo.references import DeclaredCrag
@@ -323,12 +324,21 @@ def _web(args: argparse.Namespace) -> dict:
         f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
         file=sys.stderr,
     )
-    web_server.serve(app, args.host, args.port)
+    web_server.serve(
+        app, args.host, args.port, log_config=journaux.config(args.journaux)
+    )
     return {"web": "arrêtée"}
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cdg", description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--journaux",
+        choices=journaux.FORMATS,
+        default=os.environ.get("CDG_JOURNAUX", "texte"),
+        help="format des journaux sur la sortie standard : texte (défaut) ou json "
+        "(Kubernetes) ; défaut aussi lu dans CDG_JOURNAUX",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
         "setup-db",
@@ -482,6 +492,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handler: Callable[[argparse.Namespace], dict] = args.handler
     try:
+        # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
+        logging.config.dictConfig(journaux.config(args.journaux))
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
