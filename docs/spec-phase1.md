@@ -560,6 +560,7 @@ contract-decision-graph/
 │   ├── spec-phase1.md          # ce document
 │   ├── adr-001-fan-out.md      # décision single vs multi, pattern, gates, NO_GO sur blocage dur seul
 │   ├── adr-002-ports-et-adaptateurs.md  # couches, ports, règles de dépendance, écart assumé
+│   ├── adr-003-studio-ecarte.md # LangGraph Studio écarté : documentation, observations du 27/09
 │   ├── exploitation.md         # J5 : commandes, audit, configuration, migrations, corpus
 │   ├── journal.md              # journal des décisions, des séries réelles et des pièges
 │   └── images/                 # visuels du README (enregistrement du terminal)

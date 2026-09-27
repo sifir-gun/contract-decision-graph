@@ -45,7 +45,7 @@ Exemple, sur le contrat piégé du jeu de démonstration (série 8, modèle rée
 - **Même modèle, température 0, erreurs différentes d'une série à l'autre.** Le contrat 04, extrait sans faute à la série 6, voit sa durée omise au premier essai dans les 5 essais des séries 7 et 8 ; la vérification la rattrape à chaque fois. **C'est pourquoi la sûreté repose sur les contrôles par code, et non sur la régularité du modèle.**
 - **Le contrat est une donnée non fiable.** Il est délimité comme donnée dans les prompts, jamais traité comme une instruction. Une consigne glissée dans le texte devient un constat et impose la revue humaine.
 - **Tout est auditable.** Chaque contrat terminé est scellé dans un journal en ajout seul, chaîné par SHA-256, et rejouable : mêmes clauses, mêmes références et même configuration donnent la même empreinte.
-- **Pensé pour un hébergement souverain.** Les embeddings sont calculés en local, sans appel réseau (vérifié par un test) ; le fournisseur LLM par défaut est européen (Mistral), Anthropic en alternative. L'appel au fournisseur LLM reste, lui, un appel réseau.
+- **Pensé pour un hébergement souverain.** Les embeddings sont calculés en local, sans appel réseau (vérifié par un test) ; le fournisseur LLM par défaut est européen (Mistral), Anthropic en alternative. L'appel au fournisseur LLM reste, lui, un appel réseau. LangGraph Studio est écarté : en usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot (observé le 27/09/2026, [ADR 003](docs/adr-003-studio-ecarte.md)).
 
 ## Schéma
 
