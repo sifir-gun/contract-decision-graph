@@ -11,6 +11,7 @@ import hashlib
 import logging
 import re
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlsplit
 
 import pytest
 from doubles import ABSENT, CONTRACT_TEXT, FixedExtractor, clauses
@@ -23,7 +24,7 @@ from web_helpers import (
     memory_service,
 )
 
-from cdg.adapters.web import security
+from cdg.adapters.web import presentation, security
 from cdg.adapters.web.app import WEB_ROOT, create_app
 from cdg.domain.explanation import Draft, ExplainedFinding
 from cdg.domain.models import Usage
@@ -36,6 +37,9 @@ HTMX_SHA384 = "2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 EXTERNAL = re.compile(
     r"(?i)(?:https?:)?//[a-z0-9.-]+\.[a-z]{2,}|\burl\(\s*['\"]?https?:"
 )
+# nom de l'espace de noms SVG, exigé par un fichier SVG autonome : un identifiant, que le
+# navigateur ne charge jamais
+SVG_NAMESPACE = 'xmlns="http://www.w3.org/2000/svg"'
 
 
 # --- 5. aucune ressource externe ------------------------------------------------------------
@@ -44,12 +48,32 @@ EXTERNAL = re.compile(
 def web_files() -> list[Path]:
     files = sorted(p for p in WEB_ROOT.rglob("*") if p.is_file())
     assert files, WEB_ROOT
-    return [p for p in files if p.suffix in {".html", ".css", ".js"}]
+    return [p for p in files if p.suffix in {".html", ".css", ".js", ".svg"}]
 
 
 @pytest.mark.parametrize("path", web_files(), ids=lambda p: p.name)
 def test_aucune_url_externe_dans_les_gabarits_et_fichiers_statiques(path):
-    assert not EXTERNAL.findall(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".svg":
+        assert text.count(SVG_NAMESPACE) == 1
+        text = text.replace(SVG_NAMESPACE, "")
+    assert not EXTERNAL.findall(text)
+
+
+def test_icone_servie_localement_sans_404():
+    """Icône des pages, et à `/favicon.ico`, que les navigateurs demandent d'office :
+    le même fichier SVG du dépôt, écrit à la main, sans script ni ressource externe."""
+    icon = (STATIC / "favicon.svg").read_bytes()
+    assert b"<script" not in icon and b"href" not in icon
+    web = client()
+    for path in ("/favicon.ico", "/static/favicon.svg"):
+        response = web.get(path)
+        assert response.status_code == 200, path
+        assert response.headers["content-type"].startswith("image/svg+xml")
+        assert response.content == icon
+        assert response.headers["content-security-policy"] == security.CSP
+    page = web.get("/").text
+    assert '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in page
 
 
 def test_detection_d_une_url_externe():
@@ -343,6 +367,96 @@ def test_cle_d_api_absente_message_clair():
     )
     assert response.status_code == 503
     assert "MISTRAL_API_KEY" in response.text and "démonstration" in response.text
+
+
+# --- 10. adresse d'un contrat : interne, un seul segment ------------------------------------
+# alertes CodeQL py/url-redirection (27/09) : les redirections formaient l'adresse par une
+# f-string, sans encoder l'identifiant ; les liens, par le filtre urlencode de Jinja, qui
+# garde « / ». Une seule fonction forme désormais toutes les adresses d'un contrat.
+
+HOSTILE_IDS = [
+    "//evil.example",
+    "\\\\evil.example",
+    "/\\evil.example",
+    "https://evil.example/x",
+    "javascript:alert(1)",
+    "a/b",
+    "a?b=c",
+    "a#b",
+    "revue 1 é",
+    "x\r\nLocation: https://evil.example",
+    "..",
+]
+
+
+@pytest.mark.parametrize("thread_id", HOSTILE_IDS)
+@pytest.mark.parametrize("action", ["", "decision", "rejeu"])
+def test_adresse_d_un_contrat_reste_interne(thread_id, action):
+    path = presentation.contract_path(thread_id, action)
+    segment = path.removeprefix("/contrats/")
+    if action:
+        segment = segment.removesuffix(f"/{action}")
+    assert path.startswith("/contrats/")
+    assert not set(segment) & set("/\\?#: \r\n\t")  # rien ne sort du segment
+    assert unquote(segment) == thread_id  # un seul segment, sans perte
+    here = "http://127.0.0.1:8000/contrats/c-1"
+    assert urlsplit(urljoin(here, path))[:2] == ("http", "127.0.0.1:8000")
+
+
+def test_adresse_d_un_contrat_action_inconnue_refusee():
+    with pytest.raises(ValueError, match="action inconnue"):
+        presentation.contract_path("c-1", "suppression")
+
+
+def legacy_contract(service, thread: str) -> None:
+    """Contrat d'identifiant ancien, créé par le moteur directement : la règle des
+    identifiants ne vaut qu'à la création, les contrats existants restent lisibles."""
+    service.engine.run(thread, PENDING_TEXT, (), service.today())
+
+
+def test_redirection_apres_revue_vers_le_dossier_quel_que_soit_l_identifiant():
+    thread = "revue 1#é"
+    service = memory_service()
+    legacy_contract(service, thread)
+    web = client(service)
+    data = {"decision": "GO_RESERVES", "relecteur": "Camille", "motif": "réserves"}
+    response = web.post(
+        presentation.contract_path(thread, "decision"),
+        data={"csrf": csrf(web), **data},
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == presentation.contract_path(thread)
+    page = web.get(response.headers["location"])
+    assert page.status_code == 200 and thread in page.text
+
+
+def test_redirection_apres_analyse_vers_le_dossier():
+    web = client()
+    response = web.post(
+        "/analyse",
+        data={
+            "csrf": csrf(web),
+            "source": "texte",
+            "texte": CONTRACT_TEXT,
+            "identifiant": "c-2026.09_v1",
+        },
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == presentation.contract_path("c-2026.09_v1")
+
+
+def test_liens_des_pages_par_la_meme_adresse():
+    service = memory_service()
+    for thread in ("a/b", "revue 1#é"):
+        legacy_contract(service, thread)
+    web = client(service)
+    listing = web.get("/").text
+    for thread in ("a/b", "revue 1#é"):
+        assert f'href="{presentation.contract_path(thread)}"' in listing
+    dossier = web.get(presentation.contract_path("revue 1#é")).text
+    for action in ("decision", "rejeu"):
+        assert presentation.contract_path("revue 1#é", action) in dossier
+    assert "|urlencode" not in "".join(p.read_text() for p in TEMPLATES.glob("*.html"))
 
 
 # --- cas limites ------------------------------------------------------------------------

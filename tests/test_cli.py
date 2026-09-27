@@ -150,6 +150,22 @@ def test_run_date_d_analyse_par_defaut_aujourd_hui_a_paris(
     assert cli.LEGAL_TIMEZONE.key == "Europe/Paris"
 
 
+@pytest.mark.parametrize(
+    ("name", "options"),
+    [("mon contrat.txt", []), ("contrat.txt", ["--contract-id", "a/b"])],
+)
+def test_run_refuse_un_identifiant_invalide_avant_toute_analyse(
+    tmp_path, capsys, name, options
+):
+    """Identifiant tiré du nom du fichier ou donné par `--contract-id` : même règle
+    que l'interface, vérifiée avant toute connexion à la base ou au LLM."""
+    path = tmp_path / name
+    path.write_text(CONTRACT_TEXT, encoding="utf-8")
+    code, out = run_cli(capsys, "run", str(path), *options)
+    assert code == 1 and out["erreur"] == "ContractIdError"
+    assert out["detail"].startswith("identifiant de contrat invalide")
+
+
 def test_run_date_d_analyse_invalide(contract, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(["run", contract, "--analysis-date", "31/12/2026"])

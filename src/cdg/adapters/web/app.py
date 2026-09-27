@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -35,11 +35,11 @@ from cdg.adapters.web import presentation, security
 from cdg.application import demo_set
 from cdg.application.service import ContractService
 from cdg.domain import audit
+from cdg.domain.identifiers import ContractIdError, check_contract_id
 from cdg.ports.engine import ThreadError
 from cdg.settings import SettingsError
 
 WEB_ROOT = Path(__file__).parent
-IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 # caractères de contrôle hors tabulation et fins de ligne : pas du texte brut
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 log = logging.getLogger(__name__)
@@ -81,10 +81,18 @@ def create_app(
         quotes_of=presentation.quotes_of,
         reference_rows=presentation.reference_rows,
         short_hash=presentation.short_hash,
+        contract_path=presentation.contract_path,
     )
     templates = Jinja2Templates(env=env)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=WEB_ROOT / "static"), name="static")
+
+    @app.get("/favicon.ico")
+    def favicon() -> FileResponse:
+        """Demandée d'office par les navigateurs : l'icône des pages, servie localement."""
+        return FileResponse(
+            WEB_ROOT / "static" / "favicon.svg", media_type="image/svg+xml"
+        )
 
     def page(
         request: Request, name: str, context: dict[str, Any], status: int = 200
@@ -244,7 +252,9 @@ def create_app(
                 "lancez le mode démonstration, sans clé ni coût."
             )
             return analysis_page(request, message, 503)
-        return RedirectResponse(f"/contrats/{contract_id}", status_code=303)
+        return RedirectResponse(
+            presentation.contract_path(contract_id), status_code=303
+        )
 
     # --- dossier (show), revue humaine (resume), rejeu (replay) -----------------------
 
@@ -291,7 +301,7 @@ def create_app(
         refused = status["demande"] and status["demande"].get("error")
         if refused:
             return dossier_page(request, thread_id, refused, 422)
-        return RedirectResponse(f"/contrats/{thread_id}", status_code=303)
+        return RedirectResponse(presentation.contract_path(thread_id), status_code=303)
 
     @app.get("/contrats/{thread_id}/rejeu", response_class=HTMLResponse)
     def replay(request: Request, thread_id: str) -> Response:
@@ -411,12 +421,10 @@ def _identifier(form: FormData, base: str, service: ContractService) -> str:
     wanted = _text(form, "identifiant").strip()
     if not wanted:
         return f"{base}-{service.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-    if not IDENTIFIER.fullmatch(wanted):
-        raise InputError(
-            "identifiant invalide : lettres, chiffres, points, tirets et soulignés, "
-            "100 caractères au plus"
-        )
-    return wanted
+    try:
+        return check_contract_id(wanted)  # la règle du domaine, commune avec la CLI
+    except ContractIdError as exc:
+        raise InputError(str(exc)) from exc
 
 
 def _analysis_date(form: FormData) -> date | None:

@@ -197,6 +197,8 @@ Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règl
 - **Phase 3** : observabilité (Langfuse auto-hébergé, logs structurés) ; serveur MCP ; évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 
+Liste de contrôle de la mise en production (déploiement et durée, phases 2 et 3) : [docs/mise-en-production.md](docs/mise-en-production.md).
+
 ## Licence
 
 Le code, les fiches de référence (`data/corpus/fiches/`) et les contrats synthétiques (`data/contracts/`) sont publiés sous licence **GNU Affero General Public License v3.0** (`AGPL-3.0-only`, fichier [LICENSE](LICENSE)) : quiconque modifie le projet et le met à disposition, y compris comme service en ligne, doit publier ses modifications sous la même licence. **Une licence commerciale, hors AGPL, est possible sur demande** auprès de l'auteur ([sifir-gun](https://github.com/sifir-gun)).

@@ -2139,3 +2139,52 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
 
 - Point réel relevé par AgentShield (« indirect injection defense »), sous une forme propre au dépôt : `data/contracts/` (contrat piégé, attendus) et des tests (injection, instructions, extraction, CRAG, service, interface) contiennent volontairement des consignes adressées à une IA. Une fois le dépôt public, les assistants de code des contributeurs les liront.
 - Ligne ajoutée aux règles non négociables de `CLAUDE.md`, à la suite de celle sur le texte d'un contrat : ce sont des données de test, à ne jamais suivre. Elle ne cite aucune de ces consignes.
+
+## 2026-09-27 · Préparation de la production (branche `preparation-production`)
+
+### Alertes CodeQL `py/url-redirection` : adresse d'un contrat formée à un seul endroit
+
+- **Alertes** (analyse CodeQL par défaut, première exécution après la mise en public) : les deux redirections vers le dossier d'un contrat, après une analyse et après une revue humaine (`adapters/web/app.py`), formées par une f-string.
+- **Lecture du source de CodeQL** (`UrlRedirectCustomizations.qll`, branche `main` de `github/codeql`) : la requête tient pour sûre la partie droite d'une concaténation par `+` derrière un préfixe fixe, pas une f-string (« doesn't cover formatting »). Aucune redirection hors de l'interface n'était possible : le préfixe `/contrats/` est fixe, l'identifiant d'une analyse est contrôlé, celui d'une revue désigne un contrat en attente. Mais l'adresse n'était pas encodée : Starlette (`RedirectResponse`) garde « # » et « ? », et le filtre `urlencode` de Jinja, qui formait les liens, garde « / ».
+- **Décision** : corriger le code plutôt que classer les alertes. `presentation.contract_path` forme toutes les adresses d'un contrat, liens et redirections, avec un préfixe fixe et l'identifiant encodé comme un seul segment.
+- **Tests d'abord** :
+  - adresse interne pour des identifiants hostiles (`//`, `\\`, schéma, `?`, `#`, fins de ligne, `..`), segment unique, identifiant rendu intact, action inconnue refusée ;
+  - redirection après une revue et après une analyse ;
+  - liens des pages par la même fonction, plus aucun `urlencode` dans les gabarits.
+  - Rouges sur l'ancien code : après la revue d'un contrat « revue 1#é », la redirection menait à `/contrats/revue%201#%C3%A9`, soit le dossier `revue 1` ; le lien d'un contrat « a/b » sortait de son segment.
+- Vérifié dans le navigateur, mode démonstration : analyse, redirection vers le dossier, revue humaine, redirection, liste.
+- **Limite, à décider** : la CLI accepte tout identifiant de contrat (`--contract-id`, ou le nom du fichier) ; l'interface impose lettres, chiffres, `.`, `_` et `-`. Un contrat de la CLI dont l'identifiant contient « / », ou vaut `.` ou `..`, reste inaccessible dans l'interface : le routage de Starlette lit un seul segment, décodé. Aligner la CLI sur la règle de l'interface changerait son comportement.
+- Les alertes se ferment d'elles-mêmes à la prochaine analyse de `main` qui ne les trouve plus.
+
+### Liste de contrôle de la mise en production
+
+- Périmètre retenu par le propriétaire, pour le moment : le déploiement (phase 2) et la durée (phase 3). Hors liste : authentification, données personnelles réelles, validation métier, coffre de secrets ; l'ADR 004 interdit toujours toute exposition réseau avant l'authentification.
+- `docs/mise-en-production.md` : chaque point avec sa source (feuille de route, ADR 004, spec, journal, README) et, quand il le faut, à quoi on reconnaît qu'il est fait. Une décision en tête du déploiement : un seul réplica, ou une création de thread atomique en base. Proposition à valider ; rien n'est commencé.
+
+### Identifiant d'un contrat : une seule règle, dans le domaine
+
+- **Décision du propriétaire** : la règle de l'interface devient celle du domaine (`domain/identifiers.py`) : lettres, chiffres, `.`, `_` et `-`, 100 caractères au plus, en commençant par une lettre ou un chiffre. Donc ni « / », ni blanc, ni `.` ou `..` seuls. Elle est appliquée à la création d'un contrat, par le service, pour la CLI comme pour l'interface. Les contrats existants restent lisibles.
+- **Tests d'abord** :
+  - règle du domaine : identifiants valides, dont ceux du vrai journal et ceux que génèrent l'interface et les tests ; identifiants refusés, avec le rappel de la règle ;
+  - service : analyse refusée sans rien créer ; contrat d'identifiant ancien, créé par le moteur directement, listé, lu et tranché ;
+  - CLI : identifiant invalide, tiré du nom du fichier ou de `--contract-id`, refusé avant toute connexion à la base ou au LLM (erreur JSON `ContractIdError`, code 1) ;
+  - interface : message de la règle du domaine.
+  - Rouges avant correction. Les tests des adresses créent désormais leurs contrats aux identifiants hostiles par le moteur directement, comme des contrats plus anciens que la règle.
+- **Vrai journal** (lecture seule, 27/09) : 3 enregistrements, et non 2. Le troisième, `demo-03-go-logiciel-20260927-162519-3d89`, a été créé par l'interface en mode réel, scellé le 27/09 à 16:28 UTC, `GO`. Les trois identifiants suivent la règle, comme les 3 threads du checkpointer ; la chaîne est intègre.
+
+### Référence pour `verify --expect-head` (mise à jour)
+
+Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
+
+`74fe9838c7e6854364e66083026f5cc70a5fa6f298442948d50503175881284f`
+
+### Déploiement : plusieurs réplicas, création d'un contrat sûre en base
+
+- **Décision du propriétaire** (27/09) : on permettra plusieurs réplicas ; la création d'un contrat sera rendue sûre en base, dans la phase Kubernetes. Le verrou du service reste, pour un processus.
+- Liste de contrôle validée et mise à jour (`docs/mise-en-production.md`) ; ADR 004 et spec suivent. Rien n'est codé : ce sera fait dans la phase Kubernetes.
+
+### Icône de l'interface, servie localement
+
+- Le navigateur demandait `/favicon.ico` et recevait un 404. L'icône est désormais un SVG écrit à la main (`static/favicon.svg`, 32 × 32, le bleu des liens de l'interface), déclaré dans l'en-tête des pages et servi aussi à `/favicon.ico`, avec les mêmes en-têtes de sécurité.
+- **Test d'abord** : icône servie aux deux adresses, en `image/svg+xml`, identique au fichier du dépôt, sans script ni lien. Le test des ressources externes lit aussi les SVG ; seul le nom de l'espace de noms SVG, exigé par un fichier autonome et jamais chargé, y est admis.
+- Vu dans le navigateur, mode démonstration : icône affichée, `/favicon.ico` et `/static/favicon.svg` en 200, console sans erreur.

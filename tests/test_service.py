@@ -23,6 +23,7 @@ from cdg.application import ingestion
 from cdg.application.service import ContractService, extraction_refusals, state_label
 from cdg.domain.audit import GENESIS, ReplayError
 from cdg.domain.config import load_config
+from cdg.domain.identifiers import ContractIdError
 from cdg.domain.models import Clause
 from cdg.ports.engine import ThreadError
 
@@ -144,6 +145,27 @@ def test_liste_des_contrats_en_une_seule_ouverture_du_graphe():
 
 
 # --- revue humaine ------------------------------------------------------------------------
+
+
+def test_analyse_refuse_un_identifiant_invalide_sans_rien_creer():
+    service = make_service()
+    with pytest.raises(ContractIdError, match="identifiant de contrat invalide"):
+        service.analyse(CONTRACT_TEXT, contract_id="a b/../c")
+    assert service.contracts() == [] and service.journal() == []
+
+
+def test_contrat_existant_d_identifiant_ancien_reste_lisible_et_tranchable():
+    """Contrat créé avant la règle des identifiants (le moteur directement, comme le
+    faisait la CLI) : listé, lu, tranché ; la règle ne vaut qu'à la création."""
+    service = make_service()
+    legacy = "revue 1#é"
+    service.engine.run(legacy, PENDING_TEXT, (), ANALYSIS_DATE)
+    [row] = service.contracts()
+    assert (row["thread_id"], row["etat"]) == (legacy, "en_attente")
+    assert service.dossier(legacy)["thread_id"] == legacy
+    status = service.decide(legacy, answer())
+    assert (status["statut"], status["final_decision"]) == ("termine", "GO_RESERVES")
+    assert [e["thread_id"] for e in service.journal()] == [legacy]
 
 
 def test_revue_humaine_acceptee_scelle_la_decision():

@@ -3,5 +3,5 @@
 {% block content %}
 <h1>Rejeu de {{ thread_id }}</h1>
 {% include "_rejeu.html" %}
-<p><a href="/contrats/{{ thread_id|urlencode }}">Retour au dossier</a></p>
+<p><a href="{{ contract_path(thread_id) }}">Retour au dossier</a></p>
 {% endblock %}

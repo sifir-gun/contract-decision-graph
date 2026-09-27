@@ -4,13 +4,19 @@ tableau. Aucune logique métier : le dossier vient du service des contrats, tel 
 Le surlignage produit le seul HTML construit en Python : le texte du contrat et chaque
 citation sont échappés d'abord, puis les citations sont cherchées dans le texte échappé et
 entourées de balises fixes. Les gabarits n'emploient jamais le filtre « safe ».
+
+L'adresse d'un contrat ne se forme qu'ici (`contract_path`), pour les liens des pages
+comme pour les redirections.
 """
 
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import quote as percent_encode
 
 from markupsafe import Markup, escape
+
+CONTRACT_ACTIONS = ("decision", "rejeu")
 
 DECISION_LABELS = {
     "GO": "GO",
@@ -34,6 +40,18 @@ RETRIEVAL_LABELS = {
     "OK": "références trouvées",
     "INSUFFISANT": "références insuffisantes",
 }
+
+
+def contract_path(thread_id: str, action: str = "") -> str:
+    """Adresse d'un contrat dans l'interface : préfixe fixe, identifiant encodé comme un
+    seul segment de chemin. « / », « \\ », « ? », « # », « : », blancs et fins de ligne
+    sont encodés : rien de l'identifiant ne sort de son segment, et une redirection vers
+    cette adresse reste sur l'interface (alertes CodeQL py/url-redirection, 27/09).
+    `action` : la page du contrat, ou l'une de `CONTRACT_ACTIONS`."""
+    if action and action not in CONTRACT_ACTIONS:
+        raise ValueError(f"action inconnue pour un contrat : {action}")
+    path = "/contrats/" + percent_encode(thread_id, safe="")
+    return path + "/" + action if action else path
 
 
 def _pattern(quote: str) -> re.Pattern[str] | None:
