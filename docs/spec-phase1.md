@@ -561,7 +561,8 @@ contract-decision-graph/
 │   ├── adr-001-fan-out.md      # décision single vs multi, pattern, gates, NO_GO sur blocage dur seul
 │   ├── adr-002-ports-et-adaptateurs.md  # couches, ports, règles de dépendance, écart assumé
 │   ├── exploitation.md         # J5 : commandes, audit, configuration, migrations, corpus
-│   └── journal.md              # journal des décisions, des séries réelles et des pièges
+│   ├── journal.md              # journal des décisions, des séries réelles et des pièges
+│   └── images/                 # visuels du README (enregistrement du terminal)
 ├── config/
 │   └── decision.yaml           # poids, seuils, marge, budget, politique humaine, LLM,
 │                               # termes d'absence, motifs d'instruction, explication
@@ -569,7 +570,8 @@ contract-decision-graph/
 │   └── initdb/                 # script d'init : applique migrations/*.sql
 ├── scripts/
 │   ├── check.sh                # J4 : exactement les vérifications de la CI, avant chaque push
-│   └── schema_graphe.py        # schéma du README, dessiné par LangGraph depuis le graphe
+│   ├── schema_graphe.py        # schéma du README, dessiné par LangGraph depuis le graphe
+│   └── demo_terminal.sh, .jq   # enregistrement du terminal du README (analyse réelle)
 ├── migrations/
 │   ├── 001_audit.sql           # J1 : extension vector, audit_decisions, app_role
 │   ├── 002_rag.sql             # J3 : rag_chunks, idempotente, lecture seule pour app_role
