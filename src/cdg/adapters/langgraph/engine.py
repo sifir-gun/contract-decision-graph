@@ -158,9 +158,9 @@ class LangGraphEngine:
         with self._open(self._deps.read()) as graph:
             return orchestrator.thread_history(graph, thread_id)
 
-    def thread_ids(self) -> list[str]:
+    def overview(self) -> list[dict[str, Any]]:
         with self._open(self._deps.read()) as graph:
-            return orchestrator.list_threads(graph)
+            return orchestrator.threads_overview(graph)
 
     def expire(self, older_than: timedelta, now: datetime) -> list[dict[str, Any]]:
         with self._open(self._deps.expire()) as graph:

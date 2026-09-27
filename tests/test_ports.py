@@ -15,10 +15,12 @@ from doubles import (
     FixedExtractor,
     HashEmbedder,
     MemoryAuditStore,
+    make_deps,
 )
 
 from cdg.adapters.fastembed import FastembedEmbedder
 from cdg.adapters.langgraph import orchestrator
+from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
@@ -28,6 +30,7 @@ from cdg.application.extraction import LLMExtractor
 from cdg.domain.config import load_config
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.embedder import Embedder
+from cdg.ports.engine import ContractEngine
 from cdg.ports.llm import LLMProvider
 from cdg.ports.retriever import Retriever
 
@@ -48,6 +51,16 @@ IMPLEMENTATIONS = [
     (Crag, lambda: orchestrator.crag_runner(FakeRetriever(), FakeLLM(), CONFIG)),
     (AuditStore, lambda: PostgresAuditStore("")),
     (AuditStore, MemoryAuditStore),
+    (
+        ContractEngine,
+        lambda: LangGraphEngine(
+            CONFIG,
+            memory_opener(CONFIG),
+            EngineDeps(
+                run=make_deps, resume=make_deps, expire=make_deps, read=make_deps
+            ),
+        ),
+    ),
 ]
 
 
@@ -105,3 +118,12 @@ def test_chaque_port_a_ses_methodes():
     assert _methods(Retriever) == ["search"]
     assert _methods(Extractor) == ["__call__"]
     assert _methods(Crag) == ["__call__"]
+    assert _methods(ContractEngine) == [
+        "run",
+        "resume",
+        "status",
+        "values",
+        "history",
+        "overview",
+        "expire",
+    ]

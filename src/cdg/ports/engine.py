@@ -39,7 +39,11 @@ class ContractEngine(Protocol):
         """Checkpoints, du plus ancien au plus récent."""
         ...
 
-    def thread_ids(self) -> list[str]: ...
+    def overview(self) -> list[dict[str, Any]]:
+        """Statut de chaque contrat, avec la date de son premier et de son dernier
+        checkpoint (`started_at`, `updated_at`), en ouvrant le graphe une seule fois,
+        quel que soit leur nombre."""
+        ...
 
     def expire(self, older_than: timedelta, now: datetime) -> list[dict[str, Any]]:
         """NO_GO système pour les threads en attente depuis plus de `older_than`."""

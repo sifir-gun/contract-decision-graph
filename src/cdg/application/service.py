@@ -131,19 +131,18 @@ class ContractService:
             return self.engine.resume(thread_id, dict(answer))
 
     def contracts(self, *, pending_only: bool = False) -> list[dict[str, Any]]:
-        """Contrats du checkpointer, du plus récemment modifié au plus ancien."""
+        """Contrats du checkpointer, du plus récemment modifié au plus ancien ; le graphe
+        est ouvert une seule fois pour toute la liste."""
         rows = []
-        for thread_id in self.engine.thread_ids():
-            status = self.engine.status(thread_id)
-            history = self.engine.history(thread_id)
+        for status in self.engine.overview():
             row = {
-                "thread_id": thread_id,
+                "thread_id": status["thread_id"],
                 "etat": state_label(status),
                 "analysis_date": status["analysis_date"],
                 "proposed_decision": status["proposed_decision"],
                 "final_decision": status["final_decision"],
-                "started_at": history[0]["created_at"],
-                "updated_at": history[-1]["created_at"],
+                "started_at": status["started_at"],
+                "updated_at": status["updated_at"],
             }
             if not pending_only or row["etat"] == WAITING:
                 rows.append(row)

@@ -2121,3 +2121,10 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
   - fichier envoyé lu directement (`UploadFile.file`), toujours en mémoire : la taille d'un envoi reste bornée sous le seuil d'écriture sur disque.
 - Deux analyses du même contrat : la seconde attend, puis reçoit « le thread … existe déjà » (409 dans l'interface). Tests de concurrence : 10 passages sur 10.
 - **Limite, dans l'ADR 004** : le verrou vaut pour un seul processus. En multi-réplicas (phase Kubernetes), la base protège le journal d'audit (verrou consultatif, index uniques) ; la création d'un thread est à vérifier à ce moment-là.
+
+### Liste des contrats en une seule ouverture du graphe
+
+- **Constat** (second avis ECC) : `ContractService.contracts()`, derrière `cdg list` et la page d'accueil de l'interface, appelait `thread_ids()`, puis `status()` et `history()` pour chaque contrat. Chaque appel du port ouvrait le graphe : en réel, une connexion PostgreSQL et une compilation. Soit 1 + 2 × M ouvertures.
+- **Tests d'abord** : `LangGraphEngine` ajouté au test de conformité des ports (il n'y figurait pas), avec la nouvelle liste des méthodes du port ; décompte des ouvertures pendant la liste, après 1, 2 puis 3 contrats. Rouges : 3, 5 puis 7 ouvertures.
+- **Correction** : opération `overview` du port `ContractEngine` (statut de chaque contrat, date de son premier et de son dernier checkpoint), une seule ouverture du graphe ; `contracts()` l'utilise, donc `cdg list` comme l'interface. `thread_ids`, qui n'avait plus d'appelant, est retiré du port et de l'adaptateur. Les lectures de chaque thread restent, sur la même connexion.
+- **Mesure sur la base locale** (27/09, 3 contrats, cinq appels après un appel de chauffe, même script avant et après) : avant, 7 ouvertures et 104 à 110 ms (médiane 107 ms) ; après, 1 ouverture et 31 ms à chaque appel. `cdg list` de bout en bout, processus compris : 0,79 s.

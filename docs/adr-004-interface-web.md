@@ -15,7 +15,7 @@ Tout doit pouvoir se faire soit par la CLI, soit par une interface web, au choix
 
 ### Même moteur, deux portes
 
-Un service applicatif (`application/service.py`) porte les actions communes : `analyse`, `decide`, `contracts`, `dossier`, `history`, `expire`, `journal`, `verify`, `replay`. Il passe par un port d'exécution (`ports/engine.py`, adaptateur `adapters/langgraph/engine.py`) qui ouvre le graphe avec les dépendances de chaque opération, comme le faisait chaque commande. La CLI et l'interface appellent les mêmes méthodes ; `tests/test_parite.py` le vérifie action par action. Pour que chaque écran ait sa commande, la CLI gagne `list`, `show`, `journal` et `replay`.
+Un service applicatif (`application/service.py`) porte les actions communes : `analyse`, `decide`, `contracts`, `dossier`, `history`, `expire`, `journal`, `verify`, `replay`. Il passe par un port d'exécution (`ports/engine.py`, adaptateur `adapters/langgraph/engine.py`) qui ouvre le graphe avec les dépendances de chaque opération, comme le faisait chaque commande. La liste des contrats, elle, se lit en une seule ouverture, quel que soit leur nombre (`overview`, audit de publication du 27/09 : auparavant 1 + 2 × M ouvertures). La CLI et l'interface appellent les mêmes méthodes ; `tests/test_parite.py` le vérifie action par action. Pour que chaque écran ait sa commande, la CLI gagne `list`, `show`, `journal` et `replay`.
 
 L'interface (`adapters/web/`) ne fait que lire des formulaires et mettre en page le dossier que rend le service. FastAPI, Starlette, uvicorn, Jinja2 et MarkupSafe n'y sont importés que là (`tests/test_isolation.py`).
 
