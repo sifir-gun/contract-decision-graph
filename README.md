@@ -202,3 +202,5 @@ Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règl
 Le code, les fiches de référence (`data/corpus/fiches/`) et les contrats synthétiques (`data/contracts/`) sont publiés sous licence **GNU Affero General Public License v3.0** (`AGPL-3.0-only`, fichier [LICENSE](LICENSE)) : quiconque modifie le projet et le met à disposition, y compris comme service en ligne, doit publier ses modifications sous la même licence. **Une licence commerciale, hors AGPL, est possible sur demande** auprès de l'auteur ([sifir-gun](https://github.com/sifir-gun)).
 
 Les textes publics de `data/corpus/raw/` (RGPD, codes français) ne sont pas couverts par cette licence : ils gardent leurs conditions d'origine (EUR-Lex, Décision 2011/833/UE ; Légifrance, Licence Ouverte 2.0), avec les mentions de source décrites dans [SOURCES.md](data/corpus/SOURCES.md).
+
+HTMX, copié dans `src/cdg/adapters/web/static/htmx.min.js`, garde sa licence d'origine, 0BSD ([htmx-LICENSE.txt](src/cdg/adapters/web/static/htmx-LICENSE.txt)).
