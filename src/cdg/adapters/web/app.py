@@ -370,9 +370,12 @@ def create_app(
 
     # --- administration : expiration (expire) -----------------------------------------
 
+    def admin_context(error: str | None) -> dict[str, Any]:
+        return {"error": error, "check": service.config_check()}
+
     @app.api_route("/administration", methods=PAGE_METHODS, response_class=HTMLResponse)
     def administration(request: Request) -> Response:
-        return page(request, "administration.html", {"error": None})
+        return page(request, "administration.html", admin_context(None))
 
     @app.post("/administration/expiration")
     def expiration(request: Request, form: CheckedForm) -> Response:
@@ -381,7 +384,9 @@ def create_app(
             return page(
                 request,
                 "administration.html",
-                {"error": "nombre d'heures invalide : un entier positif est attendu"},
+                admin_context(
+                    "nombre d'heures invalide : un entier positif est attendu"
+                ),
                 400,
             )
         hours = int(raw)

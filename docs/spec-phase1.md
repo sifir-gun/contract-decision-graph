@@ -840,6 +840,8 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - pool psycopg par processus pour `app_role` (`--connexions`, 10 par défaut, mesuré) : checkpointer, journal, recherche, verrous ; verrous de session relâchés au retour de chaque connexion ; pool épuisé : `ConnectionsExhausted`, 503 ; dépendance `psycopg-pool` ;
   - sondes de santé sur un port à part (`web --port-sante`) : vie, démarrage (modèle chargé), disponibilité (base, pas d'arrêt en cours) ; modèle d'embedding chargé une fois par processus ; HEAD accepté sur les pages ;
   - arrêt propre : ordre d'arrêt → plus prêt, modifications refusées (503), requêtes en cours finies dans `--delai-arret` ; reprise des analyses interrompues depuis leur dernier checkpoint (port `ContractEngine.resume_interrupted`), sous leur verrou, au lancement puis périodiquement, sans double scellement ;
+  - checkpoints écrits avant l'étape suivante (`durability="sync"`) : un processus tué ne laisse jamais un checkpoint incomplet ;
+  - `config-check` (CLI) et administration de l'interface (méthode `config_check` du service) : contrats en attente analysés sous une autre configuration, code 1 s'il y en a ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

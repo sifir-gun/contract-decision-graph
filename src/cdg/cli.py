@@ -18,7 +18,7 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 from zoneinfo import ZoneInfo
 
 from cdg import settings
@@ -391,6 +391,26 @@ def _web(args: argparse.Namespace) -> dict:
     return {"web": "arrêtée"}
 
 
+class ConfigChangeBlocked(Exception):
+    """Des contrats en attente ont été analysés sous une autre configuration."""
+
+    def __init__(self, check: dict[str, Any]):
+        names = ", ".join(c["thread_id"] for c in check["a_trancher"])
+        super().__init__(
+            f"contrats en attente sous une autre configuration : {names} ; les trancher "
+            "(resume, sous leur configuration) ou les expirer (expire) avant le "
+            "changement, ou garder l'ancienne configuration"
+        )
+        self.payload = check
+
+
+def _config_check(args: argparse.Namespace) -> dict[str, Any]:
+    check = build_service(load_config()).config_check()
+    if check["a_trancher"]:
+        raise ConfigChangeBlocked(check)
+    return check
+
+
 def resume_periodically(
     service: ContractService, interval: float, stopping: threading.Event
 ) -> None:
@@ -593,6 +613,13 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("thread_id")
     show.set_defaults(handler=_show)
 
+    sub.add_parser(
+        "config-check",
+        help="échoue (code 1) si des contrats en attente ont été analysés sous une autre "
+        "configuration que la courante : resume les refuserait. Avant un changement de "
+        "configuration (tâche Helm)",
+    ).set_defaults(handler=_config_check)
+
     web = sub.add_parser(
         "web",
         help="interface web : mêmes actions que la CLI, par le même service ; écoute "
@@ -658,7 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = getattr(exc, "payload", None)  # rapport structuré, s'il y en a un
         if isinstance(payload, dict):
             error |= payload
-        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(error, ensure_ascii=False, default=str), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0

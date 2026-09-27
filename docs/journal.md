@@ -2264,3 +2264,9 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Cause**, lue dans le code installé (langgraph 1.2.12, `langgraph/types.py`) : par défaut (`durability="async"`), le checkpoint d'une étape s'écrit pendant l'étape suivante ; un processus tué pendant cette écriture laisse un checkpoint incomplet. Défaut connu de ce mode, pas du projet ; mais un pod tué au mauvais moment aurait laissé une analyse jamais reprise, sans rien signaler.
 - **Test d'abord** (`tests/test_arret.py`) : chaque appel au graphe (analyse, reprise humaine, reprise d'une analyse interrompue) passe `durability="sync"`.
 - **Correction** : `orchestrator.DURABILITY`, passée aux trois appels. Le sous-graphe CRAG, sans checkpointer, n'est pas concerné. Vingt essais du test du processus tué, huit passages de la combinaison qui échouait : aucun échec. ADR 005 complété.
+
+### Changement de configuration : contrôle avant déploiement
+
+- **Tests d'abord** (`tests/test_configuration_changee.py`, `tests/test_parite.py`) : deux services sur le même checkpointer, l'un sous une autre configuration ; `config_check` ne liste que les contrats en attente analysés sous une autre empreinte (ni ceux déjà terminés, ni ceux de la configuration courante) ; `config-check` réussit sans contrat à trancher, échoue avec la liste sinon ; l'administration de l'interface montre la même liste, avec un lien vers chaque contrat ; parité CLI et interface.
+- **Réalisation** : méthode `config_check` du service (lecture de `overview`), commande `config-check` (`ConfigChangeBlocked`, code 1, liste dans l'erreur JSON), section de la page d'administration. Constat en chemin : l'erreur JSON de la CLI ne savait pas écrire une date ; elle passe désormais par `default=str`, comme la sortie normale.
+- **Reste pour la PR C** : ConfigMap, annotation d'empreinte des pods, tâche Helm avant la mise à jour qui lance `config-check`, valeur pour passer outre.

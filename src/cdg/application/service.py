@@ -3,17 +3,18 @@
 Chaque méthode correspond à une commande de la CLI et à une action de l'interface ; un
 test vérifie que les deux portes appellent la même (`tests/test_parite.py`) :
 
-| Méthode     | CLI       | Interface web                         |
-| ----------- | --------- | ------------------------------------- |
-| `analyse`   | `run`     | nouvelle analyse                      |
-| `decide`    | `resume`  | revue humaine                         |
-| `contracts` | `list`    | liste des contrats                    |
-| `dossier`   | `show`    | dossier d'un contrat                  |
-| `history`   | `history` | parcours, dans le dossier             |
-| `expire`    | `expire`  | administration                        |
-| `journal`   | `journal` | journal d'audit                       |
-| `verify`    | `verify`  | vérifier la chaîne                    |
-| `replay`    | `replay`  | rejouer, dans le dossier              |
+| Méthode        | CLI            | Interface web                         |
+| -------------- | -------------- | ------------------------------------- |
+| `analyse`      | `run`          | nouvelle analyse                      |
+| `decide`       | `resume`       | revue humaine                         |
+| `contracts`    | `list`         | liste des contrats                    |
+| `dossier`      | `show`         | dossier d'un contrat                  |
+| `history`      | `history`      | parcours, dans le dossier             |
+| `expire`       | `expire`       | administration                        |
+| `journal`      | `journal`      | journal d'audit                       |
+| `verify`       | `verify`       | vérifier la chaîne                    |
+| `replay`       | `replay`       | rejouer, dans le dossier              |
+| `config_check` | `config-check` | administration                        |
 
 Le service ne décide rien : le graphe (port `ContractEngine`) rend les verdicts et
 applique la politique de revue ; le domaine vérifie la chaîne et rejoue. Le texte d'un
@@ -190,6 +191,22 @@ class ContractService:
         with self._writes:
             now = self.now()  # après l'attente du verrou : l'heure de l'expiration
             return now, self.engine.expire(older_than, now)
+
+    def config_check(self) -> dict[str, Any]:
+        """Contrats en attente d'une revue analysés sous une autre configuration que la
+        courante : `resume` les refuse. À trancher ou à expirer avant de changer de
+        configuration, ou à relancer après (ADR 005, « Changement de configuration »)."""
+        current = audit.config_hash(self.config)
+        stale = [
+            {
+                "thread_id": status["thread_id"],
+                "config_hash": status["config_hash"],
+                "analysis_date": status["analysis_date"],
+            }
+            for status in self.engine.overview()
+            if state_label(status) == WAITING and status["config_hash"] != current
+        ]
+        return {"configuration": current, "a_trancher": stale}
 
     def resume_interrupted(self) -> list[dict[str, Any]]:
         """Reprise des analyses interrompues : une modification, sous le verrou du
