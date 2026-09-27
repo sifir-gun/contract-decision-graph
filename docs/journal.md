@@ -2128,3 +2128,9 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
 - **Tests d'abord** : `LangGraphEngine` ajouté au test de conformité des ports (il n'y figurait pas), avec la nouvelle liste des méthodes du port ; décompte des ouvertures pendant la liste, après 1, 2 puis 3 contrats. Rouges : 3, 5 puis 7 ouvertures.
 - **Correction** : opération `overview` du port `ContractEngine` (statut de chaque contrat, date de son premier et de son dernier checkpoint), une seule ouverture du graphe ; `contracts()` l'utilise, donc `cdg list` comme l'interface. `thread_ids`, qui n'avait plus d'appelant, est retiré du port et de l'adaptateur. Les lectures de chaque thread restent, sur la même connexion.
 - **Mesure sur la base locale** (27/09, 3 contrats, cinq appels après un appel de chauffe, même script avant et après) : avant, 7 ouvertures et 104 à 110 ms (médiane 107 ms) ; après, 1 ouverture et 31 ms à chaque appel. `cdg list` de bout en bout, processus compris : 0,79 s.
+
+### Seuil de couverture : 98 %
+
+- **Décision du propriétaire** : `fail_under` passe de 96 à 98, selon la règle du 26/09 (l'entier juste sous la mesure) : 98,71 % mesurés le 27/09 sur `main`, en lignes et en branches, tests PostgreSQL compris. Badge du README et `CLAUDE.md`, spec, `docs/exploitation.md` suivent.
+- **Test d'abord** : `tests/test_couverture.py` fige la valeur décidée (rouge à 96) ; le test de cohérence du badge reste.
+- Après les deux corrections de l'interface et le test des verrous : 98,72 %, 1 225 tests.

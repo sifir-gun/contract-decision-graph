@@ -1,7 +1,7 @@
 # contract-decision-graph
 
 [![CI](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
-[![couverture minimale](https://img.shields.io/badge/couverture-%E2%89%A5%2096%20%25-brightgreen)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
+[![couverture minimale](https://img.shields.io/badge/couverture-%E2%89%A5%2098%20%25-brightgreen)](https://github.com/sifir-gun/contract-decision-graph/actions/workflows/ci.yml)
 
 Un graphe LangGraph qui rend un verdict **auditable** sur un contrat fournisseur : `GO`, `GO_RESERVES`, `NO_GO`, ou `ESCALADE` vers un humain.
 

@@ -11,6 +11,9 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 BADGE = re.compile(r"https://img\.shields\.io/badge/couverture-([^-)]+)-[a-z]+\)")
+# décision du 27/09/2026 (audit de publication) : l'entier juste sous la couverture
+# mesurée, 98,71 % en lignes et en branches ; 96 % depuis le 26/09
+DECIDED_THRESHOLD = 98
 
 
 def fail_under() -> float:
@@ -18,8 +21,8 @@ def fail_under() -> float:
     return config["tool"]["coverage"]["report"]["fail_under"]
 
 
-def test_seuil_de_couverture_configure():
-    assert 0 < fail_under() <= 100
+def test_seuil_de_couverture_decide():
+    assert fail_under() == DECIDED_THRESHOLD
 
 
 def test_badge_du_readme_affiche_le_seuil_de_la_ci():
