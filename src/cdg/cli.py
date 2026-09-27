@@ -18,15 +18,18 @@ from zoneinfo import ZoneInfo
 
 from cdg import settings
 from cdg.adapters import fastembed
+from cdg.adapters.demo.audit_store import MemoryAuditStore
+from cdg.adapters.demo.extraction import ExpectedExtractor
+from cdg.adapters.demo.references import DeclaredCrag
 from cdg.adapters.langgraph import checkpointer, orchestrator
-from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine
+from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm import API_KEY_VARS, build_provider
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.web import app as web_app
 from cdg.adapters.web import security as web_security
 from cdg.adapters.web import server as web_server
-from cdg.application import ingestion
+from cdg.application import demo_set, ingestion
 from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
@@ -180,6 +183,46 @@ def build_service(config: DecisionConfig) -> ContractService:
     )
 
 
+# démonstration : explication toujours par le gabarit, motif scellé en mémoire
+DEMO_EXPLAINER = TemplateOnly(
+    "démonstration : explication par le gabarit, sans LLM ; extraction simulée"
+)
+
+
+def demo_service(config: DecisionConfig) -> ContractService:
+    """Service du mode démonstration de l'interface : graphe réel, checkpointer et journal
+    d'audit en mémoire, extraction simulée à partir des attendus du jeu, références par
+    rattachement déclaré, explication par le gabarit. Ni clé d'API, ni base, ni coût.
+    Date d'analyse par défaut : celle des attendus, pour que le jeu rende ses issues
+    documentées quel que soit le jour (versions des textes du corpus)."""
+    expected_on, contracts = demo_set.load()
+    store = MemoryAuditStore()
+    deps = Deps(
+        extractor=ExpectedExtractor(contracts.values()),
+        crag=DeclaredCrag(config.corpus.chunk_max_words),
+        audit_store=store,
+        clock=now,
+        explainer=DEMO_EXPLAINER,
+    )
+    engine = LangGraphEngine(
+        config,
+        memory_opener(config),
+        EngineDeps(
+            run=lambda: deps,
+            resume=lambda: deps,
+            expire=lambda: deps,
+            read=lambda: deps,
+        ),
+    )
+    return ContractService(
+        engine=engine,
+        audit_store=lambda: store,
+        config=config,
+        today=lambda: expected_on,
+        now=lambda: now(),
+    )
+
+
 def _run(args: argparse.Namespace) -> dict:
     contract = Path(args.contract)
     raw_text = contract.read_text(encoding="utf-8")
@@ -268,14 +311,16 @@ def _web(args: argparse.Namespace) -> dict:
         args.host, allow_non_local=args.ecoute_non_locale
     )
     config = load_config()
+    service = demo_service(config) if args.demo else build_service(config)
     app = web_app.create_app(
-        build_service(config), hosts=web_security.allowed_hosts(args.host)
+        service, demo=args.demo, hosts=web_security.allowed_hosts(args.host)
     )
     if warning:
         print(warning, file=sys.stderr)
     shown = f"[{args.host}]" if ":" in args.host else args.host
+    mode = "démonstration, en mémoire" if args.demo else "réel"
     print(
-        f"Interface : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
+        f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
         file=sys.stderr,
     )
     web_server.serve(app, args.host, args.port)
@@ -414,6 +459,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     web.add_argument("--host", default="127.0.0.1", help="adresse d'écoute")
     web.add_argument("--port", type=int, default=8000, help="port d'écoute")
+    web.add_argument(
+        "--demo",
+        action="store_true",
+        help="démonstration : sans clé d'API, sans coût, sans base ; extraction "
+        "simulée pour les contrats du jeu, rien n'est scellé dans le vrai journal",
+    )
     web.add_argument(
         "--ecoute-non-locale",
         action="store_true",

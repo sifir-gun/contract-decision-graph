@@ -98,14 +98,18 @@ def reference_texts() -> dict[str, dict[str, str]]:
 # --- Extraits à ingérer ------------------------------------------------------------------
 
 
-def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
-    """Extraits des articles admis et des fiches, un par domaine d'indexation.
+Pending = list[tuple[dict[str, Any], str, list[str]]]
+
+
+def pending_chunks(max_words: int) -> Pending:
+    """Extraits des articles admis et des fiches, avant embedding : métadonnées, texte à
+    embarquer, types de clause que la source peut justifier.
 
     Le texte embarqué est précédé de la référence (et de l'intitulé) pour la recherche ;
     le texte stocké reste celui de l'article, cité tel quel. Une fiche prend la plus proche
     des fins de validité des articles qu'elle cite : elle les paraphrase, elle expire avec.
     """
-    pending: list[tuple[dict[str, Any], str, list[str]]] = []
+    pending: Pending = []
     validity: dict[tuple[str, str], date | None] = {}
     for article, kinds in articles():
         validity[(article.source_id, article.article)] = article.valid_until
@@ -144,6 +148,12 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
                 "valid_until": min(ends, default=None),
             }
             pending.append((meta, f"{reference}\n{text}", fiche.kinds))
+    return pending
+
+
+def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
+    """Extraits à ingérer, un par domaine d'indexation, embarqués par le port."""
+    pending = pending_chunks(max_words)
     vectors = embedder.embed_passages([embedded for _, embedded, _ in pending])
     return [
         # une ligne par domaine d'indexation, avec les types de clause de ce domaine que la

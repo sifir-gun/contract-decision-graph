@@ -364,7 +364,9 @@ async def _contract_input(form: FormData, demo: bool) -> tuple[str, list[str], s
         chosen = contracts.get(_text(form, "contrat"))
         if chosen is None:
             raise InputError("contrat inconnu du jeu de démonstration")
-        return chosen.text(), parties or list(chosen.parties), chosen.id
+        # démonstration : les parties déclarées, dont dépend l'extraction simulée
+        declared = list(chosen.parties)
+        return chosen.text(), declared if demo else parties or declared, chosen.id
     if source in ("texte", "fichier") and demo:
         raise InputError(
             "démonstration : l'extraction est simulée pour les contrats du jeu "

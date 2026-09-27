@@ -38,13 +38,17 @@
     {% endif %}
   </fieldset>
 
+  {% if not demo %}
   <label for="parties">Parties à masquer, une par ligne</label>
   <textarea id="parties" name="parties" rows="3" aria-describedby="parties-aide"></textarea>
   <p id="parties-aide" class="hint">Pour un contrat du jeu, laissez vide : ses parties déclarées sont masquées. Le texte original n'est jamais conservé : il est masqué avant l'analyse.</p>
+  {% else %}
+  <p class="hint">Les parties déclarées du contrat choisi sont masquées avant l'analyse.</p>
+  {% endif %}
 
   <label for="date">Date d'analyse</label>
   <input type="date" id="date" name="date" aria-describedby="date-aide">
-  <p id="date-aide" class="hint">Par défaut, aujourd'hui (heure de Paris) : les versions des textes du corpus sont jugées à cette date.</p>
+  <p id="date-aide" class="hint">{% if demo %}Par défaut en démonstration, le 25 septembre 2026, date des résultats attendus du jeu{% else %}Par défaut, aujourd'hui (heure de Paris){% endif %} : les versions des textes du corpus sont jugées à cette date.</p>
 
   <label for="identifiant">Identifiant du contrat</label>
   <input type="text" id="identifiant" name="identifiant" maxlength="100" aria-describedby="identifiant-aide">
