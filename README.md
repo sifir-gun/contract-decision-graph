@@ -168,12 +168,13 @@ Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règl
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
+- [ADR 003 : LangGraph Studio écarté](docs/adr-003-studio-ecarte.md). En usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot : ce qui a été observé le 27/09/2026, avec les versions, et ce qui n'a pas été mesuré.
 - [Spécification de la phase 1](docs/spec-phase1.md), source de vérité ; [journal](docs/journal.md) des décisions, des séries réelles et des pièges ; [exploitation](docs/exploitation.md).
 
 ## Feuille de route
 
-- **Phase 2** : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
-- **Phase 3** : API (FastAPI), déploiement Helm sur k3s.
+- **Phase 2** : d'abord un rapport HTML par contrat ; puis l'API (FastAPI), avec un écran de revue humaine, et le déploiement sur Kubernetes (k3s, Helm).
+- **Phase 3** : observabilité (Langfuse auto-hébergé, logs structurés) ; serveur MCP ; évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 
 ## Licence

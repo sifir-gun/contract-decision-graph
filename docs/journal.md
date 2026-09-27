@@ -2042,3 +2042,10 @@ Après l'analyse enregistrée pour le GIF du README (thread `demo-06-no-go-conse
 `905e2359e1cf3a1905d877628364f345ccddf1715e3cd1367b755dc9f4b83740`
 
 `uv run python -m cdg.cli verify --expect-head 905e2359e1cf3a1905d877628364f345ccddf1715e3cd1367b755dc9f4b83740` passe le 27/09. À remplacer par la nouvelle tête après chaque analyse scellée dans le vrai journal.
+
+### Visuels : ADR 003 dans le README, feuille de route renumérotée (décision du 27/09)
+
+- **README** : l'ADR 003 rejoint la liste des ADR de la section « Architecture ».
+- **Phases renumérotées** : phase 2, d'abord un rapport HTML par contrat (premier chantier après la phase 1), puis l'API FastAPI avec un écran de revue humaine, et le déploiement Kubernetes (k3s, Helm) ; phase 3, l'observabilité (Langfuse auto-hébergé, logs structurés), le serveur MCP, l'évaluation en CI et les évolutions notées pendant la phase 1 (clauses non couvertes, signal « clause ambiguë », lecture de la quantité et unités de durée, juge du CRAG plus fort, ancrage externe de la tête du journal, base de test séparée, test réseau en CI) ; phase 4, optionnelle, inchangée.
+- **Renvois mis à jour** : README (feuille de route), spec (hors périmètre, stockage, jeu de démonstration, trois puces de l'historique, et une entrée du 27/09 qui explique la renumérotation), `docs/exploitation.md` (ancrage externe, test réseau en CI), ADR 003 (alternative prévue), un commentaire de `tests/test_verify_extraction.py`. CLAUDE.md et les ADR 001 et 002 ne citaient aucune phase au-delà de la phase 1.
+- **Le journal n'est pas réécrit** : ses entrées jusqu'au 27/09 disent « phase 2 » pour ce qui est désormais en phase 3.

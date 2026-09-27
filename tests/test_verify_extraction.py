@@ -314,7 +314,7 @@ def test_valeur_et_unite_retrouvees_dans_la_citation(kind, quote, value):
         ("duree_engagement", "Engagement de cent vingt mois.", 20.0, "mois"),
         # « trois ans » vaut 36 mois, jamais 3
         ("duree_engagement", "Engagement de trois ans.", 3.0, "mois"),
-        # semaines et jours pour une durée : non convertis (phase 2)
+        # semaines et jours pour une durée : non convertis (phase 3)
         ("preavis_resiliation", "Préavis de six semaines.", 1.5, "mois"),
     ],
 )
