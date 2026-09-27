@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Expiration{% endblock %}
+{% block content %}
+<h1>Expiration</h1>
+<p>Délai : {{ hours }} heure{{ "s" if hours != 1 else "" }}, au <time datetime="{{ at.isoformat() }}">{{ at.isoformat()[:19]|replace("T", " ") }}</time> (UTC).</p>
+{% if expired %}
+<ul>
+  {% for x in expired %}
+  <li><a href="/contrats/{{ x.thread_id|urlencode }}">{{ x.thread_id }}</a> : <span class="badge badge-{{ x.final_decision|lower }}">{{ decisions[x.final_decision] }}</span> (décision système, scellée)</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>Aucun contrat en attente depuis plus longtemps que ce délai.</p>
+{% endif %}
+<p><a href="/">Retour aux contrats</a></p>
+{% endblock %}

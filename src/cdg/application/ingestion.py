@@ -8,6 +8,7 @@ L'écriture en base est faite par l'adaptateur PostgreSQL, appelé par la CLI.
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -76,17 +77,39 @@ def load_fiches(directory: Path = FICHES) -> list[Fiche]:
     return fiches
 
 
+def fiche_reference(fiche: Fiche) -> str:
+    return f"Fiche projet : {fiche.title}"
+
+
+@cache
+def reference_texts() -> dict[str, dict[str, str]]:
+    """Texte de chaque référence citable du corpus (article entier, ou corps de la fiche)
+    et sa source : l'état d'un contrat ne garde que le nom des références retenues. Lus
+    dans les fichiers du corpus au premier appel, pour afficher un dossier."""
+    texts = {
+        article.reference: {"source": article.source_id, "texte": article.text}
+        for article, _ in articles()
+    }
+    for fiche in load_fiches():
+        texts[fiche_reference(fiche)] = {"source": fiche.id, "texte": fiche.body}
+    return texts
+
+
 # --- Extraits à ingérer ------------------------------------------------------------------
 
 
-def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
-    """Extraits des articles admis et des fiches, un par domaine d'indexation.
+Pending = list[tuple[dict[str, Any], str, list[str]]]
+
+
+def pending_chunks(max_words: int) -> Pending:
+    """Extraits des articles admis et des fiches, avant embedding : métadonnées, texte à
+    embarquer, types de clause que la source peut justifier.
 
     Le texte embarqué est précédé de la référence (et de l'intitulé) pour la recherche ;
     le texte stocké reste celui de l'article, cité tel quel. Une fiche prend la plus proche
     des fins de validité des articles qu'elle cite : elle les paraphrase, elle expire avec.
     """
-    pending: list[tuple[dict[str, Any], str, list[str]]] = []
+    pending: Pending = []
     validity: dict[tuple[str, str], date | None] = {}
     for article, kinds in articles():
         validity[(article.source_id, article.article)] = article.valid_until
@@ -113,7 +136,7 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
             }
             pending.append((meta, f"{header}\n{text}", kinds))
     for fiche in load_fiches():
-        reference = f"Fiche projet : {fiche.title}"
+        reference = fiche_reference(fiche)
         cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
         ends = [end for c in cited if (end := validity[c]) is not None]
         for index, text in enumerate(chunk(fiche.body, max_words)):
@@ -125,6 +148,12 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
                 "valid_until": min(ends, default=None),
             }
             pending.append((meta, f"{reference}\n{text}", fiche.kinds))
+    return pending
+
+
+def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
+    """Extraits à ingérer, un par domaine d'indexation, embarqués par le port."""
+    pending = pending_chunks(max_words)
     vectors = embedder.embed_passages([embedded for _, embedded, _ in pending])
     return [
         # une ligne par domaine d'indexation, avec les types de clause de ce domaine que la

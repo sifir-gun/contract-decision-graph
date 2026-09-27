@@ -3,9 +3,10 @@
 import json
 from datetime import UTC, date, datetime
 
+# journal d'audit en mémoire des tests : celui du mode démonstration (adapters/demo)
+from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, TemplateOnly
 from cdg.domain import audit
-from cdg.domain.audit import StoredAuditEntry
 from cdg.domain.config import load_config
 from cdg.domain.models import (
     DOMAIN_KINDS,
@@ -18,7 +19,6 @@ from cdg.domain.models import (
     Usage,
 )
 from cdg.domain.verification import VALUE_UNITS
-from cdg.ports.audit_store import AuditStoreError
 from cdg.ports.retriever import Passage
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
@@ -285,33 +285,6 @@ class FakeRetriever:
         self.calls.append((domain, query, k))
         self.searched_kinds.append(kind)
         return [p for p in self.passages.get(domain, []) if kind in p.kinds][:k]
-
-
-class MemoryAuditStore:
-    """Doublure du port AuditStore : journal en mémoire, mêmes règles que PostgreSQL
-    (un enregistrement par thread, ajout rejoué idempotent à décision égale)."""
-
-    def __init__(self):
-        self.stored: list[StoredAuditEntry] = []
-
-    def append(self, seal) -> StoredAuditEntry:
-        entry = seal(self.stored[-1].chain_hash if self.stored else None)
-        for stored in self.stored:
-            if stored.thread_id == entry.thread_id:
-                if stored.decision_hash != entry.decision_hash:
-                    raise AuditStoreError(
-                        f"thread {entry.thread_id} déjà scellé avec une autre décision"
-                    )
-                return stored
-        created_at = datetime.fromisoformat(entry.record["sealed_at"])
-        stored = StoredAuditEntry(
-            **entry.model_dump(), id=len(self.stored) + 1, created_at=created_at
-        )
-        self.stored.append(stored)
-        return stored
-
-    def entries(self) -> list[StoredAuditEntry]:
-        return list(self.stored)
 
 
 # horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre

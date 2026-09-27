@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Nouvelle analyse{% endblock %}
+{% block content %}
+<h1>Nouvelle analyse</h1>
+{% if error %}
+<p class="error" role="alert">{{ error }}</p>
+{% endif %}
+<form method="post" action="/analyse" enctype="multipart/form-data"
+      hx-indicator="#analyse-en-cours" hx-disabled-elt="find button[type='submit']">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset>
+    <legend>Contrat à analyser</legend>
+    <div class="choice">
+      <input type="radio" id="source-jeu" name="source" value="jeu" checked>
+      <label for="source-jeu">Un contrat du jeu de démonstration</label>
+    </div>
+    <label for="contrat">Contrat du jeu</label>
+    <select id="contrat" name="contrat">
+      {% for c in contracts %}
+      <option value="{{ c.id }}">{{ c.id }}</option>
+      {% endfor %}
+    </select>
+    {% if not demo %}
+    <div class="choice">
+      <input type="radio" id="source-texte" name="source" value="texte">
+      <label for="source-texte">Un texte collé</label>
+    </div>
+    <label for="texte">Texte du contrat</label>
+    <textarea id="texte" name="texte" rows="10"></textarea>
+    <div class="choice">
+      <input type="radio" id="source-fichier" name="source" value="fichier">
+      <label for="source-fichier">Un fichier texte</label>
+    </div>
+    <label for="fichier">Fichier (.txt, UTF-8)</label>
+    <input type="file" id="fichier" name="fichier" accept=".txt,text/plain">
+    {% else %}
+    <p class="hint">En démonstration, l'extraction est simulée pour les contrats du jeu seulement.</p>
+    {% endif %}
+  </fieldset>
+
+  {% if not demo %}
+  <label for="parties">Parties à masquer, une par ligne</label>
+  <textarea id="parties" name="parties" rows="3" aria-describedby="parties-aide"></textarea>
+  <p id="parties-aide" class="hint">Pour un contrat du jeu, laissez vide : ses parties déclarées sont masquées. Le texte original n'est jamais conservé : il est masqué avant l'analyse.</p>
+  {% else %}
+  <p class="hint">Les parties déclarées du contrat choisi sont masquées avant l'analyse.</p>
+  {% endif %}
+
+  <label for="date">Date d'analyse</label>
+  <input type="date" id="date" name="date" aria-describedby="date-aide">
+  <p id="date-aide" class="hint">{% if demo %}Par défaut en démonstration, le 25 septembre 2026, date des résultats attendus du jeu{% else %}Par défaut, aujourd'hui (heure de Paris){% endif %} : les versions des textes du corpus sont jugées à cette date.</p>
+
+  <label for="identifiant">Identifiant du contrat</label>
+  <input type="text" id="identifiant" name="identifiant" maxlength="100" aria-describedby="identifiant-aide">
+  <p id="identifiant-aide" class="hint">Facultatif : lettres, chiffres, points, tirets et soulignés. Par défaut, généré.</p>
+
+  {% if not demo %}
+  <p class="notice">Analyse réelle : appels au fournisseur LLM de la configuration, payants (environ 0,002 $ par contrat).</p>
+  {% endif %}
+  <button type="submit">Analyser</button>
+  <p id="analyse-en-cours" class="htmx-indicator" role="status">Analyse en cours : de 5 à 20 secondes.</p>
+</form>
+{% endblock %}

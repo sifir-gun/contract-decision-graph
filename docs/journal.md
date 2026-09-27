@@ -2049,3 +2049,51 @@ Après l'analyse enregistrée pour le GIF du README (thread `demo-06-no-go-conse
 - **Phases renumérotées** : phase 2, d'abord un rapport HTML par contrat (premier chantier après la phase 1), puis l'API FastAPI avec un écran de revue humaine, et le déploiement Kubernetes (k3s, Helm) ; phase 3, l'observabilité (Langfuse auto-hébergé, logs structurés), le serveur MCP, l'évaluation en CI et les évolutions notées pendant la phase 1 (clauses non couvertes, signal « clause ambiguë », lecture de la quantité et unités de durée, juge du CRAG plus fort, ancrage externe de la tête du journal, base de test séparée, test réseau en CI) ; phase 4, optionnelle, inchangée.
 - **Renvois mis à jour** : README (feuille de route), spec (hors périmètre, stockage, jeu de démonstration, trois puces de l'historique, et une entrée du 27/09 qui explique la renumérotation), `docs/exploitation.md` (ancrage externe, test réseau en CI), ADR 003 (alternative prévue), un commentaire de `tests/test_verify_extraction.py`. CLAUDE.md et les ADR 001 et 002 ne citaient aucune phase au-delà de la phase 1.
 - **Le journal n'est pas réécrit** : ses entrées jusqu'au 27/09 disent « phase 2 » pour ce qui est désormais en phase 3.
+
+## 2026-09-27 · Interface web (branche `interface-web`)
+
+Décision du propriétaire : une interface web en plus du terminal, avant la mise en public ; tout doit se faire soit par la CLI, soit par l'interface. C'est l'écran de revue humaine de la phase 2, avancé. Plan présenté, sans changement important des choix du propriétaire ; ajouts signalés : contrôle de l'en-tête Host (rebond DNS), taille des envois dérivée de `input.max_chars` sans nouvelle clé de configuration (une clé ajoutée changerait l'empreinte de la configuration et bloquerait la reprise des contrats suspendus), captures par Chrome sans fenêtre (le navigateur intégré de l'assistant n'écrit pas de fichier).
+
+### Dépendances
+
+- Vérifiées d'abord dans une copie jetable (`uv lock`) : fastapi 0.141.1, uvicorn 0.54.0, jinja2 3.1.6, python-multipart 0.0.32, et trois transitives (starlette 1.7.0, markupsafe 3.0.3, annotated-doc 0.0.5). Ajout seul : aucune version existante modifiée (comparaison des versions du lock avant et après). Licences, selon les métadonnées de PyPI : MIT (fastapi, annotated-doc), BSD-3-Clause (starlette, uvicorn, markupsafe ; jinja2 par son classifieur BSD), Apache-2.0 (python-multipart). pip-audit : aucune faille connue.
+- `uv.lock` réécrit au format « revision 3 » (date de mise en ligne de chaque paquet) par la même version de uv (0.12.19) : empreintes inchangées.
+- **HTMX 2.0.11**, copié dans `src/cdg/adapters/web/static/` : archive du registre npm, intégrité sha512 égale à celle du registre ; sha384 de `dist/htmx.min.js` égal à celui que publie la documentation d'HTMX pour ce fichier ; licence 0BSD copiée à côté ; aucune URL dans le fichier.
+
+### Service commun et parité
+
+- Port `ContractEngine` (`ports/engine.py`) et adaptateur LangGraph (`adapters/langgraph/engine.py`) : chaque opération ouvre le graphe avec les dépendances qu'elle exige, comme chaque commande ; checkpointer PostgreSQL ou en mémoire. `ThreadError` passe dans le port.
+- Service des contrats (`application/service.py`) : `analyse`, `decide`, `contracts`, `dossier`, `history`, `expire`, `journal`, `verify`, `replay`. La CLI passe par lui sans changement de comportement ; les noms que ses tests remplacent (`build_deps`, `_graph`, `open_audit_store`, `today`) sont lus à l'appel. Nouvelles commandes : `list`, `show`, `journal`, `replay`, `web`. L'historique d'un thread porte désormais le retour ciblé de chaque extraction refusée.
+- `tests/test_parite.py` : les deux portes sur le même service en mémoire, enveloppé d'un enregistreur ; chaque commande appelle une seule méthode, toutes les méthodes sont couvertes, et chaque action de l'interface appelle la même méthode que sa commande.
+- Journal d'audit en mémoire déplacé dans `adapters/demo/`, repris par les doublures des tests.
+- Deux tests d'expiration dépendaient de l'heure réelle (« plus tard » calculé depuis une date fixe, alors que les checkpoints sont datés à l'heure réelle : faux à partir du 28/09) : corrigés, « plus tard » part de l'heure réelle.
+
+### Interface, mode réel
+
+- `adapters/web/` : FastAPI, Jinja2 (échappement automatique, variables indéfinies refusées), HTMX. Écrans : liste (filtre en attente), nouvelle analyse (contrat du jeu, texte collé ou fichier ; parties ; date ; identifiant), dossier (décision et statut en badges avec texte, explication, texte masqué avec citations surlignées et reliées à leur clause, clauses, verdicts avec le texte des références relu dans le corpus, alertes, parcours horodaté, consommation par nœud, empreintes, rejeu), revue humaine, journal et vérification (tête attendue facultative), expiration avec confirmation.
+- Sécurité : tests d'abord (points 5 à 10 de la décision), dont un contrat, une citation, une explication de LLM et un nom de relecteur avec du HTML et du JavaScript ; le texte original absent de l'état, des journaux (tous niveaux) et des pages, même en erreur ; envoi trop gros refusé avant lecture ; fichier non textuel refusé ; clé d'API absente : message clair.
+- Vu dans le navigateur intégré sur la vraie base : liste, dossier du contrat 06 (les 4 analystes en parallèle à l'étape 3 du parcours), rejeu identique par HTMX, vérification de la chaîne avec tête attendue ; aucune erreur de CSP dans la console, aucun style injecté.
+
+### Mode démonstration
+
+- `adapters/demo/` : extraction simulée (contrat reconnu à son texte masqué avec ses parties déclarées ; tout autre texte refusé), références par rattachement déclaré passées par la vraie étape `generate` du CRAG, journal en mémoire ; explication par le gabarit. `cdg.cli web --demo`, bandeau permanent. Les 13 contrats du jeu rendent leur issue attendue, revues comprises (`tests/test_web_demo.py`).
+- Date d'analyse par défaut en démonstration : celle des attendus (25/09/2026). Sinon, à partir du 01/01/2027 (fin de validité de L441-10 et de la fiche qui le paraphrase), les issues changeraient avec le jour.
+- Limite relevée pour l'ADR : le contexte d'analyse scellé en mémoire nomme les modèles de la configuration, alors qu'aucun n'est appelé ; la consommation affiche « simulation ».
+- Captures du README (`docs/images/interface-*.png`) : interface démo remplie par ses propres formulaires, captures par Chrome sans fenêtre (profil jetable par capture : le premier essai, avec un seul profil, n'a écrit qu'une capture sur quatre, profil resté verrouillé).
+
+### Analyse réelle de bout en bout par l'interface (27/09)
+
+- Dans le navigateur intégré, interface en mode réel : contrat piégé du jeu (`demo-11-piege-injection`, identifiant `demo-11-interface`), parties déclarées masquées, date du jour. Analyse en 9,9 s, indicateur de chargement affiché pendant la requête ; revue humaine attendue (tentative d'instruction détectée), `NO_GO` proposé.
+- Décision prise dans l'interface : `NO_GO`, motif « révision de prix non plafonnée ; la consigne glissée dans le contrat est ignorée », relecteur « Relecteur interface » ; scellée en 1,5 s, explication par le LLM.
+- Rejeu identique (interface et CLI) ; `verify` par l'interface : chaîne intègre, 2 enregistrements, tête égale à la tête attendue ; `cdg.cli verify --expect-head` : même résultat.
+- Coût, aux tarifs publiés : 0,00107 $ pour 5 265 tokens (extraction 2 068 + 500, juge du CRAG 1 737 + 20 en deux appels, réécriture 162 + 33, explication 629 + 116).
+
+### Référence pour `verify --expect-head` (mise à jour)
+
+Après l'analyse de bout en bout par l'interface, le vrai journal d'audit compte 2 enregistrements ; tête de chaîne :
+
+`77eeb52281314ed36027a7d667b6abe8c6a62e0febbdc82fcbeaa7d1e989f792`
+
+### Documentation
+
+ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souveraineté, sécurité, pas d'authentification avant l'étape Kubernetes, mode démonstration et ses limites, mesure de bout en bout) ; README (section « Interface web », captures, commandes des deux modes ; ADR 004 dans la liste ; phase 2 : écran de revue humaine fait) ; `docs/exploitation.md` ; spec (arborescence, commandes, isolation, phase 2, historique) ; CLAUDE.md (règles de l'interface, commandes, pile).

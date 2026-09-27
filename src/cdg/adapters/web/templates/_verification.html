@@ -1,0 +1,9 @@
+{% if error %}
+<p class="error" role="alert">{{ error }}</p>
+{% elif report.ok %}
+<p class="ok" role="status"><strong>Chaîne intègre</strong> : {{ report.count }} enregistrement{{ "s" if report.count != 1 else "" }}{% if expected %}, tête égale à la tête attendue{% endif %}.</p>
+<p>Tête de chaîne : <code>{{ report.head }}</code></p>
+{% else %}
+<p class="error" role="alert"><strong>Chaîne non conforme</strong> : {{ report.reason }}{% if report.broken_id %} (premier enregistrement fautif : n° {{ report.broken_id }}){% endif %}.</p>
+<p>Tête de chaîne : <code>{{ report.head }}</code></p>
+{% endif %}

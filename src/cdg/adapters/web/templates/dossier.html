@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Contrat {{ d.thread_id }}{% endblock %}
+{% block content %}
+<header class="dossier-head">
+  <h1>Contrat {{ d.thread_id }}</h1>
+  <p class="status-line">
+    {% if s.final_decision %}
+    <span class="label">Décision finale</span>
+    <span class="badge badge-{{ s.final_decision|lower }}">{{ decisions[s.final_decision] }}</span>
+    {% elif s.proposed_decision %}
+    <span class="label">Décision proposée</span>
+    <span class="badge badge-{{ s.proposed_decision|lower }}">{{ decisions[s.proposed_decision] }}</span>
+    {% endif %}
+    <span class="state state-{{ d.etat }}">{{ states[d.etat] }}</span>
+    <span class="meta">analysé à la date du {{ s.analysis_date or "—" }}</span>
+  </p>
+  {% if s.reject_reason %}
+  <p class="error">Rejeté à l'entrée : {{ s.reject_reason }}</p>
+  {% endif %}
+  {% if s.human %}
+  <p class="meta">Décision humaine : {{ decisions[s.human.decision] }}, par {{ s.human.reviewer }} ({{ s.human.source }}) : {{ s.human.reason }}{% if s.human.overrides_block %} ; blocage dur levé{% endif %}.</p>
+  {% endif %}
+</header>
+
+{% if s.demande %}
+<section id="revue" class="panel review" aria-labelledby="revue-titre">
+  <h2 id="revue-titre">Revue humaine</h2>
+  <dl class="facts">
+    <dt>Décision proposée</dt>
+    <dd>{% if s.demande.proposed_decision %}<span class="badge badge-{{ s.demande.proposed_decision|lower }}">{{ decisions[s.demande.proposed_decision] }}</span>{% else %}—{% endif %}</dd>
+    <dt>Marge au seuil le plus proche</dt>
+    <dd>{{ s.demande.margin if s.demande.margin is not none else "—" }}</dd>
+    <dt>Blocages durs</dt>
+    <dd>{% set blocked = s.demande.verdicts|selectattr("hard_block")|map(attribute="domain")|list %}{% if blocked %}{% for b in blocked %}{{ domains[b] }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}aucun{% endif %}</dd>
+    {% if s.demande.failure_report %}
+    <dt>Rapport d'échec</dt>
+    <dd>{% for key, value in s.demande.failure_report.items() %}{{ key }} : {{ value }}{% if not loop.last %} ; {% endif %}{% endfor %}</dd>
+    {% endif %}
+    {% if s.demande.input_findings %}
+    <dt>Alertes</dt>
+    <dd>{% for f in s.demande.input_findings %}{{ f }}{% if not loop.last %} ; {% endif %}{% endfor %}</dd>
+    {% endif %}
+  </dl>
+  {% if s.demande.get("error") %}
+  <p class="error" role="alert">Réponse refusée par la politique de revue : {{ s.demande.get("error") }}</p>
+  {% endif %}
+  <form method="post" action="/contrats/{{ d.thread_id|urlencode }}/decision">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="decision">Décision</label>
+    <select id="decision" name="decision" required>
+      {% for x in allowed %}
+      <option value="{{ x }}">{{ decisions[x] }}</option>
+      {% endfor %}
+    </select>
+    <label for="motif">Motif (obligatoire)</label>
+    <textarea id="motif" name="motif" rows="3" required></textarea>
+    <label for="relecteur">Relecteur (nom)</label>
+    <input type="text" id="relecteur" name="relecteur" required autocomplete="name">
+    {% if d.levee_possible %}
+    <div class="warning">
+      <input type="checkbox" id="levee" name="levee" value="oui" aria-describedby="levee-aide">
+      <label for="levee">Lever le blocage dur</label>
+      <p id="levee-aide">Une règle bloquante s'est déclenchée. La lever pour rendre une autre décision que NO GO engage le relecteur : le motif et la levée sont scellés dans le journal d'audit.</p>
+    </div>
+    {% endif %}
+    <button type="submit">Enregistrer la décision</button>
+  </form>
+</section>
+{% endif %}
+
+{% set alerts = s.input_findings or s.failures or d.extractions_refusees or s.failure_report %}
+{% if alerts %}
+<section class="panel alerts" aria-labelledby="alertes-titre">
+  <h2 id="alertes-titre">Alertes</h2>
+  {% if s.input_findings %}
+  <h3>Tentative d'instruction détectée</h3>
+  <ul>{% for f in s.input_findings %}<li>{{ f }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if d.extractions_refusees %}
+  <h3>Extractions refusées par la vérification</h3>
+  <ol>
+    {% for problems in d.extractions_refusees %}
+    <li>{% for p in problems %}{{ p }}{% if not loop.last %} ; {% endif %}{% endfor %}</li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+  {% if s.failure_report %}
+  <h3>Rapport d'échec</h3>
+  <dl class="facts">
+    {% for key, value in s.failure_report.items() %}
+    <dt>{{ key }}</dt><dd>{{ value }}</dd>
+    {% endfor %}
+  </dl>
+  {% endif %}
+  {% if s.failures %}
+  <h3>Échecs de nœuds</h3>
+  <ul>{% for f in s.failures %}<li>{{ f.node }}{% if f.domain %} ({{ f.domain }}){% endif %} : {{ f.error }}, {{ f.message }} ; {{ f.attempts }} tentative(s)</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if s.explanation %}
+<section aria-labelledby="explication-titre">
+  <h2 id="explication-titre">Explication</h2>
+  <p class="synthesis">{{ s.explanation.synthesis }}</p>
+  {% for f in s.explanation.findings %}
+  <p>{% if f.kind %}<a href="#clause-{{ f.kind }}">{{ f.kind }}</a> : {% endif %}{{ f.text }}{% if f.references %} <span class="meta">(références : {{ f.references|join(" ; ") }})</span>{% endif %}</p>
+  {% endfor %}
+  <p class="meta">Explication {{ "par le LLM, contrôlée par le code" if s.explanation.source == "llm" else "par le gabarit, sans LLM" }}{% if s.explanation.reasons %} ; motifs : {{ s.explanation.reasons|join(" ; ") }}{% endif %}.</p>
+</section>
+{% endif %}
+
+<section aria-labelledby="texte-titre">
+  <h2 id="texte-titre">Texte masqué du contrat</h2>
+  <p class="hint">Citations des clauses surlignées ; chacune mène à sa clause. Le texte original n'est pas conservé.</p>
+  <div class="contract-text">{{ highlight(d.texte_masque, quotes_of(d.clauses)) }}</div>
+</section>
+
+<section aria-labelledby="clauses-titre">
+  <h2 id="clauses-titre">Clauses extraites</h2>
+  {% if d.clauses %}
+  <table>
+    <thead><tr><th scope="col">Type</th><th scope="col">Présente</th><th scope="col">Valeur</th><th scope="col">Catégorie</th><th scope="col">Citation</th></tr></thead>
+    <tbody>
+      {% for c in d.clauses %}
+      <tr id="clause-{{ c.kind }}">
+        <th scope="row">{{ c.kind }}</th>
+        <td>{{ "oui" if c.present else "non" }}</td>
+        <td>{{ c.value if c.value is not none else "—" }}</td>
+        <td>{{ c.category or "—" }}</td>
+        <td>{% if c.present %}<a href="#citation-{{ c.kind }}">{{ c.quote }}</a>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Aucune clause extraite.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="verdicts-titre">
+  <h2 id="verdicts-titre">Verdict par domaine</h2>
+  {% for v in d.verdicts %}
+  <article id="domaine-{{ v.domain }}" class="verdict">
+    <h3>{{ domains[v.domain] }} <span class="meta">score {{ v.score }}{% if v.hard_block %}, <strong>blocage dur</strong>{% endif %}, {{ retrievals[v.retrieval_status] }}</span></h3>
+    {% if v.findings %}
+    <ul>{% for f in v.findings %}<li>{{ f }}</li>{% endfor %}</ul>
+    {% else %}
+    <p>Aucun constat.</p>
+    {% endif %}
+    {% if v.retrieval %}
+    {% for c in v.retrieval.clauses %}
+    {% for row in reference_rows(d.references) if row.reference in c.retained %}
+    <details>
+      <summary>{{ c.kind }} : {{ row.reference }}{% if row.source %} <span class="meta">(source {{ row.source }})</span>{% endif %}</summary>
+      {% if row.texte %}<p class="extract">{{ row.texte }}</p>{% else %}<p>Texte de la référence absente du corpus.</p>{% endif %}
+    </details>
+    {% endfor %}
+    {% if c.expired %}<p class="meta">Références expirées à la date d'analyse, non retenues : {{ c.expired|join(" ; ") }}</p>{% endif %}
+    {% endfor %}
+    {% for f in v.retrieval.findings %}<p class="meta">{{ f }}</p>{% endfor %}
+    {% endif %}
+  </article>
+  {% else %}
+  <p>Aucun verdict : le contrat n'a pas atteint les analystes.</p>
+  {% endfor %}
+</section>
+
+<section aria-labelledby="parcours-titre">
+  <h2 id="parcours-titre">Parcours dans le graphe</h2>
+  <table>
+    <thead><tr><th scope="col">Étape</th><th scope="col">Horodatage</th><th scope="col">Nœuds suivants</th><th scope="col">Route</th></tr></thead>
+    <tbody>
+      {% for p in d.parcours %}
+      <tr>
+        <td>{{ p.step }}</td>
+        <td><time datetime="{{ p.created_at }}">{{ p.created_at }}</time></td>
+        <td>{{ p.next|join(", ") or "fin" }}</td>
+        <td>{{ p.route or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section aria-labelledby="conso-titre">
+  <h2 id="conso-titre">Consommation et latence par nœud</h2>
+  {% if d.consommation %}
+  <table>
+    <thead><tr><th scope="col">Nœud</th><th scope="col">Modèles</th><th scope="col">Appels</th><th scope="col">Tokens entrée</th><th scope="col">Tokens sortie</th><th scope="col">Latence (ms)</th></tr></thead>
+    <tbody>
+      {% for u in d.consommation %}
+      <tr><td>{{ u.node }}</td><td>{{ u.models|join(", ") }}</td><td>{{ u.calls }}</td><td>{{ u.tokens_in }}</td><td>{{ u.tokens_out }}</td><td>{{ u.latency_ms }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Aucun appel à un LLM.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="empreintes-titre">
+  <h2 id="empreintes-titre">Empreintes</h2>
+  <dl class="facts hashes">
+    <dt>Configuration</dt><dd><code>{{ s.config_hash or "—" }}</code></dd>
+    <dt>Décision</dt><dd><code>{{ s.decision_hash or "non scellée" }}</code></dd>
+    <dt>Chaîne</dt><dd><code>{{ s.chain_hash or "non scellée" }}</code></dd>
+  </dl>
+  <p><a class="button" href="/contrats/{{ d.thread_id|urlencode }}/rejeu"
+        hx-get="/contrats/{{ d.thread_id|urlencode }}/rejeu" hx-target="#rejeu" hx-push-url="false">Rejouer la décision</a></p>
+  <div id="rejeu" aria-live="polite"></div>
+</section>
+{% endblock %}

@@ -120,6 +120,25 @@ uv run python -m cdg.cli verify                   # recalcule toute la chaîne d
 
 Détail des commandes, du journal d'audit, des migrations et du corpus : [docs/exploitation.md](docs/exploitation.md).
 
+## Interface web
+
+Tout ce que fait la CLI se fait aussi dans une interface web locale, au choix : lancer une analyse, lire le dossier d'un contrat, trancher une revue humaine, vérifier le journal d'audit, rejouer une décision, expirer les contrats en attente. Même moteur, deux portes : chaque action de l'interface appelle la même fonction que sa commande, et un test le vérifie. L'interface ne contient aucune logique métier ([ADR 004](docs/adr-004-interface-web.md)).
+
+```bash
+uv run python -m cdg.cli web --demo   # démonstration : sans clé d'API, sans coût, sans base
+uv run python -m cdg.cli web          # réel : base, corpus indexé et clé dans .env
+```
+
+Puis ouvrir http://127.0.0.1:8000. En démonstration, l'extraction est simulée à partir des résultats attendus du jeu, sans appel à un LLM ; les règles, la décision, la revue humaine et le scellement tournent pour de vrai, en mémoire. L'interface écoute sur 127.0.0.1 et n'a pas d'authentification : une autre adresse exige une option explicite. Elle ne charge aucune ressource externe (ni CDN, ni police web, ni mesure d'audience), et échappe tout texte venu d'un contrat ou d'un LLM.
+
+| Liste des contrats | Dossier d'un contrat |
+| --- | --- |
+| ![Liste des contrats : état et décision de chacun, filtre des contrats en attente de revue](docs/images/interface-liste.png) | ![Dossier d'un contrat : décision, explication, texte masqué avec les citations surlignées, clauses extraites](docs/images/interface-dossier.png) |
+| **Revue humaine** | **Journal d'audit** |
+| ![Revue humaine du contrat piégé : décision proposée, blocage, tentatives d'instruction détectées, formulaire avec motif obligatoire](docs/images/interface-revue.png) | ![Journal d'audit : enregistrements scellés et vérification de la chaîne](docs/images/interface-journal.png) |
+
+*Captures en mode démonstration. Le 27/09/2026, une analyse réelle de bout en bout par l'interface (contrat piégé, revue humaine, vérification de la chaîne) a coûté 0,00107 $.*
+
 ## Résultats sur modèle réel
 
 **Série 8, 26/09/2026**, Mistral (`mistral-small-2603`, et `ministral-8b-2512` pour le juge du CRAG), 100 tests réels sur 100, sans relance. Sur le jeu de démonstration, 13 contrats × 5 essais :
@@ -164,16 +183,17 @@ Les critères testés avec le vrai modèle passent aussi, 5 fois sur 5 : un cons
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed), `cli.py` pour l'assemblage. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. Plus de mille tests, suite PostgreSQL comprise, tournent en CI ; les tests avec le vrai modèle, payants, se lancent à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web), `cli.py` pour l'assemblage. La CLI et l'interface web passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. Plus de mille tests, suite PostgreSQL comprise, tournent en CI ; les tests avec le vrai modèle, payants, se lancent à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
 - [ADR 003 : LangGraph Studio écarté](docs/adr-003-studio-ecarte.md). En usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot : ce qui a été observé le 27/09/2026, avec les versions, et ce qui n'a pas été mesuré.
+- [ADR 004 : interface web](docs/adr-004-interface-web.md). Rendu côté serveur avec HTMX plutôt qu'une application séparée ; aucune ressource externe ; sécurité ; pas d'authentification avant l'étape Kubernetes ; mode démonstration et ses limites.
 - [Spécification de la phase 1](docs/spec-phase1.md), source de vérité ; [journal](docs/journal.md) des décisions, des séries réelles et des pièges ; [exploitation](docs/exploitation.md).
 
 ## Feuille de route
 
-- **Phase 2** : d'abord un rapport HTML par contrat ; puis l'API (FastAPI), avec un écran de revue humaine, et le déploiement sur Kubernetes (k3s, Helm).
+- **Phase 2** : d'abord un rapport HTML par contrat ; puis l'API (FastAPI) et le déploiement sur Kubernetes (k3s, Helm), avec l'authentification, obligatoire avant toute exposition réseau. L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
 - **Phase 3** : observabilité (Langfuse auto-hébergé, logs structurés) ; serveur MCP ; évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 

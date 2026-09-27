@@ -1,0 +1,14 @@
+{% if error %}
+<p class="error" role="alert">Rejeu impossible : {{ error }}</p>
+{% elif report.identique %}
+<p class="ok" role="status"><strong>Rejeu identique</strong> : règles, justification et décision recalculées à partir de l'enregistrement scellé, sans LLM ni corpus, donnent la même empreinte.</p>
+{% else %}
+<p class="error" role="alert"><strong>Rejeu différent</strong> : l'empreinte recalculée diffère de l'empreinte scellée.</p>
+{% endif %}
+{% if report %}
+<dl class="facts hashes">
+  <dt>Empreinte scellée</dt><dd><code>{{ report.empreinte_scellee }}</code></dd>
+  <dt>Empreinte rejouée</dt><dd><code>{{ report.empreinte_rejouee }}</code></dd>
+  <dt>Recalcul</dt><dd>{{ "règles, justification et décision" if report.recalcule else "rien à recalculer (rejet, ou escalade avant la décision)" }}</dd>
+</dl>
+{% endif %}

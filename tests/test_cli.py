@@ -1,16 +1,13 @@
 """CLI : sorties JSON, erreurs structurées, dépendances réelles remplacées par des doublures."""
 
-import json
 from contextlib import contextmanager
 from datetime import date
 
 import psycopg
 import pytest
+from cli_helpers import INSUFFICIENT, run_cli
 from doubles import (
-    ABSENT,
     CONTRACT_TEXT,
-    TEMPLATE,
-    FakeCrag,
     FakeLLM,
     FixedExtractor,
     HashEmbedder,
@@ -19,16 +16,9 @@ from doubles import (
 )
 
 from cdg import cli
-from cdg.application.deps import Deps
 from cdg.application.explanation import LLMExplainer
 from cdg.domain.config import load_config
 from cdg.domain.models import REQUIRED_KINDS, Clause
-
-
-def run_cli(capsys, *argv) -> tuple[int, dict]:
-    code = cli.main(list(argv))
-    out, err = capsys.readouterr()
-    return code, json.loads(out if code == 0 else err)
 
 
 @pytest.mark.pg
@@ -58,43 +48,6 @@ def test_commande_obligatoire(capsys):
 
 
 # --- run, resume, history ---------------------------------------------------------------
-
-
-@pytest.fixture
-def contract(tmp_path):
-    path = tmp_path / "contrat-synth.txt"
-    path.write_text(CONTRACT_TEXT, encoding="utf-8")
-    return str(path)
-
-
-# financier INSUFFISANT : un constat (pénalités d'exécution absentes) que le corpus ne
-# justifie pas
-INSUFFICIENT = (FixedExtractor(clauses(penalites_execution=ABSENT)), {"financier"})
-
-
-@pytest.fixture
-def analysis(monkeypatch, request):
-    """Remplace les dépendances réelles (LLM, embedding, corpus) par des doublures ; la
-    CLI scelle dans un journal jetable (fixture `audit_journal`, demandée à l'appel)."""
-
-    def use(extractor=None, empty=()):
-        extractor = extractor or FixedExtractor(clauses())
-        crag = FakeCrag(empty)
-
-        def build(config):
-            request.getfixturevalue("audit_journal")
-            return Deps(
-                extractor=extractor,
-                crag=crag,
-                audit_store=cli.open_audit_store(),
-                clock=cli.now,
-                explainer=TEMPLATE,
-            )
-
-        monkeypatch.setattr(cli, "build_deps", build)
-        return extractor, crag
-
-    return use
 
 
 def test_aide_de_run(capsys):

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import psycopg
 import pytest
+from doubles import CONTRACT_TEXT, TEMPLATE, FakeCrag, FixedExtractor, clauses
 from psycopg import sql
 
 from cdg import cli, settings
@@ -15,6 +16,7 @@ from cdg.adapters.langgraph import checkpointer
 from cdg.adapters.llm import API_KEY_VARS
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
+from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 
 
@@ -138,3 +140,38 @@ def audit_journal(pg, journal, monkeypatch) -> PostgresAuditStore:
     store = PostgresAuditStore(pg.app, table=journal)
     monkeypatch.setattr(cli, "open_audit_store", lambda: store)
     return store
+
+
+# --- CLI : contrat synthétique et doublures des dépendances réelles -------------------
+
+
+@pytest.fixture
+def contract(tmp_path):
+    path = tmp_path / "contrat-synth.txt"
+    path.write_text(CONTRACT_TEXT, encoding="utf-8")
+    return str(path)
+
+
+@pytest.fixture
+def analysis(monkeypatch, request):
+    """Remplace les dépendances réelles (LLM, embedding, corpus) par des doublures ; la
+    CLI scelle dans un journal jetable (fixture `audit_journal`, demandée à l'appel)."""
+
+    def use(extractor=None, empty=()):
+        extractor = extractor or FixedExtractor(clauses())
+        crag = FakeCrag(empty)
+
+        def build(config):
+            request.getfixturevalue("audit_journal")
+            return Deps(
+                extractor=extractor,
+                crag=crag,
+                audit_store=cli.open_audit_store(),
+                clock=cli.now,
+                explainer=TEMPLATE,
+            )
+
+        monkeypatch.setattr(cli, "build_deps", build)
+        return extractor, crag
+
+    return use

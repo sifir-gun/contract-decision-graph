@@ -34,6 +34,7 @@ from cdg.application.state import AnalystInput, ContractState
 from cdg.domain import audit, expiry, masking, policy
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
+from cdg.ports.engine import ThreadError
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
 from cdg.ports.retriever import Retriever
 
@@ -373,8 +374,7 @@ def open_graph(
 # --- Exécution d'un thread : run, resume, history ---------------------------------
 
 
-class ThreadError(Exception):
-    """Thread inconnu, déjà existant, ou pas en attente d'une décision humaine."""
+__all__ = ["ThreadError"]  # défini par le port ; relevé ici par la CLI et les tests
 
 
 def _thread(thread_id: str) -> RunnableConfig:
@@ -510,9 +510,20 @@ def thread_history(graph: CompiledStateGraph, thread_id: str) -> list[dict]:
             "route": snap.values.get("route"),
             "proposed_decision": snap.values.get("proposed_decision"),
             "final_decision": snap.values.get("final_decision"),
+            # retour ciblé posé par une extraction refusée, avant la suivante
+            "extraction_feedback": list(snap.values.get("extraction_feedback", [])),
         }
         for snap in reversed(history)
     ]
+
+
+def list_threads(graph: CompiledStateGraph) -> list[str]:
+    """Threads du checkpointer, triés. list() garde le verrou (non réentrant) du
+    checkpointer tant que le générateur n'est pas épuisé : collecter d'abord."""
+    saver = graph.checkpointer
+    if not isinstance(saver, BaseCheckpointSaver):
+        raise ThreadError("la liste des threads exige un graphe avec un checkpointer")
+    return sorted({c.config["configurable"]["thread_id"] for c in saver.list(None)})
 
 
 def _metadata(snapshot: StateSnapshot) -> CheckpointMetadata:
@@ -532,15 +543,7 @@ def expire_threads(
     `thread_ids` restreint la recherche : les tests ne touchent ainsi jamais aux
     autres threads en attente de la base. La CLI n'en passe pas.
     """
-    # list() garde le verrou (non réentrant) du checkpointer tant que le
-    # générateur n'est pas épuisé : collecter d'abord, interroger ensuite
-    saver = graph.checkpointer
-    if not isinstance(saver, BaseCheckpointSaver):
-        raise ThreadError("expire exige un graphe compilé avec un checkpointer")
-    found = {
-        checkpoint.config["configurable"]["thread_id"]
-        for checkpoint in saver.list(None)
-    }
+    found = set(list_threads(graph))
     if thread_ids is not None:
         found &= thread_ids
     pending = []

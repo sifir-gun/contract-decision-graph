@@ -351,11 +351,11 @@ Points à maîtriser :
 - **Timeout humain, échec fermé** : `expire --older-than 24h` reprend chaque thread en attente d'un humain depuis strictement plus que le délai. Le point de départ est la date du checkpoint de suspension. La reprise se fait par une décision système `NO_GO` : `source = "systeme"`, relecteur `systeme:expire`, motif « timeout : en attente depuis … ». Elle passe par la même politique, et `audit_seal` la scellera (J4). Jamais d'approbation automatique : le modèle `HumanDecision` refuse toute décision système autre que `NO_GO`. Un thread qui a reçu des réponses refusées reste en attente, donc il expire aussi. La sélection (`expiry.py`) est pure, avec une horloge injectée ; l'appel à LangGraph reste dans `orchestrator.py`.
 - **Sous-graphe CRAG** : compilé à part avec son propre état (`CragState` : `clause`, `query`, `queries`, `attempts`, `docs`, `relevant`, `route`, `usage`, `result`), une invocation par clause qui porte un constat, et appelé dans `analyst`. Ses nœuds sont les fonctions pures de `crag.py` ; sa fonction de routage est annotée avec `CragState`, car LangGraph déduit un schéma de l'annotation d'une fonction de routage ; la compilation du sous-graphe vit dans `orchestrator.py`, la règle d'isolation ne change pas. Héritage du checkpointer vérifié dans langgraph 1.2.12 : par défaut, le sous-graphe hérite du checkpointer du parent (voir le journal). Décision : `compile(checkpointer=False)`, aucun checkpoint du CRAG ; un analyste relancé refait son CRAG de zéro. Pour l'audit, le CRAG renvoie un résumé (requêtes essayées, nombre de passes, références retenues et références expirées), porté par le verdict de l'analyste, lui-même checkpointé.
 - **Isolation** : architecture inspirée de l'architecture hexagonale (ports et adaptateurs, `docs/adr-002-ports-et-adaptateurs.md`). Seul `adapters/langgraph/` importe LangGraph ; `orchestrator.py` y contient les adaptateurs (`Send`, `interrupt()`, câblage). Nœuds, règles, politique et audit restent des fonctions pures qui renvoient des dicts, testables sans le framework. Règles vérifiées sur les imports (`tests/test_isolation.py`) :
-  - chaque bibliothèque externe n'est importée que dans son adaptateur : langgraph dans `adapters/langgraph/`, psycopg et pgvector dans `adapters/postgres/` (psycopg aussi dans `adapters/langgraph/checkpointer.py`, car `PostgresSaver` exige une connexion psycopg), fastembed dans `adapters/fastembed.py`, mistralai et anthropic dans `adapters/llm/` ;
+  - chaque bibliothèque externe n'est importée que dans son adaptateur : langgraph dans `adapters/langgraph/`, psycopg et pgvector dans `adapters/postgres/` (psycopg aussi dans `adapters/langgraph/checkpointer.py`, car `PostgresSaver` exige une connexion psycopg), fastembed dans `adapters/fastembed.py`, mistralai et anthropic dans `adapters/llm/` ; fastapi, starlette, uvicorn, jinja2 et markupsafe dans `adapters/web/` (27/09) ;
   - `domain/` n'importe ni `ports/`, ni `application/`, ni `adapters/` ; `ports/` n'importe que `domain/` ; `application/` importe `domain/` et `ports/`, jamais `adapters/` ; `adapters/` importe `ports/`, `domain/`, `application/` et `settings`, jamais `cli` ni une autre famille d'adaptateurs ; `cli.py` est la racine de composition ;
   - chaque adaptateur et chaque doublure expose les attributs et méthodes de son port, avec la même signature (`tests/test_ports.py`).
 
-  Ports : `LLMProvider`, `Embedder`, `Retriever` (requête en texte : l'adaptateur calcule le vecteur et filtre sur son modèle), `AuditStore` (implémenté au J4 ; `append` lit la tête de chaîne et insère dans une même transaction, le calcul des empreintes reste dans le domaine). Pas de port pour l'écriture du corpus : l'ingestion est une commande d'administration, câblée dans la CLI. **Écart assumé : le flux vit dans le graphe.** Routes, fan-out et interruption sont câblés dans l'adaptateur LangGraph, pas dans un service de l'application.
+  Ports : `LLMProvider`, `Embedder`, `Retriever` (requête en texte : l'adaptateur calcule le vecteur et filtre sur son modèle), `ContractEngine` (27/09 : exécution d'un contrat, reprise, lecture, liste, expiration ; utilisé par le service des contrats, commun à la CLI et à l'interface web, qui ne fait que déléguer), `AuditStore` (implémenté au J4 ; `append` lit la tête de chaîne et insère dans une même transaction, le calcul des empreintes reste dans le domaine). Pas de port pour l'écriture du corpus : l'ingestion est une commande d'administration, câblée dans la CLI. **Écart assumé : le flux vit dans le graphe.** Routes, fan-out et interruption sont câblés dans l'adaptateur LangGraph, pas dans un service de l'application.
 - **thread_id** : un contrat = un thread. Clé de reprise, de l'historique et du lien avec la piste d'audit.
 - **Échecs de nœud** : au J2, une exception dans un nœud (clause ou verdict manquant, erreur d'API) interrompt l'exécution. L'état reste dans le dernier checkpoint, lisible par `history`, et la CLI rend l'erreur en JSON sur stderr avec le code 1. Un test le vérifie. Étude de `error_handler` (LangGraph 1.2.12), faite par sonde :
   - un gestionnaire qui renvoie un dict voit ses écritures appliquées, puis **l'exécution s'arrête** : ni l'arête fixe ni l'arête conditionnelle du nœud en échec ne sont suivies, et `route` écrite dans l'état n'est pas lue ;
@@ -583,7 +583,8 @@ contract-decision-graph/
 │   ├── contracts/              # 10 contrats synthétiques, 2 piégés, 1 réaliste ; attendus
 │   └── corpus/                 # SOURCES.md, manifest.yaml, raw/ (textes publics), fiches/
 ├── src/cdg/
-│   ├── cli.py                  # racine de composition : run, resume, history, expire, verify
+│   ├── cli.py                  # racine de composition : run, resume, history, expire, verify,
+│   │                           # list, show, journal, replay, web (27/09)
 │   ├── settings.py             # .env (python-dotenv), variables obligatoires
 │   ├── domain/                 # règles pures : n'importe ni ports, ni application, ni adaptateurs
 │   │   ├── models.py           # modèles métier Pydantic (clauses, verdicts, décision humaine…)
@@ -608,7 +609,8 @@ contract-decision-graph/
 │   │   ├── llm.py              # LLMProvider
 │   │   ├── embedder.py         # Embedder
 │   │   ├── retriever.py        # Retriever, Passage
-│   │   └── audit_store.py      # AuditStore, implémenté au J4
+│   │   ├── audit_store.py      # AuditStore, implémenté au J4
+│   │   └── engine.py           # ContractEngine : exécution des contrats (27/09)
 │   ├── application/            # orchestre le domaine à travers les ports, jamais un adaptateur
 │   │   ├── state.py            # état du graphe : ContractState, réducteurs, route, AnalystInput
 │   │   ├── nodes/              # un fichier par nœud : adaptation état -> domaine -> état
@@ -618,10 +620,18 @@ contract-decision-graph/
 │   │   ├── explanation.py      # J4 : explication LLM des constats (modèle main)
 │   │   ├── prompts/            # prompts système, sans règle de décision
 │   │   ├── crag.py             # fonctions pures du CRAG ; sous-graphe compilé dans l'orchestrateur
-│   │   └── ingestion.py        # lecture du corpus, extraits embarqués par le port Embedder
+│   │   ├── ingestion.py        # lecture du corpus, extraits embarqués par le port Embedder
+│   │   ├── service.py          # service des contrats, commun à la CLI et à l'interface (27/09)
+│   │   └── demo_set.py         # jeu de démonstration : fichiers, parties, clauses attendues
 │   └── adapters/               # chaque bibliothèque externe n'est importée que dans son adaptateur
 │       ├── langgraph/          # orchestrator.py (câblage, Send, interrupt, sous-graphe CRAG),
-│       │                       # checkpointer.py (PostgresSaver, sérialiseur strict)
+│       │                       # checkpointer.py (PostgresSaver, sérialiseur strict),
+│       │                       # engine.py (port ContractEngine, checkpointer PostgreSQL ou
+│       │                       # en mémoire)
+│       ├── web/                # interface web (27/09) : FastAPI, Jinja2, HTMX copié dans
+│       │                       # static/ ; sécurité, présentation, aucune logique métier
+│       ├── demo/               # mode démonstration : extraction simulée, références
+│       │                       # déclarées, journal d'audit en mémoire
 │       ├── postgres/           # conninfo.py, migrations.py, rag_store.py (corpus),
 │       │                       # audit_store.py (J4 : verrou consultatif, ajout idempotent)
 │       ├── llm/                # fournisseurs mistral.py, anthropic.py, choisis par la config
@@ -629,7 +639,7 @@ contract-decision-graph/
 └── tests/
 ```
 
-CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `ingest` (identifiants administrateur, rejouable), `run <contrat> [--party …] [--contract-id …] [--analysis-date AAAA-MM-JJ]`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify [--expect-head <empreinte>]`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
+CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `ingest` (identifiants administrateur, rejouable), `run <contrat> [--party …] [--contract-id …] [--analysis-date AAAA-MM-JJ]`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify [--expect-head <empreinte>]` ; depuis le 27/09, par le service des contrats commun à l'interface web : `list [--en-attente]`, `show <thread_id>`, `journal`, `replay <thread_id>`, et `web [--demo] [--host …] [--port …] [--ecoute-non-locale]`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
 
 Comportement de la CLI (J2) :
 - `run` refuse un thread existant, puisqu'un contrat correspond à un thread ;
@@ -687,11 +697,11 @@ Priorité si le temps manque : ne sacrifier ni J2, ni l'audit, ni le test d'inje
 
 Hors phase 1 :
 
-- **Phase 2** : d'abord un rapport HTML par contrat ; puis l'API FastAPI, avec un écran de revue humaine, et le déploiement Kubernetes (k3s, Helm).
+- **Phase 2** : d'abord un rapport HTML par contrat ; puis l'API FastAPI et le déploiement Kubernetes (k3s, Helm), avec l'authentification, obligatoire avant toute exposition réseau. **Écran de revue humaine : fait**, en avance (27/09) : l'interface web locale, `docs/adr-004-interface-web.md`.
 - **Phase 3** : observabilité (Langfuse auto-hébergé, logs structurés), serveur MCP, évaluation en CI, et les évolutions notées pendant la phase 1 : détection des clauses qui ne correspondent à aucun type connu, signalées à l'humain comme « clause non couverte par les règles », ancrage externe de la tête de la chaîne d'audit par un horodatage certifié, base de test séparée de la base de développement, pour que les tests ne partagent jamais la base qui contient le vrai journal, cohérence entre valeur et citation qui sache quel nombre de la citation est la quantité de la clause : aujourd'hui la valeur est seulement cherchée parmi les nombres de la citation, et dans « 1 % par semaine, dans la limite de 10 % », un plafond de 1 % passerait (décision du 26/09), normalisation des unités de durée : semaines et jours pour une durée ou un préavis comptés en mois, durées composées (« trois ans et six mois ») (décision du 26/09), signal « clause ambiguë » rendu par l'extraction, qui mènerait à la revue humaine au lieu d'une lecture au pire (décision du 26/09), variabilité du juge du CRAG : à la série 6, il n'a retenu aucune référence pour la clause d'engagement du contrat 03 au 5e essai, alors qu'il en retenait aux 4 autres (`INSUFFISANT`, puis `ESCALADE`, dans le sens prudent) ; évaluer un modèle plus fort pour le juge (décision du 26/09), test d'absence d'appel réseau des embeddings en CI : aujourd'hui il ne tourne qu'en local, sur les vrais poids, et ne protège donc pas les mises à jour de Dependabot ; piste : un modèle ONNX minuscule en fixture (la télémétrie se déclenche à l'initialisation d'onnxruntime, quel que soit le modèle), exécuté en CI dans un environnement Linux sans réseau (espace de noms réseau isolé), à chaque pull request et sans les 35 secondes du test local (décision du 26/09).
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 
-Pas d'interface graphique en phase 1 (l'écran de revue humaine vient en phase 2) ; pas de repli web dans le CRAG.
+Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est venue le 27/09, avant la mise en public (écran de revue humaine de la phase 2, avancé). Pas de repli web dans le CRAG.
 
 ## Historique des révisions
 
@@ -806,6 +816,12 @@ Pas d'interface graphique en phase 1 (l'écran de revue humaine vient en phase 2
   - schéma du README dessiné par LangGraph depuis le graphe réel (`scripts/schema_graphe.py`), vérifié par un test ; enregistrement du terminal pendant une analyse réelle (`scripts/demo_terminal.sh`) ;
   - LangGraph Studio écarté (ADR 003, `docs/adr-003-studio-ecarte.md`) ;
   - feuille de route renumérotée : phase 2, d'abord un rapport HTML par contrat, puis l'API FastAPI avec un écran de revue humaine, et le déploiement Kubernetes (k3s, Helm) ; phase 3, l'observabilité (Langfuse auto-hébergé, logs structurés), le serveur MCP, l'évaluation en CI et les évolutions notées pendant la phase 1, jusque-là rangées en phase 2. Les renvois de la spec suivent la nouvelle numérotation ; le journal garde l'ancienne, pour les dates antérieures.
+- **27 septembre 2026, interface web** :
+  - service des contrats (`application/service.py`) sur un port d'exécution (`ports/engine.py`) : la CLI et l'interface appellent les mêmes méthodes (`tests/test_parite.py`) ; la CLI gagne `list`, `show`, `journal`, `replay` et `web` ;
+  - interface web (`adapters/web/`, ADR 004) : liste, nouvelle analyse, dossier, revue humaine, rejeu, journal et vérification, expiration ; rendu serveur (Jinja2), HTMX copié dans le dépôt ; aucune ressource externe ; écoute locale par défaut, hôtes admis, CSP stricte, CSRF, échappement, texte original jamais conservé ; aucune authentification avant l'étape Kubernetes ;
+  - mode démonstration (`adapters/demo/`) : extraction simulée à partir des attendus, références par rattachement déclaré, explication par le gabarit, journal en mémoire ; règles, décision, revue, scellement et vérification pour de vrai ;
+  - dépendances : fastapi, uvicorn, jinja2, python-multipart ;
+  - ingestion : découpage du corpus séparé de l'embedding (`pending_chunks`), sans changement de comportement.
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

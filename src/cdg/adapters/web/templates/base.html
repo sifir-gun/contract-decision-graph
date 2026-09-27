@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false, "allowScriptTags": false, "selfRequestsOnly": true, "historyCacheSize": 0, "responseHandling": [{"code": "204", "swap": false}, {"code": "[2345]..", "swap": true}]}'>
+<title>{% block title %}{% endblock %} · contract-decision-graph</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body hx-boost="true" hx-history="false">
+<a class="skip" href="#contenu">Aller au contenu</a>
+{% if demo %}
+<div class="banner" role="status">Démonstration : extraction simulée à partir des résultats attendus, aucun appel à un LLM, rien n'est scellé dans le vrai journal</div>
+{% endif %}
+<header class="top">
+  <nav aria-label="Navigation principale">
+    <a class="brand" href="/">contract-decision-graph</a>
+    <a href="/">Contrats</a>
+    <a href="/analyse">Nouvelle analyse</a>
+    <a href="/journal">Journal d'audit</a>
+    <a href="/administration">Administration</a>
+  </nav>
+</header>
+<main id="contenu">
+{% block content %}{% endblock %}
+</main>
+<footer>
+  <p>Le code décide ; le LLM extrait et explique. Interface locale, sans authentification{% if demo %}, en démonstration{% endif %}.</p>
+</footer>
+</body>
+</html>
