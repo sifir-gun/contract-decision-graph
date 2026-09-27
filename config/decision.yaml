@@ -34,6 +34,8 @@ extraction:
       - l'acheteur répond
       - responsabilité du client
       - le client répond
+      - le client ne répond
+      - l'acheteur ne répond
     responsabilite_fournisseur:
       - responsabilité du prestataire
       - responsabilité du fournisseur
@@ -49,6 +51,9 @@ extraction:
       - peut être révisé
       - peuvent être révisés
       - indexation
+      - prix sont indexés
+      - tarifs sont indexés
+      - prix indexés
     penalites_execution:
       - pénalités d'exécution
       - clause pénale
@@ -56,6 +61,8 @@ extraction:
       - donne lieu à des pénalités
       - pénalités de retard de livraison
       - pénalités de retard d'exécution
+      - réfaction
+      - refaction
     delai_paiement:
       - payables à
       - payable à
@@ -74,6 +81,13 @@ extraction:
     donnees_personnelles:
       - données à caractère personnel
       - données personnelles
+      - annuaire
+      - noms et prénoms
+      - nom et prénom
+      - adresse électronique
+      - adresses électroniques
+      - données des utilisateurs
+      - données des salariés
     accord_traitement_donnees:
       - accord de traitement
       - accord de sous-traitance
@@ -85,6 +99,77 @@ extraction:
       - transfert des données
       - pays tiers
       - hors de l'union
+      # localisation et hébergement des données (J5, série 7) : ancrés sur les données
+      # ou les serveurs, jamais sur « hébergement » seul, objet d'un contrat d'hébergement
+      - sont traitées et hébergées
+      - données sont stockées
+      - localisation des données
+      - serveurs sont situés
+      - centre de données situé
+      - centres de données situés
+      - territoire de l'union
+      - hors de l'ue
+      - hors de l'espace économique européen
+      - en dehors de l'union
+  # Cohérence entre catégorie et citation (J5, après la série 6) : pour chaque type à
+  # catégorie, des termes par catégorie, de la plus spécifique à la moins spécifique.
+  # Parmi les catégories dont un terme figure dans la citation (casse et typographie
+  # ignorées), la première l'emporte ; si ce n'est pas la catégorie rendue, la clause est
+  # redemandée avec un retour ciblé, puis escaladée. Une citation qui n'évoque aucune
+  # catégorie n'est pas contrôlée. Listes imparfaites : une couche de défense parmi d'autres.
+  category_terms:
+    delai_paiement:
+      facture_periodique:
+        - factures périodiques
+        - facture périodique
+        - factures récapitulatives
+        - facture récapitulative
+        - facturation périodique
+      fin_de_mois:
+        - jours fin de mois
+        - jours fin du mois
+      date_facture:
+        - date d'émission
+        - date de facture
+        - date de la facture
+        - date de facturation
+    transfert_hors_ue:
+      clauses_contractuelles_ad_hoc_autorisees:
+        - autorisées par l'autorité de contrôle
+        - autorisation de l'autorité de contrôle
+        - autorisées par la cnil
+        - autorisation de la cnil
+      clauses_contractuelles_types:
+        - clauses types
+        - clauses contractuelles types
+        - clauses contractuelles standard
+      clauses_contractuelles_ad_hoc:
+        - clauses ad hoc
+        - clauses contractuelles ad hoc
+        - négociées entre les parties
+        - clauses contractuelles spécifiques
+      regles_entreprise_contraignantes:
+        - règles d'entreprise contraignantes
+      code_conduite:
+        - code de conduite
+      certification:
+        - mécanisme de certification
+        - mécanismes de certification
+      decision_adequation:
+        - décision d'adéquation
+        - niveau de protection adéquat
+      aucune_garantie:
+        - sans garantie particulière
+        - sans garantie appropriée
+        - sans garanties appropriées
+        - aucune garantie appropriée
+        - consentement explicite
+      sans_transfert:
+        - aucun transfert
+        - exclusivement dans l'union
+        - exclusivement dans l'espace économique européen
+        - exclusivement en france
+        - aucun pays tiers
 
 # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
 rules:

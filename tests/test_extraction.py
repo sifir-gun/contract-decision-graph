@@ -166,3 +166,16 @@ def test_prompt_une_consigne_n_est_jamais_une_stipulation():
 
 def test_prompt_citation_avec_la_quantite():
     assert "La citation d'une clause chiffrée contient la quantité" in PROMPT
+
+
+def test_prompt_durees_en_mois_annees_converties():
+    # J5 : la vérification lit « trois ans » comme 36 mois ; le modèle rend des mois.
+    # Exemples choisis hors des seuils de la configuration (36 et 6 mois)
+    lines = {line.split(" :", 1)[0][2:]: line for line in PROMPT.splitlines()}
+    for kind, example in (
+        ("duree_engagement", "« deux ans » donne 24"),
+        ("preavis_resiliation", "« un an » donne 12"),
+    ):
+        assert "en mois" in lines[kind] and "se convertit en mois" in lines[kind], kind
+        assert example in lines[kind], kind
+    assert "avec son unité (%, jours, mois, ou années" in PROMPT

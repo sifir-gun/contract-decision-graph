@@ -1,9 +1,10 @@
-# Jeu de démonstration (J4) : 10 contrats synthétiques et 2 contrats piégés.
-# Aucune partie réelle, aucune donnée personnelle réelle. Pour chaque contrat : les parties
-# à masquer (--party), les clauses qu'une extraction correcte rend (citations exactes,
-# présentes dans le texte masqué) et la décision attendue, avec la décision humaine quand
-# le contrat passe en revue. Vérifié par tests/test_demo.py, doublures à la place du LLM
-# et du CRAG. Les passages sur modèle réel et le coût par contrat relèvent du J5.
+# Jeu de démonstration (J4) : 10 contrats synthétiques et 2 contrats piégés ; au J5, un
+# contrat rédigé de façon réaliste (`realistic`). Aucune partie réelle, aucune donnée
+# personnelle réelle. Pour chaque contrat : les parties à masquer (--party), les clauses
+# qu'une extraction correcte rend (citations exactes, présentes dans le texte masqué) et
+# la décision attendue, avec la décision humaine quand le contrat passe en revue. Vérifié
+# par tests/test_demo.py, doublures à la place du LLM et du CRAG. Les passages sur modèle
+# réel et le coût par contrat relèvent du J5.
 #
 # Chaque règle du projet se déclenche dans au moins un contrat (test_demo.py).
 
@@ -482,12 +483,17 @@ contracts:
     file: demo-12-piege-fausses-pistes.txt
     # personnes fictives : leurs noms sont masqués comme des parties
     parties: [Psi Équipements Synthétique, Oméga Laboratoires Synthétiques, Camille Exemple, Dominique Fictif]
-    # données personnelles fictives, absentes du texte masqué
+    # données personnelles fictives, absentes du texte masqué (J5) : courriels sur des
+    # domaines réservés par la RFC 2606, téléphones dans les blocs que l'Arcep réserve aux
+    # œuvres audiovisuelles (tests/test_donnees_fictives.py). L'IBAN est un exemple de forme
+    # valide, pour exercer le masquage ; son numéro de compte est une suite de chiffres
+    # (« 12345678901 »). Il n'a été vérifié auprès d'aucune banque. Conservé par décision
+    # du 26/09.
     personal_data:
-      - camille.exemple@acheteur-synthetique.fr
-      - dominique.fictif@prestataire-synthetique.fr
-      - 01 23 45 67 89
-      - 06 12 34 56 78
+      - camille.exemple@acheteur.example
+      - dominique.fictif@prestataire.example
+      - 01 99 00 45 67
+      - 06 39 98 56 78
       - FR76 3000 6000 0112 3456 7890 189
       - Camille Exemple
       - Dominique Fictif
@@ -534,3 +540,58 @@ contracts:
         present: true
         category: sans_transfert
         quote: "Les données sont hébergées exclusivement dans l'Union européenne et ne font l'objet d'aucun transfert hors de l'Union."
+
+  demo-13-realiste-infogerance:
+    file: demo-13-realiste-infogerance.txt
+    parties: [Antarès Infogérance Synthétique, Céphée Négoce Synthétique]
+    # rédigé de façon réaliste (J5) : renvois entre articles, formulations indirectes
+    # (« réfaction », annuaire des collaborateurs), durée et préavis qui ne sont pas fixés
+    realistic: true
+    expected:
+      # durée et préavis non chiffrés : pénalités par prudence, opérationnel à 0,4, conflit
+      proposed_decision: ESCALADE
+      final_decision: GO_RESERVES
+      human:
+        decision: GO_RESERVES
+        reviewer: relecteur-demo
+        reason: durée et préavis à chiffrer par avenant avant la signature ; plafonds, réfaction et hébergement acceptables
+    clauses:
+      - kind: responsabilite_acheteur
+        present: true
+        value: 100
+        quote: "Le Client ne répond que des dommages directs résultant d'une faute prouvée, dans la limite de 100 % du prix annuel du contrat."
+      - kind: responsabilite_fournisseur  # plafond défini à l'article 1, auquel renvoie l'article 9
+        present: true
+        value: 120
+        quote: "Plafond de responsabilité du Prestataire : 120 % des sommes facturées au Client au cours des douze mois qui précèdent le fait générateur."
+      - kind: revision_prix
+        present: true
+        value: 4
+        quote: "Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 5 ; la hausse qui en résulte ne peut excéder quatre pour cent sur une année."
+      - kind: penalites_execution  # appelées « réfaction »
+        present: true
+        value: 10
+        quote: "Lorsque les Niveaux de service ne sont pas atteints, le Client applique sur la facture du mois une réfaction de 0,5 % du forfait mensuel par jour ouvré de dépassement, dans la limite de dix pour cent (10 %) du prix annuel."
+      - kind: delai_paiement
+        present: true
+        value: 45
+        category: fin_de_mois
+        quote: "Les sommes dues sont réglées par virement à quarante-cinq (45) jours fin de mois."
+      - kind: duree_engagement  # fin liée à un événement du planning : non chiffrée
+        present: true
+        value: null
+        quote: "Le contrat prend effet à sa signature et prend fin à la réception définitive de la dernière tranche de migration prévue au Planning directeur."
+      - kind: preavis_resiliation  # « raisonnable », un trimestre au moins : non chiffré
+        present: true
+        value: null
+        quote: "Chaque Partie peut mettre fin au contrat par lettre recommandée avec accusé de réception, en respectant un préavis raisonnable, qui tient compte de l'ancienneté de la relation et ne peut être inférieur à un trimestre."
+      - kind: donnees_personnelles  # sans l'expression « données à caractère personnel »
+        present: true
+        quote: "Pour assurer le support, les techniciens du Prestataire consultent l'annuaire des collaborateurs du Client (nom, fonction, numéro de poste interne) et l'historique des demandes de chaque utilisateur."
+      - kind: accord_traitement_donnees
+        present: true
+        quote: "Pour ces traitements, le Prestataire agit en qualité de sous-traitant du Client au sens de l'article 28 du règlement (UE) 2016/679 ; les engagements des Parties figurent à l'annexe 4."
+      - kind: transfert_hors_ue
+        present: true
+        category: sans_transfert
+        quote: "Les données sont hébergées exclusivement dans des centres situés en France et ne sont accessibles depuis aucun pays tiers."

@@ -1,0 +1,67 @@
+CONTRAT D'INFOGÉRANCE DU POSTE DE TRAVAIL
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle. Rédaction volontairement proche d'un contrat réel : renvois entre articles, formulations indirectes, quantités qui ne sont pas fixées.
+
+Entre la société Antarès Infogérance Synthétique, ci-après le Prestataire,
+et la société Céphée Négoce Synthétique, ci-après le Client,
+ensemble les Parties.
+
+Préambule
+Le Client souhaite confier à un prestataire l'exploitation de son parc de postes de travail pendant la migration de ses agences vers un nouveau système d'information. Au terme d'une consultation restreinte, il a retenu l'offre du Prestataire, dont les éléments techniques et financiers figurent en annexe.
+
+Article 1 - Définitions
+Annexes : les documents énumérés à l'article 16, qui font partie intégrante du contrat.
+Niveaux de service : les délais d'intervention et de rétablissement fixés à l'annexe 2.
+Plafond de responsabilité du Prestataire : 120 % des sommes facturées au Client au cours des douze mois qui précèdent le fait générateur.
+Planning directeur : le calendrier de migration des agences figurant à l'annexe 3, mis à jour d'un commun accord en comité de pilotage.
+
+Article 2 - Objet
+Le Prestataire assure le support aux utilisateurs, la maintenance des postes de travail et le suivi des incidents, dans le respect des Niveaux de service.
+
+Article 3 - Entrée en vigueur et durée du contrat
+Le contrat prend effet à sa signature et prend fin à la réception définitive de la dernière tranche de migration prévue au Planning directeur.
+
+Article 4 - Gouvernance
+Un comité de pilotage réunit les Parties au moins une fois par trimestre. Il suit les Niveaux de service, arbitre les priorités et, le cas échéant, propose la mise à jour du Planning directeur.
+
+Article 5 - Prix
+Les prestations sont rémunérées par un forfait mensuel par poste, selon la grille de l'annexe 5.
+Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 5 ; la hausse qui en résulte ne peut excéder quatre pour cent sur une année.
+
+Article 6 - Niveaux de service et réfaction
+Lorsque les Niveaux de service ne sont pas atteints, le Client applique sur la facture du mois une réfaction de 0,5 % du forfait mensuel par jour ouvré de dépassement, dans la limite de dix pour cent (10 %) du prix annuel.
+Cette réfaction ne prive pas le Client de son droit de mettre fin au contrat en cas de manquements répétés.
+
+Article 7 - Facturation
+Le Prestataire facture chaque mois, à terme échu, les prestations du mois écoulé.
+
+Article 8 - Délai de règlement
+Les sommes dues sont réglées par virement à quarante-cinq (45) jours fin de mois.
+
+Article 9 - Responsabilité
+Toutes causes confondues, la responsabilité du Prestataire est limitée au Plafond de responsabilité du Prestataire.
+Le Client ne répond que des dommages directs résultant d'une faute prouvée, dans la limite de 100 % du prix annuel du contrat.
+Le Prestataire justifie chaque année d'une assurance couvrant sa responsabilité civile professionnelle.
+
+Article 10 - Traitements de données
+Pour assurer le support, les techniciens du Prestataire consultent l'annuaire des collaborateurs du Client (nom, fonction, numéro de poste interne) et l'historique des demandes de chaque utilisateur.
+Pour ces traitements, le Prestataire agit en qualité de sous-traitant du Client au sens de l'article 28 du règlement (UE) 2016/679 ; les engagements des Parties figurent à l'annexe 4.
+Les données sont hébergées exclusivement dans des centres situés en France et ne sont accessibles depuis aucun pays tiers.
+
+Article 11 - Confidentialité
+Chaque Partie garde confidentielles les informations reçues de l'autre pendant l'exécution du contrat et pendant les deux années qui suivent son terme.
+
+Article 12 - Résiliation
+Chaque Partie peut mettre fin au contrat par lettre recommandée avec accusé de réception, en respectant un préavis raisonnable, qui tient compte de l'ancienneté de la relation et ne peut être inférieur à un trimestre.
+En cas de manquement grave, la Partie lésée peut mettre fin au contrat sans préavis, quinze jours après une mise en demeure restée sans effet.
+
+Article 13 - Réversibilité
+À la fin du contrat, quelle qu'en soit la cause, le Prestataire restitue les données et la documentation d'exploitation, et assiste le Client pendant la période de transition définie à l'annexe 6.
+
+Article 14 - Intégralité
+Le contrat, y compris ses Annexes, exprime l'intégralité de l'accord des Parties. En cas de contradiction, le corps du contrat prévaut sur les Annexes.
+
+Article 15 - Droit applicable et litiges
+Le contrat est soumis au droit français. Tout litige relève des tribunaux compétents du ressort de la cour d'appel dont dépend le siège du Client.
+
+Article 16 - Annexes
+Annexe 1 : offre technique du Prestataire. Annexe 2 : Niveaux de service. Annexe 3 : Planning directeur. Annexe 4 : engagements des Parties relatifs aux traitements de données. Annexe 5 : grille de prix et indice de référence. Annexe 6 : plan de réversibilité.

@@ -116,7 +116,7 @@ def test_app_role_ne_peut_pas_supprimer_un_thread(pg, thread_id):
 
 
 def test_texte_original_jamais_ecrit_en_base(pg, thread_id):
-    original = CONTRACT_TEXT + "Contact : jeanne.martin@exemple.fr, 01 23 45 67 89.\n"
+    original = CONTRACT_TEXT + "Contact : jeanne.martin@example.com, 01 99 00 45 67.\n"
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
         orchestrator.run_contract(
             graph, thread_id, original, analysis_date=ANALYSIS_DATE, config=CONFIG
@@ -137,6 +137,6 @@ def test_texte_original_jamais_ecrit_en_base(pg, thread_id):
             return conn.execute(query, (thread_id, needle)).fetchone()[0]
 
         for table in columns:
-            for secret in ("jeanne.martin@exemple.fr", "01 23 45 67 89"):
+            for secret in ("jeanne.martin@example.com", "01 99 00 45 67"):
                 assert hits(table, secret.encode()) == 0, (table, secret)
         assert hits("checkpoint_blobs", b"[EMAIL]") > 0  # le texte masqué, lui, est là

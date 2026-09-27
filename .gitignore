@@ -17,3 +17,6 @@ dist/
 
 # Configuration locale de l’IDE
 .vscode/
+
+# Réglages locaux de l'assistant de code
+.claude/

@@ -20,7 +20,7 @@ _TYPOGRAPHY = str.maketrans(
         "„": '"',
         "–": "-",
         "—": "-",
-        "‑": "-",
+        "\u2010": "-",  # trait d'union typographique ; NFKC y ramène le tiret insécable
     }
 )
 

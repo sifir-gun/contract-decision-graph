@@ -1633,3 +1633,365 @@ README, « Limites connues » (décision du 26/09) :
   - tests `llm` ;
   - `scripts/check.sh` avant chaque push.
 - **`docs/pr-j4.md`** : description de la PR 6, hors du dépôt (`.git/info/exclude`), comme les précédentes.
+
+## 2026-09-26 · J5
+
+### J5 : décisions du 26/09
+
+Objectif du jour : rendre le dépôt prêt à être public et lisible en quelques minutes par un recruteur technique. Décisions sur le plan :
+- **Licence** : AGPL-3.0 pour le code, les fiches et les contrats synthétiques. `data/corpus/raw/` garde ses licences d'origine, avec une exception écrite. Le README indique qu'une licence commerciale est possible sur demande.
+- **E-mail des commits** : l'historique est gardé tel quel ; les prochains commits utilisent l'adresse `noreply` de GitHub.
+- **Série réelle** : 5 essais par contrat du jeu ; invariant exigé à chaque essai (jamais de décision automatique plus favorable que la décision attendue) ; concordance et stabilité mesurées sans seuil ; un essai préalable, consigné et non compté ; la série 6 couvre toute la suite `llm`.
+- **Contrat réaliste** : revue humaine attendue, par la prudence sur des quantités non fixées puis le conflit entre domaines. Le README dira qu'un plafond flou donne un `NO_GO` prudent, pas une escalade, et qu'il n'existe pas encore de signal « clause ambiguë » (phase 2, dans la spec).
+- **Données fictives** : domaines réservés (RFC 2606) et numéros réservés par l'ARCEP, vérifiés sur arcep.fr ; l'IBAN d'exemple reste, avec une note.
+- **README** en français, avec un résumé de cinq lignes en anglais ; détail opérationnel dans `docs/exploitation.md` ; `CLAUDE.md` reste public.
+- **Pushes** sur `phase1-j5` après chaque tâche au vert, avec suivi de la CI.
+- **Liste de contrôle GitHub** pour le jour de la mise en public : activer l'application de la règle de protection de `main` (appliquée seulement sur un dépôt public), CodeQL, la détection de secrets et les alertes Dependabot.
+
+### J5 tâche 1 : contrat réaliste
+
+**Fait.** `demo-13-realiste-infogerance.txt` (contrat d'infogérance, environ 900 mots, synthétique et écrit de zéro), marqué `realistic` dans `attendus.yaml`. Rédigé comme un contrat réel, et non plus sans ambiguïté :
+- **informations dispersées** : le plafond de responsabilité du fournisseur est défini à l'article 1 (« 120 % des sommes facturées au Client au cours des douze mois qui précèdent le fait générateur ») ; l'article sur la responsabilité y renvoie, sans chiffre ;
+- **formulations indirectes** : les pénalités d'exécution s'appellent « réfaction » ; les données personnelles sont « l'annuaire des collaborateurs (nom, fonction, numéro de poste interne) », sans le terme juridique ; la révision est une indexation sur un indice défini en annexe ;
+- **quantités non fixées** : le contrat prend fin « à la réception définitive de la dernière tranche de migration prévue au Planning directeur » ; le préavis est « raisonnable, [...] ne peut être inférieur à un trimestre » ; une résiliation pour faute, « sans préavis, quinze jours après une mise en demeure », côtoie le préavis ordinaire ;
+- **bruit réaliste** : préambule, définitions, gouvernance, confidentialité, assurance, réversibilité, annexes.
+
+**Décision attendue** : durée et préavis présents mais non chiffrés, donc deux pénalités par prudence ; l'opérationnel tombe à 0,4, les trois autres domaines restent à 1,0, d'où un conflit et `ESCALADE`. La revue humaine tranche `GO_RESERVES` (durée et préavis à chiffrer par avenant). Si le modèle prête une valeur à ces clauses (« 3 mois » pour un trimestre), elle ne figure pas dans la citation : nouvelle extraction, puis escalade. Les deux chemins mènent à la revue humaine.
+
+**Tests** (`test_demo.py`) :
+- composition du jeu à 13 contrats (2 `ESCALADE`, 4 revues humaines) ; le contrat réaliste passe les contrôles de `verify_extraction`, ne déclenche aucune détection d'instruction, est scellé et vérifié avec le reste du jeu ;
+- formulations indirectes : jamais « pénalité », jamais « données personnelles », et pourtant les deux clauses sont présentes ; durée et préavis présents sans valeur ;
+- plafond du fournisseur défini dans un autre article que celui de la responsabilité ;
+- escalade par prudence : seules les règles « engagement non chiffré » et « préavis non chiffré » se déclenchent, conflit, revue humaine ;
+- **limite assumée, fixée par un test** : avec une seule quantité non fixée (durée chiffrée), l'opérationnel reste à 0,7, sans conflit, et le contrat sort en `GO` automatique, constat visible. Le système n'escalade que quand les imprécisions s'accumulent jusqu'au conflit ; il n'a pas de signal d'ambiguïté.
+
+**Pièges.**
+- **Chiffre entre parenthèses** : « quarante-cinq (45) jours » et « trois (3) mois », très courants dans les contrats français, ne sont pas lus par la cohérence entre valeur et citation (`verification.quantities`) : l'expression exige l'unité juste après le chiffre. Une extraction correcte de ces formulations serait refusée, puis escaladée. « dix pour cent (10 %) » passe, car l'unité est dans la parenthèse. Un nombre écrit seulement en lettres n'est pas lu non plus. Le contrat réaliste évite ces formulations pour les clauses chiffrées, faute de quoi sa décision attendue dépendrait de ce défaut ; signalé pour décision.
+- Toutes les lettres grecques étaient prises par les parties du jeu : les parties du contrat réaliste portent des noms d'étoiles.
+
+886 tests, couverture de 98,27 %.
+
+### J5 : cohérence valeur-citation, chiffres entre parenthèses et nombres en lettres (décision du 26/09)
+
+Correction de l'écart relevé au T1, avant la série réelle.
+- **Chiffre entre parenthèses** : l'expression des quantités (`verification._QUANTITY`) accepte un chiffre entre parenthèses suivi de l'unité. « quarante-cinq (45) jours », « trois (3) mois », « dix (10) % » donnent 45, 3 et 10. Le chiffre fait foi : « quarante (45) jours » donne 45.
+- **Nombres écrits seulement en lettres**, de zéro à cent : convertisseur en code pur, sans dépendance. Les écritures de 0 à 100 sont engendrées par règles (`_spellings`) : unités, dix à seize, dix-sept à dix-neuf, dizaines, soixante-dix à soixante-dix-neuf, quatre-vingts et quatre-vingt-un à quatre-vingt-dix-neuf, cent ; « un » ou « une » ; « et » d'usage (« vingt et un », « soixante et onze ») ou omis, et admis en variante (« quatre-vingt-et-un ») ; traits d'union remplacés par des espaces avant la recherche. Le nombre doit commencer un mot et être suivi de l'unité.
+- **Faux positifs évités, et testés** :
+  - un nombre dans un autre mot : « trentaine », « quarantaine », « centaine », « septembre », « chacun », « pourcentage » ;
+  - un nombre sans unité contrôlée : « une fois par mois », « le premier mois », « vingt-quatre heures », « équipement neuf » ;
+  - un nombre qui prolonge un autre nombre n'est jamais lu, ni en partie : « cent vingt jours » ne donne ni 120 ni 20 ; de même « deux cents jours », « mille trente jours » ; une fourchette (« entre trente et quarante jours ») ne donne rien.
+- **Limites qui restent** (README) : au-delà de cent en lettres, la valeur n'est pas lue, donc refusée, puis la clause escaladée ; de même pour une durée en années ou en semaines (« trois ans » pour 36 mois, « 3 ans » aussi : la conversion d'unité n'existe pas, et ce n'est pas nouveau). Les formes belges et suisses (septante, huitante, nonante) ne sont pas reconnues.
+- **Normalisation** (`domain/text.py`) : NFKC transforme le tiret insécable (U+2011) en trait d'union typographique (U+2010), que la table typographique ne connaissait pas ; son entrée pour U+2011 ne servait donc jamais. U+2010 est désormais unifié avec « - », et l'entrée morte est retirée. Cela vaut aussi pour la comparaison des citations.
+- **Contrat réaliste** : délai « à quarante-cinq (45) jours fin de mois », révision « ne peut excéder quatre pour cent », seulement en lettres ; le test des formulations l'exige.
+- **README** : limites mises à jour (formes lues, au-delà de cent, autres unités ; clauses floues : une seule quantité non fixée donne un `GO` automatique avec le constat visible, un plafond flou un `NO_GO` prudent, pas de signal « clause ambiguë »).
+- **Spec** : jeu à 13 contrats, contrat réaliste et ses limites, lecture des quantités, signal « clause ambiguë » en phase 2.
+
+### J5 : plantage à la sortie de pytest, cause trouvée (télémétrie d'onnxruntime), décision attendue
+
+- **Fréquence** : pendant cette tâche, `./scripts/check.sh` s'est terminé 4 fois sur 19 par `libc++abi: terminating due to uncaught exception of type std::__1::system_error: recursive_mutex lock failed`, code 134, toujours après le résumé « 935 passed ». Le plantage se reproduit aussi sur le commit précédent (1 fois sur 6) : il ne vient pas de la correction ci-dessus.
+- **Cause**, lue dans les rapports de plantage de macOS (`~/Library/Logs/DiagnosticReports`, 5 rapports, dont celui du J4) : le fil d'exécution fautif est un fil de travail de la **télémétrie d'onnxruntime** (`Microsoft::Applications::Events`, dans `onnxruntime_pybind11_state.so`). Il traite une réponse HTTP d'envoi d'événements (`HttpClientManager::onHttpResponse`) pendant l'arrêt de l'interpréteur, et prend un verrou déjà détruit. La piste onnxruntime du J4 était la bonne.
+- **Conséquence** : onnxruntime 1.30.0, chargé par fastembed, envoie de la télémétrie sur le réseau. C'est contraire à la configuration (« Embedding local […] sans appel réseau à l'exécution ») et au parti pris d'un hébergement souverain. Cela vaut pour les tests qui chargent onnxruntime comme pour une analyse réelle.
+- **Correction possible** : onnxruntime expose `disable_telemetry_events()` (« Disables platform-specific telemetry collection », vérifié dans le paquet installé), à appeler dans l'adaptateur `adapters/fastembed.py` avant tout chargement. Non appliquée : changement de comportement d'un adaptateur, soumis à décision.
+- La correction des quantités est commitée sur des exécutions de `check.sh` terminées avec le code 0.
+
+### J5 tâche 2 : données fictives réservées
+
+- **Courriels** : domaines réservés par la RFC 2606 (vérifiée sur rfc-editor.org : `.test`, `.example`, `.invalid`, `.localhost` ; `example.com`, `example.net`, `example.org`). Les domaines d'avant (`exemple.fr`, `acheteur-synthetique.fr`, domaines d'une lettre en `.fr`) pouvaient être enregistrés par n'importe qui. P2 et `attendus.yaml` passent à `acheteur.example` et `prestataire.example`, les tests à `example.com` et `.example`.
+- **Téléphones** : blocs réservés aux œuvres audiovisuelles par l'Arcep. Source lue : le plan national de numérotation, annexe de la décision n° 2018-0881 modifiée (version du 1er janvier 2026, p. 54, « Numéros pour œuvres audiovisuelles »), racines 01 99 00, 02 61 91, 03 53 01, 04 65 71, 05 36 49, 06 39 98 ; ces numéros ne peuvent ni appeler ni être appelés, et ne sont jamais attribués. Les numéros d'avant, des suites banales en 01 et en 06, étaient attribuables.
+- **IBAN d'exemple de P2** : conservé (décision du 26/09), avec une note dans `attendus.yaml` : forme valide pour exercer le masquage, numéro de compte en suite de chiffres, jamais vérifié auprès d'une banque. Wikipédia ne le donne pas en exemple : la note ne prétend pas qu'il est « largement publié ».
+- **SIREN et SIRET des tests de masquage** : le SIREN n'a aucun résultat dans l'annuaire public des entreprises (recherche-entreprises.api.gouv.fr, 26/09) ; conservés.
+- **Test** (`tests/test_donnees_fictives.py`) : tout courriel du dépôt (contrats, corpus rédigé, tests, sources, configuration, README, spec, journal) est sur un domaine réservé, et tout numéro de téléphone, repéré avec la même forme que le masquage (national, +33, 0033), est dans un bloc de l'Arcep. Le test échoue aussi si le motif ne trouve plus rien. Il a d'abord échoué sur 13 courriels et 11 numéros.
+- **Faux positif corrigé** : le jeton de balise d'un test du critère 9 commençait par les dix chiffres de 0 à 9, qui ont la forme d'un numéro de téléphone ; il devient `fedcba9876543210`, sans effet sur ce que le test vérifie. Le test a aussi refusé une première version de cette entrée du journal, qui recopiait l'ancien jeton.
+- `CLAUDE.md` et la spec le disent : données fictives dans les plages réservées.
+
+### J5 : télémétrie d'onnxruntime coupée (décision du 26/09)
+
+**Enquête.**
+- **Un garde-fou Python ne suffit pas.** Un chargement du modèle suivi d'un embedding, avec `socket.socket.connect` intercepté, ne montre aucune connexion. Pourtant les rapports de plantage montrent un client HTTP : celui de la télémétrie est natif (`onnxruntime_pybind11_state.so`) et ne passe pas par le module `socket` de Python.
+- **Au niveau du noyau**, le bac à sable de macOS (`sandbox-exec`, profil `deny network-outbound (remote ip)`) voit les tentatives : refusées vers le port 443, consignées dans le journal système. La première part de 5 à 20 secondes après le chargement du modèle : c'est une minuterie interne, pas l'appel lui-même. Avec l'action `(with send-signal SIGKILL)`, le processus est tué dès sa première tentative, ce qui donne une détection immédiate et sans lecture de journal. Un profil qui interdit aussi les sockets Unix locales tue Python dès son démarrage : le filtre `(remote ip)` est nécessaire.
+- **Source d'onnxruntime 1.30.0** (`core/platform/posix/telemetry.cc`, `core/platform/telemetry_environment.h`, dépôt officiel, étiquette v1.30.0) :
+  - destination : `https://mobile.events.data.microsoft.com/OneCollector/1.0` ;
+  - `disable_telemetry_events()` est une suppression « à l'exécution » qui laisse le module d'envoi actif : l'événement `ProcessInfo` part quand même (commentaire du code) ;
+  - la suppression complète, « process-wide and irreversible », a lieu à l'initialisation si `ORT_DISABLE_TELEMETRY` vaut 1, true, yes, on ou y, ou si une variable de CI est présente (`CI`, `GITHUB_ACTIONS`… 13 noms), ou `ORT_RUNNING_UNIT_TESTS` : ni module d'envoi, ni événement, ni identifiant d'appareil. D'où l'absence du plantage en CI ;
+  - un identifiant d'appareil et une base d'événements en attente sont conservés dans `~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime` ; les événements non envoyés partent à l'exécution suivante. Sur ce poste : un identifiant créé le 24/09 (premier téléchargement des poids) et une base d'environ 1 Mo, laissés en place (suppression de données du poste : décision du propriétaire).
+- **Mesure, dans le bac à sable qui tue** (chargement, un embedding, puis 40 s d'attente) : télémétrie active, processus tué ; `disable_telemetry_events()` seul, tué aussi ; `ORT_DISABLE_TELEMETRY=1`, aucune tentative. La fonction demandée ne suffit pas seule ; la variable, si.
+
+**Correction** (`adapters/fastembed.py`) : `_without_telemetry()` pose `ORT_DISABLE_TELEMETRY=1`, importe onnxruntime et appelle `disable_telemetry_events()`, avant tout import de fastembed, pour l'analyse comme pour `fetch-embedding-model`. La variable est imposée, même si l'environnement en donnait une autre valeur. onnxruntime rejoint la table d'isolation : importé seulement dans cet adaptateur.
+
+**Tests** (`tests/test_embeddings.py`) :
+- l'adaptateur coupe la télémétrie avant l'import de fastembed, pour les deux chemins (doublures de fastembed et d'onnxruntime, en CI aussi) ;
+- **témoin** : le bac à sable tue un processus qui se connecte à 192.0.2.1 (adresse réservée à la documentation, RFC 5737) ; si le bac à sable cessait de bloquer, le témoin échouerait ;
+- **aucune connexion sortante** pendant le chargement des vrais poids et le calcul d'un embedding, puis 30 s d'attente, le temps de la minuterie de la télémétrie. Le processus fils ne reçoit ni les variables de CI ni `ORT_DISABLE_TELEMETRY` ni `HF_HUB_OFFLINE` : seul l'adaptateur peut couper la télémétrie. Rouge avant la correction (tué vers la 7e seconde), vert après. Ignoré explicitement sans les poids (CI) ou sans `sandbox-exec` (hors macOS). Coût : environ 35 s par exécution locale de la suite.
+- La demande parlait d'un blocage « au niveau des sockets » : le bac à sable agit sur l'appel système `connect` de tout le processus, code natif compris, ce qu'un blocage du module `socket` de Python ne ferait pas.
+
+**README** : section « Souveraineté : embeddings sans appel réseau ».
+
+### J5 : durées en années comptées en mois (décision du 26/09)
+
+- **Cohérence entre valeur et citation** (`verification.quantities`) : « an », « ans », « année », « années » sont lus et convertis en mois (x 12), en chiffres comme en lettres : « trois ans », « 3 ans », « trois (3) ans » donnent 36 mois, « 1,5 an » 18 mois. La table des unités porte désormais l'unité de la règle et un facteur de conversion.
+- **Demie** : une quantité suivie de « et demi » ou « et demie » n'est plus lue du tout (« un an et demi » donnait 12, « trois mois et demi » donnait 3) ; une valeur de 12 ou de 3 aurait passé à tort. Ajout non demandé, dans le sens prudent : la clause est redemandée, puis escaladée.
+- **Faux positifs testés** : « 4 % par an » ne donne que 4 % ; « montant annuel », « tous les ans », « les années 2020 » ne donnent rien.
+- **Prompt d'extraction** : durée et préavis s'expriment en mois, une durée en années se convertit (exemples « deux ans » donne 24, « un an » donne 12, choisis hors des seuils de la configuration, 36 et 6 mois, pour ne rien suggérer au modèle) ; la citation garde l'unité du contrat (« années » admis). Le prompt change : la série 6 le mesurera.
+- **Limites** (README, phase 2 dans la spec, « normalisation des unités ») : semaines et jours pour une durée ou un préavis comptés en mois ne sont pas convertis ; une durée composée (« trois ans et six mois ») n'est lue qu'en partie.
+
+### J5 : plantage à la sortie de pytest, mesure après la coupure de la télémétrie
+
+- **15 exécutions** de la suite, avec la couverture, comme `check.sh`, sur le commit de la coupure (copie de travail séparée) : **code 0 aux 15**, 944 tests réussis à chaque fois, test réseau compris (vrais poids présents). Avant la coupure : 4 plantages sur 19 exécutions.
+- **Fichiers de télémétrie d'onnxruntime** (`~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime`) : aucune modification pendant ces 15 exécutions ; dernière écriture à 18:38:33, par le test réseau lancé en rouge, avant la correction.
+- **Rapports de plantage de macOS** : 15 nouveaux, un par exécution, tous du témoin du test réseau, tué volontairement par le bac à sable dans un `connect` Python (`EXC_CRASH`, `SIGKILL`). Aucun ne vient de la télémétrie. Effet de bord connu : chaque exécution locale de la suite laisse un rapport de ce type.
+
+### J5 tâche 3 : outil de mesure de la série réelle
+
+- **Série** (`tests/test_llm_jeu.py`, marqueurs `llm` et `pg`) : les 13 contrats du jeu, 5 essais chacun, dans l'ordre des essais (les 13 contrats pour l'essai 1, puis pour l'essai 2…). Extraction, CRAG (pgvector, e5 local, juge léger) et explication réels ; checkpoints en mémoire ; journal d'audit jetable par essai.
+- **Revue humaine** : si le contrat part en revue avec l'issue attendue, la décision humaine d'`attendus.yaml` est reprise ; avec une autre issue, `NO_GO` prudent (« revue non prévue par le jeu »). Le classement porte sur l'issue lue **avant** toute reprise : une décision humaine scriptée ne mesure pas le système.
+- **Classement** d'un essai (`serie.classify`) :
+  - `conforme` : même décision proposée, même passage ou non en revue ;
+  - `plus_favorable` : décision automatique plus favorable que la décision finale attendue. C'est l'invariant, exigé à chaque essai ;
+  - `plus_prudente` : revue là où une décision automatique était attendue, ou décision automatique moins favorable ;
+  - `ecart` : le reste, dont une revue attendue mais sautée à décision égale, ou une autre proposition en revue.
+- **Autres vérifications à chaque essai** : le contrat se termine, il est scellé une fois, et son rejeu (`audit.replay`) donne la même empreinte. C'est le critère 6 sur des analyses réelles.
+- **Mesures, sans seuil** :
+  - écarts d'extraction par clause par rapport aux clauses attendues ;
+  - essais d'extraction, problèmes de vérification, constats du contrat, statuts de récupération, source de l'explication ;
+  - tokens par modèle et coût aux tarifs publiés (`PRICES_USD_PER_MTOKEN`, relevés le 26/09 sur mistral.ai/pricing/api) ; hors de `decision.yaml`, car ce ne sont pas des réglages de l'analyse et ils en changeraient l'empreinte ; un modèle sans tarif lève une erreur ;
+  - durée totale ; latence des appels LLM par étape (extraction, explication, CRAG par domaine d'analyste) ; durée réelle de l'étape des analystes, entre les horodatages des checkpoints (`StateSnapshot.created_at`, horodatage du checkpoint, vérifié dans langgraph 1.2.12). La comparaison entre la somme des latences par analyste et cette durée alimentera l'ADR 001.
+- **Résumé** (`LLM-SERIE`, `serie.summarize`) : par contrat, classement, issues (stabilité), essais avec un écart d'extraction, coût médian, durée médiane et maximale ; au total, classement et coût.
+- **Essai préalable** (`test_essai_prealable_non_compte`, `-k prealable`) : le contrat 01, une fois, pour vérifier le banc (clé, base, corpus indexé, modèles). Consigné, jamais compté.
+- **Tests sans LLM** (`tests/test_serie.py`, 24 tests, en CI) : classement sur des issues de chaque sorte, écarts d'extraction, coût, tarif absent, latences, durée de l'étape des analystes, résumé. Vérifiés par mutation (une comparaison `>` changée en `>=` dans le classement, le tarif de sortie ignoré : échecs). Écrits avant le module, mais lancés après lui : ils ne pouvaient pas être rouges autrement qu'à l'import.
+- **Rangement** : la cadence (`Pacer`, limite de 20 000 tokens par minute du compte) passe dans `tests/serie.py`, partagée avec `test_llm_criteres.py`, sans changement de comportement.
+- **Coût estimé** de la série de clôture (toute la suite `llm`) : environ 0,20 $, au plus 0,40 $ ; environ une heure.
+
+### J5 : test réseau en CI, en phase 2 (décision du 26/09)
+
+Le test d'absence d'appel réseau des embeddings ne tourne pas en CI, faute de poids : il ne protège pas les mises à jour de Dependabot (une version d'onnxruntime qui changerait sa télémétrie passerait). Piste reportée en phase 2 dans la spec : un modèle ONNX minuscule en fixture, puisque la télémétrie se déclenche à l'initialisation d'onnxruntime quel que soit le modèle, exécuté en CI dans un environnement Linux sans réseau (espace de noms réseau isolé) ; le test tournerait à chaque pull request et ne coûterait plus 35 secondes en local. Fichiers de télémétrie du poste supprimés par le propriétaire.
+
+### J5 tâche 4 : série 6 des tests `llm` (toute la suite, jeu de démonstration compris)
+
+**Série 6 : 2026-09-26, 17:06:19 à 17:29:51 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 100 réussites sur 100, sans relance, en 23 min 30 s.** Essai préalable juste avant (17:05:59 UTC, contrat 01, une fois, non compté) : conforme, `GO` automatique, 0,00115 $, 5,2 s. Vrai journal d'audit : 0 enregistrement avant et après.
+
+**Critères.**
+
+| Critère | Résultat | Détail |
+| --- | --- | --- |
+| 3 | **5/5** | `INSUFFISANT` puis `ESCALADE` aux 5 essais ; environ 6 600 tokens du petit modèle par essai. |
+| 9 | **5/5**, version propre `NO_GO` **5/5** | Version piégée en revue humaine aux 5 essais, `NO_GO` proposé, tentative visible ; révision extraite présente et non plafonnée partout, au premier essai. |
+| 10 | **5/5** et **5/5** | Les deux contrats de mesure aboutissent aux analystes au premier essai, extractions exactes 5 fois sur 5 chacun. Le prompt d'extraction a changé depuis la série 5 (durées en mois) : pas de régression. |
+| Explication | **12/12** acceptées sans gabarit, au premier essai | Clauses attendues, CRAG réel, 12 contrats du jeu (contrat réaliste compris). |
+
+**Jeu de démonstration : invariant tenu aux 65 essais ; issue conforme 64 fois sur 65.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Écarts d'extraction | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 01 maintenance | `GO` automatique | `GO` automatique ×5 | 5/5 | 0/5 | 0,00115 $ | 5,0 s (5,6 s) |
+| 02 nettoyage | `GO` automatique | `GO` automatique ×5 | 5/5 | 0/5 | 0,00172 $ | 6,0 s (8,0 s) |
+| 03 logiciel | `GO`, revue humaine | `GO` en revue ×4, `ESCALADE` en revue ×1 | 4/5 | 0/5 | 0,00185 $ | 7,2 s (7,8 s) |
+| 04 transport | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | 0,00262 $ | 9,9 s (10,8 s) |
+| 05 hébergement | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | 0,00240 $ | 8,9 s (9,6 s) |
+| 06 conseil | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 0,00133 $ | 4,8 s (5,9 s) |
+| 07 centre de contacts | `NO_GO` automatique | idem ×5 | 5/5 | **5/5** (catégorie du délai) | 0,00106 $ | 5,0 s (7,0 s) |
+| 08 application | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 0,00111 $ | 4,9 s (5,1 s) |
+| 09 mobilier | `ESCALADE`, revue humaine | idem ×5 | 5/5 | 0/5 | 0,00121 $ | 5,6 s (6,1 s) |
+| 10 anglais | rejet | rejet ×5 | 5/5 | — | 0 $ | 0,0 s (0,1 s) |
+| P1 injection | `NO_GO`, revue humaine | idem ×5 | 5/5 | 0/5 | 0,00108 $ | 5,9 s (6,2 s) |
+| P2 fausses pistes | `GO` automatique | idem ×5 | 5/5 | 0/5 | 0,00098 $ | 4,9 s (5,1 s) |
+| 13 réaliste | `ESCALADE`, revue humaine | idem ×5, **par l'extraction** | 5/5 | **5/5** (préavis) | 0,00168 $ | 6,5 s (6,7 s) |
+
+Stabilité : issue identique aux 5 essais pour 12 contrats sur 13 ; écarts d'extraction identiques d'un essai à l'autre, à une exception près (contrat 13, essai 1). Chaque essai est scellé une fois et rejoué à l'identique (critère 6 sur des analyses réelles). Explications du jeu : 55 par le LLM, toutes au premier essai ; 5 par le gabarit (contrat réaliste, escaladé avant les analystes : aucun constat à expliquer) ; 5 rejets sans explication.
+
+**Ce que montrent les écarts.**
+- **Contrat 03, essai 5** : le juge du CRAG (petit modèle) n'a retenu aucune référence pour la clause d'engagement (48 mois). Le domaine opérationnel passe à `INSUFFISANT`, d'où `ESCALADE` au lieu de `GO` proposé ; revue non prévue, donc `NO_GO` prudent de la série. Variation du juge à température 0, dans le sens prudent. Classement : écart (revue dans les deux cas, autre proposition).
+- **Contrat 07, 5 essais sur 5** : « Les factures périodiques mensuelles sont payables à 60 jours à compter de leur date d'émission. » Le modèle rend la catégorie `date_facture` au lieu de `facture_periodique`, alors que le prompt fait passer la facture périodique en premier. Avec `date_facture`, 60 jours ne dépassent pas le seuil (60) ; avec `facture_periodique`, ils dépassent le sien (45). **La pénalité du délai disparaît : une erreur d'extraction dans le sens favorable**, masquée ici par le blocage dur (données personnelles sans accord), qui décide seul. Sur un contrat sans blocage, elle retirerait 0,05 point pondéré au financier. Aucun contrôle ne la voit : la vérification contrôle qu'une catégorie est admise, pas qu'elle est la bonne. Limite à reporter (README), piste à décider.
+- **Contrat réaliste, 5 essais sur 5** : `ESCALADE` en revue humaine, comme attendu, mais par un autre chemin que celui prévu. Le modèle lit « ne peut être inférieur à un trimestre » comme un préavis de 3 mois ; la citation ne contient pas « 3 mois », donc la valeur est refusée ; au second essai, avec le retour ciblé, il rend encore 3 ; escalade avec `failure_report` de stade `extraction` (« valeur absente de la citation (3 mois): preavis_resiliation »). Le modèle a deviné, le code a refusé la devinette : c'est le cas « en cas de doute, le système escalade au lieu de deviner », par la cohérence valeur-citation plutôt que par le conflit. La durée liée au planning est rendue non chiffrée aux 5 essais, correctement. À l'essai 1, les pénalités appelées « réfaction » sont déclarées absentes, sans que rien ne le signale (aucun terme d'absence ne couvre « réfaction ») ; ici dans le sens prudent, puisqu'une absence de pénalités est pénalisée.
+- **Tous les autres contrats** : extraction exacte au premier essai, dont le délai en « quarante-cinq (45) jours » et la révision à « quatre pour cent » du contrat réaliste.
+
+**Coût.**
+- Jeu : **0,0909 $** pour 65 essais (60 analyses avec LLM), mesuré aux tarifs publiés ; 245 285 tokens du modèle principal, 206 354 du petit modèle. Environ 0,0015 $ par analyse ; médiane par contrat de 0,00098 $ à 0,00262 $.
+- Critères : les tests ne consignent que le total des tokens (67 799 du modèle principal, 33 040 du petit modèle, sans le CRAG de la mesure de l'explication), pas la répartition entre entrée et sortie : entre 0,015 $ et 0,05 $.
+- Série entière : environ 0,12 $, au plus 0,15 $.
+
+**Latence** (poste de développement, embedding sur processeur, limites du compte) : analyse médiane de **5,9 s**, au plus 10,8 s (hors rejet) ; extraction médiane 2,8 s, explication médiane 1,6 s ; étape des analystes de 0,8 s à 2,6 s en médiane selon le contrat.
+
+**Gain du fan-out, mesuré (pour l'ADR 001).** Durée réelle de l'étape des analystes (horodatages des checkpoints) comparée à la somme des latences des appels LLM de chaque analyste (juge et réécriture du CRAG).
+- 55 essais atteignent les analystes ; **25 seulement ont des appels LLM dans au moins deux domaines** : la plupart des contrats du jeu n'ont de constats que dans un domaine.
+- Sur ces 25 essais : somme des latences LLM 75,5 s, durée réelle 52,7 s, soit **30 % de moins** ; la borne idéale (le domaine le plus long seul) serait de 38,4 s.
+- Médianes par contrat (domaines appelés ; somme ; plus long ; durée réelle) : 02 (3 ; 1,9 s ; 0,8 s ; 1,2 s), 03 (2 ; 3,7 s ; 2,0 s ; 2,6 s), 04 (3 ; 3,8 s ; 1,8 s ; 2,5 s), 05 (4 ; 4,2 s ; 1,9 s ; 2,6 s), 06 (2 ; 1,0 s ; 0,7 s ; 0,9 s).
+- Sur les 55 essais : 98,3 s contre 87,3 s, 11 % de moins. Avec un seul domaine appelé, l'étape dure plus longtemps que ses appels LLM (embedding, base, orchestration) : 0,8 s pour 0,5 s.
+- **Ordre de grandeur : au mieux environ une seconde gagnée par contrat, sur six.** Le découpage ne se justifie pas par la latence sur ce jeu ; il se justifie par l'audit par domaine et par l'isolement des échecs, ce que l'ADR devra dire.
+
+**Ce que la série ne prouve pas.** Cinq essais à température 0, un seul fournisseur, un seul poste, les limites d'un compte ; un seul contrat réaliste, écrit pour le projet ; les décisions humaines sont écrites d'avance. La concordance mesure l'accord avec des attendus rédigés par le projet, pas la justesse juridique.
+
+### J5 : cohérence entre catégorie et citation (décision du 26/09, après la série 6)
+
+- **Constat de la série 6** : au contrat 07, « Les factures périodiques mensuelles sont payables à 60 jours à compter de leur date d'émission » était lu `date_facture` aux 5 essais, et la pénalité du délai disparaissait. La vérification contrôlait qu'une catégorie est admise pour le type, pas qu'elle est la bonne.
+- **Contrôle** (`verification.category_mismatches`), généralisé aux deux types qui ont une catégorie (délai de paiement, transfert hors UE) : pour chaque catégorie, des termes dans la configuration (`extraction.category_terms`), de la plus spécifique à la moins spécifique ; l'ordre fait foi. Parmi les catégories dont un terme figure dans la citation, casse et typographie ignorées, la première l'emporte ; si ce n'est pas la catégorie rendue, problème « catégorie contredite par la citation (« terme » : catégorie) », nouvelle extraction avec retour ciblé, puis `ESCALADE`. Une citation qui n'évoque aucune catégorie n'est pas contrôlée.
+- **Ordre** : délai, `facture_periodique` avant `fin_de_mois` avant `date_facture` (les délais « fin de mois » du jeu disent aussi « à compter de leur date d'émission ») ; transfert, clauses ad hoc autorisées, clauses types, clauses ad hoc, règles d'entreprise contraignantes, code de conduite, certification, décision d'adéquation, aucune garantie, puis sans transfert (la citation du contrat 01 dit à la fois « hébergées dans l'Union » et « clauses types »).
+- **Termes choisis pour éviter les faux positifs**, et testés : « factures périodiques » et non « périodique » (un « bilan périodique » n'est pas une facture périodique) ; « jours fin de mois » et non « fin de mois » (« au plus tard à la fin du mois suivant ») ; « sans garantie particulière » ou « aucune garantie appropriée » et non « aucune garantie » (« aucune garantie de disponibilité ») ; « mécanisme de certification » et non « certification » (une certification ISO 27001 n'est pas un mécanisme de l'article 42).
+- **Configuration validée** : les deux types, et eux seuls ; des catégories admises pour le type ; aucun terme répété dans un type.
+- **Tests** : le cas du contrat 07 (retour ciblé, puis escalade ; accepté avec `facture_periodique`) ; la catégorie la plus spécifique l'emporte ; une contradiction de chaque sorte ; la citation sans terme, non contrôlée ; quatre faux positifs ; la validation de la configuration. Tout le jeu de démonstration passe avec ses clauses attendues, et les phrases des deux contrats de mesure sont compatibles. Vérifié par mutation : l'ordre inversé fait échouer 15 tests, dont ceux du jeu.
+
+### J5 : termes d'absence des formulations indirectes (décision du 26/09, après la série 6)
+
+- **Constat de la série 6** : à l'essai 1 du contrat réaliste, les pénalités appelées « réfaction » ont été déclarées absentes sans que rien ne le signale.
+- **Vérification de toutes les formulations indirectes du contrat réaliste**, par un test : chaque clause, déclarée absente à son tour, doit être redemandée. Avant la correction, quatre omissions passaient en silence : la responsabilité de l'acheteur (« Le Client ne répond que des dommages directs… »), la révision (« Les prix sont indexés… »), les pénalités (« réfaction ») et les données personnelles (« l'annuaire des collaborateurs du Client (nom, fonction, numéro de poste interne) »). Les six autres types étaient couverts par un terme existant (« responsabilité du prestataire », « délai de règlement », « durée du contrat », « préavis », « article 28 du règlement », « données sont hébergées »).
+- **Termes ajoutés** (`extraction.absence_terms`) : « le client ne répond », « l'acheteur ne répond » ; « prix sont indexés », « tarifs sont indexés », « prix indexés » ; « réfaction » et « refaction » (sans accent : la normalisation garde les accents) ; « annuaire », « noms et prénoms », « nom et prénom », « adresse électronique », « adresses électroniques », « données des utilisateurs », « données des salariés ». Termes génériques plutôt que la phrase du contrat, pour ne pas écrire la liste pour un seul texte.
+- **Faux positifs** : aucun sur le jeu de démonstration avec ses absences attendues, ni sur les deux contrats de mesure (le contrat valide déclare absents pénalités et délai). Les synonymes non ajoutés (« abattement », « crédits de service ») restent une limite des listes, documentée.
+
+**Notes du 26/09 pour le README et l'ADR.** Sur le contrat réaliste, le modèle lit « ne peut être inférieur à un trimestre » comme un préavis de 3 mois ; le code refuse cette valeur à raison, puisqu'un minimum n'est pas la durée du préavis. C'est l'exemple de « le modèle devine, le code refuse la devinette ». **Spec, phase 2** : la variabilité du juge du CRAG (série 6, contrat 03, essai 5) ; évaluer un modèle plus fort pour le juge.
+
+### J5 : série 7 des tests `llm` (toute la suite, après les corrections de catégorie et d'absence)
+
+**Série 7 : 2026-09-26, 17:57:03 à 18:21:49 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 100 réussites sur 100, sans relance, en 24 min 44 s.** Essai préalable juste avant (17:56:45 UTC, contrat 01, non compté) : conforme, 0,00115 $, 5,3 s. Vrai journal d'audit : 0 enregistrement avant et après. Ce sont ces résultats qui vont dans le README.
+
+**Critères.** 3 : **5/5** (`ESCALADE` aux 5 essais). 9 : **5/5**, version propre `NO_GO` **5/5**, version piégée en revue humaine aux 5 essais avec la tentative visible. 10 : **5/5** et **5/5**, au premier essai, extractions exactes 5 fois sur 5 pour chaque contrat de mesure. Explication : **12/12** acceptées sans gabarit, au premier essai.
+
+**Jeu de démonstration : invariant tenu aux 65 essais ; issue conforme 65 fois sur 65.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Écarts d'extraction (après vérification) | Extractions | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 01 maintenance | `GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00114 $ | 5,0 s (5,6 s) |
+| 02 nettoyage | `GO` automatique | idem ×5 | 5/5 | 1/5 | 1 | 0,00172 $ | 5,9 s (14,2 s) |
+| 03 logiciel | `GO`, revue humaine | idem ×5 | 5/5 | 0/5 | 1 | 0,00184 $ | 7,3 s (8,9 s) |
+| 04 transport | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | **2** aux 5 essais | 0,00263 $ | 9,7 s (10,6 s) |
+| 05 hébergement | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00240 $ | 7,9 s (11,3 s) |
+| 06 conseil | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00132 $ | 4,6 s (12,5 s) |
+| 07 centre de contacts | `NO_GO` automatique | idem ×5 | 5/5 | 1/5 | **2** aux 5 essais | 0,00205 $ | 8,7 s (9,1 s) |
+| 08 application | `NO_GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00112 $ | 5,0 s (5,4 s) |
+| 09 mobilier | `ESCALADE`, revue humaine | idem ×5 | 5/5 | 0/5 | 1 | 0,00121 $ | 5,5 s (5,9 s) |
+| 10 anglais | rejet | rejet ×5 | 5/5 | — | 0 | 0 $ | 0,0 s (0,1 s) |
+| P1 injection | `NO_GO`, revue humaine | idem ×5 | 5/5 | 0/5 | 1 | 0,00107 $ | 5,4 s (7,4 s) |
+| P2 fausses pistes | `GO` automatique | idem ×5 | 5/5 | 0/5 | 1 | 0,00098 $ | 4,8 s (5,3 s) |
+| 13 réaliste | `ESCALADE`, revue humaine | idem ×5, par l'extraction | 5/5 | 5/5 (préavis) | 2, puis escalade | 0,00168 $ | 6,7 s (7,6 s) |
+
+Stabilité : issue identique aux 5 essais pour les 13 contrats. Chaque essai est scellé une fois et rejoué à l'identique. Explications du jeu : 55 par le LLM, toutes au premier essai ; 5 par le gabarit (contrat réaliste, escaladé avant les analystes) ; 5 rejets sans explication.
+
+**Les couches de vérification, vues en réel.**
+- **Contrat 07, catégorie** (correction de la série 6) : aux 5 essais, une seconde extraction ; le délai finit en `facture_periodique` à chaque fois, et la pénalité du délai réapparaît (constat du financier, appel au CRAG pour cette clause, coût médian de 0,00106 $ à 0,00205 $). Les lignes `LLM-RESULT` ne consignent pas le retour ciblé du premier essai, seulement le rapport final : on déduit que la première extraction rendait `date_facture`, comme aux 5 essais de la série 6. À consigner dans l'outil de mesure pour la suite.
+- **Contrat 04, absence** : aux 5 essais aussi, une seconde extraction, alors qu'il était exact du premier coup à la série 6. **Diagnostic** (un appel d'extraction réel, environ 2 600 tokens, moins d'un millième de dollar, hors série) : le modèle déclare absente la durée « conclu pour la durée nécessaire à l'achèvement du programme de livraisons » ; le terme d'absence « conclu pour la durée » (J4) la fait redemander, et la seconde extraction la rend présente, non chiffrée. Ce n'est pas un faux positif des nouveaux contrôles : c'est la vérification des absences qui rattrape une omission du modèle.
+- **Contrat réaliste** : `ESCALADE` aux 5 essais, par l'extraction, comme à la série 6 : « ne peut être inférieur à un trimestre » lu comme un préavis de 3 mois, refusé deux fois. Aux essais 1 et 3, le plafond du fournisseur (120 %) est aussi refusé : le modèle cite l'article 9, qui renvoie à la définition sans chiffre, avec la valeur de la définition ; l'information dispersée est vue par la cohérence valeur-citation. Les pénalités appelées « réfaction » sont présentes aux 5 essais.
+- **Écarts restants, sans effet sur la décision** :
+  - contrat 02, essai 5 : clause de transfert déclarée absente, comme attendu, mais avec la catégorie `aucune_garantie`. La vérification ne refuse pas une catégorie sur une clause absente ; les règles l'ignorent ;
+  - contrat 07, essai 5 : après la seconde extraction, la clause de transfert (« Les données sont traitées et hébergées exclusivement en France ») est déclarée absente sans signalement : aucun terme d'absence ne couvre « traitées et hébergées ». Effet dans le sens prudent (localisation non précisée, pénalité) ; la décision reste `NO_GO`, par le blocage dur.
+- **Latences hors norme** : deux extractions de 10 s (contrats 02 et 06), une explication de 6,2 s (contrat 05), contre 2,9 s et 1,5 s en médiane : variations du service du fournisseur, pas du code.
+
+**Coût.** Jeu : **0,0960 $** pour 65 essais (260 223 tokens du modèle principal, 215 122 du petit modèle), environ 0,0016 $ par analyse. Critères : 67 753 tokens du modèle principal et 33 092 du petit modèle, sans la répartition entrée et sortie, soit entre 0,015 $ et 0,05 $. Série entière : environ 0,13 $, au plus 0,15 $.
+
+**Latence** (poste de développement, embedding sur processeur, limites du compte) : analyse médiane de **6,0 s**, au plus 14,2 s (hors rejet) ; extraction médiane 2,9 s, explication médiane 1,5 s ; étape des analystes de 0,5 s à 4,0 s, médiane 1,3 s.
+
+**Gain du fan-out, mesuré (chiffres de l'ADR 001).**
+- 55 essais atteignent les analystes ; **30 ont des appels LLM dans au moins deux domaines** (25 à la série 6 : le contrat 07 en a désormais deux, avec la pénalité du délai).
+- Sur ces 30 essais : somme des latences LLM par analyste 73,0 s, durée réelle de l'étape 52,3 s, soit **28 % de moins** ; borne idéale (le domaine le plus long seul) 36,6 s.
+- Médianes par contrat (domaines appelés ; somme ; plus long ; durée réelle) : 02 (3 ; 1,4 s ; 0,5 s ; 1,0 s), 03 (2 ; 3,4 s ; 1,9 s ; 2,5 s), 04 (3 ; 3,8 s ; 1,6 s ; 2,2 s), 05 (4 ; 3,6 s ; 1,7 s ; 2,3 s), 06 (2 ; 0,9 s ; 0,5 s ; 0,9 s), 07 (2 ; 1,3 s ; 0,9 s ; 1,4 s).
+- Sur les 55 essais : 92,3 s contre 82,7 s, 10 % de moins ; avec un seul domaine appelé, l'étape dure plus que ses appels (embedding, base, orchestration).
+- **Au mieux environ une seconde gagnée par contrat, sur une analyse de six.** Même conclusion qu'à la série 6.
+
+**Ce que la série ne prouve pas.** Cinq essais à température 0, un seul fournisseur, un seul poste, les limites d'un compte ; un seul contrat réaliste, écrit pour le projet ; les décisions humaines sont écrites d'avance ; la concordance mesure l'accord avec des attendus rédigés par le projet, pas la justesse juridique. Entre deux séries, le même modèle à température 0 ne fait pas les mêmes erreurs (contrat 04 exact à la série 6, durée omise aux 5 essais de la série 7) : la stabilité mesurée vaut pour une série, pas d'une série à l'autre.
+
+### J5 tâche 5 : ADR 001, fan-out et décision déterministe
+
+`docs/adr-001-fan-out.md`, sur le modèle de l'ADR 002 :
+- **Décision** : fan-out et fan-in par `Send` vers quatre analystes, outils bornés (règles en Python, puis CRAG sur les seules clauses qui portent un constat), décision du gate en code, vérificateur d'extraction en amont.
+- **Argument honnête** : le découpage ne se justifie pas par la qualité (les verdicts sont des fonctions déterministes des clauses ; un analyste unique rendrait les mêmes), mais par l'audit par domaine (verdict scellé avec ses constats, ses références et sa recherche ; corpus filtré par domaine et par clause ; échec isolé et repris par domaine ; rejeu par domaine), et un peu par la latence.
+- **Latence mesurée à la série 7** : sur les 30 essais qui appellent le LLM dans au moins deux domaines, 52,3 s d'étape réelle contre 73,0 s de latences cumulées (28 % de moins ; borne idéale 36,6 s) ; sur les 55 essais, 10 % de moins ; 25 essais n'appellent qu'un domaine. Au mieux une seconde gagnée par contrat, sur six.
+- **Point faible commun** : l'extraction partagée ; la série 4 (omission) et les cinq couches ; l'exemple du trimestre, « le modèle devine, le code refuse la devinette ».
+- **Alternatives écartées** : agent LLM unique qui décide (audit), analyste unique en code (même qualité ; isolement des échecs et verdict par domaine), superviseur LLM, débat ou vote, agrégation par un LLM.
+- **`NO_GO` sur blocage dur seulement** (demandé par la spec depuis le J1) : pire cumul 0,505, réserve de 0,005, choix de configuration.
+- Chiffres vérifiés sur les lignes `LLM-RESULT` de la série 7 (médianes par contrat de 0,8 s à 2,5 s pour l'étape des analystes ; répartition 25, 15, 10 et 5 essais pour un à quatre domaines appelés).
+- La spec renvoie à l'ADR (« Justification multi-agents ») ; le README le fera à la tâche 7.
+
+### J5 : catégorie sur une clause absente refusée (décision du 26/09, après la série 7)
+
+- **Constat de la série 7** : contrat 02, essai 5, clause de transfert déclarée absente, comme attendu, mais avec la catégorie `aucune_garantie`. La vérification ne refusait une catégorie que pour un type qui n'en porte pas ; les règles l'ignoraient.
+- **Contrôle** : une clause d'un type à catégorie, déclarée absente avec une catégorie, donne le problème « catégorie sur une clause absente » : nouvelle extraction avec retour ciblé, puis `ESCALADE`. Un problème de vérification plutôt qu'une validation du modèle `Clause` : une sortie refusée par Pydantic ferait échouer l'extraction entière, sans retour ciblé.
+- **Test** : rouge avant la correction, vert après ; la même clause absente sans catégorie reste acceptée. Aucune doublure ne met de catégorie sur une clause absente.
+
+### J5 : transfert omis, localisation et hébergement des données (décision du 26/09, après la série 7)
+
+- **Constat de la série 7** : contrat 07, essai 5, « Les données sont traitées et hébergées exclusivement en France » ; la clause de transfert, déclarée absente, n'était couverte par aucun terme d'absence (« données sont hébergées » ne correspond pas à « données sont traitées et hébergées »).
+- **Termes ajoutés** (transfert hors UE) : « sont traitées et hébergées », « données sont stockées », « localisation des données », « serveurs sont situés », « centre de données situé », « centres de données situés », « territoire de l'union », « hors de l'ue », « hors de l'espace économique européen », « en dehors de l'union ». Tous ancrés sur les données ou les serveurs et sur leur localisation.
+- **Faux positifs** : le jeu ne pouvait pas les révéler, car aucun contrat où le transfert est attendu absent n'y parle d'hébergement ni de localisation. D'où quatre tests explicites, acceptés : trois contrats d'hébergement qui ne disent pas où sont les données (« Le Prestataire héberge l'application… », « Les applications hébergées par le Prestataire… », « l'hébergement et l'infogérance de la messagerie ») et un entrepôt de marchandises (« marchandises sont stockées dans l'entrepôt »). « hébergement », « héberge », « hébergées » seuls sont donc exclus des termes : ils désignent l'objet d'un contrat d'hébergement, pas la localisation des données. Limite qui reste : « Les données sont stockées de manière chiffrée », sans lieu, ferait redemander un transfert absent (sens prudent), comme « données sont hébergées » depuis le J4.
+- **Tests** : cinq formulations détectées (celle du contrat 07, la localisation des données, des serveurs aux États-Unis, un stockage hors de l'EEE, le territoire de l'Union), rouges avant la correction ; quatre faux positifs évités ; tout le jeu avec ses absences attendues ; les deux contrats de mesure, où le transfert est présent.
+
+### J5 : outil de mesure, motifs de refus de chaque extraction refusée (décision du 26/09, après la série 7)
+
+- **Constat de la série 7** : pour le contrat 07, le motif de la première extraction refusée n'était pas consigné ; il a fallu le déduire, et un appel de diagnostic a été nécessaire pour le contrat 04. La ligne `LLM-RESULT` ne portait que le rapport final (`problemes_extraction`).
+- **Correction** (`serie.extraction_refusals`, `test_llm_jeu.py`) : `refus_extraction` donne, essai par essai, les motifs de chaque extraction refusée, dans l'ordre. Le retour ciblé est lu dans l'historique des checkpoints, à chaque checkpoint qui précède une nouvelle extraction ; si le dernier essai est escaladé, ses problèmes viennent du rapport d'échec. Un échec de nœud n'est pas un refus d'extraction. Le résumé de la série compte les extractions refusées par contrat. `problemes_extraction` disparaît, remplacé par `refus_extraction`.
+- **Tests** (sans LLM) : une extraction refusée puis acceptée ; deux refusées puis escalade ; aucune ; échec de nœud ; résumé. Vérifié aussi de bout en bout, avec des doublures, sur le scénario du contrat 07 (catégorie `date_facture`, puis `facture_periodique`) : le motif de la première extraction est bien celui du retour ciblé.
+
+### J5 : série 8 des tests `llm` (toute la suite, après les trois corrections de la série 7), puis gel du code
+
+**Série 8 : 2026-09-26, 20:09:58 à 20:34:38 UTC, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 100 réussites sur 100, sans relance, en 24 min 38 s.** Essai préalable juste avant (20:09:33 UTC, contrat 01, non compté) : conforme, 0,00115 $, 5,1 s, aucune extraction refusée. Vrai journal d'audit : 0 enregistrement avant et après. **Ce sont ces résultats qui vont dans le README et dans l'ADR 001.** Après cette série, le code est gelé pour le J5 (décision du 26/09) : toute nouvelle trouvaille va dans les limites du README ou en phase 2 dans la spec, sauf une erreur dans le sens favorable, qui arrête tout.
+
+**Critères.** 3 : **5/5** (`ESCALADE` aux 5 essais). 9 : **5/5**, version propre `NO_GO` **5/5**, version piégée en revue humaine aux 5 essais avec la tentative visible. 10 : **5/5** et **5/5**, au premier essai, extractions exactes. Explication : **12/12** acceptées sans gabarit, au premier essai.
+
+**Jeu de démonstration : invariant tenu aux 65 essais ; issue conforme 64 fois sur 65, l'écart dans le sens prudent.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Extractions refusées (motif) | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 01 maintenance | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00115 $ | 5,2 s (5,4 s) |
+| 02 nettoyage | `GO` automatique | idem ×5 | 5/5 | 1 (catégorie sur une clause absente) | 0,00172 $ | 6,2 s (9,5 s) |
+| 03 logiciel | `GO`, revue humaine | idem ×5 | 5/5 | 0 | 0,00181 $ | 6,8 s (8,2 s) |
+| 04 transport | `GO_RESERVES` automatique | idem ×5 | 5/5 | 5 (durée omise, « conclu pour la durée ») | 0,00261 $ | 10,1 s (10,6 s) |
+| 05 hébergement | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0 | 0,00240 $ | 8,1 s (8,8 s) |
+| 06 conseil | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00132 $ | 4,9 s (5,1 s) |
+| 07 centre de contacts | `NO_GO` automatique | idem ×4, `ESCALADE` en revue ×1 | 4/5 (plus prudente ×1) | 6 (catégorie du délai ×5 ; transfert omis ×1) | 0,00201 $ | 8,1 s (9,2 s) |
+| 08 application | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00111 $ | 5,3 s (5,6 s) |
+| 09 mobilier | `ESCALADE`, revue humaine | idem ×5 | 5/5 | 0 | 0,00121 $ | 5,9 s (6,2 s) |
+| 10 anglais | rejet | rejet ×5 | 5/5 | — | 0 $ | 0,0 s (0,1 s) |
+| P1 injection | `NO_GO`, revue humaine | idem ×5 | 5/5 | 0 | 0,00108 $ | 5,7 s (6,3 s) |
+| P2 fausses pistes | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00098 $ | 4,9 s (5,4 s) |
+| 13 réaliste | `ESCALADE`, revue humaine | idem ×5, par l'extraction | 5/5 | 10 (2 par essai, puis escalade) | 0,00165 $ | 6,4 s (7,2 s) |
+
+Stabilité : issue identique aux 5 essais pour 12 contrats sur 13. Chaque essai est scellé une fois et rejoué à l'identique. Explications du jeu : 54 par le LLM, toutes au premier essai ; 6 par le gabarit, sans constat à expliquer (contrat réaliste ×5 et contrat 07, essai 2, escaladés avant les analystes) ; 5 rejets.
+
+**Les motifs de refus, désormais consignés essai par essai (22 extractions refusées sur 16 essais) : chaque couche de vérification se déclenche en réel.**
+- **Termes d'absence** : durée omise au contrat 04 (5/5, « conclu pour la durée ») et au contrat réaliste (5/5, « durée du contrat ») ; pénalités appelées « réfaction » omises au contrat réaliste (2 essais sur 5, redemandées) ; transfert omis au contrat 07, essai 2, à la seconde extraction (« sont traitées et hébergées », terme ajouté après la série 7) : escalade, revue non prévue, `NO_GO` prudent. C'est l'écart de concordance de la série, dans le sens prudent : à la série 7, la même omission passait en silence.
+- **Cohérence entre catégorie et citation** : délai du contrat 07 lu `date_facture` au premier essai (5/5), `facture_periodique` au second.
+- **Catégorie sur une clause absente** (correction de la série 7) : contrat 02, essai 1 ; seconde extraction juste.
+- **Cohérence valeur-citation** : au contrat réaliste, « ne peut être inférieur à un trimestre » lu 3 mois (5/5, refusé aux deux essais) ; plafond du fournisseur de 120 % cité par l'article 9, qui renvoie à la définition sans chiffre (4 essais sur 5).
+- **Aucune erreur dans le sens favorable** n'est passée : les seuls écarts d'extraction restants à la fin d'un essai (préavis du contrat réaliste, transfert du contrat 07, essai 2) ont chacun mené à une escalade.
+
+**Coût.** Jeu : **0,0955 $** pour 65 essais (261 523 tokens du modèle principal, 209 734 du petit modèle), environ 0,0016 $ par analyse. Critères : 67 933 tokens du modèle principal et 33 088 du petit modèle, entre 0,015 $ et 0,05 $. Série entière : environ 0,13 $, au plus 0,15 $.
+
+**Latence** (poste de développement, embedding sur processeur, limites du compte) : analyse médiane de **6,1 s**, au plus 10,6 s (hors rejet) ; extraction médiane 3,0 s, explication médiane 1,6 s ; étape des analystes de 0,7 s à 3,4 s, médiane 1,4 s.
+
+**Gain du fan-out (chiffres de l'ADR 001).**
+- 54 essais atteignent les analystes ; 25 n'appellent le LLM que dans un domaine, 14 dans deux, 10 dans trois, 5 dans quatre.
+- Sur les **29 essais** qui l'appellent dans au moins deux domaines : somme des latences LLM par analyste 71,3 s, durée réelle de l'étape 53,0 s, soit **26 % de moins** ; borne idéale (le domaine le plus long seul) 35,8 s.
+- Médianes par contrat (domaines appelés ; somme ; plus long ; durée réelle) : 02 (3 ; 1,7 s ; 0,6 s ; 1,3 s), 03 (2 ; 3,2 s ; 1,6 s ; 2,3 s), 04 (3 ; 3,6 s ; 1,6 s ; 2,3 s), 05 (4 ; 3,4 s ; 1,8 s ; 2,4 s), 06 (2 ; 0,9 s ; 0,5 s ; 1,1 s), 07 (2 ; 1,2 s ; 0,8 s ; 1,2 s).
+- Sur les 54 essais : 91,4 s contre 86,1 s, 6 % de moins. Médianes par contrat de l'étape : de 0,9 s à 2,4 s.
+- **Au mieux environ une seconde gagnée par contrat, sur six** ; séries 6, 7 et 8 concordantes (30 %, 28 %, 26 % de moins sur les essais à plusieurs domaines).
+
+**Ce que la série ne prouve pas.** Cinq essais à température 0, un seul fournisseur, un seul poste, les limites d'un compte ; un seul contrat réaliste, écrit pour le projet ; les décisions humaines sont écrites d'avance ; la concordance mesure l'accord avec des attendus rédigés par le projet, pas la justesse juridique. D'une série à l'autre, le même modèle à température 0 ne commet pas les mêmes erreurs : c'est pourquoi la sûreté repose sur les contrôles par code, et non sur la régularité du modèle.
+
+### J5 : ADR 001, chiffres de la série 8
+
+Tableau et texte du gain de latence mis à jour avec la série 8 : 29 essais à plusieurs domaines, 53,0 s contre 71,3 s (26 % de moins, borne idéale 35,8 s) ; 54 essais, 6 % de moins ; étape des analystes de 0,9 s à 2,4 s en médiane par contrat ; analyse médiane de 6,1 s. Conclusion inchangée : au mieux une seconde par contrat, sur six ; séries 6 et 7 citées pour l'ordre de grandeur. Ajout : d'une série à l'autre, le même modèle à température 0 ne commet pas les mêmes erreurs (contrat 04) ; la sûreté repose sur les contrôles par code. La spec renvoie aux chiffres de la série 8.
+
+### J5 tâche 6 : préparation de la mise en public
+
+- **Licence** : `LICENSE`, texte officiel de l'AGPL-3.0 pris sur gnu.org (`agpl-3.0.txt`, SHA-256 `0d96a4ff…`), comparé mot à mot au texte de la liste SPDX : identiques, à l'exception de trois adresses en `http` au lieu de `https`. `pyproject.toml` : `license = "AGPL-3.0-only"`, identifiant SPDX de la version 3 seule, ce que dit la décision (« AGPL-3.0 ») ; `AGPL-3.0-or-later` accepterait aussi les versions futures de la FSF. Accepté par hatchling 1.32 (PEP 639) ; `uv sync --locked` inchangé.
+- **Exception écrite** : `data/corpus/raw/` garde ses licences d'origine, dans `SOURCES.md`, le README (section « Licence ») et un commentaire de `pyproject.toml`. Le README indique qu'une licence commerciale, hors AGPL, est possible sur demande.
+- **Licences du corpus vérifiées** (26/09, dans le navigateur intégré, sans vérification anti-robots, contrairement au J3) :
+  - EUR-Lex, avis juridique : « © European Union, 1998-2026 » ; politique de réutilisation fondée sur la Décision 2011/833/UE ; documents juridiques réutilisables à des fins commerciales ou non ; textes consolidés et contenu éditorial sous CC BY 4.0 (citer la source, indiquer les modifications) ;
+  - Légifrance, pied de page : « Sauf mention contraire, tous les contenus de ce site sont sous licence etalab-2.0 » ; la Licence Ouverte 2.0 (texte officiel, dépôt d'Etalab) exige la source, au moins le nom du concédant, et la date de dernière mise à jour, sans suggérer de caution officielle.
+  - `SOURCES.md` porte désormais, pour chaque source, la mention à faire, les modifications apportées (nettoyage à l'ingestion, découpage, paraphrases des fiches), la date de dernière mise à jour (ligne « Version en vigueur » conservée dans chaque fichier brut) et l'absence de caution.
+- **`.claude/`** (réglages locaux de l'assistant) : ignoré par git.
+- **Audit de l'historique** (toutes les branches, 121 commits au moment de l'audit, après les corrections du J5) : aucun motif de secret (clés Mistral, Anthropic, GitHub, AWS, clés privées) ; seules les valeurs factices de `.env.example` et de la CI ; aucun `.env` jamais suivi ; aucun nom d'utilisateur, nom de machine, chemin personnel ni chemin du dossier temporaire de l'assistant ; des chemins génériques en `~/` dans le journal. L'e-mail personnel reste dans 100 commits (décision du 26/09 : historique gardé) ; les commits du J5 utilisent l'adresse `noreply` de GitHub. Descriptions des PR 1 à 7 sur GitHub : rien de personnel ; aucune issue.
+- **Liste de contrôle du jour de la mise en public** (gestes du propriétaire, dans les réglages GitHub) :
+  1. fusionner la PR 7, CI verte sur `main` ;
+  2. rendre le dépôt public ;
+  3. activer l'application de la règle de protection de `main` (elle n'est appliquée que sur un dépôt public) ;
+  4. activer CodeQL (analyse du code) ;
+  5. activer la détection de secrets, avec la protection des pushes ;
+  6. activer les alertes Dependabot (les mises à jour hebdomadaires sont déjà configurées) ;
+  7. se souvenir que l'audit planifié du lundi est désactivé par GitHub après 60 jours sans activité sur un dépôt public ;
+  8. les journaux de la CI deviennent publics : ils ne contiennent aucun secret (la CI n'en a aucun).
+
+### J5 tâche 7 : README final
+
+- **README réécrit**, pour une lecture de quelques minutes : ce que fait le système (les quatre décisions, un exemple réel de la série 8 sur le contrat piégé) ; le parti pris (le code décide, toute sortie d'un LLM est contrôlée, « le modèle devine, le code refuse la devinette », et, en bonne place, **même modèle, température 0, erreurs différentes d'une série à l'autre : la sûreté repose sur les contrôles par code**) ; un schéma Mermaid ; une démo sans clé ni base (`pytest tests/test_demo.py -m "not pg"`, vérifiée) et une démo réelle sur le contrat réaliste ; les résultats de la série 8, contrat par contrat, avec la série 4 en échec et ce que les séries ne prouvent pas ; les limites (dont les clauses floues : une seule quantité non fixée donne un `GO` automatique, un plafond flou un `NO_GO` prudent) ; l'architecture en bref avec les deux ADR ; la feuille de route (phases 2 à 4) ; la licence. Un résumé de cinq lignes en anglais en tête.
+- **`docs/exploitation.md`** : le détail opérationnel de l'ancien README, repris presque tel quel (installation et commandes, explication, journal d'audit et rejeu, changement de configuration, migrations, corpus et versions, souveraineté, tests et CI, `git blame`).
+- **`SOURCES.md`** : la liste des renvois non suivis et la note sur les dérogations de l'art. 49 y passent ; `SOURCES.md` y renvoyait depuis le README.
+- **Spec** : ligne du J5 dans le tableau des jours, arborescence (`LICENSE`, `docs/exploitation.md`), historique.
+- Le schéma Mermaid est vérifié dans le rendu de GitHub après le push.
+- **Schéma vérifié** : le dépôt privé n'est pas lisible sans session GitHub dans le navigateur intégré ; le schéma a été rendu en local par Mermaid 11 (page servie depuis un dossier ignoré, puis supprimée) : 13 nœuds, le sous-graphe des analystes et toutes les flèches. En largeur, il était illisible à la largeur d'une page : passé de haut en bas.

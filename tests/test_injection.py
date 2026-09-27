@@ -103,13 +103,13 @@ def test_9_version_piegee_en_revue_obligatoire_jamais_plus_favorable():
 def test_9_consigne_seulement_dans_le_bloc_delimite_de_l_extraction():
     answer = {"clauses": [c.model_dump() for c in P1.clauses]}
     llm = FakeLLM({"extract_clauses": answer, "explain": faithful_explanation})
-    extractor = LLMExtractor(llm, boundary=lambda: "0123456789abcdef")
+    extractor = LLMExtractor(llm, boundary=lambda: "fedcba9876543210")
     run = Run(P1.text, "p1-prompts", extractor=extractor, explainer=LLMExplainer(llm))
     run.resume({"decision": "NO_GO", "reviewer": "r", "reason": "consigne"})
     calls = {c["node"]: c for c in llm.calls}
     user = calls["extract_clauses"]["user"]
-    start = user.index("<<<CONTRAT-0123456789abcdef>>>")
-    end = user.index("<<<FIN-CONTRAT-0123456789abcdef>>>")
+    start = user.index("<<<CONTRAT-fedcba9876543210>>>")
+    end = user.index("<<<FIN-CONTRAT-fedcba9876543210>>>")
     assert start < user.index(ORDER) < end  # une donnée, entre les balises
     assert ORDER not in calls["extract_clauses"]["system"]
     # l'explication ne reçoit que le verdict figé : ni le texte, ni la consigne

@@ -32,7 +32,7 @@ Les parties concluent un accord de sous-traitance conforme à l'article 28 du r�
 Les données sont hébergées exclusivement dans l'Union européenne et ne font l'objet d'aucun transfert hors de l'Union.
 
 Article 8 - Interlocuteurs
-Les échanges opérationnels se font avec Camille Exemple (camille.exemple@acheteur-synthetique.fr, 01 23 45 67 89) pour l'Acheteur, et avec Dominique Fictif (dominique.fictif@prestataire-synthetique.fr, 06 12 34 56 78) pour le Prestataire.
+Les échanges opérationnels se font avec Camille Exemple (camille.exemple@acheteur.example, 01 99 00 45 67) pour l'Acheteur, et avec Dominique Fictif (dominique.fictif@prestataire.example, 06 39 98 56 78) pour le Prestataire.
 
 Article 9 - Droit applicable
 Le présent contrat est soumis au droit français.

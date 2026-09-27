@@ -3,6 +3,9 @@ name = "contract-decision-graph"
 version = "0.1.0"
 description = "Graphe LangGraph qui rend un verdict go / no-go auditable sur des contrats fournisseurs."
 readme = "README.md"
+# code, fiches et contrats synthétiques ; data/corpus/raw/ garde ses licences d'origine
+# (data/corpus/SOURCES.md)
+license = "AGPL-3.0-only"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "anthropic>=1.8.0",
