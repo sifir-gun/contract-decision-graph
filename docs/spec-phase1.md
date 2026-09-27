@@ -829,7 +829,7 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - liste des contrats en une seule ouverture du graphe, quel que soit leur nombre : opération `overview` du port `ContractEngine`, à la place de `thread_ids` ; sur la base locale, 1 ouverture au lieu de 7 et 31 ms au lieu de 107 ms pour 3 contrats ;
 - **27 septembre 2026, préparation de la production** :
   - adresse d'un contrat formée à un seul endroit (`presentation.contract_path`), liens et redirections : préfixe fixe, identifiant encodé comme un seul segment (alertes CodeQL `py/url-redirection`, ADR 004) ;
-  - liste de contrôle de la mise en production, déploiement (phase 2) et durée (phase 3) : `docs/mise-en-production.md`, à valider ;
+  - liste de contrôle de la mise en production, déploiement (phase 2) et durée (phase 3) : `docs/mise-en-production.md`, validée ; décision : plusieurs réplicas, création d'un contrat rendue sûre en base dans la phase Kubernetes ;
   - identifiant d'un contrat : une seule règle, dans le domaine (`domain/identifiers.py`), appliquée à la création par le service, donc par la CLI comme par l'interface : lettres, chiffres, `.`, `_` et `-`, 100 caractères au plus, en commençant par une lettre ou un chiffre ; les contrats existants restent lisibles ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;

@@ -2177,3 +2177,8 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
 Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 
 `74fe9838c7e6854364e66083026f5cc70a5fa6f298442948d50503175881284f`
+
+### Déploiement : plusieurs réplicas, création d'un contrat sûre en base
+
+- **Décision du propriétaire** (27/09) : on permettra plusieurs réplicas ; la création d'un contrat sera rendue sûre en base, dans la phase Kubernetes. Le verrou du service reste, pour un processus.
+- Liste de contrôle validée et mise à jour (`docs/mise-en-production.md`) ; ADR 004 et spec suivent. Rien n'est codé : ce sera fait dans la phase Kubernetes.

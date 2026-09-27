@@ -1,6 +1,6 @@
 # Mise en production : liste de contrôle
 
-- **Statut** : proposition du 27/09/2026. Périmètre retenu par le propriétaire, pour le moment : le déploiement (phase 2 de la feuille de route) et ce qu'il faut pour tenir dans la durée (phase 3). Rien n'est commencé.
+- **Statut** : validée le 27/09/2026. Périmètre retenu par le propriétaire, pour le moment : le déploiement (phase 2 de la feuille de route) et ce qu'il faut pour tenir dans la durée (phase 3). Rien n'est commencé.
 - **Hors de cette liste, pour le moment** : l'authentification, le chiffrement des échanges et les rôles ; le traitement de vrais contrats et de leurs données personnelles (RGPD) ; la validation des règles et des fiches par un juriste ; un coffre de secrets.
 - **Rappel de l'ADR 004** : l'interface n'est exposée sur aucun réseau avant l'authentification.
 
@@ -17,8 +17,8 @@ Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.
 
 Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans un processus (ADR 004, « Accès concurrents »).
 
-- [ ] **Décider** : un seul réplica, où le verrou suffit ; ou plusieurs réplicas, avec une garantie en base.
-- [ ] **Si plusieurs réplicas** : rendre atomique en base la création d'un thread. Aujourd'hui, `run_contract` vérifie qu'un thread n'existe pas, puis le crée, sans verrou entre deux processus. *Fait quand* un test à deux processus lance deux analyses du même contrat et n'en obtient qu'une, la seconde refusée clairement, comme `tests/test_concurrence.py` le fait pour deux threads.
+- [x] **Décision du 27/09** : plusieurs réplicas. La création d'un contrat sera rendue sûre en base, dans la phase Kubernetes ; le verrou du service reste, pour un processus.
+- [ ] **Création d'un contrat sûre en base**, dans la phase Kubernetes : rendre atomique en base la création d'un thread. Aujourd'hui, `run_contract` vérifie qu'un thread n'existe pas, puis le crée, sans verrou entre deux processus. *Fait quand* un test à deux processus lance deux analyses du même contrat et n'en obtient qu'une, la seconde refusée clairement, comme `tests/test_concurrence.py` le fait pour deux threads.
 - Déjà en place, en base : le verrou consultatif et les index uniques du journal d'audit, qui empêchent un double scellement et une fourche de la chaîne.
 
 ### PostgreSQL de production
