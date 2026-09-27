@@ -34,6 +34,7 @@ from typing import Any
 from cdg.application import ingestion
 from cdg.domain import audit
 from cdg.domain.config import DecisionConfig
+from cdg.domain.identifiers import check_contract_id
 from cdg.domain.models import Clause, Usage
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.engine import ContractEngine
@@ -120,6 +121,9 @@ class ContractService:
         parties: Sequence[str] = (),
         analysis_date: date | None = None,
     ) -> dict[str, Any]:
+        check_contract_id(
+            contract_id
+        )  # à la création seulement : l'existant reste lisible
         on = analysis_date if analysis_date is not None else self.today()
         with self._writes:
             return self.engine.run(contract_id, raw_text, parties, on)

@@ -639,7 +639,7 @@ contract-decision-graph/
 └── tests/
 ```
 
-CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `ingest` (identifiants administrateur, rejouable), `run <contrat> [--party …] [--contract-id …] [--analysis-date AAAA-MM-JJ]`, `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify [--expect-head <empreinte>]` ; depuis le 27/09, par le service des contrats commun à l'interface web : `list [--en-attente]`, `show <thread_id>`, `journal`, `replay <thread_id>`, et `web [--demo] [--host …] [--port …] [--ecoute-non-locale]`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
+CLI phase 1 : `setup-db` (une fois, identifiants administrateur), `fetch-embedding-model` (réseau, une fois : poids dans `EMBEDDING_CACHE_DIR`), `ingest` (identifiants administrateur, rejouable), `run <contrat> [--party …] [--contract-id …] [--analysis-date AAAA-MM-JJ]` (identifiant : nom du fichier par défaut, même règle que l'interface depuis le 27/09, `domain/identifiers.py`), `resume <thread_id> --decision ...`, `history <thread_id>`, `expire --older-than 24h`, `verify [--expect-head <empreinte>]` ; depuis le 27/09, par le service des contrats commun à l'interface web : `list [--en-attente]`, `show <thread_id>`, `journal`, `replay <thread_id>`, et `web [--demo] [--host …] [--port …] [--ecoute-non-locale]`. Environnement lu dans `.env` par `python-dotenv` (`load_dotenv(override=False)` : une variable exportée garde la priorité), y compris `LANGSMITH_TRACING`.
 
 Comportement de la CLI (J2) :
 - `run` refuse un thread existant, puisqu'un contrat correspond à un thread ;
@@ -830,6 +830,7 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
 - **27 septembre 2026, préparation de la production** :
   - adresse d'un contrat formée à un seul endroit (`presentation.contract_path`), liens et redirections : préfixe fixe, identifiant encodé comme un seul segment (alertes CodeQL `py/url-redirection`, ADR 004) ;
   - liste de contrôle de la mise en production, déploiement (phase 2) et durée (phase 3) : `docs/mise-en-production.md`, à valider ;
+  - identifiant d'un contrat : une seule règle, dans le domaine (`domain/identifiers.py`), appliquée à la création par le service, donc par la CLI comme par l'interface : lettres, chiffres, `.`, `_` et `-`, 100 caractères au plus, en commençant par une lettre ou un chiffre ; les contrats existants restent lisibles ;
 - **23 septembre 2026, J2** :
   - `setup-db` : tables du checkpointer créées par l'administrateur ; `app_role` limité à `SELECT, INSERT, UPDATE`, sans `DELETE` ;
   - `StrictSerializer` : un type hors liste lève `BlockedDeserialization` au lieu de revenir dégradé en `dict` ;

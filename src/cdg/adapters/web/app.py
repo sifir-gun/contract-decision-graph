@@ -35,11 +35,11 @@ from cdg.adapters.web import presentation, security
 from cdg.application import demo_set
 from cdg.application.service import ContractService
 from cdg.domain import audit
+from cdg.domain.identifiers import ContractIdError, check_contract_id
 from cdg.ports.engine import ThreadError
 from cdg.settings import SettingsError
 
 WEB_ROOT = Path(__file__).parent
-IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 # caractères de contrôle hors tabulation et fins de ligne : pas du texte brut
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 log = logging.getLogger(__name__)
@@ -414,12 +414,10 @@ def _identifier(form: FormData, base: str, service: ContractService) -> str:
     wanted = _text(form, "identifiant").strip()
     if not wanted:
         return f"{base}-{service.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-    if not IDENTIFIER.fullmatch(wanted):
-        raise InputError(
-            "identifiant invalide : lettres, chiffres, points, tirets et soulignés, "
-            "100 caractères au plus"
-        )
-    return wanted
+    try:
+        return check_contract_id(wanted)  # la règle du domaine, commune avec la CLI
+    except ContractIdError as exc:
+        raise InputError(str(exc)) from exc
 
 
 def _analysis_date(form: FormData) -> date | None:

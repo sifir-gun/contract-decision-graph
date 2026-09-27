@@ -365,7 +365,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--contract-id",
-        help="identifiant du contrat et du thread (défaut : nom du fichier)",
+        help="identifiant du contrat et du thread (défaut : nom du fichier) ; "
+        "lettres, chiffres, points, tirets et soulignés, 100 caractères au plus, "
+        "en commençant par une lettre ou un chiffre",
     )
     run.add_argument(
         "--analysis-date",

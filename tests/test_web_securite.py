@@ -385,10 +385,16 @@ def test_adresse_d_un_contrat_action_inconnue_refusee():
         presentation.contract_path("c-1", "suppression")
 
 
+def legacy_contract(service, thread: str) -> None:
+    """Contrat d'identifiant ancien, créé par le moteur directement : la règle des
+    identifiants ne vaut qu'à la création, les contrats existants restent lisibles."""
+    service.engine.run(thread, PENDING_TEXT, (), service.today())
+
+
 def test_redirection_apres_revue_vers_le_dossier_quel_que_soit_l_identifiant():
     thread = "revue 1#é"
     service = memory_service()
-    service.analyse(PENDING_TEXT, contract_id=thread)
+    legacy_contract(service, thread)
     web = client(service)
     data = {"decision": "GO_RESERVES", "relecteur": "Camille", "motif": "réserves"}
     response = web.post(
@@ -419,7 +425,7 @@ def test_redirection_apres_analyse_vers_le_dossier():
 def test_liens_des_pages_par_la_meme_adresse():
     service = memory_service()
     for thread in ("a/b", "revue 1#é"):
-        service.analyse(PENDING_TEXT, contract_id=thread)
+        legacy_contract(service, thread)
     web = client(service)
     listing = web.get("/").text
     for thread in ("a/b", "revue 1#é"):

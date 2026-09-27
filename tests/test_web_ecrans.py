@@ -141,7 +141,7 @@ def test_analyse_identifiant_genere_et_date():
         ),
         (
             {"source": "texte", "texte": CONTRACT_TEXT, "identifiant": "a b/../c"},
-            "identifiant invalide",
+            "identifiant de contrat invalide",
         ),
     ],
 )

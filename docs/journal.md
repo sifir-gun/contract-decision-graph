@@ -2160,3 +2160,20 @@ ADR 004 (rendu serveur avec HTMX plutôt qu'une application séparée, souverain
 
 - Périmètre retenu par le propriétaire, pour le moment : le déploiement (phase 2) et la durée (phase 3). Hors liste : authentification, données personnelles réelles, validation métier, coffre de secrets ; l'ADR 004 interdit toujours toute exposition réseau avant l'authentification.
 - `docs/mise-en-production.md` : chaque point avec sa source (feuille de route, ADR 004, spec, journal, README) et, quand il le faut, à quoi on reconnaît qu'il est fait. Une décision en tête du déploiement : un seul réplica, ou une création de thread atomique en base. Proposition à valider ; rien n'est commencé.
+
+### Identifiant d'un contrat : une seule règle, dans le domaine
+
+- **Décision du propriétaire** : la règle de l'interface devient celle du domaine (`domain/identifiers.py`) : lettres, chiffres, `.`, `_` et `-`, 100 caractères au plus, en commençant par une lettre ou un chiffre. Donc ni « / », ni blanc, ni `.` ou `..` seuls. Elle est appliquée à la création d'un contrat, par le service, pour la CLI comme pour l'interface. Les contrats existants restent lisibles.
+- **Tests d'abord** :
+  - règle du domaine : identifiants valides, dont ceux du vrai journal et ceux que génèrent l'interface et les tests ; identifiants refusés, avec le rappel de la règle ;
+  - service : analyse refusée sans rien créer ; contrat d'identifiant ancien, créé par le moteur directement, listé, lu et tranché ;
+  - CLI : identifiant invalide, tiré du nom du fichier ou de `--contract-id`, refusé avant toute connexion à la base ou au LLM (erreur JSON `ContractIdError`, code 1) ;
+  - interface : message de la règle du domaine.
+  - Rouges avant correction. Les tests des adresses créent désormais leurs contrats aux identifiants hostiles par le moteur directement, comme des contrats plus anciens que la règle.
+- **Vrai journal** (lecture seule, 27/09) : 3 enregistrements, et non 2. Le troisième, `demo-03-go-logiciel-20260927-162519-3d89`, a été créé par l'interface en mode réel, scellé le 27/09 à 16:28 UTC, `GO`. Les trois identifiants suivent la règle, comme les 3 threads du checkpointer ; la chaîne est intègre.
+
+### Référence pour `verify --expect-head` (mise à jour)
+
+Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
+
+`74fe9838c7e6854364e66083026f5cc70a5fa6f298442948d50503175881284f`

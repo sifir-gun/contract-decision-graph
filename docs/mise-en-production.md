@@ -60,6 +60,6 @@ Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans u
 - [ ] **Juge du CRAG** : sa variabilité, dans le sens prudent ; évaluer un modèle plus fort.
 - [ ] **Ancrage externe de la tête du journal d'audit**, par un horodatage certifié.
 
-## À décider
+## Décidé et fait
 
-- [ ] **Identifiants de contrat de la CLI** : la CLI accepte tout identifiant, l'interface impose lettres, chiffres, `.`, `_` et `-`. Un identifiant de la CLI qui contient « / », ou vaut `.` ou `..`, reste inaccessible dans l'interface (journal, 27/09). Aligner la CLI changerait son comportement.
+- [x] **Identifiants de contrat** (décision du 27/09) : une seule règle, dans le domaine (`domain/identifiers.py`), appliquée à la création d'un contrat, par la CLI comme par l'interface. Les contrats existants restent lisibles ; les trois du vrai journal suivent la règle.
