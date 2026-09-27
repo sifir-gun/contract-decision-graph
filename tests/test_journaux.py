@@ -96,12 +96,10 @@ def test_format_inconnu_refuse():
 # --- CLI et serveur ----------------------------------------------------------------------------
 
 
-def test_serveur_recoit_la_configuration_des_journaux(monkeypatch):
-    seen = {}
-    monkeypatch.setattr(server.uvicorn, "run", lambda app, **kw: seen.update(kw))
+def test_serveur_recoit_la_configuration_des_journaux():
     config = journaux.config("json")
-    server.serve(object(), "127.0.0.1", 8000, log_config=config)
-    assert seen["log_config"] is config
+    main, _ = server.servers(object(), "127.0.0.1", 8000, log_config=config)
+    assert main.config.log_config is config
 
 
 @pytest.mark.parametrize(

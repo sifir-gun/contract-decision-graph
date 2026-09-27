@@ -10,9 +10,11 @@ import argparse
 import atexit
 import functools
 import json
+import logging
 import logging.config
 import os
 import sys
+import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -32,6 +34,7 @@ from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.web import app as web_app
+from cdg.adapters.web import sante
 from cdg.adapters.web import security as web_security
 from cdg.adapters.web import server as web_server
 from cdg.application import demo_set, ingestion
@@ -65,6 +68,23 @@ def app_pool() -> connexions.Source:
     return pool
 
 
+_EMBEDDERS: dict[str, fastembed.FastembedEmbedder] = {}
+_EMBEDDERS_GUARD = threading.Lock()
+log = logging.getLogger(__name__)
+
+
+def process_embedder(config: DecisionConfig) -> fastembed.FastembedEmbedder:
+    """Embedder du processus : poids chargés une fois, puis réutilisés par chaque analyse
+    (ONNX Runtime accepte les appels simultanés sur une même session)."""
+    key = config.embedding.model_dump_json()
+    with _EMBEDDERS_GUARD:
+        if key not in _EMBEDDERS:
+            _EMBEDDERS[key] = fastembed.FastembedEmbedder(
+                config.embedding, settings.embedding_cache_dir()
+            )
+        return _EMBEDDERS[key]
+
+
 def open_audit_store() -> AuditStore:
     """Journal d'audit réel, avec le rôle applicatif. Les tests le remplacent par un
     journal jetable : aucune option de la CLI ni de la configuration n'en change la table."""
@@ -84,10 +104,7 @@ def build_deps(config: DecisionConfig) -> Deps:
     modèle et avant la création du thread.
     """
     llm = build_provider(config.llm)
-    embedder = fastembed.FastembedEmbedder(
-        config.embedding, settings.embedding_cache_dir()
-    )
-    retriever = rag_store.PgvectorRetriever(app_pool(), embedder)
+    retriever = rag_store.PgvectorRetriever(app_pool(), process_embedder(config))
     return Deps(
         extractor=LLMExtractor(llm),
         crag=orchestrator.crag_runner(retriever, llm, config),
@@ -343,10 +360,50 @@ def _web(args: argparse.Namespace) -> dict:
         f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
         file=sys.stderr,
     )
+    probes = _probes(args, config)
     web_server.serve(
-        app, args.host, args.port, log_config=journaux.config(args.journaux)
+        app,
+        args.host,
+        args.port,
+        log_config=journaux.config(args.journaux),
+        probes=probes,
     )
     return {"web": "arrêtée"}
+
+
+def _probes(
+    args: argparse.Namespace, config: DecisionConfig
+) -> web_server.Probes | None:
+    """En mode réel, le modèle d'embedding se charge en arrière-plan dès le lancement ;
+    les sondes, si un port leur est donné, disent quand il est chargé et si la base
+    répond. En démonstration, ni modèle ni base : prêtes aussitôt."""
+    started = threading.Event()
+    if args.demo:
+        started.set()
+    else:
+        threading.Thread(
+            target=_warm_up, args=(config, started), name="modele", daemon=True
+        ).start()
+    if args.port_sante is None:
+        return None
+    checks = sante.Checks(
+        started=started.is_set,
+        database=(lambda: True) if args.demo else lambda: connexions.ping(app_pool()),
+        draining=lambda: False,
+    )
+    return web_server.Probes(
+        sante.create_health_app(checks), args.hote_sante, args.port_sante
+    )
+
+
+def _warm_up(config: DecisionConfig, started: threading.Event) -> None:
+    try:
+        process_embedder(config)
+    # un modèle qui ne se charge pas : la sonde de démarrage échoue, le journal dit pourquoi
+    except Exception as exc:  # noqa: BLE001
+        log.error("modèle d'embedding non chargé (%s)", type(exc).__name__)
+        return
+    started.set()
 
 
 def _positive(text: str) -> int:
@@ -515,6 +572,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="autorise une adresse non locale : l'interface n'a pas "
         "d'authentification, avertissement affiché",
+    )
+    web.add_argument(
+        "--port-sante",
+        type=_positive,
+        default=None,
+        help="port des sondes de santé de Kubernetes (/sante/vie, /sante/demarrage, "
+        "/sante/pret) ; aucune sonde par défaut",
+    )
+    web.add_argument(
+        "--hote-sante",
+        default="127.0.0.1",
+        help="adresse d'écoute des sondes (0.0.0.0 dans un pod : le kubelet appelle "
+        "l'adresse du pod) ; elles ne servent aucune donnée",
     )
     web.set_defaults(handler=_web)
     return parser

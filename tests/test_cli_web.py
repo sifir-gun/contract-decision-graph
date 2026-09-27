@@ -14,7 +14,7 @@ from cdg.adapters.web import server
 def served(monkeypatch):
     seen = {}
 
-    def serve(app, host, port, *, log_config):
+    def serve(app, host, port, *, log_config, probes=None):
         seen.update(app=app, host=host, port=port, log_config=log_config)
 
     monkeypatch.setattr(server, "serve", serve)

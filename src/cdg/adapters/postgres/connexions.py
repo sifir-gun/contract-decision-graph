@@ -63,6 +63,18 @@ def open_pool(
     )
 
 
+def ping(source: Source, timeout: float = 2.0) -> bool:
+    """Base joignable : `SELECT 1` sur une connexion prêtée en `timeout` secondes au
+    plus. Lève si la base ne répond pas (sonde de disponibilité)."""
+    if isinstance(source, str):
+        with psycopg.connect(source, connect_timeout=int(timeout) or 1) as conn:
+            conn.execute("SELECT 1")
+        return True
+    with source.connection(timeout=timeout) as conn:
+        conn.execute("SELECT 1")
+    return True
+
+
 @contextmanager
 def connection(source: Source) -> Iterator[psycopg.Connection[DictRow]]:
     """Connexion empruntée au pool, ou ouverte directement depuis une chaîne."""
