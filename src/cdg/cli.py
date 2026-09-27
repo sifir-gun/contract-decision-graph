@@ -347,6 +347,15 @@ def _expire(args: argparse.Namespace) -> dict:
     }
 
 
+def _tell(args: argparse.Namespace, level: int, message: str) -> None:
+    """Message à l'opérateur : sur la sortie d'erreur au terminal (journaux texte), dans le
+    journal en json, où un collecteur lit la sortie ligne à ligne (Kubernetes)."""
+    if args.journaux == "json":
+        log.log(level, message)
+    else:
+        print(message, file=sys.stderr)
+
+
 def _web(args: argparse.Namespace) -> dict:
     """Interface web, sur le même service que les autres commandes ; jusqu'à Ctrl+C."""
     warning = web_security.bind_warning(
@@ -364,12 +373,13 @@ def _web(args: argparse.Namespace) -> dict:
         draining=stopping.is_set,
     )
     if warning:
-        print(warning, file=sys.stderr)
+        _tell(args, logging.WARNING, warning)
     shown = f"[{args.host}]" if ":" in args.host else args.host
     mode = "démonstration, en mémoire" if args.demo else "réel"
-    print(
+    _tell(
+        args,
+        logging.INFO,
         f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
-        file=sys.stderr,
     )
     probes = _probes(args, config, stopping)
     if not args.demo:  # démonstration : tout en mémoire, rien à reprendre
@@ -687,7 +697,9 @@ def main(argv: list[str] | None = None) -> int:
             error |= payload
         print(json.dumps(error, ensure_ascii=False, default=str), file=sys.stderr)
         return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    # en json, le résultat tient sur une ligne, comme chaque entrée du journal
+    indent = None if args.journaux == "json" else 2
+    print(json.dumps(result, ensure_ascii=False, indent=indent, default=str))
     return 0
 
 

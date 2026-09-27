@@ -124,6 +124,24 @@ def test_cli_format_des_journaux_option_ou_environnement(
     assert seen["log_config"] == journaux.config(expected)
 
 
+def test_cli_en_json_chaque_ligne_de_sortie_est_du_json(monkeypatch, capsys):
+    """Dans un pod, un collecteur lit la sortie ligne à ligne : en json, l'avertissement et
+    l'adresse qu'affiche `web` sont des entrées du journal, et le résultat final tient sur
+    une ligne. En texte, rien ne change au terminal (tests/test_cli_web.py)."""
+    monkeypatch.setattr(cli.web_server, "serve", lambda *a, **kw: None)
+    argv = ["--journaux", "json", "web", "--demo", "--host", "0.0.0.0"]
+    assert cli.main([*argv, "--ecoute-non-locale"]) == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    lines = [json.loads(line) for line in out.splitlines()]
+    assert lines[-1] == {"web": "arrêtée"}
+    warning, address = lines[:-1]
+    assert (warning["niveau"], address["niveau"]) == ("WARNING", "INFO")
+    assert warning["journal"] == address["journal"] == "cdg.cli"
+    assert "AVERTISSEMENT" in warning["message"]
+    assert "http://0.0.0.0:8000" in address["message"]
+
+
 # --- de bout en bout : un vrai serveur uvicorn -------------------------------------------------
 
 
