@@ -29,7 +29,7 @@ Les pages sont rendues par Jinja2, avec l'échappement automatique ; HTMX ajoute
 
 ### Souveraineté
 
-Aucune ressource externe : ni CDN, ni police web, ni outil de mesure d'audience. Polices du système ; thèmes clair et sombre selon le réglage du système. Un test échoue si un gabarit ou un fichier statique référence une URL externe. La politique de sécurité du contenu (`default-src 'none'`, puis `'self'` pour les scripts, les styles, les images et les connexions) l'impose aussi au navigateur.
+Aucune ressource externe : ni CDN, ni police web, ni outil de mesure d'audience. Polices du système ; thèmes clair et sombre selon le réglage du système. L'icône est un SVG écrit à la main, servi par l'interface (`static/favicon.svg`, et à `/favicon.ico`, que les navigateurs demandent d'office). Un test échoue si un gabarit ou un fichier statique, SVG compris, référence une URL externe ; seul le nom de l'espace de noms SVG, jamais chargé, est admis. La politique de sécurité du contenu (`default-src 'none'`, puis `'self'` pour les scripts, les styles, les images et les connexions) l'impose aussi au navigateur.
 
 ### Sécurité
 

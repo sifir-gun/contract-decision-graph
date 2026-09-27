@@ -2182,3 +2182,9 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 
 - **Décision du propriétaire** (27/09) : on permettra plusieurs réplicas ; la création d'un contrat sera rendue sûre en base, dans la phase Kubernetes. Le verrou du service reste, pour un processus.
 - Liste de contrôle validée et mise à jour (`docs/mise-en-production.md`) ; ADR 004 et spec suivent. Rien n'est codé : ce sera fait dans la phase Kubernetes.
+
+### Icône de l'interface, servie localement
+
+- Le navigateur demandait `/favicon.ico` et recevait un 404. L'icône est désormais un SVG écrit à la main (`static/favicon.svg`, 32 × 32, le bleu des liens de l'interface), déclaré dans l'en-tête des pages et servi aussi à `/favicon.ico`, avec les mêmes en-têtes de sécurité.
+- **Test d'abord** : icône servie aux deux adresses, en `image/svg+xml`, identique au fichier du dépôt, sans script ni lien. Le test des ressources externes lit aussi les SVG ; seul le nom de l'espace de noms SVG, exigé par un fichier autonome et jamais chargé, y est admis.
+- Vu dans le navigateur, mode démonstration : icône affichée, `/favicon.ico` et `/static/favicon.svg` en 200, console sans erreur.

@@ -37,6 +37,9 @@ HTMX_SHA384 = "2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 EXTERNAL = re.compile(
     r"(?i)(?:https?:)?//[a-z0-9.-]+\.[a-z]{2,}|\burl\(\s*['\"]?https?:"
 )
+# nom de l'espace de noms SVG, exigé par un fichier SVG autonome : un identifiant, que le
+# navigateur ne charge jamais
+SVG_NAMESPACE = 'xmlns="http://www.w3.org/2000/svg"'
 
 
 # --- 5. aucune ressource externe ------------------------------------------------------------
@@ -45,12 +48,32 @@ EXTERNAL = re.compile(
 def web_files() -> list[Path]:
     files = sorted(p for p in WEB_ROOT.rglob("*") if p.is_file())
     assert files, WEB_ROOT
-    return [p for p in files if p.suffix in {".html", ".css", ".js"}]
+    return [p for p in files if p.suffix in {".html", ".css", ".js", ".svg"}]
 
 
 @pytest.mark.parametrize("path", web_files(), ids=lambda p: p.name)
 def test_aucune_url_externe_dans_les_gabarits_et_fichiers_statiques(path):
-    assert not EXTERNAL.findall(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".svg":
+        assert text.count(SVG_NAMESPACE) == 1
+        text = text.replace(SVG_NAMESPACE, "")
+    assert not EXTERNAL.findall(text)
+
+
+def test_icone_servie_localement_sans_404():
+    """Icône des pages, et à `/favicon.ico`, que les navigateurs demandent d'office :
+    le même fichier SVG du dépôt, écrit à la main, sans script ni ressource externe."""
+    icon = (STATIC / "favicon.svg").read_bytes()
+    assert b"<script" not in icon and b"href" not in icon
+    web = client()
+    for path in ("/favicon.ico", "/static/favicon.svg"):
+        response = web.get(path)
+        assert response.status_code == 200, path
+        assert response.headers["content-type"].startswith("image/svg+xml")
+        assert response.content == icon
+        assert response.headers["content-security-policy"] == security.CSP
+    page = web.get("/").text
+    assert '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">' in page
 
 
 def test_detection_d_une_url_externe():

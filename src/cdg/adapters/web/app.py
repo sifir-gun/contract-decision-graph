@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -86,6 +86,13 @@ def create_app(
     templates = Jinja2Templates(env=env)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=WEB_ROOT / "static"), name="static")
+
+    @app.get("/favicon.ico")
+    def favicon() -> FileResponse:
+        """Demandée d'office par les navigateurs : l'icône des pages, servie localement."""
+        return FileResponse(
+            WEB_ROOT / "static" / "favicon.svg", media_type="image/svg+xml"
+        )
 
     def page(
         request: Request, name: str, context: dict[str, Any], status: int = 200
