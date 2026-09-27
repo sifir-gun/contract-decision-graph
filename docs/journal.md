@@ -2034,3 +2034,11 @@ Dernière PR avant la mise en public. Code gelé : aucun changement de comportem
 - Une mesure brouillée par un lancement en trop (serveur arrêté après une seconde, dont les tentatives tombaient dans la fenêtre suivante) a été refaite proprement, en suivant le processus du serveur.
 - **Décision du propriétaire** : ce qui est observé suffit ; Studio est écarté, y compris comme outil de développement. **ADR 003** (`docs/adr-003-studio-ecarte.md`) : la documentation, les observations avec versions et heures, ce qui n'a pas été mesuré, les autres coûts (dépendances du produit rétrogradées, licence Elastic 2.0 du serveur, entrée non masquée), la décision et l'alternative prévue (rapport HTML par contrat, puis écran de revue humaine en phase 3). Une phrase du README, au paragraphe sur la souveraineté, y renvoie. Citations de la documentation limitées à un court extrait ; le reste est reformulé, section par section.
 - **Nettoyage vérifié** : dossier jetable et environnement supprimés ; `pyproject.toml` et `uv.lock` identiques à `main` ; aucun `langgraph.json` ni `.langgraph_api` dans le dépôt ; ni `langgraph_api` ni `langgraph_cli` dans l'environnement du projet. Les paquets téléchargés restent dans le cache global de uv, hors du dépôt.
+
+### Référence pour `verify --expect-head`
+
+Après l'analyse enregistrée pour le GIF du README (thread `demo-06-no-go-conseil`, scellée le 27/09/2026 à 06:02:01 UTC), le vrai journal d'audit compte 1 enregistrement ; tête de chaîne :
+
+`905e2359e1cf3a1905d877628364f345ccddf1715e3cd1367b755dc9f4b83740`
+
+`uv run python -m cdg.cli verify --expect-head 905e2359e1cf3a1905d877628364f345ccddf1715e3cd1367b755dc9f4b83740` passe le 27/09. À remplacer par la nouvelle tête après chaque analyse scellée dans le vrai journal.
