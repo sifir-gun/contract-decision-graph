@@ -70,10 +70,21 @@ def _port_error(exc: Exception, model: str, node: str) -> Exception | None:
 class MistralProvider:
     name = "mistral"
 
-    def __init__(self, config: LLMConfig, *, api_key: str | None = None, client=None):
+    def __init__(
+        self,
+        config: LLMConfig,
+        *,
+        api_key: str | None = None,
+        server_url: str | None = None,
+        client=None,
+    ):
         self._config = config
+        # server_url None : l'adresse du SDK, https://api.mistral.ai
         self._client = client or Mistral(
-            api_key=api_key, timeout_ms=config.timeout_seconds * 1000, retry_config=None
+            api_key=api_key,
+            server_url=server_url,
+            timeout_ms=config.timeout_seconds * 1000,
+            retry_config=None,
         )
 
     def structured(
