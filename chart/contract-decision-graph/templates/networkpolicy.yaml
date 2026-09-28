@@ -52,7 +52,9 @@ spec:
     {{- end }}
 {{- if include "cdg.taches" . | trim }}
 ---
-# Tâches : en sortie, le DNS et PostgreSQL seulement ; aucune entrée.
+# Tâches : en sortie, le DNS et PostgreSQL seulement ; aucune entrée. Posée avec elles
+# (crochet), comme leur compte : les tâches d'avant mise à jour tournent avant les
+# ressources ordinaires, et doivent joindre la base des nouvelles valeurs (restauration).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -61,6 +63,9 @@ metadata:
   labels:
     {{- include "cdg.etiquettes" . | nindent 4 }}
   annotations:
+    "helm.sh/hook": pre-install,pre-upgrade,post-install,post-upgrade
+    "helm.sh/hook-weight": "-30"
+    "helm.sh/hook-delete-policy": before-hook-creation
     # exclusion de kube-linter, justifiée ici et dans l'ADR 005
     ignore-check.kube-linter.io/dangling-networkpolicypeer-podselector: "PostgreSQL n'est pas rendu par ce chart (PR C3 : CloudNativePG) : ses pods existent hors du rendu"
 spec:

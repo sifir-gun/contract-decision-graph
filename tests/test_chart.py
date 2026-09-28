@@ -483,6 +483,23 @@ def test_taches_helm_ordonnees_limitees_et_nettoyees(reel):
 
 
 @pytest.mark.chart
+def test_regle_reseau_des_taches_posee_avant_elles(reel):
+    """Les tâches d'avant mise à jour tournent avant les ressources ordinaires du chart :
+    leur règle réseau est un crochet, comme leur compte, posé avant elles. Sinon une mise à
+    jour qui change de base (restauration) les laisse sous l'ancienne règle, qui ne mène
+    qu'à l'ancienne base (scénario du cluster, 28/09)."""
+    annotations = named(reel, "NetworkPolicy", "-taches")["metadata"]["annotations"]
+    account = named(reel, "ServiceAccount", "-taches")["metadata"]["annotations"]
+    assert annotations["helm.sh/hook"] == account["helm.sh/hook"]
+    assert annotations["helm.sh/hook-delete-policy"] == "before-hook-creation"
+    weights = [
+        int(job["metadata"]["annotations"]["helm.sh/hook-weight"])
+        for job in of_kind(reel, "Job")
+    ]
+    assert int(annotations["helm.sh/hook-weight"]) < min(weights)
+
+
+@pytest.mark.chart
 def test_volume_image_du_modele_en_lecture_seule(reel):
     pod = of_kind(reel, "Deployment")[0]["spec"]["template"]["spec"]
     [volume] = [v for v in pod["volumes"] if v["name"] == "modele"]
