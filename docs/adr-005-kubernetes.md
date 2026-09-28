@@ -169,3 +169,33 @@ Décisions du 28/09 (propriétaire), réalisées dans la PR B.
 - **Image du modèle en deux architectures** : elle ne contient que des données, sa variante arm64 se construit donc sans émulation (`FROM scratch`, aucune commande exécutée) sur le runner amd64, et ses couches doivent être exactement celles de la variante testée (`RootFS.Layers` comparés ; vérifié sur le poste, dans l'autre sens). Même index, même signature récursive, mêmes vérifications que l'application.
 - **Cluster local** : k3d sur le poste utilise l'image construite sur le poste, de son architecture (PR C3).
 
+
+### Chart Helm (PR C2)
+
+Le chart (`chart/contract-decision-graph/`) et sa validation statique, sans cluster : k3d, CloudNativePG, le proxy de sortie (Smokescreen) et les scénarios viennent en PR C3. Mode d'emploi et valeurs : `chart/contract-decision-graph/README.md`.
+
+- **Outils figés** : helm 4.3.0 (au-delà des avis publiés, jusqu'à 4.1.3), installé sur le poste par Homebrew (`brew install helm`, même version) et en CI depuis l'archive officielle, vérifiée par son empreinte ; kubeconform 0.8.0 et kube-linter 0.8.3 dans leurs images officielles, figées par version et empreinte. Kubernetes visé : 1.36.4, canal stable de k3s.
+- **Validation** (`scripts/chart.py verifier`, job `chart` de la CI, `scripts/check.sh`) : `helm lint --strict` et rendu de trois variantes (réel, démonstration, repli par copie du modèle) ; kubeconform, strict, contre les schémas de Kubernetes 1.36.4 ; kube-linter, toutes vérifications actives, sur chaque variante à part. Réunies, les variantes se mêlent : kube-linter rapprochait le budget d'interruption du rendu réel du Deployment de la démonstration. `tests/test_chart.py` vérifie ensuite les garanties du rendu ; il le lit avec un chargeur YAML qui refuse une clé en double, car PyYAML garde la dernière sans rien dire (les étiquettes des pods étaient en double, kubeconform les refusait).
+- **Pods** : Pod Security « restricted » (utilisateur 65532, seccomp `RuntimeDefault`, racine en lecture seule, aucune capacité, pas d'élévation) ; compte de service dédié, sans jeton monté ; `/tmp` en volume éphémère borné ; images par empreinte seulement ; poids du modèle en volume `image`, en lecture seule, ou copiés par des conteneurs d'initialisation (`modele.montage=copie`).
+- **Secrets** : créés hors du chart, qui ne fait que les nommer ; aucune valeur secrète dans les valeurs (testé).
+- **Dimensionnement**, d'après la mesure du 28/09 (`scripts/mesure_memoire.py`, journal) :
+  - réplica réel : environ 1 550 Mio de mémoire anonyme une fois prêt, 16 Mio de plus par analyse. Requête de 2 Gi, limite de 3 Gi, pour garder de la marge au cache de fichiers et aux pics ;
+  - CPU : requête de 1, limite entière de 2. Le nombre de fils de l'embedder suit la limite (`CDG_FILS_EMBEDDING`) : sous 2 CPU, une requête prend 3,6 s avec 2 fils, contre 9,7 s avec les fils par défaut d'onnxruntime ;
+  - ingestion : 2 290 Mio au pic. Requête de 3 Gi, limite de 3,5 Gi, 2 CPU ;
+  - démonstration : 73 à 107 Mio. Requête de 128 Mi, limite de 256 Mi ;
+  - autres tâches : requête de 256 Mi, limite de 512 Mi ; copie des poids : 32 Mi, limite de 64 Mi.
+- **Disponibilité** : deux réplicas, sans autoscaling (la charge est de l'attente du LLM, bornée par le quota de Mistral) ; mise à jour progressive sans interruption (un pod de plus, jamais un de moins) ; budget d'interruption d'un pod disponible, qui laisse évincer un pod pas prêt ; répartition sur des nœuds différents ; trois sondes sur le port des sondes ; pause avant l'arrêt, puis délai de grâce égal à la pause, plus le délai d'arrêt, plus une marge.
+- **Configuration** : une ConfigMap, dont l'empreinte, portée par les pods, les relance à chaque changement ; la tâche de contrôle refuse une mise à jour qui laisserait des contrats en attente impossibles à trancher (`passerOutre`, en connaissance de cause).
+- **Réseau** : tout refusé par défaut. En sortie, l'interface ne joint que le DNS, PostgreSQL et le proxy ; les tâches, le DNS et PostgreSQL ; le test Helm, le DNS et les sondes. Aucune entrée hors du test. Les règles des tâches et leur compte de service n'existent qu'avec des tâches : une règle qui ne désigne aucun pod est orpheline, comme en démonstration.
+- **Tâches Helm** : migrations avant l'installation et chaque mise à jour, ingestion après, contrôle de configuration avant une mise à jour ; tentatives bornées, délai maximal, nettoyage automatique. Une tâche en échec reste, pour le diagnostic, jusqu'à son délai de conservation.
+
+#### Exceptions aux bonnes pratiques (kube-linter)
+
+Toutes les vérifications intégrées sont actives (`addAllBuiltIn`). Une exception qui tient à un objet est posée sur lui, par l'annotation `ignore-check.kube-linter.io/<vérification>`, avec sa justification pour valeur ; `tests/test_chart.py` fixe la liste par type d'objet et exige une justification. Les autres, qui ne dépendent d'aucun objet ou datent d'avant cette règle, sont dans `chart/.kube-linter.yaml`.
+
+- **Sur les Jobs et le Pod du test Helm** :
+  - `restart-policy` : `Never`, pour que chaque tentative ait son pod et que le journal d'une tentative ratée reste lisible ; le test Helm n'est jamais retenté ;
+  - `no-liveness-probe` et `no-readiness-probe` : des tâches qui s'exécutent jusqu'au bout, bornées par leur délai, sans service ni trafic à recevoir.
+- **Sur le Deployment, les Jobs et le Pod de test** : `dnsconfig-options` (`ndots: "2"` recommandé). Ces pods ne résolvent que des noms internes au cluster ; `api.mistral.ai` est résolu par le proxy de sortie. **En PR C3, le pod du proxy recevra cette configuration DNS**.
+- **Sur le Deployment et les Jobs** : `env-value-from`. La vérification signale un Secret ou une ConfigMap absent des objets examinés (documentation de kube-linter 0.8.3) ; les Secrets sont créés hors du chart, par conception.
+- **Dans la configuration** : `schema-validation` (kubeconform la fait déjà, figé et strict, contre la version visée ; celle de kube-linter télécharge les schémas de la branche principale, sans version, et échoue en TLS depuis son image) ; conventions d'une organisation (`required-annotation-email`, `required-label-owner`) ; ordre des clés (`sorted-keys`) ; et, décidées avant la règle des annotations : `no-node-affinity`, `priority-class-name`, `minimum-three-replicas`, `no-anti-affinity`, `read-secret-from-env-var`, `dangling-networkpolicypeer-podselector`, chacune justifiée dans le fichier.

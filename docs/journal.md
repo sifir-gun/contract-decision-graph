@@ -2442,3 +2442,18 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Décision** : le nombre de fils suit la limite CPU du pod. Option `--fils-embedding` ou variable `CDG_FILS_EMBEDDING`, posée par le chart ; sans réglage, le défaut d'onnxruntime (le poste n'a pas de limite).
 - **Tests d'abord** (`tests/test_embeddings.py`, `tests/test_sante.py`) : le nombre est transmis à fastembed (`threads`, dont `None` est le défaut, vérifié dans fastembed 0.8.1) ; option ou variable ; valeur nulle, négative ou non entière refusée.
 
+
+### Chart et validation statique
+
+- **Reprise** : le chart, son script de validation, ses tests et le job `chart` étaient restés non commités ; basculés sur `main` avec le dépôt, ils ont été remis sur `chart` (autorisation du propriétaire), puis la branche rebasée sur `main`. **Règle du propriétaire (28/09)** : tout travail en cours est commité sur sa branche avant chaque arrêt, jamais laissé non commité.
+- **helm 4.3.0**, installé par le propriétaire (`brew install helm`) : les 18 tests du rendu passaient, mais la validation complète échouait.
+- **Étiquettes des pods en double** : kubeconform refusait 12 ressources (`app.kubernetes.io/name` et `instance`, posées par les étiquettes communes et par le sélecteur). Les tests ne le voyaient pas : PyYAML garde la dernière valeur d'une clé en double. Test d'abord : le rendu est lu par un chargeur qui refuse les clés en double ; puis une aide `cdg.etiquettesComposant` pose chaque étiquette une fois.
+- **kube-linter, 107 erreurs sur 7 vérifications** :
+  - `pdb-min-available` : les trois variantes étaient examinées ensemble, et le budget d'interruption du rendu réel était rapproché du Deployment de la démonstration (1 réplica). Test d'abord : une variante à la fois ;
+  - variante par variante, une vraie règle orpheline est apparue : en démonstration, la règle réseau des tâches ne désignait aucun pod. Test d'abord, sur chaque variante et sans aucune tâche ; la liste des tâches rendues (`cdg.taches`) décide désormais des Jobs, de leur règle et de leur compte de service ;
+  - `restart-policy` du Deployment : `Always` écrit (valeur par défaut) ;
+  - décisions du propriétaire : exceptions par annotation sur chaque objet, justifiées (`restart-policy`, sondes des Jobs et du Pod de test, `dnsconfig-options`, `env-value-from`) ; `schema-validation` seule dans la configuration, car elle ne dépend d'aucun objet ;
+  - `env-value-from`, lu dans la documentation de kube-linter 0.8.3 (`docs/generated/checks.md`) : elle signale un Secret ou une ConfigMap absent des objets examinés, et ne déconseille pas les variables d'environnement ; exclue, les Secrets étant créés hors du chart ;
+  - `dnsconfig-options` recommande `ndots: "2"` : exclue pour l'application, les tâches et le test, qui ne résolvent que des noms internes ; à appliquer au proxy de sortie en PR C3, qui résout `api.mistral.ai` ;
+  - syntaxe des annotations lue dans `docs/configuring-kubelinter.md` (0.8.3) : `ignore-check.kube-linter.io/<vérification>`, justification en valeur.
+- **Résultat** : `scripts/chart.py verifier` passe sur les trois variantes ; 37 tests du chart, dont 27 avec helm.
