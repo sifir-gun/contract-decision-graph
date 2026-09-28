@@ -1,11 +1,13 @@
 """Embedding local : préfixes e5, dimension contrôlée, jamais de téléchargement implicite,
 aucun appel réseau (télémétrie d'onnxruntime coupée, J5)."""
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 from dotenv import dotenv_values
@@ -16,6 +18,7 @@ from cdg.adapters import fastembed
 from cdg.domain.config import load_config
 
 CONFIG = load_config().embedding
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeModel:
@@ -229,3 +232,92 @@ def test_aucune_connexion_reseau_au_chargement_du_modele_ni_a_l_embedding(monkey
     )
     assert result.returncode == 0, result.stderr[-3000:]
     assert "aucune connexion" in result.stdout
+
+
+# --- langsmith : rien n'est envoyé dans notre configuration ------------------------------------
+#
+# langsmith, client de traçage de LangSmith, vient avec langchain-core. Il ne trace que si
+# LANGSMITH_TRACING (ou LANGCHAIN_TRACING_V2) vaut « true » (0.14.0,
+# utils.tracing_is_enabled) ; l'image pose LANGSMITH_TRACING=false et ne porte aucune clé.
+# Une analyse complète (graphe, doublures) ne doit rien tenter. Le témoin active le traçage
+# avec une clé fictive : il prouve que le test verrait un envoi.
+
+ANALYSE = """
+import json, socket, sys
+sys.path.insert(0, "tests")
+attempts = []
+if sys.argv[1] == "garde":
+    # garde portable : toute résolution de nom ou connexion de Python est refusée et
+    # comptée ; langsmith passe par le client HTTP de Python, que cette garde voit
+    def refuse(*args, **kwargs):
+        attempts.append(repr(args[:2])[:120])
+        raise OSError("connexion refusée par le test")
+    socket.getaddrinfo = refuse
+    socket.socket.connect = refuse
+    socket.socket.connect_ex = refuse
+from doubles import CONTRACT_TEXT
+from test_service import make_service
+make_service().analyse(CONTRACT_TEXT, contract_id="c-reseau")
+from langchain_core.tracers.langchain import wait_for_all_tracers
+wait_for_all_tracers()  # envoie ce qui attendrait encore, si un client existait
+print(json.dumps({"tentatives": attempts}))
+"""
+TRACING = {"LANGSMITH_TRACING": "true", "LANGSMITH_API_KEY": "cle-fictive-de-test"}
+CONFIGURATIONS = {"sans variable": {}, "comme l'image": {"LANGSMITH_TRACING": "false"}}
+
+
+def without_langsmith(extra: dict[str, str]) -> dict[str, str]:
+    """L'environnement du test, sans aucune variable de LangSmith ni de LangChain."""
+    keep = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("LANGSMITH_", "LANGCHAIN_"))
+    }
+    return keep | extra
+
+
+def guarded(extra: dict[str, str]) -> list[str]:
+    result = subprocess.run(
+        [sys.executable, "-c", ANALYSE, "garde"],
+        cwd=ROOT,
+        env=without_langsmith(extra),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[-3000:]
+    return json.loads(result.stdout.splitlines()[-1])["tentatives"]
+
+
+@pytest.mark.parametrize("extra", CONFIGURATIONS.values(), ids=CONFIGURATIONS.keys())
+def test_langsmith_n_envoie_rien_pendant_une_analyse(extra):
+    assert guarded(extra) == []
+
+
+def test_temoin_la_garde_voit_langsmith_quand_le_tracage_est_active():
+    assert guarded(TRACING)
+
+
+def langsmith_sandboxed(extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    if shutil.which("sandbox-exec") is None:
+        pytest.skip("bac à sable macOS (sandbox-exec) indisponible sur ce système")
+    return subprocess.run(
+        ["sandbox-exec", "-p", SANDBOX, sys.executable, "-c", ANALYSE, "noyau"],
+        cwd=ROOT,
+        env=without_langsmith(extra),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("extra", CONFIGURATIONS.values(), ids=CONFIGURATIONS.keys())
+def test_langsmith_aucune_connexion_vue_par_le_noyau(extra):
+    result = langsmith_sandboxed(extra)
+    assert result.returncode == 0, result.stderr[-3000:]
+
+
+def test_temoin_le_noyau_tue_langsmith_quand_le_tracage_est_active():
+    assert langsmith_sandboxed(TRACING).returncode == -9

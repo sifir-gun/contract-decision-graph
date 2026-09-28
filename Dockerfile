@@ -44,6 +44,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-build --no-install-project
 
 COPY LICENSE /app/LICENSE
+# licences tierces absentes des roues et de Python (licences/PROVENANCE.md)
+COPY licences /app/licences
 COPY config /app/config
 COPY data /app/data
 COPY migrations /app/migrations

@@ -32,6 +32,7 @@ ENTRYPOINT = ["python", "-m", "cdg.cli"]
 # ce que l'image utilise : le code, sa configuration, ses données, ses migrations, sa licence
 CONTEXT = {
     "LICENSE",
+    "licences",  # textes des licences tierces (tests/test_licences.py)
     "pyproject.toml",
     "uv.lock",
     "config",

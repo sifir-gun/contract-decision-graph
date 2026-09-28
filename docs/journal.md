@@ -2359,3 +2359,26 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Correction** : `docker/modele/Dockerfile.dockerignore` exclut les verrous (`.locks/`) et `trees/`. Vérifié : l'image reconstruite n'en contient plus, et les 18 tests du modèle passent (1 min 35 sur le poste).
 - **Lu dans huggingface_hub 1.32.0** (`file_download.py`, `_chmod_and_move`) : les fichiers téléchargés prennent les droits par défaut du dossier, donc le umask du processus (0644 sur un runner) ; le test protège d'un autre umask.
 
+## 2026-09-28 · Notices de licence des images publiques (branche `licences-tierces`)
+
+### Constats, à la lecture de la première publication
+
+- **Publication vérifiée** (run 36397989991, image `sha256:30e6d959…`) : signature (cosign, identité `ci.yml@refs/heads/main`), provenance SLSA v1 (commit `24b4e594`, push sur `main`) et inventaire SPDX 2.3 (93 paquets, Syft 1.52.0), lus depuis le registre (`gh attestation verify --bundle-from-oci` : le stockage des attestations de GitHub est bloqué par le bac à sable réseau du poste).
+- **Paquet public dès sa publication**, contrairement à la documentation de GitHub et à ce qu'en disait l'ADR 005 : jeton anonyme du registre accordé, étiquettes listées sans authentification. Irréversible. La publication de l'image du modèle est suspendue à la décision du propriétaire.
+- **Inspection de l'image publique, couche par couche** (24 couches, 15 430 fichiers, recherche sur les octets) : aucun secret, aucun fichier `.env`, aucune clé du projet ; ni le nom d'utilisateur du poste, ni l'identité du propriétaire. Relevés, tous tiers : faux jetons des tests livrés par mistralai (`github_pat_abcdef…`, `AKIAIOSFODNN7EXAMPLE`), `/Users/Barney` dans la documentation de `ntpath` (CPython), `/home/runner` dans les roues construites par leurs projets, adresses d'auteurs dans les métadonnées. L'historique de l'image ne montre que l'étape finale. Contenu propre du projet : exactement les fichiers suivis par git.
+- **Notices manquantes** : quatre paquets Python sans texte de licence dans leur roue (flatbuffers, langsmith, loguru, tokenizers) ; les bibliothèques liées dans Python (OpenSSL, SQLite, libffi…), dont l'archive `install_only_stripped` ne porte pas les licences. Le dossier `share` retiré de Python ne contenait que des pages de manuel.
+- **Image du modèle**, inspectée avant publication : les poids, le cache de Hugging Face (chemins relatifs seulement), la notice MIT ; rien du poste.
+
+### Correction, tests d'abord
+
+- **Tests** (`tests/test_licences.py`) : provenance des textes ajoutés (publication de python-build-standalone égale à celle que uv installe, versions des paquets égales à celles de `uv.lock`) ; sur l'image de l'application, licence de chaque paquet Python, `copyright` de chaque paquet Debian, licences de Python et de ses bibliothèques liées, AGPL, HTMX, corpus ; sur l'image du modèle, sa notice MIT, avec le même test.
+- **Réalisation** : `licences/` (19 licences de python-build-standalone, extraites des archives complètes x86_64 et aarch64 de la publication 20260924 après vérification de leurs empreintes, identiques ; quatre licences amont, au tag et au commit de chaque version), copié dans l'image sous `/app/licences/`.
+- **Contre-épreuve** : lancé sur l'image publiée ce matin, le test nomme les quatre paquets et les licences de Python manquantes ; sur les images reconstruites, les 12 tests passent.
+- **Mise au point** : `uv python list --all-platforms` ne rend qu'une entrée par système ; interrogé par clé (`cpython-3.12.14-linux-x86_64-gnu`), il rend la bonne publication. Le lien `cpython-3.12-…` vers `cpython-3.12.14-…` fait voir deux fois la licence de CPython : chemins résolus.
+
+### langsmith
+
+- **Lu dans le code installé** (langsmith 0.14.0, `utils.tracing_is_enabled`) : le traçage n'est actif que si `LANGSMITH_TRACING` (ou `LANGCHAIN_TRACING_V2`, ou leurs formes courtes) vaut `true`. L'image pose `LANGSMITH_TRACING=false`, `.env.example` aussi ; le `.env` du poste n'en contient aucune.
+- **Tests** (`tests/test_embeddings.py`) : une analyse complète (graphe, doublures) ne tente aucune connexion, sans variable comme avec la configuration de l'image. Deux gardes : portable (résolution de nom et connexion de Python refusées et comptées, en CI) et noyau de macOS (bac à sable existant, sur le poste). Témoins : traçage activé avec une clé fictive, la garde voit la tentative, le noyau tue le processus.
+- **Dans le cluster** : le proxy de sortie (PR C) ne laissera passer que l'API de Mistral ; LangSmith y serait refusé de toute façon (ADR 005).
+
