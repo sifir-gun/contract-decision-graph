@@ -126,9 +126,12 @@ def test_cli_format_des_journaux_option_ou_environnement(
 
 def test_cli_en_json_chaque_ligne_de_sortie_est_du_json(monkeypatch, capsys):
     """Dans un pod, un collecteur lit la sortie ligne à ligne : en json, l'avertissement et
-    l'adresse qu'affiche `web` sont des entrées du journal, et le résultat final tient sur
-    une ligne. En texte, rien ne change au terminal (tests/test_cli_web.py)."""
-    monkeypatch.setattr(cli.web_server, "serve", lambda *a, **kw: None)
+    l'adresse qu'affiche `web`, une fois le port ouvert, sont des entrées du journal, et le
+    résultat final tient sur une ligne. En texte, rien ne change au terminal
+    (tests/test_cli_web.py)."""
+    monkeypatch.setattr(
+        cli.web_server, "serve", lambda *a, on_started, **kw: on_started()
+    )
     argv = ["--journaux", "json", "web", "--demo", "--host", "0.0.0.0"]
     assert cli.main([*argv, "--ecoute-non-locale"]) == 0
     out, err = capsys.readouterr()
