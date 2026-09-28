@@ -1,6 +1,7 @@
 """Scénarios sur le cluster de test k3d (ADR 005, PR C3), préparé par scripts/cluster.py :
 plusieurs nœuds, CloudNativePG avec sauvegardes vers SeaweedFS, proxy de sortie, serveur
-factice de Mistral, application. Marqueur `cluster`, option `--cluster DOSSIER`.
+factice de Mistral, application. Marqueur `cluster`, option `--cluster=DOSSIER`, en un
+mot (voir tests/test_cluster_outillage.py).
 
 Les analyses passent par l'interface (redirection de port vers un pod), comme pour un
 utilisateur : la CLI, lancée dans un pod, chargerait une seconde fois le modèle (ADR 005,

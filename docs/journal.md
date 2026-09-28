@@ -2496,6 +2496,7 @@ Lu dans `docs/src/declarative_role_management.md` (v1.30.1) : rôle déclaré, c
 - **Base restaurée** : la condition `Ready` précédait l'instance qui sert ; le scénario attend l'état sain.
 - **Disque plein pendant `check.sh`** : après les constructions d'images, la VM Docker du poste (110 Go, partagée avec d'autres projets) était à 86 % ; k3s, qui évince à 5 % libres et récupère 10 % de plus, a évincé tout le cluster. Seuils absolus sur les nœuds (1 Gi, 500 Mi), vérifiés dans la configuration des kubelets ; images orphelines de ce dépôt supprimées (étiquette `org.opencontainers.image.source`), rien d'autre. En CI (14 Go garantis), le job retire les outils préinstallés inutilisés avant le cluster.
 - **Test de l'ingestion par la CLI** : la doublure de l'embedder refusait la taille des lots ; vu par `check.sh` (test `pg`, hors de ma passe sans PostgreSQL).
+- **Commande des scénarios** : `--cluster "$RUNNER_TEMP/cluster"`, en deux mots, faisait prendre ce dossier hors du dépôt pour une cible ; pytest y cherchait sa racine, sans charger `tests/conftest.py`, et refusait l'option (code 4). Mes essais nommaient `tests/test_cluster.py` et ne le voyaient pas ; vu par `check.sh`, il aurait frappé la CI. En un mot (`--cluster=…`) ; un test lance la commande du job telle quelle, avec un dossier hors du dépôt.
 
 ### Scénarios, profil local (poste, 28/09)
 

@@ -6,6 +6,9 @@ import base64
 import importlib.util
 import json
 import re
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -198,7 +201,7 @@ ORDER = [
     f"{SCRIPT} creer",
     f'{SCRIPT} images --dossier "$RUNNER_TEMP/cluster"',
     f'{SCRIPT} installer --dossier "$RUNNER_TEMP/cluster"',
-    'uv run --no-sync pytest -m cluster --cluster "$RUNNER_TEMP/cluster"',
+    'uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"',
 ]
 
 
@@ -279,6 +282,29 @@ def test_runner_libere_les_outils_inutilises_avant_le_cluster():
         assert folder in removed
     script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
     assert "rm -rf /usr" not in script and "/usr/local/lib/android" not in script
+
+
+def test_commande_des_scenarios_comprise_par_pytest_hors_du_depot(tmp_path):
+    """Un dossier hors du dépôt passé en second mot (`--cluster DOSSIER`) est pris par
+    pytest pour une cible : il y cherche sa racine, ne charge pas tests/conftest.py et
+    refuse l'option (vu par check.sh le 28/09). La commande du job, telle quelle, avec
+    le dossier du runner : les onze scénarios sont collectés."""
+    [command] = [c for c in ORDER if " pytest " in c]
+    folder = tmp_path / "cluster"
+    folder.mkdir()
+    args = shlex.split(command.replace("$RUNNER_TEMP", str(tmp_path)))
+    assert args[:4] == ["uv", "run", "--no-sync", "pytest"]
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", *args[4:], "--collect-only", "-q"]
+        + ["-p", "no:cacheprovider"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.match(r"11/\d+ tests collected", result.stdout.splitlines()[-1])
 
 
 def test_check_sh_deroule_le_meme_cluster():

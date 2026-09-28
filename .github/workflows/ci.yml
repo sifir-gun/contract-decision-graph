@@ -331,7 +331,7 @@ jobs:
       - name: Composants, base, proxy, serveur factice, application
         run: uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
       - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, restauration)
-        run: uv run --no-sync pytest -m cluster --cluster "$RUNNER_TEMP/cluster"
+        run: uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
       - name: Diagnostic en cas d'échec
         id: diagnostic-cluster
         if: failure()

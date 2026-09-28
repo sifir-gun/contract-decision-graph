@@ -52,7 +52,8 @@ def pytest_addoption(parser):
         metavar="DOSSIER",
         default=None,
         help="exécute aussi les tests marqués cluster, sur le cluster k3d préparé par "
-        "scripts/cluster.py (DOSSIER : celui de `images` et `installer`)",
+        "scripts/cluster.py (DOSSIER : celui de `images` et `installer`) ; en un mot, "
+        "--cluster=DOSSIER : en second mot, un dossier hors du dépôt devient une cible",
     )
     parser.addoption(
         "--proxy",

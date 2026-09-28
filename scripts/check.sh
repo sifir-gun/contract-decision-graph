@@ -70,7 +70,7 @@ uv run --no-sync python scripts/cluster.py tirer-modele
 uv run --no-sync python scripts/cluster.py creer
 uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
 uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
-uv run --no-sync pytest -m cluster --cluster "$RUNNER_TEMP/cluster"
+uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
 uv run --no-sync python scripts/cluster.py detruire
 
 echo "==> vérifications de la CI : toutes passées"
