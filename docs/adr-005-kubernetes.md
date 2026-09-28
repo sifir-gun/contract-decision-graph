@@ -112,8 +112,13 @@ Au plus, par réplica : 6 pour l'analyse en cours, plus une par lecture simultan
 - **Journaux JSON de bout en bout** : en `--journaux json`, l'adresse de l'interface et l'avertissement d'écoute non locale passent par le journal, et le résultat final d'une commande tient sur une ligne. Au terminal (journaux texte), rien ne change.
 - **Interface sur 127.0.0.1 dans le conteneur** : même publiée, elle ne répond pas depuis l'extérieur (vérifié) ; elle sera jointe par oauth2-proxy, dans le même pod (PR D). Seules les sondes écoutent sur l'adresse du pod.
 - **Taille** : 423 Mo (arm64), surtout onnxruntime, numpy et leurs bibliothèques. Les poids du modèle d'embedding (2,2 Go) n'y sont pas : image dédiée en PR B.
-- **Vérification** : `tests/test_image.py`. Les tests du Dockerfile tournent avec la suite ; ceux de l'image construite (marqueur `image`, `--image ÉTIQUETTE`) dans le job `image` de la CI, sur amd64, et dans `scripts/check.sh`, sur l'architecture du poste. Publication sur ghcr.io, scan, inventaire, signature et provenance : PR B. Mise à jour des bases : à la main, délibérément, comme l'image de PostgreSQL, jusqu'à la décision de la PR B.
+- **Vérification** : `tests/test_image.py`. Les tests du Dockerfile tournent avec la suite ; ceux de l'image construite (marqueur `image`, `--image ÉTIQUETTE`) dans le job `image` de la CI, sur amd64, et dans `scripts/check.sh`, sur l'architecture du poste. Publication sur ghcr.io, scan, inventaire, signature et provenance : PR B. Mise à jour des bases : à la main dans cette PR ; Dependabot en PR B (ci-dessous).
 - **Écarté : `python:3.12-slim`** (image officielle Docker) et `debian:trixie-slim` (celle de l'exemple de uv) pour l'exécution : shell, `apt`, `dpkg` et pip y restent, soit autant d'outils inutiles et de paquets à surveiller. Elles restent la base la plus simple, et la plus courante ; distroless est publiée et signée par son projet (GoogleContainerTools), pas par Docker.
 - **Écarté : `distroless/python3-debian13`**, dont le Python (3.13, celui de Debian) n'est pas celui du projet.
 - **Écarté : un processus d'init** (tini, `dumb-init`) : rien à récolter, et un outil de plus.
+
+### Prévu pour la PR B (décisions du 28/09)
+
+- **Images de base de l'image applicative** (`Dockerfile`) : Dependabot propose leurs mises à jour (écosystème `docker`, empreinte comprise), qui passent par la CI (tests, construction, scan) avant fusion. L'image PostgreSQL reste mise à jour à la main, délibérément : elle touche aux données.
+- **Signature des images distroless vérifiée en CI avant la construction** : `cosign verify`, avec l'identité et l'émetteur publiés par le projet distroless (références) ; une signature absente ou différente arrête la construction.
 
