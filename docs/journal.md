@@ -2494,6 +2494,8 @@ Lu dans `docs/src/declarative_role_management.md` (v1.30.1) : rôle déclaré, c
 - **Installation relancée** : elle tirait de nouvelles clés S3 ; SeaweedFS, qui ne relit ses identités qu'au démarrage, refusait l'archivage des WAL depuis la première relance, sans que rien d'autre ne le montre avant la sauvegarde. Secrets repris ; le scénario vérifie l'archivage continu avant de sauvegarder.
 - **Règle réseau des tâches** : mise à jour après les crochets `pre-upgrade`, elle laissait la tâche de migrations sous l'ancienne règle lors de la bascule vers la base restaurée (connexion refusée). Devenue un crochet, comme le compte des tâches ; lu dans la documentation des crochets de Helm.
 - **Base restaurée** : la condition `Ready` précédait l'instance qui sert ; le scénario attend l'état sain.
+- **Disque plein pendant `check.sh`** : après les constructions d'images, la VM Docker du poste (110 Go, partagée avec d'autres projets) était à 86 % ; k3s, qui évince à 5 % libres et récupère 10 % de plus, a évincé tout le cluster. Seuils absolus sur les nœuds (1 Gi, 500 Mi), vérifiés dans la configuration des kubelets ; images orphelines de ce dépôt supprimées (étiquette `org.opencontainers.image.source`), rien d'autre. En CI (14 Go garantis), le job retire les outils préinstallés inutilisés avant le cluster.
+- **Test de l'ingestion par la CLI** : la doublure de l'embedder refusait la taille des lots ; vu par `check.sh` (test `pg`, hors de ma passe sans PostgreSQL).
 
 ### Scénarios, profil local (poste, 28/09)
 
