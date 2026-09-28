@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cdg-proxy.nomComplet" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-proxy.etiquettes" . | nindent 4 }}
+  annotations:
+    # exclusions de kube-linter, justifiées ici et dans l'ADR 005
+    ignore-check.kube-linter.io/no-node-affinity: "aucune contrainte de matériel ni de zone : n'importe quel nœud convient, amd64 comme arm64 (image multi-architecture)"
+    ignore-check.kube-linter.io/minimum-three-replicas: "deux réplicas : un seul porte la charge (6 Mio mesurés après 43 requêtes) ; le second garde la sortie pendant une mise à jour ou la perte d'un nœud, et le budget d'interruption en garde un disponible (ADR 005)"
+spec:
+  replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "cdg-proxy.selecteur" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cdg-proxy.etiquettes" . | nindent 8 }}
+      annotations:
+        # tout changement de la configuration ou de la liste d'accès relance les pods
+        checksum/configuration: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      restartPolicy: Always
+      serviceAccountName: {{ include "cdg-proxy.nomComplet" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # le proxy résout les noms qu'on lui demande (api.mistral.ai) : un nom qui contient
+      # au moins deux points est cherché tel quel d'abord, sans les domaines de recherche
+      # du cluster (kube-linter, dnsconfig-options)
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "2"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "cdg-proxy.selecteur" . | nindent 20 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: {{ .Values.repartition.siImpossible }}
+          labelSelector:
+            matchLabels:
+              {{- include "cdg-proxy.selecteur" . | nindent 14 }}
+      containers:
+        - name: smokescreen
+          image: {{ printf "%s@%s" .Values.image.repository .Values.image.digest }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: proxy
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+          startupProbe:
+            tcpSocket: {port: proxy}
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket: {port: proxy}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket: {port: proxy}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          resources:
+            {{- toYaml .Values.ressources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: configuration
+              mountPath: /configuration
+              readOnly: true
+      volumes:
+        - name: configuration
+          configMap:
+            name: {{ include "cdg-proxy.nomComplet" . }}

@@ -1,0 +1,64 @@
+# En entrée, les seuls pods de l'application ; en sortie, le DNS du cluster et le port 443
+# vers Internet, jamais vers les adresses privées. Profil de test : sorties internes
+# supplémentaires (serveur factice de Mistral).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cdg-proxy.nomComplet" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-proxy.etiquettes" . | nindent 4 }}
+  annotations:
+    # exclusion de kube-linter, justifiée ici et dans l'ADR 005
+    ignore-check.kube-linter.io/dangling-networkpolicypeer-podselector: "les clients du proxy sont les pods de l'application, rendus par son propre chart : ils existent hors de ce rendu"
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cdg-proxy.selecteur" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.clients | nindent 14 }}
+      ports:
+        - port: {{ .Values.port }}
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.dns.espaceDeNoms }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.dns.selecteur | nindent 14 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- range .Values.sortiesInternes }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .espaceDeNoms }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .selecteur | nindent 14 }}
+      ports:
+        - port: {{ .port }}
+          protocol: TCP
+    {{- end }}

@@ -568,19 +568,30 @@ def test_lint_rendu_schemas_et_bonnes_pratiques(tmp_path):
     run = Recorder({"version": "v4.3.0", "template": "kind: ConfigMap\n"})
     assert module.verify(tmp_path, run=run) == 0
     tools = [c[0] if c[0] == "helm" else c[c.index("--rm") + 1 :] for c in run.commands]
+    # le chart de l'application et celui du proxy de sortie (PR C3), chacun ses variantes
+    renders = [
+        (chart, name)
+        for chart, variants, prefix in module.CHARTS
+        for name in (f"{prefix}{variant}" for variant in variants)
+    ]
+    assert {chart.name for chart, _ in renders} == {
+        "contract-decision-graph",
+        "cdg-proxy",
+    }
     lints = [c for c in run.commands if c[:2] == ["helm", "lint"]]
-    assert len(lints) == len(module.VARIANTS) and all("--strict" in c for c in lints)
+    assert [c[3] for c in lints] == [str(chart) for chart, _ in renders]
+    assert all("--strict" in c for c in lints)
     templates = [c for c in run.commands if c[:2] == ["helm", "template"]]
-    assert len(templates) == len(module.VARIANTS)
-    for variant in module.VARIANTS:
-        assert (tmp_path / f"{variant}.yaml").read_text() == "kind: ConfigMap\n"
+    assert len(templates) == len(renders)
+    for _, name in renders:
+        assert (tmp_path / f"{name}.yaml").read_text() == "kind: ConfigMap\n"
     [kubeconform] = [c for c in run.commands if module.KUBECONFORM in c]
     assert {"-strict", "-summary"} <= set(kubeconform)
     assert kubeconform[kubeconform.index("-kubernetes-version") + 1] == "1.36.4"
     # kube-linter relie les objets d'un même lot : chaque variante à part, sinon le
     # budget d'interruption du rendu réel est rapproché du Deployment de la démo (28/09)
     linters = [c for c in run.commands if module.KUBE_LINTER in c]
-    assert [c[-1] for c in linters] == [f"/rendu/{v}.yaml" for v in module.VARIANTS]
+    assert [c[-1] for c in linters] == [f"/rendu/{name}.yaml" for _, name in renders]
     assert all("lint" in c and "/configuration/.kube-linter.yaml" in c for c in linters)
     assert tools  # la liste des commandes n'est pas vide
 

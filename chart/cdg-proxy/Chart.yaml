@@ -1,0 +1,17 @@
+apiVersion: v2
+name: cdg-proxy
+description: >-
+  Proxy de sortie de contract-decision-graph : Smokescreen, construit par le projet, seule
+  sortie vers Internet, limitée à l'API de Mistral (ADR 005, PR C3).
+type: application
+version: 0.1.0
+# Smokescreen : commit de master du 28/09/2026 (docker/proxy-sortie/Dockerfile)
+appVersion: "6c446988"
+kubeVersion: ">=1.33.0-0"
+home: https://github.com/sifir-gun/contract-decision-graph
+sources:
+  - https://github.com/sifir-gun/contract-decision-graph
+  - https://github.com/stripe/smokescreen
+maintainers:
+  - name: sifir-gun
+    url: https://github.com/sifir-gun
