@@ -833,6 +833,12 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - identifiant d'un contrat : une seule règle, dans le domaine (`domain/identifiers.py`), appliquée à la création par le service, donc par la CLI comme par l'interface : lettres, chiffres, `.`, `_` et `-`, 100 caractères au plus, en commençant par une lettre ou un chiffre ; les contrats existants restent lisibles ;
   - icône de l'interface servie localement (`static/favicon.svg`, aussi à `/favicon.ico`) : plus de 404 ;
   - feuille de route : la phase 2 commence par le déploiement Kubernetes, le rapport HTML par contrat vient ensuite ;
+- **28 septembre 2026, Kubernetes, PR B** (ADR 005, chaîne d'approvisionnement) :
+  - Dependabot sur les images de base du `Dockerfile` (uv et l'image PostgreSQL à la main) ;
+  - signatures des images de base vérifiées avant la construction (`scripts/chaine.py bases` : cosign pour distroless, attestation GitHub pour uv) ;
+  - inventaire (Syft, SPDX) et scan (Grype) de l'image, échec sur une faille critique ou haute corrigeable, exceptions datées et expirantes (`securite/exceptions-vulnerabilites.yaml`) ; job `image` aussi le lundi ;
+  - publication sur ghcr.io après une fusion dans `main` (étiquette du commit, jamais `latest`), signature sans clé, provenance et inventaire attestés, vérification de ce qui est publié ;
+  - image du modèle d'embedding, figée par les empreintes de ses fichiers, workflow à part (`.github/workflows/modele.yml`) ;
 - **28 septembre 2026, Kubernetes, PR A** (ADR 005) :
   - échéances du corpus contrôlées par le job `audit` de la CI (60 jours) ;
   - journaux en texte ou en JSON sur la sortie standard (`--journaux`, `CDG_JOURNAUX`) : une exception n'y laisse que son type et sa pile, le journal d'accès la méthode, le chemin et le code ;

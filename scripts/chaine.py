@@ -1,0 +1,288 @@
+"""Chaîne d'approvisionnement de l'image (ADR 005, PR B) : mêmes commandes en CI et en local
+(`scripts/check.sh`). Chaque outil tourne dans son image officielle, figée par version et
+empreinte : rien à installer sur le poste, et le même binaire partout.
+
+  uv run --no-sync python scripts/chaine.py bases
+  uv run --no-sync python scripts/chaine.py inventaire IMAGE --dossier DOSSIER
+  uv run --no-sync python scripts/chaine.py scan --dossier DOSSIER
+
+- `bases` : vérifie la signature de chaque image de base du Dockerfile avant la
+  construction ; une base sans politique de vérification est refusée, jamais ignorée.
+- `inventaire` : inventaire des composants de l'image construite (Syft), en SPDX (pour
+  l'attestation) et au format de Syft (pour le scan), dans DOSSIER.
+- `scan` : failles connues de cet inventaire (Grype) ; échec sur une faille critique ou
+  haute qui a un correctif, sauf exception justifiée, datée et non expirée
+  (`securite/exceptions-vulnerabilites.yaml`).
+Réseau : registres des images, journal de transparence de Sigstore, API de GitHub, base
+de failles de Grype (gardée dans le volume Docker `cdg-grype-db`).
+"""
+
+import argparse
+import subprocess
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date, timedelta
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from cdg.cli import today
+
+ROOT = Path(__file__).resolve().parents[1]
+EXCEPTIONS = ROOT / "securite" / "exceptions-vulnerabilites.yaml"
+MAX_EXCEPTION = timedelta(days=90)  # durée de vie d'une exception, au plus
+GRYPE_DB = "cdg-grype-db"  # volume Docker : base de failles gardée entre deux scans
+
+# outils : versions au-delà des avis de sécurité publiés (ADR 005, relevé du 28/09/2026)
+COSIGN = (
+    "ghcr.io/sigstore/cosign/cosign:v3.1.3"
+    "@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8"
+)
+SYFT = (
+    "docker.io/anchore/syft:v1.52.0"
+    "@sha256:500e2d872ac019436926e8322b4fc1f39441d94d21f6f4046c6ff29b30e8cb02"
+)
+GRYPE = (
+    "docker.io/anchore/grype:v0.119.0"
+    "@sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3"
+)
+
+Run = Callable[..., subprocess.CompletedProcess[str]]
+
+
+@dataclass(frozen=True)
+class Cosign:
+    """Signature sans clé, vérifiée par cosign : identité et émetteur du certificat."""
+
+    identity: str
+    issuer: str
+
+    def command(self, image: str) -> list[str]:
+        return [
+            "docker",
+            "run",
+            "--rm",
+            COSIGN,
+            "verify",
+            image,
+            "--certificate-identity",
+            self.identity,
+            "--certificate-oidc-issuer",
+            self.issuer,
+        ]
+
+
+@dataclass(frozen=True)
+class GitHubAttestation:
+    """Attestation de provenance de GitHub, vérifiée par `gh attestation verify`."""
+
+    owner: str
+    workflow: str
+
+    def command(self, image: str) -> list[str]:
+        return [
+            "gh",
+            "attestation",
+            "verify",
+            f"oci://{image}",
+            "--owner",
+            self.owner,
+            "--signer-workflow",
+            self.workflow,
+        ]
+
+
+# qui doit avoir signé chaque base (documentation de chaque projet, ADR 005)
+POLICIES: dict[str, Cosign | GitHubAttestation] = {
+    "gcr.io/distroless/": Cosign(
+        identity="keyless@distroless.iam.gserviceaccount.com",
+        issuer="https://accounts.google.com",
+    ),
+    "ghcr.io/astral-sh/uv:": GitHubAttestation(
+        owner="astral-sh",
+        workflow="astral-sh/uv/.github/workflows/publish-docker-image.yml",
+    ),
+}
+
+
+def bases(dockerfile: Path) -> list[str]:
+    """Images de base (FROM), dans l'ordre du Dockerfile."""
+    found = []
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        words = line.split()
+        if words and words[0].upper() == "FROM":
+            found.append(next(w for w in words[1:] if not w.startswith("--")))
+    return found
+
+
+def command(image: str) -> list[str]:
+    for prefix, policy in POLICIES.items():
+        if image.startswith(prefix):
+            return policy.command(image)
+    raise ValueError(
+        f"image de base sans politique de vérification de signature : {image} "
+        "(scripts/chaine.py, POLICIES)"
+    )
+
+
+def verify_bases(dockerfile: Path, *, run: Run = subprocess.run) -> int:
+    failed = []
+    for image in bases(dockerfile):
+        result = run(command(image), capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            print(f"signature vérifiée : {image}")
+        else:
+            failed.append(image)
+            print(
+                f"signature refusée : {image}\n{result.stderr.strip()}", file=sys.stderr
+            )
+    return 1 if failed else 0
+
+
+def inventory(image: str, folder: Path, *, run: Run = subprocess.run) -> int:
+    """`image.tar`, puis `sbom.syft.json` et `sbom.spdx.json`, dans `folder`."""
+    folder = folder.resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    for command in (
+        ["docker", "save", image, "-o", str(folder / "image.tar")],
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{folder}:/travail",
+            SYFT,
+            "docker-archive:/travail/image.tar",
+            "-o",
+            "syft-json=/travail/sbom.syft.json",
+            "-o",
+            "spdx-json=/travail/sbom.spdx.json",
+            "-q",
+        ],
+    ):
+        result = run(command, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            print(
+                f"inventaire impossible ({command[1]}) :\n{result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return 1
+    print(f"inventaire : {folder / 'sbom.spdx.json'}")
+    return 0
+
+
+def _exception_rule(entry: dict[str, Any], today: date) -> dict[str, Any]:
+    """Règle d'exception de Grype, après contrôle : justifiée, datée, non expirée."""
+    name = entry.get("vulnerabilite") or "?"
+    package = entry.get("paquet") or {}
+    for field in ("nom", "type", "version"):
+        if not package.get(field):
+            raise ValueError(f"exception {name} : paquet sans {field}")
+    reason = str(entry.get("motif") or "").strip()
+    if not reason:
+        raise ValueError(f"exception {name} : motif absent")
+    decided, expires = entry.get("decidee"), entry.get("expire")
+    if not isinstance(decided, date) or not isinstance(expires, date):
+        raise TypeError(f"exception {name} : dates decidee et expire attendues")
+    if expires - decided > MAX_EXCEPTION:
+        raise ValueError(
+            f"exception {name} : plus de 90 jours entre décision et expiration"
+        )
+    if today > expires:
+        raise ValueError(
+            f"exception {name} expirée le {expires.isoformat()} : la revoir "
+            f"({EXCEPTIONS.relative_to(ROOT)})"
+        )
+    return {
+        "vulnerability": name,
+        "package": {
+            "name": package["nom"],
+            "type": package["type"],
+            "version": str(package["version"]),
+        },
+        "reason": reason,
+    }
+
+
+def grype_config(exceptions: Path, today: date) -> dict[str, Any]:
+    data = yaml.safe_load(exceptions.read_text(encoding="utf-8")) or {}
+    entries = data.get("exceptions") or []
+    return {"ignore": [_exception_rule(entry, today) for entry in entries]}
+
+
+def scan(
+    folder: Path, exceptions: Path, *, today: date, run: Run = subprocess.run
+) -> int:
+    """Échec (1) sur une faille critique ou haute corrigeable, hors exception."""
+    folder = folder.resolve()
+    config = grype_config(exceptions, today)
+    (folder / "grype.yaml").write_text(
+        yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{folder}:/travail",
+        "-v",
+        f"{GRYPE_DB}:/cache",
+        "-e",
+        "GRYPE_DB_CACHE_DIR=/cache",
+        "-e",
+        "GRYPE_CHECK_FOR_APP_UPDATE=false",
+        GRYPE,
+        "sbom:/travail/sbom.syft.json",
+        "--only-fixed",
+        "--fail-on",
+        "high",
+        "-c",
+        "/travail/grype.yaml",
+        "-o",
+        "table",
+        "-o",
+        "json=/travail/grype.json",
+        "-q",
+    ]
+    result = run(command, capture_output=True, text=True, check=False)
+    print(result.stdout, end="")
+    if result.returncode == 2:  # --fail-on : faille au-dessus du seuil
+        print(
+            "scan : faille critique ou haute corrigeable (tableau ci-dessus) ; "
+            "corriger, ou justifier une exception datée",
+            file=sys.stderr,
+        )
+        return 1
+    if result.returncode != 0:
+        print(f"scan impossible :\n{result.stderr.strip()}", file=sys.stderr)
+        return 1
+    print(
+        f"scan : aucune faille critique ou haute corrigeable ({len(config['ignore'])} "
+        "exception(s))"
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    commands = parser.add_subparsers(dest="commande", required=True)
+    verify = commands.add_parser("bases", help="signatures des images de base")
+    verify.add_argument("--dockerfile", type=Path, default=ROOT / "Dockerfile")
+    inventory_ = commands.add_parser("inventaire", help="inventaire (Syft)")
+    inventory_.add_argument("image")
+    inventory_.add_argument("--dossier", type=Path, required=True)
+    scan_ = commands.add_parser("scan", help="failles connues (Grype)")
+    scan_.add_argument("--dossier", type=Path, required=True)
+    scan_.add_argument("--exceptions", type=Path, default=EXCEPTIONS)
+    args = parser.parse_args(argv)
+    if args.commande == "bases":
+        return verify_bases(args.dockerfile)
+    if args.commande == "inventaire":
+        return inventory(args.image, args.dossier)
+    return scan(args.dossier, args.exceptions, today=today())
+
+
+if __name__ == "__main__":
+    sys.exit(main())

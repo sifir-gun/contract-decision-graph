@@ -53,6 +53,13 @@ RUN /app/.venv/bin/python -m compileall -q --invalidation-mode checked-hash /app
 
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:54df941ed0d06a1bd95ef5e0ce391fd8d9f94b64782dc9a60062727849ee3f97
 
+# la source relie le paquet ghcr.io au dépôt ; la révision est dans l'attestation de
+# provenance, pas dans l'image : la même construction en CI et sur le poste
+LABEL org.opencontainers.image.source="https://github.com/sifir-gun/contract-decision-graph" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.title="contract-decision-graph" \
+      org.opencontainers.image.description="Verdict go / no-go auditable sur des contrats fournisseurs"
+
 # propriétaire root : le processus (65532) lit le code, ne peut pas le modifier
 COPY --from=construction /python /python
 COPY --from=construction /app /app

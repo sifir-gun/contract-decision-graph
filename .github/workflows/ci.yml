@@ -7,8 +7,9 @@ on:
   push:
     branches: [main]
   pull_request:
-  # audit hebdomadaire de main : une faille publiée entre deux commits est vue sans
-  # attendre le suivant ; lint, types et tests ne tournent pas sur ce déclenchement
+  # audit hebdomadaire de main (dépendances Python, échéances du corpus, image : signatures
+  # des bases, scan, exceptions expirées) : une faille publiée entre deux commits est vue
+  # sans attendre le suivant ; lint, types et tests ne tournent pas sur ce déclenchement
   schedule:
     - cron: "17 7 * * 1" # lundi 7 h 17, après Dependabot, hors du début d'heure chargé
       timezone: "Europe/Paris"
@@ -145,7 +146,7 @@ jobs:
 
   image:
     name: image (construction et vérifications)
-    if: github.event_name != 'schedule'
+    # aussi chaque lundi : une faille publiée entre deux commits, une exception expirée
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -159,8 +160,110 @@ jobs:
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock (pytest et httpx pour les vérifications)
         run: uv sync --locked
+      - name: Signatures des images de base, avant la construction
+        # distroless : signature cosign sans clé du projet ; uv : attestation de provenance
+        # de GitHub (astral-sh/uv) ; toute base sans politique de vérification est refusée
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/chaine.py bases
       - name: Construction, bases figées par empreinte, dépendances strictement depuis uv.lock
         # l'image n'est ni publiée ni signée ici : c'est l'objet de la PR B (ADR 005)
         run: docker build --tag cdg:verification .
       - name: Vérifications de l'image construite (non root, lecture seule, sans shell)
         run: uv run --no-sync pytest -m image --image cdg:verification
+      - name: Inventaire des composants (Syft), en SPDX et au format de Syft
+        run: >-
+          uv run --no-sync python scripts/chaine.py inventaire cdg:verification
+          --dossier "$RUNNER_TEMP/chaine"
+      - name: Scan (Grype), échec sur une faille critique ou haute corrigeable
+        # exceptions justifiées, datées et expirantes : securite/exceptions-vulnerabilites.yaml
+        run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"
+      - name: Image et inventaire, pour la publication (main seulement)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image
+          path: |
+            ${{ runner.temp }}/chaine/image.tar
+            ${{ runner.temp }}/chaine/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 1
+
+  publication:
+    name: publication (ghcr.io, signature, attestations)
+    # après une fusion dans main seulement : ni pull request, ni lundi. L'image publiée est
+    # celle que le job image a construite, testée, inventoriée et scannée, jamais reconstruite
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, types, audit, tests, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # pousser l'image sur ghcr.io
+      id-token: write # identité OIDC du workflow : signature sans clé, attestations
+      attestations: write # attestations de provenance et d'inventaire
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: image
+          path: ${{ runner.temp }}/chaine
+      - name: Image construite, testée et scannée par le job image
+        run: docker load --input "$RUNNER_TEMP/chaine/image.tar"
+      - name: Connexion à ghcr.io (jeton du workflow ; droit packages limité à ce job)
+        env:
+          TOKEN: ${{ github.token }}
+        run: echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publication, étiquetée par le commit, empreinte relue dans le registre
+        run: |
+          docker tag cdg:verification "$IMAGE:sha-$GITHUB_SHA"
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" \
+            --format '{{json .Manifest}}' | jq -r .digest)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "empreinte publiée illisible : $digest" >&2
+            exit 1
+          fi
+          echo "DIGEST=$digest" >> "$GITHUB_ENV"
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3 # celui des vérifications (scripts/chaine.py)
+      - name: Signature sans clé, par l'identité OIDC du workflow
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Attestation de provenance (SLSA)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          push-to-registry: true
+          create-storage-record: false # dépôts d'organisation seulement
+      - name: Attestation de l'inventaire (SPDX 2.3, Syft), celui qui a été scanné
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          sbom-path: ${{ runner.temp }}/chaine/sbom.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Vérification de ce qui est publié (signature, provenance, inventaire)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main
+          WORKFLOW: ${{ github.repository }}/.github/workflows/ci.yml
+        run: |
+          cosign verify "$IMAGE@$DIGEST" --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          gh attestation verify "oci://$IMAGE@$DIGEST" --owner "$GITHUB_REPOSITORY_OWNER" \
+            --signer-workflow "$WORKFLOW"
+          gh attestation verify "oci://$IMAGE@$DIGEST" --owner "$GITHUB_REPOSITORY_OWNER" \
+            --signer-workflow "$WORKFLOW" --predicate-type https://spdx.dev/Document/v2.3
+      - name: Empreinte publiée, celle que le chart référence
+        run: |
+          {
+            echo "### Image publiée"
+            echo
+            echo "\`$IMAGE@$DIGEST\`"
+            echo
+            echo "Signée sans clé, provenance et inventaire attestés (ADR 005)."
+          } >> "$GITHUB_STEP_SUMMARY"

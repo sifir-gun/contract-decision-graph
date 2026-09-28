@@ -2301,3 +2301,44 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Réalisation** : `domain/resumption.py` (règle et rapport d'échec), port `ResumeCounter`, adaptateurs `adapters/postgres/resumes.py` et `adapters/demo/resumes.py`, migration `006_reprises.sql`, section `interrupted` de `config/decision.yaml` (l'empreinte de configuration change ; aucun contrat réel en attente), `orchestrator._escalate_interrupted` (`bulk_update_state` : `END`, puis l'escalade au nom de `decision_gate`), `setup-db` qui annonce la table et ses droits.
 - **Pour la PR B, noté dans l'ADR 005** : Dependabot sur les images de base du `Dockerfile` (l'image PostgreSQL reste manuelle) ; signature des images distroless vérifiée en CI avant la construction.
 
+## 2026-09-28 · Kubernetes, PR B : chaîne d'approvisionnement (branche `chaine-approvisionnement`)
+
+### Dependabot sur les images de base
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`) : écosystème `docker` sur le dossier racine, même horaire que les autres ; uv exclu ; ni écosystème `docker-compose`, ni fichier YAML à la racine que l'écosystème `docker` prendrait pour un manifeste Kubernetes ; toutes les actions des workflows épinglées par empreinte, version en commentaire.
+- **Vérifié dans dependabot-core** (`file_fetcher.rb`) : l'écosystème `docker` lit les Dockerfile et les YAML qui portent `apiVersion` et `kind` ; `docker-compose.yml` n'en est pas un. L'image PostgreSQL reste donc manuelle sans règle d'exclusion à entretenir. Les images sont nommées sans leur registre : l'exclusion de uv porte sur `astral-sh/uv`.
+
+### Signatures des images de base, avant la construction
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`) : outils figés par version et empreinte, au-delà des avis de sécurité publiés (cosign ≥ 3.1.3, Syft ≥ 1.52.0, Grype ≥ 0.104.1) ; chaque base du Dockerfile a sa vérification (commande exacte) ; une base sans politique refusée ; une vérification échouée arrête, avec l'image et le message de l'outil ; en CI et dans `check.sh`, la vérification précède la construction.
+- **Réalisation** : `scripts/chaine.py bases`. cosign 3.1.3 dans son image officielle (`docker run`), `gh attestation verify` pour uv (`GH_TOKEN` en CI).
+- **Vérifié sur le poste** : les deux bases passent (9 s) ; cosign refuse une autre identité (code 12), `gh` un autre propriétaire (code 1). `gh attestation verify` ne dit rien sans terminal : son format JSON a confirmé une attestation SLSA v1 du workflow `publish-docker-image.yml` d'astral-sh/uv.
+
+### Inventaire (Syft) et scan (Grype), exceptions datées
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`) : commandes exactes de l'inventaire (image sauvegardée, Syft en SPDX et au format de Syft) et du scan (Grype sur l'inventaire, `--only-fixed --fail-on high`, base de failles dans un volume) ; code 2 de Grype rendu en échec avec un message clair ; exceptions passées à Grype avec leur motif ; exception expirée, sans motif, sans version, ou de plus de 90 jours refusée ; en CI et dans `check.sh`, inventaire et scan après les tests de l'image ; job `image` aussi le lundi.
+- **Premier scan réel** (28/09) : 34 correspondances, dont 4 hautes. Trois sans correctif (glibc et zlib de Debian 13), qui ne bloquent pas. Une corrigeable, CVE-2026-82049, sur le binaire CPython 3.12.14 : `tarfile`, corrigée pour 3.14 et au-delà ; le report sur 3.12 (python/cpython#157454) n'est pas fusionné, et uv ne propose pas de 3.12 plus récent. Aucun paquet Python vulnérable (comme le dit pip-audit).
+- **Décision** : exception justifiée, datée du 28/09, expirant le 28/10/2026. Le projet n'extrait aucune archive, et fastembed ne télécharge rien en production. Contre-épreuve : sans elle, le scan échoue (code 1), la faille affichée.
+- **Mesures sur le poste** : inventaire en 17 s ; premier scan en 2 min 30 (téléchargement de la base de failles), quelques secondes ensuite.
+
+### Publication : ghcr.io, signature sans clé, attestations
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`, `tests/test_image.py`) : job de publication après une fusion dans `main` seulement, tous les autres jobs requis ; permissions du workflow en lecture, écriture pour ce seul job, et seulement `packages`, `id-token`, `attestations` ; l'image publiée est celle du job `image` (artefact, `docker load`, jamais `docker build`) ; cosign installé à la version des vérifications ; signature et deux attestations par empreinte, poussées dans le registre, sans trace de stockage ; vérification de ce qui est publié (identité et émetteur exacts, provenance et inventaire SPDX 2.3) ; aucune expression `${{ }}` dans les scripts ; étiquettes OCI de l'image.
+- **Lu dans le code et la documentation** : `actions/attest-build-provenance` 4 n'est qu'une surcouche d'`actions/attest`, recommandée à sa place ; le prédicat SPDX vient de `spdxVersion` (`src/sbom.ts`) ; les traces de stockage exigent un dépôt d'organisation (ce dépôt appartient à un compte personnel : désactivées, sinon l'étape échouerait) ; `{{.Manifest.Digest}}` n'est pas accepté par `imagetools inspect`, d'où `{{json .Manifest}}` lu par `jq`.
+- **Vérifié sur le poste, sans rien publier** : l'aller-retour `docker save` puis `docker load` rend la même image (même identifiant) ; l'empreinte d'une image publique se lit par la commande du job. La première exécution réelle du job se lit après la fusion.
+- **À décider avec la PR C** : visibilité du paquet (privé à la première publication, public de façon irréversible), ou secret de tirage dans le chart.
+
+### Données fictives : l'identité de signature de distroless
+
+- **Constat** : `tests/test_donnees_fictives.py` refuse toute adresse hors des domaines réservés ; l'identité qui signe les images distroless (`keyless@` sur `distroless.iam.gserviceaccount.com`), écrite dans les tests de la vérification des bases, en a la forme. Les commits `148ca16` à `4ffde95` laissaient donc ce test en échec : seuls les tests ciblés avaient été lancés à chacun, pas toute la suite. Leçon : toute la suite à chaque commit.
+- **Décision** : ce n'est pas le courriel d'une personne, mais le compte de service public du projet distroless, qu'il faut écrire tel quel pour vérifier sa signature. Exception étroite, pour ce seul domaine, justifiée dans le test ; un second test échoue si elle ne sert plus.
+
+### Image du modèle d'embedding, workflow à part
+
+- **Constat en chemin** : le dépôt amont (`Qdrant/multilingual-e5-large-onnx`) est passé de la révision `66076b8d…` (cache local, corpus indexé) à `ac6781cd…` le 24/09/2026. Seul le README a changé (licence Apache-2.0 remplacée par MIT) : les six fichiers chargés ont les mêmes empreintes. Mais fastembed télécharge toujours la dernière révision : sans contrôle, un changement de poids aurait faussé la recherche sans rien signaler (requêtes et corpus indexé par deux modèles différents).
+- **Décision** : figer le contenu, pas la révision. `docker/modele/empreintes.sha256` (SHA-256 des six fichiers ; les trois gros correspondent aux empreintes LFS publiées) et `scripts/modele.py verifier`, avant toute construction.
+- **Tests d'abord** (`tests/test_modele.py`) : manifeste des fichiers que charge l'application ; vérification d'un cache conforme, puis refus d'un fichier modifié, absent ou en trop ; Dockerfile `FROM scratch` sans `RUN`, licence MIT et notice ; notice qui cite les sources et reprend la licence de microsoft/unilm ; workflow à la demande et sur les pull requests qui le touchent, lecture seule pour la vérification, écriture pour la seule publication depuis `main`, téléchargement vérifié avant la construction, signature et attestation ; sur l'image construite, contenu conforme, liens physiques conservés, poids chargés par l'application sans réseau et en lecture seule.
+- **Vérifié sur le poste** : image construite depuis le cache local en 1 min (2,25 Go : les liens physiques sont gardés, sinon 4,5 Go) ; les trois tests de bout en bout passent en 45 s, dont le chargement des poids avec `--network none`, système de fichiers racine en lecture seule.
+- **Écarté** : le montage d'image de Docker 29 (`--mount type=image`), qui fonctionne mais reste expérimental ; le test extrait le contenu de l'image (`docker export`) et le monte en lecture seule.
+- **Écart avec le plan** : le plan disait « révision et empreintes figées » ; seules les empreintes le sont, pour la raison ci-dessus.
+

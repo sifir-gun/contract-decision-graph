@@ -1,0 +1,151 @@
+# Image du modèle d'embedding (ADR 005, PR B) : les poids, figés par leurs empreintes, dans
+# une image sans système ni outil, montée en lecture seule dans les pods. Seule exception à
+# « aucun téléchargement du modèle en CI » (plan validé) : ce workflow télécharge les poids
+# depuis Hugging Face (2,2 Go), les vérifie, puis construit et teste l'image.
+# - pull request qui touche l'image du modèle ou le chargement des poids : vérification,
+#   sans aucun droit d'écriture, rien de publié ;
+# - à la demande, depuis main : la même vérification, puis publication sur ghcr.io,
+#   signature sans clé et attestation de provenance.
+name: Modèle d'embedding
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - docker/modele/**
+      - scripts/modele.py
+      - src/cdg/adapters/fastembed.py
+      - .github/workflows/modele.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    name: vérification (poids, empreintes, image, chargement sans réseau)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Espace disque (poids, image, extraction pour le test)
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+      - name: Dépendances, strictement depuis uv.lock
+        run: uv sync --locked
+      - name: Téléchargement des poids depuis Hugging Face (2,2 Go)
+        env:
+          EMBEDDING_CACHE_DIR: ${{ runner.temp }}/modele
+        run: uv run --no-sync python -m cdg.cli fetch-embedding-model
+      - name: Poids conformes à leurs empreintes (docker/modele/empreintes.sha256)
+        run: uv run --no-sync python scripts/modele.py verifier "$RUNNER_TEMP/modele"
+      - name: Image du modèle, depuis le cache vérifié
+        run: >-
+          docker build --file docker/modele/Dockerfile --build-context notice=docker/modele
+          --tag cdg-modele:verification "$RUNNER_TEMP/modele"
+      - name: Image de l'application, qui charge les poids
+        run: docker build --tag cdg:verification .
+      - name: Poids chargés par l'application, en lecture seule et sans réseau
+        run: >-
+          uv run --no-sync pytest -m modele --image cdg:verification
+          --modele cdg-modele:verification
+
+  publication:
+    name: publication (ghcr.io, signature, attestation)
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write # pousser l'image sur ghcr.io
+      id-token: write # identité OIDC du workflow : signature sans clé, attestation
+      attestations: write # attestation de provenance
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}/modele-embedding
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Espace disque (poids, image, extraction pour le test)
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+      - name: Dépendances, strictement depuis uv.lock
+        run: uv sync --locked
+      - name: Téléchargement des poids depuis Hugging Face (2,2 Go)
+        env:
+          EMBEDDING_CACHE_DIR: ${{ runner.temp }}/modele
+        run: uv run --no-sync python -m cdg.cli fetch-embedding-model
+      - name: Poids conformes à leurs empreintes (docker/modele/empreintes.sha256)
+        run: uv run --no-sync python scripts/modele.py verifier "$RUNNER_TEMP/modele"
+      - name: Image du modèle, depuis le cache vérifié
+        run: >-
+          docker build --file docker/modele/Dockerfile --build-context notice=docker/modele
+          --tag cdg-modele:verification "$RUNNER_TEMP/modele"
+      - name: Image de l'application, qui charge les poids
+        run: docker build --tag cdg:verification .
+      - name: Poids chargés par l'application, en lecture seule et sans réseau
+        run: >-
+          uv run --no-sync pytest -m modele --image cdg:verification
+          --modele cdg-modele:verification
+      - name: Connexion à ghcr.io (jeton du workflow ; droit packages limité à ce job)
+        env:
+          TOKEN: ${{ github.token }}
+        run: echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publication, étiquetée par le commit, empreinte relue dans le registre
+        run: |
+          docker tag cdg-modele:verification "$IMAGE:sha-$GITHUB_SHA"
+          docker push "$IMAGE:sha-$GITHUB_SHA"
+          digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" \
+            --format '{{json .Manifest}}' | jq -r .digest)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "empreinte publiée illisible : $digest" >&2
+            exit 1
+          fi
+          echo "DIGEST=$digest" >> "$GITHUB_ENV"
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3 # celui des vérifications (scripts/chaine.py)
+      - name: Signature sans clé, par l'identité OIDC du workflow
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Attestation de provenance (SLSA)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          push-to-registry: true
+          create-storage-record: false # dépôts d'organisation seulement
+      - name: Vérification de ce qui est publié (signature, provenance)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/modele.yml@refs/heads/main
+          WORKFLOW: ${{ github.repository }}/.github/workflows/modele.yml
+        run: |
+          cosign verify "$IMAGE@$DIGEST" --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          gh attestation verify "oci://$IMAGE@$DIGEST" --owner "$GITHUB_REPOSITORY_OWNER" \
+            --signer-workflow "$WORKFLOW"
+      - name: Empreinte publiée, celle que le chart référence
+        run: |
+          {
+            echo "### Image du modèle publiée"
+            echo
+            echo "\`$IMAGE@$DIGEST\`"
+            echo
+            echo "Poids conformes à docker/modele/empreintes.sha256 ; signée, provenance attestée."
+          } >> "$GITHUB_STEP_SUMMARY"
