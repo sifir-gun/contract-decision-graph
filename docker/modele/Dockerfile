@@ -3,7 +3,8 @@
 #
 # Contexte : le cache rempli par `cdg.cli fetch-embedding-model`, vérifié par
 # `scripts/modele.py verifier` avant la construction ; liens physiques compris (la copie à
-# plat que charge l'adaptateur). La notice de licence vient du contexte nommé `notice`.
+# plat que charge l'adaptateur), sans les artefacts du téléchargement
+# (`Dockerfile.dockerignore`). La notice de licence vient du contexte nommé `notice`.
 #
 #   docker build --file docker/modele/Dockerfile --build-context notice=docker/modele \
 #     --tag cdg-modele:verification "$EMBEDDING_CACHE_DIR"

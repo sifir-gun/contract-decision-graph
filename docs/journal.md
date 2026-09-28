@@ -2342,3 +2342,20 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Écarté** : le montage d'image de Docker 29 (`--mount type=image`), qui fonctionne mais reste expérimental ; le test extrait le contenu de l'image (`docker export`) et le monte en lecture seule.
 - **Écart avec le plan** : le plan disait « révision et empreintes figées » ; seules les empreintes le sont, pour la raison ci-dessus.
 
+## 2026-09-28 · Correction : vérification du modèle en échec (branche `correction-modele`)
+
+### Cause du run 36397656485
+
+- **Constat** : la PR B a été fusionnée alors que « Modèle d'embedding / vérification » échouait. Ce workflow ne fait pas partie des vérifications obligatoires de `main`.
+- **Journal du run** : téléchargement, empreintes, image du modèle et image de l'application passent ; deux tests de bout en bout sur trois aussi (contenu conforme, liens physiques). Le troisième échoue : dans le conteneur (uid 65532), fastembed « Could not find model in cache_dir », puis `EmbeddingError : poids … introuvables dans /modele`.
+- **Cause** : le test montait le contenu extrait depuis un dossier de pytest, créé en 0700 (`_pytest/tmpdir.py`). Sur un runner Linux, l'uid 65532 ne peut pas y entrer. Sur le poste, Docker Desktop n'applique pas les droits des dossiers partagés : le test y passait. Reproduit sur le poste avec un volume Docker dont la racine est en 0700 : mêmes deux messages. L'image n'était pas en cause.
+- **Correction, test d'abord** : le contenu de l'image est extrait par root dans un volume Docker, là où tournent les conteneurs (la VM de Docker Desktop, ou l'hôte Linux du runner) : propriétaire, droits et liens physiques de l'image, comme dans le volume `image` d'un pod, et les mêmes règles partout.
+- **Chemins du workflow élargis** : le test lui-même (`tests/test_modele.py`) ne déclenchait pas le workflow, pas plus que le `Dockerfile`, les dépendances (`pyproject.toml`, `uv.lock` : fastembed, onnxruntime) ou `config/decision.yaml` ; tous décident du chargement des poids.
+- **Leçon** : un test qui passe sur le poste et pas en CI se lit avec les droits de Linux ; les montages de dossiers de Docker Desktop les masquent.
+
+### Contenu de l'image du modèle lisible, artefacts exclus
+
+- **Test d'abord** (`tests/test_modele.py`) : dans l'image, tout fichier est lisible et tout dossier traversable par les autres, car dans le pod les fichiers appartiennent à root et l'application tourne sous 65532. Le test a trouvé `trees/<révision>.json` en 0600 : la liste des fichiers du dépôt, écrite par huggingface_hub au téléchargement, inutile au chargement hors ligne (le chargement passait sans elle).
+- **Correction** : `docker/modele/Dockerfile.dockerignore` exclut les verrous (`.locks/`) et `trees/`. Vérifié : l'image reconstruite n'en contient plus, et les 18 tests du modèle passent (1 min 35 sur le poste).
+- **Lu dans huggingface_hub 1.32.0** (`file_download.py`, `_chmod_and_move`) : les fichiers téléchargés prennent les droits par défaut du dossier, donc le umask du processus (0644 sur un runner) ; le test protège d'un autre umask.
+

@@ -11,10 +11,17 @@ name: Modèle d'embedding
 on:
   workflow_dispatch:
   pull_request:
+    # ce qui décide du chargement des poids : l'image du modèle, l'adaptateur, l'image de
+    # l'application et ses dépendances, la configuration du modèle, et le test lui-même
     paths:
       - docker/modele/**
       - scripts/modele.py
       - src/cdg/adapters/fastembed.py
+      - Dockerfile
+      - pyproject.toml
+      - uv.lock
+      - config/decision.yaml
+      - tests/test_modele.py
       - .github/workflows/modele.yml
 
 permissions:

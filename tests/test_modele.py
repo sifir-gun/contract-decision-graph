@@ -16,6 +16,9 @@ import importlib.util
 import json
 import os
 import subprocess
+import tarfile
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -119,6 +122,19 @@ def test_image_du_modele_sans_systeme_ni_outil():
     assert "org.opencontainers.image.source=" in labels
 
 
+def test_artefacts_du_telechargement_hors_de_l_image():
+    # BuildKit lit le fichier d'exclusion propre au Dockerfile (Dockerfile.dockerignore) :
+    # les verrous et la liste des fichiers du dépôt (trees/, écrite en 0600, illisible par
+    # l'utilisateur de l'application) ne servent qu'au téléchargement
+    ignored = (MODELE / "Dockerfile.dockerignore").read_text(encoding="utf-8")
+    patterns = [
+        line.strip()
+        for line in ignored.splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert patterns == [".locks/", "models--*/trees/"]
+
+
 def test_notice_de_licence_du_modele():
     notice = (MODELE / "LICENCE-MODELE.md").read_text(encoding="utf-8")
     for source in (
@@ -165,7 +181,16 @@ def test_workflow_a_la_demande_et_sur_les_pull_requests_qui_le_touchent():
         "scripts/modele.py",
         ".github/workflows/modele.yml",
     } <= paths
-    assert "src/cdg/adapters/fastembed.py" in paths  # la façon de charger les poids
+    # ce qui décide du chargement des poids : l'adaptateur, l'image de l'application, ses
+    # dépendances (fastembed, onnxruntime), la configuration du modèle, et ce test lui-même
+    assert {
+        "src/cdg/adapters/fastembed.py",
+        "Dockerfile",
+        "pyproject.toml",
+        "uv.lock",
+        "config/decision.yaml",
+        "tests/test_modele.py",
+    } <= paths
     assert workflow()["permissions"] == {"contents": "read"}
 
 
@@ -231,6 +256,8 @@ def test_meme_construction_de_l_application_qu_en_ci():
 # --- l'image construite (--modele ÉTIQUETTE, --image ÉTIQUETTE) ----------------------------
 
 WAIT = 300
+# ajoutés par `docker export` (conteneur créé), absents de l'image
+RUNTIME = (".dockerenv", "dev/", "etc/", "proc/")
 
 
 @pytest.fixture(scope="module")
@@ -271,6 +298,78 @@ def extracted(images, tmp_path_factory) -> Path:
     return target
 
 
+@pytest.fixture(scope="module")
+def container(images) -> Iterator[str]:
+    """Un conteneur créé (jamais lancé) sur l'image du modèle, pour en exporter le
+    contenu."""
+    _, weights = images
+    created = subprocess.run(
+        ["docker", "create", weights, "absent"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    yield created
+    subprocess.run(["docker", "rm", created], capture_output=True, check=False)
+
+
+EXTRACT = f"""
+import sys, tarfile
+with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as archive:
+    for member in archive:
+        if not member.name.startswith({RUNTIME!r}):
+            archive.extract(member, "/modele", filter="tar")
+"""
+
+
+@pytest.fixture(scope="module")
+def volume(images, container) -> Iterator[str]:
+    """Le contenu de l'image du modèle dans un volume Docker, extrait par root là où
+    tournent les conteneurs : propriétaire, droits et liens physiques de l'image, comme
+    dans le volume `image` d'un pod. Un dossier de l'hôte ne vaut pas : pytest crée les
+    siens en 0700, et Docker Desktop n'applique pas les droits des dossiers partagés
+    (premier essai en CI, run 36397656485 : poids introuvables sous l'uid 65532)."""
+    app, _ = images
+    name = f"cdg-modele-test-{uuid.uuid4().hex[:12]}"
+    try:
+        export = subprocess.Popen(
+            ["docker", "export", container], stdout=subprocess.PIPE
+        )
+        extract = subprocess.run(
+            ["docker", "run", "--rm", "-i", "--user", "0", "--network", "none"]
+            + ["-v", f"{name}:/modele", "--entrypoint", "python", app, "-c", EXTRACT],
+            stdin=export.stdout,
+            capture_output=True,
+            text=True,
+            timeout=WAIT,
+            check=False,
+        )
+        assert export.wait(WAIT) == 0
+        assert extract.returncode == 0, extract.stderr[-2000:]
+        yield name
+    finally:
+        subprocess.run(
+            ["docker", "volume", "rm", "-f", name], capture_output=True, check=False
+        )
+
+
+@pytest.mark.modele
+def test_contenu_lisible_par_l_utilisateur_de_l_application(container):
+    # dans le pod, les fichiers de l'image appartiennent à root ; l'application tourne
+    # sous 65532 : tout doit être lisible, et chaque dossier traversable, par les autres
+    refused = []
+    export = subprocess.Popen(["docker", "export", container], stdout=subprocess.PIPE)
+    with tarfile.open(fileobj=export.stdout, mode="r|") as archive:
+        for member in archive:
+            if member.name.startswith(RUNTIME):
+                continue
+            directory = member.isdir() and member.mode & 0o005 != 0o005
+            if directory or (member.isfile() and not member.mode & 0o004):
+                refused.append(f"{member.name} {oct(member.mode)}")
+    assert export.wait(WAIT) == 0
+    assert refused == []
+
+
 @pytest.mark.modele
 def test_image_du_modele_conforme_au_manifeste(extracted):
     assert modele().verify(extracted, MODELE / "empreintes.sha256") == 0
@@ -287,7 +386,7 @@ def test_liens_physiques_conserves_dans_l_image(extracted):
 
 
 @pytest.mark.modele
-def test_l_application_charge_les_poids_sans_reseau_ni_ecriture(images, extracted):
+def test_l_application_charge_les_poids_sans_reseau_ni_ecriture(images, volume):
     app, _ = images
     code = """
 import json
@@ -312,7 +411,7 @@ print(json.dumps({"dimension": len(embedder.embed_query("clause de responsabilit
             "--security-opt",
             "no-new-privileges",
             "-v",
-            f"{extracted}:/modele:ro",
+            f"{volume}:/modele:ro",
             "-e",
             "EMBEDDING_CACHE_DIR=/modele",
             "--entrypoint",

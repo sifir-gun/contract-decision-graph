@@ -1,0 +1,5 @@
+# Contexte de l'image du modèle (le cache de Hugging Face) : artefacts du téléchargement,
+# inutiles au chargement hors ligne. trees/ garde la liste des fichiers du dépôt, écrite en
+# 0600 : illisible par l'utilisateur de l'application (tests/test_modele.py).
+.locks/
+models--*/trees/
