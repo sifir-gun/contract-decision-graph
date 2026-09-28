@@ -32,6 +32,9 @@ EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
 PHONE = re.compile(r"(?<![\d+])(?:(?:\+|00)33[ .-]?|0)[1-9](?:[ .-]?\d{2}){4}(?!\d)")
 RESERVED_TLDS = (".test", ".example", ".invalid", ".localhost")
 RESERVED_DOMAINS = ("example.com", "example.net", "example.org")
+# identités publiques de signature, au format d'une adresse sans en être une : le compte de
+# service qui signe les images distroless, publié par le projet (ADR 005, PR B)
+SIGNING_DOMAINS = ("distroless.iam.gserviceaccount.com",)
 AUDIOVISUAL_ROOTS = ("019900", "026191", "035301", "046571", "053649", "063998")
 
 
@@ -63,7 +66,13 @@ def test_les_fichiers_examines_existent():
 def test_courriels_sur_des_domaines_reserves():
     emails = found(EMAIL)
     assert emails, "aucun courriel trouvé : le motif ne voit plus rien"
-    assert [e for e in emails if not reserved_domain(e[1])] == []
+    others = [e for e in emails if not reserved_domain(e[1])]
+    assert [e for e in others if e[1] not in SIGNING_DOMAINS] == []
+
+
+def test_identites_de_signature_toujours_utilisees():
+    # une exception qui ne sert plus disparaît
+    assert {domain for _, domain in found(EMAIL)} >= set(SIGNING_DOMAINS)
 
 
 def test_telephones_dans_les_blocs_reserves_aux_oeuvres_audiovisuelles():
