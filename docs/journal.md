@@ -2415,3 +2415,14 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Tests d'abord** (`tests/test_providers.py`) : adresse du SDK par défaut (`https://api.mistral.ai`) ; `MISTRAL_SERVER_URL` la remplace ; une adresse sans schéma http(s), sans hôte, ou avec des identifiants est refusée, et le message ne la reprend jamais.
 - **Lu dans le SDK installé** (mistralai 2.10.1, `client/sdk.py`, `sdkconfiguration.py`) : `server_url` remplace le serveur `https://api.mistral.ai` ; le client HTTP suit les redirections (`follow_redirects=True`), qui passeront elles aussi par le proxy de sortie.
 - **Pourquoi une variable d'environnement** : c'est un réglage de déploiement, comme la clé, pas un réglage de décision (`config/decision.yaml`). Elle sert au serveur factice des tests du cluster (PR C3) ; en production, le proxy de sortie ne laisse passer que l'API de Mistral, et un test du cluster le prouvera.
+
+### Mémoire et CPU d'un réplica, mesurés
+
+- **Script** : `scripts/mesure_memoire.py`, reproductible. L'image lancée comme dans un pod (lecture seule, sans privilège), poids montés en lecture seule depuis un volume rempli à partir de l'image du modèle, base locale ; relevés dans le cgroup du conteneur (`memory.current`, `memory.peak`, `memory.stat`, `cpu.stat`). Les mots de passe passent par l'environnement du processus Docker, jamais par la ligne de commande.
+- **Mesures du 28/09**, poste (arm64, Docker Desktop, 8 cœurs), trois essais :
+  - réplica réel prêt (modèle chargé, base joignable) en 9 à 22 s : environ **1 550 Mio de mémoire anonyme**. Le cache de fichiers varie d'un essai à l'autre (40 à 1 250 Mio) : il est compté au conteneur qui a lu les poids en premier, et le noyau le récupère ;
+  - une analyse, soit des embeddings de requêtes : **+16 Mio** ;
+  - l'ingestion, soit un lot de 16 passages longs : **+695 Mio** au pic (2 290 Mio au total) ;
+  - réplica de démonstration : **73 à 107 Mio**, prêt en 3 s.
+- **Premier essai raté, de mon fait** : le réplica de démonstration était lancé sans `--demo`, donc en mode réel sans variables ; le script l'a attendu 5 minutes. Corrigé ; chaque mesure s'affiche désormais dès qu'elle est prise.
+
