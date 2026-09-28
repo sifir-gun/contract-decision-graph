@@ -28,6 +28,7 @@ def test_setup_db(pg, capsys):
     assert out == {
         "setup_db": "ok",
         "role": "app_role",
+        "role_cree": False,  # base existante : rôle déjà là, rien ne change
         "tables": ["checkpoints", "checkpoint_blobs", "checkpoint_writes"],
         "droits": ["SELECT", "INSERT", "UPDATE"],
         "migrations": [

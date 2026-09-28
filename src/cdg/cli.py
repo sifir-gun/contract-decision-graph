@@ -166,13 +166,20 @@ def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> 
 
 
 def _setup_db(args: argparse.Namespace) -> dict:
+    """Amorce une base vide (toutes les migrations, dans l'ordre) ou met à jour une base
+    existante ; relancé, ne change rien. Le rôle applicatif d'abord, s'il manque (mot de
+    passe haché côté client), car migrations et checkpointer lui donnent ses droits."""
     admin = conninfo.admin_conninfo()
-    checkpointer.setup_database(admin)
+    created = migrations.ensure_role_at(
+        admin, settings.APP_ROLE, lambda: settings.require_secret("APP_DB_PASSWORD")
+    )
     applied = migrations.apply(admin)
+    checkpointer.setup_database(admin)
     rag_store.check_dimension(admin, load_config().embedding.dimension)
     return {
         "setup_db": "ok",
         "role": settings.APP_ROLE,
+        "role_cree": created,
         "tables": list(checkpointer.CHECKPOINT_TABLES),
         "droits": ["SELECT", "INSERT", "UPDATE"],
         "migrations": applied,
