@@ -256,6 +256,20 @@ def check_k3d(runner: Callable[..., str] | None = None) -> None:
         raise ClusterError(f"k3d {version} : {K3D_VERSION} attendu (celui de la CI)")
 
 
+# disque des nœuds : celui de Docker, partagé (poste, runner). k3s 1.36.4 évince à 5 %
+# libres, puis récupère 10 % de plus (pkg/daemons/agent/agent.go) : sur un disque de 110 Go
+# rempli par d'autres, tout le cluster était évincé (28/09). Seuils absolus ; k3s ne pose
+# que ces deux signaux, les autres restent à zéro comme chez lui (ADR 005). Un seul « @ »,
+# filtres séparés par « ; » (cmd/util/filter.go de k3d 5.9.0, que son aide contredit).
+KUBELET_ARGS = tuple(
+    f"--kubelet-arg={flag}@server:*;agent:*"
+    for flag in (
+        "eviction-hard=imagefs.available<1Gi,nodefs.available<1Gi",
+        "eviction-minimum-reclaim=imagefs.available=500Mi,nodefs.available=500Mi",
+    )
+)
+
+
 def create(profile: Profile) -> None:
     check_k3d()
     registries = run(["k3d", "registry", "list", "-o", "json"], "registres k3d")
@@ -270,6 +284,7 @@ def create(profile: Profile) -> None:
         + ["--agents", str(profile.agents), "--no-lb", "--wait", "--timeout", "300s"]
         + ["--registry-use", REGISTRY_CLUSTER]
         + ["--k3s-arg", "--disable=traefik@server:*"]
+        + [arg for kubelet in KUBELET_ARGS for arg in ("--k3s-arg", kubelet)]
         + ["--kubeconfig-update-default=false", "--kubeconfig-switch-context=false"],
         "cluster k3d",
     )

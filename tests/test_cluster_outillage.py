@@ -143,6 +143,35 @@ def test_installation_relancee_reprend_les_secrets_deja_crees():
         module.generated("cdg", "cdg-s3", generators, get=partial)
 
 
+def test_noeuds_evinces_sur_un_seuil_absolu_de_disque(monkeypatch, tmp_path):
+    """Le disque des nœuds est celui de Docker, partagé (poste, runner) : k3s 1.36.4
+    évince à 5 % libres puis récupère 10 % de plus (pkg/daemons/agent/agent.go), soit
+    tout le cluster sur un disque de 110 Go à 86 % (vu le 28/09). Seuils absolus, sur
+    chaque nœud ; toute la mémoire et les inodes restent aux réglages de k3s."""
+    module = cluster()
+    commands = []
+
+    def fake(command, what, *, stdin=None):
+        commands.append(command)
+        if command[:2] == ["k3d", "version"]:
+            return f"k3d version {module.K3D_VERSION}\n"
+        return "[]" if command[:3] == ["k3d", "registry", "list"] else ""
+
+    monkeypatch.setattr(module, "run", fake)
+    monkeypatch.setattr(module, "KUBECONFIG", tmp_path / "kubeconfig")
+    module.create(module.PROFILES["local"])
+    [create] = [c for c in commands if c[:3] == ["k3d", "cluster", "create"]]
+    k3s_args = [create[i + 1] for i, arg in enumerate(create) if arg == "--k3s-arg"]
+    assert (
+        "--kubelet-arg=eviction-hard=imagefs.available<1Gi,nodefs.available<1Gi"
+        "@server:*;agent:*"
+    ) in k3s_args
+    assert (
+        "--kubelet-arg=eviction-minimum-reclaim=imagefs.available=500Mi,"
+        "nodefs.available=500Mi@server:*;agent:*"
+    ) in k3s_args
+
+
 def test_version_de_k3d_verifiee():
     module = cluster()
 
