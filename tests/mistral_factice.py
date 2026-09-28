@@ -30,7 +30,7 @@ from typing import Any
 from cdg.application import demo_set
 from cdg.domain import masking
 
-CONTRACT = re.compile(r"<<<CONTRAT-(\S+)>>>\n(.*)\n<<<FIN-CONTRAT-\1>>>", re.DOTALL)
+OPEN, HEAD_END, CLOSE = "<<<CONTRAT-", ">>>\n", "\n<<<FIN-CONTRAT-"
 EXCERPT = re.compile(r"^<<<EXTRAIT (\d+)>>>$", re.MULTILINE)
 TRIED = "Requêtes déjà essayées :\n"
 NEUTRAL = "Explication du serveur factice pour ce constat, rédigée pour les tests."
@@ -56,9 +56,25 @@ class State:
         }
 
 
+def _contract(user: str) -> str | None:
+    """Texte entre les balises du contrat et leur jeton (application/extraction.py), par
+    découpage de chaîne : temps linéaire, là où une expression à référence arrière
+    revenait en arrière sur une entrée hostile (CodeQL)."""
+    start = user.find(OPEN)
+    head_end = user.find(HEAD_END, start + len(OPEN)) if start >= 0 else -1
+    if head_end < 0:
+        return None
+    token = user[start + len(OPEN) : head_end]
+    if not token or any(c.isspace() for c in token):
+        return None
+    body = head_end + len(HEAD_END)
+    end = user.find(f"{CLOSE}{token}>>>", body)
+    return user[body:end] if end >= 0 else None
+
+
 def _extraction(state: State, user: str) -> dict[str, Any]:
-    match = CONTRACT.search(user)
-    clauses = state.by_text.get(match[2]) if match else None
+    text = _contract(user)
+    clauses = state.by_text.get(text) if text is not None else None
     if clauses is None:
         raise Refused("texte hors du jeu de démonstration")
     return {

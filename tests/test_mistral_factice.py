@@ -9,6 +9,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+import mistral_factice
 import pytest
 from mistral_factice import serve
 
@@ -68,6 +69,41 @@ def test_texte_hors_du_jeu_refuse_explicitement(factice):
         LLMExtractor(provider(factice))("Contrat inconnu du jeu.", [])
     assert "422" in str(raised.value) or "hors du jeu" in str(raised.value)
     assert control(factice)["refus"] == 1
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "<<<CONTRAT-" + "<<<CONTRAT-!" * 16_000,
+        "<<<CONTRAT-!>>>\n" + "<<<CONTRAT-!>>>\na" * 16_000,
+    ],
+    ids=["jeton", "texte"],
+)
+def test_balises_du_contrat_lues_en_temps_lineaire(hostile):
+    """Les entrées que CodeQL signale (expression à retour arrière polynomial) : près de
+    200 Ko refusés en moins d'une seconde ; l'expression mettait une dizaine de secondes."""
+    state = mistral_factice.State()
+    start = time.monotonic()
+    with pytest.raises(mistral_factice.Refused):
+        mistral_factice.answer(state, "ExtractionOutput", hostile)
+    assert time.monotonic() - start < 1
+
+
+def test_contrat_lu_entre_ses_balises_et_leur_jeton():
+    state = mistral_factice.State()
+    masked, clauses = next(iter(state.by_text.items()))
+    message = f"Jeton : ab12\n\n<<<CONTRAT-ab12>>>\n{masked}\n<<<FIN-CONTRAT-ab12>>>"
+    answered = mistral_factice.answer(state, "ExtractionOutput", message)
+    assert len(answered["clauses"]) == len(clauses)
+    for broken in (
+        message.replace("<<<FIN-CONTRAT-ab12>>>", "<<<FIN-CONTRAT-cd34>>>"),
+        message.replace("<<<CONTRAT-ab12>>>", "<<<CONTRAT-a b>>>"),
+        message.replace(">>>\n", ">>>", 1).replace(
+            "<<<CONTRAT-ab12>>>", "<<<CONTRAT->>>"
+        ),
+    ):
+        with pytest.raises(mistral_factice.Refused):
+            mistral_factice.answer(state, "ExtractionOutput", broken)
 
 
 def test_juge_du_crag_retient_tous_les_extraits(factice):
