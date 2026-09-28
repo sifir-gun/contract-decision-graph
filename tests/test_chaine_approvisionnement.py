@@ -404,7 +404,8 @@ def test_les_images_publiees_sont_celles_testees_et_scannees():
         ("chaine", uploads["image-${{ matrix.arch }}"]),
         ("chaine-proxy", uploads["proxy-${{ matrix.arch }}"]),
     ):
-        assert upload["if"] == ONLY_MAIN
+        # toujours produit : le job cluster reprend les images testées (PR C3)
+        assert "if" not in upload
         assert upload["with"]["path"].splitlines() == [
             f"${{{{ runner.temp }}}}/{folder}/image.tar",
             f"${{{{ runner.temp }}}}/{folder}/sbom.spdx.json",

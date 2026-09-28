@@ -1,11 +1,14 @@
 """Cluster de test k3d (ADR 005, PR C3) : mêmes commandes en CI (job `cluster`) et en local
 (`scripts/check.sh`).
 
-  uv run --no-sync python scripts/cluster.py creer --profil ci|local
+  uv run --no-sync python scripts/cluster.py detruire
+  uv run --no-sync python scripts/cluster.py creer [--profil ci|local]
   uv run --no-sync python scripts/cluster.py tirer-modele
   uv run --no-sync python scripts/cluster.py images --dossier DOSSIER
-  uv run --no-sync python scripts/cluster.py installer --profil ci|local --dossier DOSSIER
-  uv run --no-sync python scripts/cluster.py detruire
+  uv run --no-sync python scripts/cluster.py installer [--profil ci|local] --dossier DOSSIER
+
+Profil : `ci` sur GitHub Actions (CI=true), `local` ailleurs (profil réduit) ; mêmes
+commandes en CI et dans scripts/check.sh. `detruire` ne fait rien s'il n'y a rien.
 
 - `creer` : un registre local (k3d) et un cluster de plusieurs nœuds, k3s figé par
   empreinte ; le contexte kubectl courant du poste n'est jamais changé (contexte `k3d-cdg`,
@@ -27,11 +30,12 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import secrets
 import subprocess
 import sys
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -55,6 +59,7 @@ BUCKET = "cdg-sauvegardes"
 FACTICE_URL = "http://mistral-factice.cdg-tests.svc.cluster.local:8080"
 SERVICE_CIDR = "10.43.0.0/16"  # plage des services de k3s (par défaut)
 WAIT = "600s"
+K3D_VERSION = "v5.9.0"  # celle de la CI et de Homebrew (ADR 005)
 
 # canal stable de k3s au 27/09/2026 (ADR 005) : volume image stable
 K3S = (
@@ -159,6 +164,11 @@ PROFILES = {
 }
 
 
+def default_profile(environ: Mapping[str, str] = os.environ) -> str:
+    """Profil tiré de l'environnement : mêmes commandes en CI et dans scripts/check.sh."""
+    return "ci" if environ.get("CI") == "true" else "local"
+
+
 # --- réécriture des images des composants tiers ---------------------------------------------
 
 
@@ -236,7 +246,15 @@ def helm(*args: str, what: str = "helm") -> str:
     return run([*command, *args], what)
 
 
+def check_k3d(runner: Callable[..., str] | None = None) -> None:
+    output = (runner or run)(["k3d", "version"], "k3d introuvable")
+    version = output.split()[2] if output.startswith("k3d version") else output
+    if version != K3D_VERSION:
+        raise ClusterError(f"k3d {version} : {K3D_VERSION} attendu (celui de la CI)")
+
+
 def create(profile: Profile) -> None:
+    check_k3d()
     registries = run(["k3d", "registry", "list", "-o", "json"], "registres k3d")
     if not any(r["name"] == f"k3d-{REGISTRY_NAME}" for r in json.loads(registries)):
         run(
@@ -557,7 +575,10 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="commande", required=True)
     for name in ("creer", "installer"):
         sub = commands.add_parser(name)
-        sub.add_argument("--profil", choices=sorted(PROFILES), required=True)
+        # par défaut, d'après l'environnement : CI=true sur GitHub Actions
+        sub.add_argument(
+            "--profil", choices=sorted(PROFILES), default=default_profile()
+        )
         if name == "installer":
             sub.add_argument("--dossier", type=Path, required=True)
     commands.add_parser("tirer-modele")

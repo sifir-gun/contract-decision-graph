@@ -7,3 +7,6 @@ base:
     secret: cdg-postgres-superuser
     cleUtilisateur: username
     cleMotDePasse: password
+# reprise des analyses interrompues plus fréquente : le scénario d'arrêt l'attend
+web:
+  repriseIntervalle: 15

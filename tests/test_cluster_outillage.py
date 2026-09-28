@@ -89,3 +89,105 @@ def test_profils_ci_et_local_reduit():
     assert ci.agents >= 1 and local.agents >= 1
     # profil local réduit : les requêtes de mémoire de l'interface sont abaissées
     assert local.web_memory_request < ci.web_memory_request
+
+
+def test_profil_choisi_d_apres_l_environnement():
+    """Mêmes commandes en CI et dans scripts/check.sh (tests/test_ci.py) : le profil vient
+    de l'environnement, CI=true sur GitHub Actions."""
+    module = cluster()
+    assert module.default_profile({"CI": "true"}) == "ci"
+    assert module.default_profile({}) == "local"
+    assert module.default_profile({"CI": "false"}) == "local"
+
+
+def test_version_de_k3d_verifiee():
+    module = cluster()
+
+    def answer(output):
+        def run(command, what, **_):
+            assert command == ["k3d", "version"]
+            return output
+
+        return run
+
+    module.check_k3d(answer("k3d version v5.9.0\nk3s version v1.35.5-k3s1 (default)\n"))
+    with pytest.raises(module.ClusterError, match="v5.9.0"):
+        module.check_k3d(answer("k3d version v5.8.3\n"))
+
+
+# --- CI : job cluster, mêmes commandes que check.sh ------------------------------------------
+
+K3D_SHA256 = "06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0"
+KUBECTL_SHA256 = "8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a"
+SCRIPT = "uv run --no-sync python scripts/cluster.py"
+ORDER = [
+    f"{SCRIPT} detruire",
+    f"{SCRIPT} tirer-modele",
+    f"{SCRIPT} creer",
+    f'{SCRIPT} images --dossier "$RUNNER_TEMP/cluster"',
+    f'{SCRIPT} installer --dossier "$RUNNER_TEMP/cluster"',
+    'uv run --no-sync pytest -m cluster --cluster "$RUNNER_TEMP/cluster"',
+]
+
+
+def ci_job() -> dict:
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    return workflow["jobs"]["cluster"]
+
+
+def test_outils_du_cluster_installes_depuis_leurs_binaires_officiels_verifies():
+    steps = {s.get("id"): s.get("run", "") for s in ci_job()["steps"]}
+    k3d = steps["installation-k3d"]
+    assert (
+        "https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64" in k3d
+    )
+    assert f"{K3D_SHA256}  " in k3d and "sha256sum --check --strict" in k3d
+    kubectl = steps["installation-kubectl"]
+    assert "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl" in kubectl
+    assert f"{KUBECTL_SHA256}  " in kubectl and "sha256sum --check --strict" in kubectl
+    assert "installation-helm" in steps  # helm 4.3.0, comme le job chart
+
+
+def test_images_de_l_application_et_du_proxy_reprises_du_job_image():
+    job = ci_job()
+    assert "image" in job["needs"] and job["runs-on"] == "ubuntu-24.04"
+    downloads = [s for s in job["steps"] if "download-artifact" in s.get("uses", "")]
+    assert sorted(d["with"]["name"] for d in downloads) == [
+        "image-amd64",
+        "proxy-amd64",
+    ]
+    runs = " ".join(s.get("run", "") for s in job["steps"])
+    assert "docker load --input" in runs
+    builds = [
+        s["run"] for s in job["steps"] if s.get("run", "").startswith("docker build")
+    ]
+    # seule l'image de test du serveur factice est construite ici, sur l'image chargée
+    factice = (
+        "docker build --file docker/mistral-factice/Dockerfile "
+        "--build-arg APPLICATION=cdg:verification "
+        "--tag cdg-mistral-factice:verification ."
+    )
+    assert builds == [factice]
+
+
+def test_deroule_du_cluster_et_destruction_quoi_qu_il_arrive():
+    steps = ci_job()["steps"]
+    runs = [" ".join(s.get("run", "").split()) for s in steps]
+    positions = [runs.index(command) for command in ORDER]
+    assert positions == sorted(positions)
+    [last] = [
+        s for s in steps if s.get("run", "") == f"{SCRIPT} detruire" and s.get("if")
+    ]
+    assert last["if"] == "always()"
+    [model] = [s for s in steps if s.get("run", "") == f"{SCRIPT} tirer-modele"]
+    assert model["env"]["GH_TOKEN"] == "${{ github.token }}"  # provenance vérifiée
+
+
+def test_check_sh_deroule_le_meme_cluster():
+    script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
+    lines = [" ".join(line.split()) for line in script.splitlines()]
+    positions = [lines.index(command) for command in ORDER]
+    assert positions == sorted(positions)
+    assert f"{SCRIPT} detruire" in lines[positions[-1] + 1 :]

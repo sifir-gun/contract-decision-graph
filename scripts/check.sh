@@ -10,6 +10,9 @@
 # - RUNNER_TEMP, fourni par GitHub Actions, est ici un dossier temporaire, supprimé à la fin ;
 # - helm vient de Homebrew (brew install helm), à la version de la CI, que scripts/chart.py
 #   contrôle ; la CI l'installe depuis l'archive officielle vérifiée par son empreinte ;
+# - k3d et kubectl aussi (brew install k3d kubernetes-cli) ; le cluster prend le profil
+#   local réduit (scripts/cluster.py), et reste en place si un scénario échoue, pour le
+#   diagnostic (scripts/cluster.py detruire) ;
 # - l'image est construite pour l'architecture du poste (arm64 sur un Mac récent), celle
 #   de la CI pour amd64 : les bases figées sont des index multi-architecture.
 # Payant : non (tests llm exclus). Réseau : pip-audit interroge la base de failles de PyPI ;
@@ -59,5 +62,15 @@ docker build --file docker/proxy-sortie/Dockerfile --tag cdg-proxy:verification 
 uv run --no-sync pytest -m proxy --proxy cdg-proxy:verification --image cdg:verification
 uv run --no-sync python scripts/chaine.py inventaire cdg-proxy:verification --dossier "$RUNNER_TEMP/chaine-proxy"
 uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"
+
+echo "==> cluster (k3d, profil local réduit ; k3d et kubectl par Homebrew)"
+docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
+uv run --no-sync python scripts/cluster.py detruire
+uv run --no-sync python scripts/cluster.py tirer-modele
+uv run --no-sync python scripts/cluster.py creer
+uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
+uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
+uv run --no-sync pytest -m cluster --cluster "$RUNNER_TEMP/cluster"
+uv run --no-sync python scripts/cluster.py detruire
 
 echo "==> vérifications de la CI : toutes passées"

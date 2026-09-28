@@ -48,6 +48,13 @@ def pytest_addoption(parser):
         "déjà construite sous cette étiquette (avec --image : l'image de l'application)",
     )
     parser.addoption(
+        "--cluster",
+        metavar="DOSSIER",
+        default=None,
+        help="exécute aussi les tests marqués cluster, sur le cluster k3d préparé par "
+        "scripts/cluster.py (DOSSIER : celui de `images` et `installer`)",
+    )
+    parser.addoption(
         "--proxy",
         metavar="ÉTIQUETTE",
         default=None,
@@ -64,13 +71,15 @@ def pytest_report_header(config):
 
 def pytest_collection_modifyitems(config, items):
     # exclusion par défaut, comptée comme « deselected » : jamais de saut silencieux,
-    # et -m "not pg" n'active par accident ni les tests llm, image, modele, chart, proxy
+    # et -m "not pg" n'active par accident aucun test llm, image, modele, chart, proxy,
+    # cluster
     for marker, option in (
         ("llm", "--llm"),
         ("image", "--image"),
         ("modele", "--modele"),
         ("chart", "--chart"),
         ("proxy", "--proxy"),
+        ("cluster", "--cluster"),
     ):
         if config.getoption(option):
             continue
