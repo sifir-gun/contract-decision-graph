@@ -15,7 +15,7 @@ Déploiement de contract-decision-graph sur Kubernetes (k3s), selon l'ADR 005 : 
   kubectl label namespace cdg pod-security.kubernetes.io/enforce=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/audit=restricted
   ```
 
-- **Secrets**, créés à part (jamais dans les valeurs) : clé de Mistral (`cdg-mistral`, clé `MISTRAL_API_KEY`), mot de passe d'`app_role` (`cdg-base-application`, clé `password`), administrateur de PostgreSQL (`cdg-base-administrateur`, clés `username` et `password`).
+- **Secrets**, créés à part (jamais dans les valeurs), montés en fichiers en lecture seule dans `/run/secrets/cdg`, jamais en variables d'environnement : clé de Mistral (`cdg-mistral`, clé `MISTRAL_API_KEY`), mot de passe d'`app_role` (`cdg-base-application`, clé `password`), administrateur de PostgreSQL (`cdg-base-administrateur`, clés `username` et `password`).
 - **PostgreSQL** avec pgvector (CloudNativePG, PR C3) et le **proxy de sortie** (Smokescreen, PR C3), joignables aux adresses des valeurs `base` et `proxy`.
 
 ## Installation et mise à jour
@@ -51,7 +51,7 @@ Le schéma complet est `values.schema.json` : toute valeur inconnue ou mal form�
 Par `scripts/chart.py` (helm lint, kubeconform, kube-linter) et `tests/test_chart.py`, en CI et dans `scripts/check.sh` :
 
 - chaque pod : non root (65532), seccomp `RuntimeDefault`, racine en lecture seule, aucune capacité, pas d'élévation, compte de service dédié sans jeton, requêtes et limites ;
-- images par empreinte seulement ; aucun Secret rendu, mots de passe et clé par référence ;
-- interface : mise à jour progressive sans interruption, budget d'interruption, répartition sur des nœuds différents, trois sondes, pause avant l'arrêt et délai de grâce calculé ;
+- images par empreinte seulement ; aucun Secret rendu ; secrets en fichiers (0440, groupe du pod), chaque conteneur ne recevant que les siens ;
+- interface : mise à jour progressive sans interruption, budget d'interruption, répartition sur des nœuds différents (contraintes de topologie, anti-affinité préférée), trois sondes, pause avant l'arrêt et délai de grâce calculé ;
 - configuration en ConfigMap, dont l'empreinte relance les pods ;
 - réseau : tout refusé par défaut ; en sortie, DNS, PostgreSQL et proxy seulement ; jamais le port 443 ouvert largement.
