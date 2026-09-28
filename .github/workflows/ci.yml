@@ -144,6 +144,36 @@ jobs:
         # seuil : fail_under de [tool.coverage.report], lu par pytest-cov
         run: uv run --no-sync pytest --cov --cov-report=term
 
+  chart:
+    name: chart (lint, schémas, bonnes pratiques, rendu)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Dépendances, strictement depuis uv.lock (pytest pour les tests du rendu)
+        run: uv sync --locked
+      - name: helm 4.3.0, archive officielle vérifiée par son empreinte
+        # sur le poste : Homebrew, même version (scripts/chart.py la contrôle)
+        id: installation-helm
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/helm.tar.gz" https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz
+          echo "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb  $RUNNER_TEMP/helm.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP" linux-amd64/helm
+          sudo install -m 0755 "$RUNNER_TEMP/linux-amd64/helm" /usr/local/bin/helm
+      - name: Validation statique (helm lint, kubeconform, kube-linter) des trois variantes
+        run: uv run --no-sync python scripts/chart.py verifier --dossier "$RUNNER_TEMP/chart"
+      - name: Garanties du chart rendu (sécurité, empreintes, réseau, tâches, arrêt propre)
+        run: uv run --no-sync pytest -m chart --chart
+
   image:
     name: image (construction et vérifications, ${{ matrix.arch }})
     # aussi chaque lundi : une faille publiée entre deux commits, une exception expirée.
@@ -205,7 +235,7 @@ jobs:
     # sont celles que le job image a construites, testées, inventoriées et scannées sur
     # chaque architecture, jamais reconstruites ; un index les réunit
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, types, audit, tests, image]
+    needs: [lint, types, audit, tests, chart, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

@@ -1,0 +1,147 @@
+# Valeurs du chart contract-decision-graph (ADR 005). Schéma : values.schema.json ; toute
+# valeur inconnue ou mal formée fait échouer l'installation. Aucun secret ici : les
+# Secrets sont créés à part, et le chart ne fait que les nommer.
+
+# Mode de l'interface : « reel » (base, modèle d'embedding, LLM) ou « demo » (en mémoire,
+# ni base, ni modèle, ni clé : profil local réduit).
+mode: reel
+
+# Image de l'application : l'empreinte de l'index amd64/arm64 publié par la CI (résumé du
+# run de publication), jamais une étiquette.
+image:
+  repository: ghcr.io/sifir-gun/contract-decision-graph
+  digest: sha256:0727136980b36b63f0e86e2e5a3a5a6b1178bf535b96fd5796966e2021fd716d
+  pullPolicy: IfNotPresent
+
+# Poids du modèle d'embedding : image dédiée, montée en lecture seule (mode réel).
+modele:
+  image:
+    repository: ghcr.io/sifir-gun/contract-decision-graph/modele-embedding
+    digest: sha256:97111c7a4bde523af411eaeb4430b3dcd82bc05b5e56747f739cafbd1244d570
+    pullPolicy: IfNotPresent
+  # « image » : volume image (Kubernetes 1.36, stable) ; « copie » : pour un cluster sans
+  # volume image, deux conteneurs d'initialisation copient les poids dans un volume
+  # éphémère (busybox fournit le programme de copie, l'image du modèle n'en a aucun)
+  montage: image
+  copie:
+    busybox:
+      repository: docker.io/library/busybox
+      # busybox 1.37.0-musl, image officielle de Docker (index amd64/arm64)
+      digest: sha256:5cec3fc171c87218698e85a52af7087de727372aae264a787b8112901a5b0092
+    # taille du volume éphémère qui reçoit les poids (2,2 Go)
+    tailleMax: 3Gi
+
+# Réplicas de l'interface. Pas d'autoscaling : la charge est de l'attente du LLM, bornée par
+# le quota de Mistral, pas par le CPU (ADR 005).
+replicas: 2
+
+web:
+  # arrêt propre : pause avant l'arrêt (retrait du service), puis délai laissé aux requêtes
+  pauseAvantArret: 10
+  delaiArret: 60
+  repriseIntervalle: 60
+  # taille du pool de connexions d'app_role (ADR 005, budget de connexions)
+  connexions: 10
+  portSante: 8081
+
+# Ressources, fixées d'après la mesure du 28/09 (scripts/mesure_memoire.py, ADR 005).
+# La limite CPU est un entier : elle fixe aussi le nombre de fils de calcul de l'embedder.
+ressources:
+  reel:
+    requests: {cpu: "1", memory: 2Gi}
+    limits: {cpu: "2", memory: 3Gi}
+  demo:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 256Mi}
+  ingestion:
+    requests: {cpu: "2", memory: 3Gi}
+    limits: {cpu: "2", memory: 3584Mi}
+  jobs:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  copie:
+    requests: {cpu: 100m, memory: 32Mi}
+    limits: {cpu: "1", memory: 64Mi}
+
+# Volume éphémère /tmp (système de fichiers racine en lecture seule).
+tmp:
+  tailleMax: 64Mi
+
+# Répartition et disponibilité.
+repartition:
+  # DoNotSchedule en production (réplicas sur des nœuds différents) ; ScheduleAnyway sur
+  # un cluster d'un seul nœud
+  siImpossible: DoNotSchedule
+budgetInterruption:
+  minDisponibles: 1
+
+# PostgreSQL (opérateur CloudNativePG en PR C3) : adresse et Secrets existants.
+base:
+  hote: cdg-postgres-rw
+  port: 5432
+  nom: cdg
+  # mot de passe d'app_role : Secret existant
+  application:
+    secret: cdg-base-application
+    cle: password
+  # administrateur (migrations, ingestion) : Secret existant
+  administrateur:
+    secret: cdg-base-administrateur
+    cleUtilisateur: username
+    cleMotDePasse: password
+  # pods de PostgreSQL, pour les règles de sortie
+  selecteur:
+    cnpg.io/cluster: cdg-postgres
+
+# LLM : clé dans un Secret existant ; adresse de l'API vide = celle du SDK
+# (https://api.mistral.ai). Le proxy de sortie ne laisse passer que l'API de Mistral.
+llm:
+  secret: cdg-mistral
+  cle: MISTRAL_API_KEY
+  adresseApi: ""
+
+# Proxy de sortie (Smokescreen, PR C3) : seule sortie vers Internet.
+proxy:
+  url: http://cdg-proxy:4750
+  port: 4750
+  selecteur:
+    app.kubernetes.io/name: cdg-proxy
+
+# DNS du cluster, pour les règles de sortie.
+dns:
+  espaceDeNoms: kube-system
+  selecteur:
+    k8s-app: kube-dns
+
+# Tâches Helm.
+taches:
+  # conserver une tâche terminée, puis la supprimer (secondes)
+  conservation: 3600
+  tentatives: 2
+  migrations:
+    active: true
+  ingestion:
+    active: true
+  # avant une mise à jour : refuse si des contrats en attente ont été analysés sous une
+  # autre configuration (ADR 005) ; passerOutre, en connaissance de cause seulement
+  controleConfiguration:
+    active: true
+    passerOutre: false
+
+# Configuration de décision : par défaut files/decision.yaml, copie de config/decision.yaml
+# (un test vérifie qu'elles sont identiques). Une autre configuration se passe ici, en texte.
+configuration:
+  decision: ""
+
+# Quota et limites par défaut de l'espace de noms.
+espaceDeNoms:
+  quota:
+    requests.cpu: "8"
+    requests.memory: 12Gi
+    limits.cpu: "12"
+    limits.memory: 20Gi
+    pods: "20"
+  limitesParDefaut:
+    defaut: {cpu: 500m, memory: 256Mi}
+    requeteParDefaut: {cpu: 100m, memory: 128Mi}
+    max: {cpu: "4", memory: 6Gi}

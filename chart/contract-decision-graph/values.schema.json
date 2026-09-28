@@ -1,0 +1,220 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Valeurs du chart contract-decision-graph",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "image", "modele", "replicas", "web", "ressources", "tmp", "repartition", "budgetInterruption", "base", "llm", "proxy", "dns", "taches", "configuration", "espaceDeNoms"],
+  "definitions": {
+    "empreinte": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "depot": {"type": "string", "pattern": "^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$"},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest", "pullPolicy"],
+      "properties": {
+        "repository": {"$ref": "#/definitions/depot"},
+        "digest": {"$ref": "#/definitions/empreinte"},
+        "pullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]}
+      }
+    },
+    "quantiteCpu": {"type": "string", "pattern": "^([0-9]+m|[0-9]+(\\.[0-9]+)?)$"},
+    "cpuEntier": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+    "quantiteMemoire": {"type": "string", "pattern": "^[0-9]+(Ki|Mi|Gi)$"},
+    "ressources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {"cpu": {"$ref": "#/definitions/quantiteCpu"}, "memory": {"$ref": "#/definitions/quantiteMemoire"}}
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {"cpu": {"$ref": "#/definitions/quantiteCpu"}, "memory": {"$ref": "#/definitions/quantiteMemoire"}}
+        }
+      }
+    },
+    "selecteur": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+    "nomSecret": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+    "entierPositif": {"type": "integer", "minimum": 1}
+  },
+  "properties": {
+    "mode": {"enum": ["reel", "demo"]},
+    "image": {"$ref": "#/definitions/image"},
+    "modele": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "montage", "copie"],
+      "properties": {
+        "image": {"$ref": "#/definitions/image"},
+        "montage": {"enum": ["image", "copie"]},
+        "copie": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["busybox", "tailleMax"],
+          "properties": {
+            "busybox": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["repository", "digest"],
+              "properties": {"repository": {"$ref": "#/definitions/depot"}, "digest": {"$ref": "#/definitions/empreinte"}}
+            },
+            "tailleMax": {"$ref": "#/definitions/quantiteMemoire"}
+          }
+        }
+      }
+    },
+    "replicas": {"$ref": "#/definitions/entierPositif"},
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pauseAvantArret", "delaiArret", "repriseIntervalle", "connexions", "portSante"],
+      "properties": {
+        "pauseAvantArret": {"type": "integer", "minimum": 0},
+        "delaiArret": {"$ref": "#/definitions/entierPositif"},
+        "repriseIntervalle": {"$ref": "#/definitions/entierPositif"},
+        "connexions": {"$ref": "#/definitions/entierPositif"},
+        "portSante": {"type": "integer", "minimum": 1024, "maximum": 65535}
+      }
+    },
+    "ressources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reel", "demo", "ingestion", "jobs", "copie"],
+      "properties": {
+        "reel": {
+          "allOf": [
+            {"$ref": "#/definitions/ressources"},
+            {"properties": {"limits": {"properties": {"cpu": {"$ref": "#/definitions/cpuEntier"}}}}}
+          ]
+        },
+        "demo": {"$ref": "#/definitions/ressources"},
+        "ingestion": {
+          "allOf": [
+            {"$ref": "#/definitions/ressources"},
+            {"properties": {"limits": {"properties": {"cpu": {"$ref": "#/definitions/cpuEntier"}}}}}
+          ]
+        },
+        "jobs": {"$ref": "#/definitions/ressources"},
+        "copie": {"$ref": "#/definitions/ressources"}
+      }
+    },
+    "tmp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tailleMax"],
+      "properties": {"tailleMax": {"$ref": "#/definitions/quantiteMemoire"}}
+    },
+    "repartition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["siImpossible"],
+      "properties": {"siImpossible": {"enum": ["DoNotSchedule", "ScheduleAnyway"]}}
+    },
+    "budgetInterruption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minDisponibles"],
+      "properties": {"minDisponibles": {"$ref": "#/definitions/entierPositif"}}
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hote", "port", "nom", "application", "administrateur", "selecteur"],
+      "properties": {
+        "hote": {"type": "string", "minLength": 1},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "nom": {"type": "string", "minLength": 1},
+        "application": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["secret", "cle"],
+          "properties": {"secret": {"$ref": "#/definitions/nomSecret"}, "cle": {"type": "string", "minLength": 1}}
+        },
+        "administrateur": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["secret", "cleUtilisateur", "cleMotDePasse"],
+          "properties": {
+            "secret": {"$ref": "#/definitions/nomSecret"},
+            "cleUtilisateur": {"type": "string", "minLength": 1},
+            "cleMotDePasse": {"type": "string", "minLength": 1}
+          }
+        },
+        "selecteur": {"$ref": "#/definitions/selecteur"}
+      }
+    },
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secret", "cle", "adresseApi"],
+      "properties": {
+        "secret": {"$ref": "#/definitions/nomSecret"},
+        "cle": {"type": "string", "minLength": 1},
+        "adresseApi": {"type": "string", "pattern": "^(|https?://[^/@\\s]+(/.*)?)$"}
+      }
+    },
+    "proxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "port", "selecteur"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^http://[^/@\\s]+$"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "selecteur": {"$ref": "#/definitions/selecteur"}
+      }
+    },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["espaceDeNoms", "selecteur"],
+      "properties": {"espaceDeNoms": {"type": "string", "minLength": 1}, "selecteur": {"$ref": "#/definitions/selecteur"}}
+    },
+    "taches": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conservation", "tentatives", "migrations", "ingestion", "controleConfiguration"],
+      "properties": {
+        "conservation": {"$ref": "#/definitions/entierPositif"},
+        "tentatives": {"type": "integer", "minimum": 0, "maximum": 6},
+        "migrations": {"type": "object", "additionalProperties": false, "required": ["active"], "properties": {"active": {"type": "boolean"}}},
+        "ingestion": {"type": "object", "additionalProperties": false, "required": ["active"], "properties": {"active": {"type": "boolean"}}},
+        "controleConfiguration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["active", "passerOutre"],
+          "properties": {"active": {"type": "boolean"}, "passerOutre": {"type": "boolean"}}
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision"],
+      "properties": {"decision": {"type": "string"}}
+    },
+    "espaceDeNoms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quota", "limitesParDefaut"],
+      "properties": {
+        "quota": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+        "limitesParDefaut": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["defaut", "requeteParDefaut", "max"],
+          "properties": {
+            "defaut": {"type": "object", "additionalProperties": {"type": "string"}},
+            "requeteParDefaut": {"type": "object", "additionalProperties": {"type": "string"}},
+            "max": {"type": "object", "additionalProperties": {"type": "string"}}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+contract-decision-graph {{ .Chart.AppVersion }} (chart {{ .Chart.Version }}), mode {{ .Values.mode }}.
+
+Image : {{ include "cdg.image" . }}
+{{- if eq .Values.mode "reel" }}
+Modèle d'embedding : {{ include "cdg.imageModele" . }} (montage : {{ .Values.modele.montage }})
+{{- end }}
+
+État des pods :
+  kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Test de disponibilité :
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}
+
+L'interface n'écoute que sur 127.0.0.1 dans le pod (ADR 004) : aucune entrée réseau avant
+l'authentification (PR D). Pour y accéder depuis le poste, le temps d'une vérification :
+  kubectl --namespace {{ .Release.Namespace }} port-forward deploy/{{ include "cdg.nomComplet" . }} 8000:8000
+
+Espace de noms : Pod Security au niveau « restricted » (étiquette
+pod-security.kubernetes.io/enforce=restricted), posée avant l'installation.

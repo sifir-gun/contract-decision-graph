@@ -1,0 +1,22 @@
+apiVersion: v2
+name: contract-decision-graph
+description: >-
+  Verdict go / no-go auditable sur des contrats fournisseurs : interface web, sondes de
+  santé, migrations, ingestion du corpus et contrôle de configuration (ADR 005).
+type: application
+# version du chart : chaque changement du chart l'incrémente (SemVer)
+version: 0.1.0
+# version de l'application : celle de pyproject.toml ; l'image se désigne par son empreinte
+appVersion: "0.1.0"
+# volume image stable depuis Kubernetes 1.36 (bêta active par défaut en 1.35) ; en deçà,
+# modele.montage=copie
+kubeVersion: ">=1.33.0-0"
+home: https://github.com/sifir-gun/contract-decision-graph
+sources:
+  - https://github.com/sifir-gun/contract-decision-graph
+keywords:
+  - langgraph
+  - audit
+maintainers:
+  - name: sifir-gun
+    url: https://github.com/sifir-gun

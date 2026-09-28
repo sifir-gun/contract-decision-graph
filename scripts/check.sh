@@ -8,6 +8,8 @@
 # - la base est celle de docker compose (docker compose up -d), déjà migrée : setup-db
 #   applique les migrations idempotentes, sans le script d'init du conteneur de service ;
 # - RUNNER_TEMP, fourni par GitHub Actions, est ici un dossier temporaire, supprimé à la fin ;
+# - helm vient de Homebrew (brew install helm), à la version de la CI, que scripts/chart.py
+#   contrôle ; la CI l'installe depuis l'archive officielle vérifiée par son empreinte ;
 # - l'image est construite pour l'architecture du poste (arm64 sur un Mac récent), celle
 #   de la CI pour amd64 : les bases figées sont des index multi-architecture.
 # Payant : non (tests llm exclus). Réseau : pip-audit interroge la base de failles de PyPI ;
@@ -41,6 +43,10 @@ uv run --no-sync python scripts/echeances_corpus.py --jours 60
 echo "==> tests (PostgreSQL + pgvector)"
 uv run --no-sync python -m cdg.cli setup-db
 uv run --no-sync pytest --cov --cov-report=term
+
+echo "==> chart (lint, schémas, bonnes pratiques, rendu ; helm par Homebrew)"
+uv run --no-sync python scripts/chart.py verifier --dossier "$RUNNER_TEMP/chart"
+uv run --no-sync pytest -m chart --chart
 
 echo "==> image (signatures des bases, construction, vérifications, inventaire, scan)"
 uv run --no-sync python scripts/chaine.py bases

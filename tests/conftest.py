@@ -36,6 +36,11 @@ def pytest_addoption(parser):
         "sous cette étiquette (docker build --tag ÉTIQUETTE .)",
     )
     parser.addoption(
+        "--chart",
+        action="store_true",
+        help="exécute aussi les tests marqués chart (rendu du chart Helm, helm requis)",
+    )
+    parser.addoption(
         "--modele",
         metavar="ÉTIQUETTE",
         default=None,
@@ -52,11 +57,12 @@ def pytest_report_header(config):
 
 def pytest_collection_modifyitems(config, items):
     # exclusion par défaut, comptée comme « deselected » : jamais de saut silencieux,
-    # et -m "not pg" n'active par accident ni les tests llm, ni image, ni modele
+    # et -m "not pg" n'active par accident ni les tests llm, ni image, ni modele, ni chart
     for marker, option in (
         ("llm", "--llm"),
         ("image", "--image"),
         ("modele", "--modele"),
+        ("chart", "--chart"),
     ):
         if config.getoption(option):
             continue

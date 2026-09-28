@@ -1,0 +1,18 @@
+{{- if gt (int .Values.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cdg.nomComplet" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  minAvailable: {{ .Values.budgetInterruption.minDisponibles }}
+  # un pod qui n'est pas prêt peut être évincé : il ne protège aucune disponibilité et
+  # ne doit pas bloquer la vidange d'un nœud
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      {{- include "cdg.selecteur" (dict "racine" . "composant" "web") | nindent 6 }}
+{{- end }}

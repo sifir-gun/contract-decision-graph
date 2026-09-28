@@ -1,0 +1,154 @@
+{{- $reel := eq .Values.mode "reel" -}}
+{{- $ressources := ternary .Values.ressources.reel .Values.ressources.demo $reel -}}
+{{- $web := dict "racine" . "composant" "web" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cdg.nomComplet" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  annotations:
+    # exclusions de kube-linter, justifiées ici et dans l'ADR 005
+    ignore-check.kube-linter.io/dnsconfig-options: "ne résout que des noms internes au cluster ; api.mistral.ai est résolu par le proxy de sortie, qui porte ndots 2 (ADR 005)"
+    ignore-check.kube-linter.io/env-value-from: "Secrets créés hors du chart par conception (PostgreSQL, clé de Mistral) : aucun secret dans les valeurs (ADR 005)"
+spec:
+  replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: 5
+  # mise à jour progressive sans interruption : un pod de plus, jamais un de moins
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "cdg.selecteur" $web | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cdg.etiquettesComposant" $web | nindent 8 }}
+      annotations:
+        # tout changement de la configuration relance les pods (ADR 005)
+        checksum/configuration: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      restartPolicy: Always  # la valeur par défaut, écrite (kube-linter, restart-policy)
+      serviceAccountName: {{ include "cdg.nomComplet" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "cdg.securitePod" . | nindent 8 }}
+      # pause avant l'arrêt + délai laissé aux requêtes + marge (ADR 005, arrêt propre)
+      terminationGracePeriodSeconds: {{ add .Values.web.pauseAvantArret .Values.web.delaiArret 10 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: {{ .Values.repartition.siImpossible }}
+          labelSelector:
+            matchLabels:
+              {{- include "cdg.selecteur" $web | nindent 14 }}
+      {{- if $reel }}
+      {{- with (include "cdg.initCopieModele" .) }}
+      initContainers:
+        {{- . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      containers:
+        - name: web
+          image: {{ include "cdg.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --journaux
+            - json
+            {{- if $reel }}
+            - --connexions
+            - {{ .Values.web.connexions | quote }}
+            - --fils-embedding
+            - {{ include "cdg.fils" $ressources | quote }}
+            {{- end }}
+            - web
+            {{- if not $reel }}
+            - --demo
+            {{- end }}
+            # l'interface écoute sur 127.0.0.1 (ADR 004) : jointe par le mandataire
+            # d'authentification du même pod (PR D), jamais par le réseau
+            - --port-sante
+            - {{ .Values.web.portSante | quote }}
+            - --hote-sante
+            - 0.0.0.0
+            - --delai-arret
+            - {{ .Values.web.delaiArret | quote }}
+            - --reprise-intervalle
+            - {{ .Values.web.repriseIntervalle | quote }}
+          {{- if $reel }}
+          env:
+            {{- include "cdg.envBase" . | nindent 12 }}
+            - name: EMBEDDING_CACHE_DIR
+              value: /modele
+            - name: MISTRAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.llm.secret }}
+                  key: {{ .Values.llm.cle }}
+            {{- with .Values.llm.adresseApi }}
+            - name: MISTRAL_SERVER_URL
+              value: {{ . | quote }}
+            {{- end }}
+            # seule sortie vers Internet : le proxy, qui ne laisse passer que Mistral
+            - name: HTTPS_PROXY
+              value: {{ .Values.proxy.url | quote }}
+            - name: HTTP_PROXY
+              value: {{ .Values.proxy.url | quote }}
+            - name: NO_PROXY
+              value: {{ .Values.base.hote | quote }}
+          {{- end }}
+          ports:
+            - name: sante
+              containerPort: {{ .Values.web.portSante }}
+              protocol: TCP
+          startupProbe:
+            # le modèle se charge en 9 à 22 s (mesure du 28/09) : jusqu'à 5 minutes
+            httpGet: {path: /sante/demarrage, port: sante}
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: {path: /sante/vie, port: sante}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /sante/pret, port: sante}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              # retiré du service avant l'arrêt ; action native de Kubernetes, sans shell
+              sleep:
+                seconds: {{ .Values.web.pauseAvantArret }}
+          resources:
+            {{- toYaml $ressources | nindent 12 }}
+          securityContext:
+            {{- include "cdg.securiteConteneur" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: configuration
+              mountPath: /app/config
+              readOnly: true
+            {{- if $reel }}
+            - name: modele
+              mountPath: /modele
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmp.tailleMax }}
+        - name: configuration
+          configMap:
+            name: {{ include "cdg.nomComplet" . }}-configuration
+        {{- if $reel }}
+        {{- include "cdg.volumeModele" . | nindent 8 }}
+        {{- end }}

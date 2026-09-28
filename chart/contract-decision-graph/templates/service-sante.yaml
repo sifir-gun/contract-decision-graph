@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cdg.nomComplet" . }}-sante
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  # sondes de santé seulement (aucune donnée) : interne au cluster, pour helm test
+  type: ClusterIP
+  selector:
+    {{- include "cdg.selecteur" (dict "racine" . "composant" "web") | nindent 4 }}
+  ports:
+    - name: sante
+      port: {{ .Values.web.portSante }}
+      targetPort: sante
+      protocol: TCP
