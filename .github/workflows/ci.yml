@@ -145,9 +145,19 @@ jobs:
         run: uv run --no-sync pytest --cov --cov-report=term
 
   image:
-    name: image (construction et vérifications)
-    # aussi chaque lundi : une faille publiée entre deux commits, une exception expirée
-    runs-on: ubuntu-24.04
+    name: image (construction et vérifications, ${{ matrix.arch }})
+    # aussi chaque lundi : une faille publiée entre deux commits, une exception expirée.
+    # Une construction native par architecture, sur son propre runner : ni émulation, ni
+    # plateforme forcée ; chaque image passe la même chaîne de vérification
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm # runner ARM de GitHub, dépôts publics
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,7 +192,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: image
+          name: image-${{ matrix.arch }}
           path: |
             ${{ runner.temp }}/chaine/image.tar
             ${{ runner.temp }}/chaine/sbom.spdx.json
@@ -191,15 +201,16 @@ jobs:
 
   publication:
     name: publication (ghcr.io, signature, attestations)
-    # après une fusion dans main seulement : ni pull request, ni lundi. L'image publiée est
-    # celle que le job image a construite, testée, inventoriée et scannée, jamais reconstruite
+    # après une fusion dans main seulement : ni pull request, ni lundi. Les images publiées
+    # sont celles que le job image a construites, testées, inventoriées et scannées sur
+    # chaque architecture, jamais reconstruites ; un index les réunit
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint, types, audit, tests, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: write # pousser l'image sur ghcr.io
+      packages: write # pousser les images sur ghcr.io
       id-token: write # identité OIDC du workflow : signature sans clé, attestations
       attestations: write # attestations de provenance et d'inventaire
     env:
@@ -207,63 +218,98 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: image
+          pattern: image-* # un dossier par architecture : image-amd64, image-arm64
           path: ${{ runner.temp }}/chaine
-      - name: Image construite, testée et scannée par le job image
-        run: docker load --input "$RUNNER_TEMP/chaine/image.tar"
       - name: Connexion à ghcr.io (jeton du workflow ; droit packages limité à ce job)
         env:
           TOKEN: ${{ github.token }}
         run: echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-      - name: Publication, étiquetée par le commit, empreinte relue dans le registre
+      - name: Publication de chaque architecture, empreinte relue dans le registre
         run: |
-          docker tag cdg:verification "$IMAGE:sha-$GITHUB_SHA"
-          docker push "$IMAGE:sha-$GITHUB_SHA"
-          digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" \
-            --format '{{json .Manifest}}' | jq -r .digest)"
+          docker version --format 'Docker {{.Server.Version}}'
+          for arch in amd64 arm64; do
+            docker load --input "$RUNNER_TEMP/chaine/image-$arch/image.tar"
+            docker tag cdg:verification "$IMAGE:sha-$GITHUB_SHA-$arch"
+            docker image rm cdg:verification
+            docker push "$IMAGE:sha-$GITHUB_SHA-$arch"
+            digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA-$arch" \
+              --format '{{json .Manifest}}' | jq -r .digest)"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "empreinte publiée illisible ($arch) : $digest" >&2
+              exit 1
+            fi
+            echo "DIGEST_$(tr '[:lower:]' '[:upper:]' <<< "$arch")=$digest" >> "$GITHUB_ENV"
+          done
+      - name: Index amd64 et arm64, étiqueté par le commit
+        run: |
+          docker buildx imagetools create --tag "$IMAGE:sha-$GITHUB_SHA" \
+            "$IMAGE@$DIGEST_AMD64" "$IMAGE@$DIGEST_ARM64"
+          manifest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" \
+            --format '{{json .Manifest}}')"
+          digest="$(jq -r .digest <<< "$manifest")"
+          platforms="$(jq -r '[.manifests[].platform | "\(.os)/\(.architecture)"]
+            | sort | join(",")' <<< "$manifest")"
+          test "$platforms" = "linux/amd64,linux/arm64" || {
+            echo "plateformes de l'index inattendues : $platforms" >&2
+            exit 1
+          }
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "empreinte publiée illisible : $digest" >&2
+            echo "empreinte de l'index illisible : $digest" >&2
             exit 1
           fi
           echo "DIGEST=$digest" >> "$GITHUB_ENV"
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3 # celui des vérifications (scripts/chaine.py)
-      - name: Signature sans clé, par l'identité OIDC du workflow
-        run: cosign sign --yes "$IMAGE@$DIGEST"
-      - name: Attestation de provenance (SLSA)
+      - name: Signature sans clé de l'index et de chaque image qu'il désigne
+        run: cosign sign --yes --recursive "$IMAGE@$DIGEST"
+      - name: Attestation de provenance (SLSA), sur l'index
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ env.DIGEST }}
           push-to-registry: true
           create-storage-record: false # dépôts d'organisation seulement
-      - name: Attestation de l'inventaire (SPDX 2.3, Syft), celui qui a été scanné
+      - name: Attestation de l'inventaire amd64 (SPDX 2.3, Syft), celui qui a été scanné
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ env.DIGEST }}
-          sbom-path: ${{ runner.temp }}/chaine/sbom.spdx.json
+          subject-digest: ${{ env.DIGEST_AMD64 }}
+          sbom-path: ${{ runner.temp }}/chaine/image-amd64/sbom.spdx.json
           push-to-registry: true
           create-storage-record: false
-      - name: Vérification de ce qui est publié (signature, provenance, inventaire)
+      - name: Attestation de l'inventaire arm64 (SPDX 2.3, Syft), celui qui a été scanné
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST_ARM64 }}
+          sbom-path: ${{ runner.temp }}/chaine/image-arm64/sbom.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: Vérification de ce qui est publié (signatures, provenance, inventaires)
         env:
           GH_TOKEN: ${{ github.token }}
           IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main
           WORKFLOW: ${{ github.repository }}/.github/workflows/ci.yml
         run: |
-          cosign verify "$IMAGE@$DIGEST" --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          for digest in "$DIGEST" "$DIGEST_AMD64" "$DIGEST_ARM64"; do
+            cosign verify "$IMAGE@$digest" --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          done
           gh attestation verify "oci://$IMAGE@$DIGEST" --owner "$GITHUB_REPOSITORY_OWNER" \
             --signer-workflow "$WORKFLOW"
-          gh attestation verify "oci://$IMAGE@$DIGEST" --owner "$GITHUB_REPOSITORY_OWNER" \
-            --signer-workflow "$WORKFLOW" --predicate-type https://spdx.dev/Document/v2.3
-      - name: Empreinte publiée, celle que le chart référence
+          for digest in "$DIGEST_AMD64" "$DIGEST_ARM64"; do
+            gh attestation verify "oci://$IMAGE@$digest" --owner "$GITHUB_REPOSITORY_OWNER" \
+              --signer-workflow "$WORKFLOW" --predicate-type https://spdx.dev/Document/v2.3
+          done
+      - name: Empreintes publiées ; le chart référence celle de l'index
         run: |
           {
             echo "### Image publiée"
             echo
-            echo "\`$IMAGE@$DIGEST\`"
+            echo "- index : \`$IMAGE@$DIGEST\`"
+            echo "- amd64 : \`$IMAGE@$DIGEST_AMD64\`"
+            echo "- arm64 : \`$IMAGE@$DIGEST_ARM64\`"
             echo
-            echo "Signée sans clé, provenance et inventaire attestés (ADR 005)."
+            echo "Signées sans clé, provenance et inventaires attestés (ADR 005)."
           } >> "$GITHUB_STEP_SUMMARY"
