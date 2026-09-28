@@ -153,19 +153,28 @@ IGNORE = "ignore-check.kube-linter.io/"
 # des tâches qui s'exécutent jusqu'au bout, sans sonde, un nouveau pod par tentative ; des
 # Secrets créés hors du chart ; des noms à résoudre tous internes au cluster
 IGNORED_BY_KIND = {
-    "Deployment": {"dnsconfig-options"},
+    "Deployment": {"dnsconfig-options", "minimum-three-replicas", "no-node-affinity"},
     "Job": {
         "dnsconfig-options",
         "no-liveness-probe",
+        "no-node-affinity",
         "no-readiness-probe",
         "restart-policy",
     },
     "Pod": {
         "dnsconfig-options",
         "no-liveness-probe",
+        "no-node-affinity",
         "no-readiness-probe",
         "restart-policy",
     },
+}
+# règles réseau vers le proxy de sortie et PostgreSQL, rendus hors du chart (PR C3)
+IGNORED_BY_NAME = {
+    ("NetworkPolicy", f"cdg-contract-decision-graph-{name}"): {
+        "dangling-networkpolicypeer-podselector"
+    }
+    for name in ("web", "taches")
 }
 
 
@@ -179,17 +188,26 @@ def test_exclusions_de_kube_linter_par_objet_et_justifiees(reel):
             if key.startswith(IGNORE)
         }
         name = doc["metadata"]["name"]
-        assert set(ignored) == IGNORED_BY_KIND.get(doc["kind"], set()), name
+        by_kind = IGNORED_BY_KIND.get(doc["kind"], set())
+        expected = IGNORED_BY_NAME.get((doc["kind"], name), by_kind)
+        assert set(ignored) == expected, name
         assert all(len(reason.split()) >= 5 for reason in ignored.values()), name
+    # deux réplicas, justifiés par la mémoire mesurée d'un réplica
+    deployment = named(reel, "Deployment", "graph")["metadata"]["annotations"]
+    assert "Mio" in deployment[f"{IGNORE}minimum-three-replicas"]
 
 
 def test_configuration_de_kube_linter_sans_exclusion_globale_d_un_objet():
     config = yaml.safe_load((ROOT / "chart" / ".kube-linter.yaml").read_text())
-    excluded = set(config["checks"]["exclude"])
     assert config["checks"]["addAllBuiltIn"] is True
-    assert "schema-validation" in excluded  # kubeconform la fait, figé et strict
-    assert "read-secret-from-env-var" not in excluded  # secrets en fichiers
-    assert not excluded & set().union(*IGNORED_BY_KIND.values())
+    # seules restent globales les exclusions qui ne visent aucun objet : conventions d'une
+    # organisation, ordre des clés, et la validation des schémas, que fait kubeconform
+    assert set(config["checks"]["exclude"]) == {
+        "required-annotation-email",
+        "required-label-owner",
+        "sorted-keys",
+        "schema-validation",
+    }
 
 
 SANS_TACHES = (
@@ -224,6 +242,25 @@ def test_chaque_regle_reseau_designe_des_pods_du_rendu(variant):
         ]["name"]
     accounts = [a["metadata"]["name"] for a in of_kind(docs, "ServiceAccount")]
     assert any(a.endswith("-taches") for a in accounts) == bool(of_kind(docs, "Job"))
+
+
+@pytest.mark.chart
+def test_replicas_sur_des_noeuds_differents_sans_bloquer_la_mise_a_jour(reel):
+    """Anti-affinité préférée (kube-linter, no-anti-affinity) : exigée, elle bloquerait la
+    mise à jour progressive quand le cluster a autant de nœuds que de réplicas (le pod en
+    plus ne trouverait aucun nœud libre) ; la répartition stricte reste celle des
+    contraintes de topologie, qui tolèrent ce pod en plus."""
+    deployment = named(reel, "Deployment", "graph")
+    spec = deployment["spec"]["template"]["spec"]
+    anti = spec["affinity"]["podAntiAffinity"]
+    assert "requiredDuringSchedulingIgnoredDuringExecution" not in anti
+    [term] = anti["preferredDuringSchedulingIgnoredDuringExecution"]
+    assert term["weight"] == 100
+    assert term["podAffinityTerm"]["topologyKey"] == "kubernetes.io/hostname"
+    selector = term["podAffinityTerm"]["labelSelector"]["matchLabels"]
+    assert selector == deployment["spec"]["selector"]["matchLabels"]
+    [spread] = spec["topologySpreadConstraints"]
+    assert (spread["maxSkew"], spread["whenUnsatisfiable"]) == (1, "DoNotSchedule")
 
 
 @pytest.mark.chart

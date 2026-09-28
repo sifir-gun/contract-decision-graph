@@ -37,6 +37,7 @@ metadata:
     ignore-check.kube-linter.io/restart-policy: "chaque tentative dans un nouveau pod (backoffLimit) : le journal d'une tentative ratée reste lisible"
     ignore-check.kube-linter.io/no-liveness-probe: "tâche qui s'exécute jusqu'au bout, bornée par activeDeadlineSeconds : aucune sonde de vie"
     ignore-check.kube-linter.io/no-readiness-probe: "tâche sans service ni trafic à recevoir : aucune sonde de disponibilité"
+    ignore-check.kube-linter.io/no-node-affinity: "aucune contrainte de matériel ni de zone : n'importe quel nœud convient, amd64 comme arm64 (images multi-architecture)"
     ignore-check.kube-linter.io/dnsconfig-options: "ne résout que des noms internes au cluster ; api.mistral.ai est résolu par le proxy de sortie, qui porte ndots 2 (ADR 005)"
 spec:
   backoffLimit: {{ $v.taches.tentatives }}

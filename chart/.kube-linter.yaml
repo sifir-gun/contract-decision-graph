@@ -15,16 +15,3 @@ checks:
     - required-label-owner
     # ordre alphabétique des clés YAML : mise en forme, sans effet sur le déploiement
     - sorted-keys
-    # aucune contrainte de matériel ni de zone : n'importe quel nœud convient
-    - no-node-affinity
-    # pas de classe de priorité propre au cluster : celle par défaut
-    - priority-class-name
-    # deux réplicas suffisent : la charge est de l'attente du LLM, bornée par le quota de
-    # Mistral ; la disponibilité tient au budget d'interruption et à la répartition
-    - minimum-three-replicas
-    # répartition sur des nœuds différents par topologySpreadConstraints (maxSkew 1,
-    # DoNotSchedule), plus souple et plus lisible qu'une anti-affinité
-    - no-anti-affinity
-    # le proxy de sortie et PostgreSQL ne sont pas rendus par ce chart (PR C3 : Smokescreen,
-    # CloudNativePG) : leurs sélecteurs ne désignent aucun pod du rendu
-    - dangling-networkpolicypeer-podselector

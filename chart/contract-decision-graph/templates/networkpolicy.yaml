@@ -22,6 +22,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "cdg.etiquettes" . | nindent 4 }}
+  annotations:
+    # exclusion de kube-linter, justifiée ici et dans l'ADR 005
+    ignore-check.kube-linter.io/dangling-networkpolicypeer-podselector: "le proxy de sortie et PostgreSQL ne sont pas rendus par ce chart (PR C3 : Smokescreen, CloudNativePG) : leurs pods existent hors du rendu"
 spec:
   podSelector:
     matchLabels:
@@ -57,6 +60,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "cdg.etiquettes" . | nindent 4 }}
+  annotations:
+    # exclusion de kube-linter, justifiée ici et dans l'ADR 005
+    ignore-check.kube-linter.io/dangling-networkpolicypeer-podselector: "PostgreSQL n'est pas rendu par ce chart (PR C3 : CloudNativePG) : ses pods existent hors du rendu"
 spec:
   podSelector:
     matchLabels:

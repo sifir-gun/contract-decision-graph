@@ -15,6 +15,7 @@ metadata:
     ignore-check.kube-linter.io/restart-policy: "test Helm exécuté une fois : un échec reste un échec, sans nouvelle tentative"
     ignore-check.kube-linter.io/no-liveness-probe: "test Helm qui s'exécute jusqu'au bout, en quelques secondes : aucune sonde de vie"
     ignore-check.kube-linter.io/no-readiness-probe: "test Helm sans service ni trafic à recevoir : aucune sonde de disponibilité"
+    ignore-check.kube-linter.io/no-node-affinity: "aucune contrainte de matériel ni de zone : n'importe quel nœud convient, amd64 comme arm64 (images multi-architecture)"
     ignore-check.kube-linter.io/dnsconfig-options: "ne résout que le service interne des sondes de l'interface"
 spec:
   restartPolicy: Never
