@@ -2353,3 +2353,9 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Chemins du workflow élargis** : le test lui-même (`tests/test_modele.py`) ne déclenchait pas le workflow, pas plus que le `Dockerfile`, les dépendances (`pyproject.toml`, `uv.lock` : fastembed, onnxruntime) ou `config/decision.yaml` ; tous décident du chargement des poids.
 - **Leçon** : un test qui passe sur le poste et pas en CI se lit avec les droits de Linux ; les montages de dossiers de Docker Desktop les masquent.
 
+### Contenu de l'image du modèle lisible, artefacts exclus
+
+- **Test d'abord** (`tests/test_modele.py`) : dans l'image, tout fichier est lisible et tout dossier traversable par les autres, car dans le pod les fichiers appartiennent à root et l'application tourne sous 65532. Le test a trouvé `trees/<révision>.json` en 0600 : la liste des fichiers du dépôt, écrite par huggingface_hub au téléchargement, inutile au chargement hors ligne (le chargement passait sans elle).
+- **Correction** : `docker/modele/Dockerfile.dockerignore` exclut les verrous (`.locks/`) et `trees/`. Vérifié : l'image reconstruite n'en contient plus, et les 18 tests du modèle passent (1 min 35 sur le poste).
+- **Lu dans huggingface_hub 1.32.0** (`file_download.py`, `_chmod_and_move`) : les fichiers téléchargés prennent les droits par défaut du dossier, donc le umask du processus (0644 sur un runner) ; le test protège d'un autre umask.
+

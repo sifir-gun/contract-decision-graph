@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import tarfile
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -119,6 +120,19 @@ def test_image_du_modele_sans_systeme_ni_outil():
     labels = " ".join(line for line in lines if line.startswith("LABEL"))
     assert 'org.opencontainers.image.licenses="MIT"' in labels
     assert "org.opencontainers.image.source=" in labels
+
+
+def test_artefacts_du_telechargement_hors_de_l_image():
+    # BuildKit lit le fichier d'exclusion propre au Dockerfile (Dockerfile.dockerignore) :
+    # les verrous et la liste des fichiers du dépôt (trees/, écrite en 0600, illisible par
+    # l'utilisateur de l'application) ne servent qu'au téléchargement
+    ignored = (MODELE / "Dockerfile.dockerignore").read_text(encoding="utf-8")
+    patterns = [
+        line.strip()
+        for line in ignored.splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert patterns == [".locks/", "models--*/trees/"]
 
 
 def test_notice_de_licence_du_modele():
@@ -337,6 +351,23 @@ def volume(images, container) -> Iterator[str]:
         subprocess.run(
             ["docker", "volume", "rm", "-f", name], capture_output=True, check=False
         )
+
+
+@pytest.mark.modele
+def test_contenu_lisible_par_l_utilisateur_de_l_application(container):
+    # dans le pod, les fichiers de l'image appartiennent à root ; l'application tourne
+    # sous 65532 : tout doit être lisible, et chaque dossier traversable, par les autres
+    refused = []
+    export = subprocess.Popen(["docker", "export", container], stdout=subprocess.PIPE)
+    with tarfile.open(fileobj=export.stdout, mode="r|") as archive:
+        for member in archive:
+            if member.name.startswith(RUNTIME):
+                continue
+            directory = member.isdir() and member.mode & 0o005 != 0o005
+            if directory or (member.isfile() and not member.mode & 0o004):
+                refused.append(f"{member.name} {oct(member.mode)}")
+    assert export.wait(WAIT) == 0
+    assert refused == []
 
 
 @pytest.mark.modele
