@@ -2321,3 +2321,10 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Décision** : exception justifiée, datée du 28/09, expirant le 28/10/2026. Le projet n'extrait aucune archive, et fastembed ne télécharge rien en production. Contre-épreuve : sans elle, le scan échoue (code 1), la faille affichée.
 - **Mesures sur le poste** : inventaire en 17 s ; premier scan en 2 min 30 (téléchargement de la base de failles), quelques secondes ensuite.
 
+### Publication : ghcr.io, signature sans clé, attestations
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`, `tests/test_image.py`) : job de publication après une fusion dans `main` seulement, tous les autres jobs requis ; permissions du workflow en lecture, écriture pour ce seul job, et seulement `packages`, `id-token`, `attestations` ; l'image publiée est celle du job `image` (artefact, `docker load`, jamais `docker build`) ; cosign installé à la version des vérifications ; signature et deux attestations par empreinte, poussées dans le registre, sans trace de stockage ; vérification de ce qui est publié (identité et émetteur exacts, provenance et inventaire SPDX 2.3) ; aucune expression `${{ }}` dans les scripts ; étiquettes OCI de l'image.
+- **Lu dans le code et la documentation** : `actions/attest-build-provenance` 4 n'est qu'une surcouche d'`actions/attest`, recommandée à sa place ; le prédicat SPDX vient de `spdxVersion` (`src/sbom.ts`) ; les traces de stockage exigent un dépôt d'organisation (ce dépôt appartient à un compte personnel : désactivées, sinon l'étape échouerait) ; `{{.Manifest.Digest}}` n'est pas accepté par `imagetools inspect`, d'où `{{json .Manifest}}` lu par `jq`.
+- **Vérifié sur le poste, sans rien publier** : l'aller-retour `docker save` puis `docker load` rend la même image (même identifiant) ; l'empreinte d'une image publique se lit par la commande du job. La première exécution réelle du job se lit après la fusion.
+- **À décider avec la PR C** : visibilité du paquet (privé à la première publication, public de façon irréversible), ou secret de tirage dans le chart.
+

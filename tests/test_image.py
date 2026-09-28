@@ -175,6 +175,21 @@ def test_environnement_de_l_image_finale():
     assert env["PATH"].startswith("/app/.venv/bin:")
 
 
+def test_etiquettes_oci_de_l_image():
+    labels = {}
+    for keyword, rest in stages()[-1]:
+        if keyword == "LABEL":
+            for pair in shlex.split(rest):
+                name, _, value = pair.partition("=")
+                labels[name] = value
+    # la source relie le paquet ghcr.io au dépôt (droits, page du paquet, Dependabot)
+    assert labels["org.opencontainers.image.source"] == (
+        "https://github.com/sifir-gun/contract-decision-graph"
+    )
+    assert labels["org.opencontainers.image.licenses"] == "AGPL-3.0-only"
+    assert labels["org.opencontainers.image.title"] == "contract-decision-graph"
+
+
 def test_contexte_de_construction_limite_a_ce_que_l_image_utilise():
     lines = [
         line.strip()
@@ -230,6 +245,10 @@ def test_configuration_de_l_image(image):
     [config] = json.loads(docker("image", "inspect", image).stdout)
     assert config["Config"]["User"] == NONROOT
     assert config["Config"]["Entrypoint"] == ENTRYPOINT
+    labels = config["Config"]["Labels"]
+    assert labels["org.opencontainers.image.source"].endswith(
+        "/contract-decision-graph"
+    )
     names = [e.split("=", 1)[0] for e in config["Config"]["Env"]]
     assert not [n for n in names if re.search("KEY|PASSWORD|SECRET|TOKEN", n)]
 

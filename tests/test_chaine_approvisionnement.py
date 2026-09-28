@@ -291,3 +291,102 @@ def test_inventaire_et_scan_apres_la_construction_en_ci_et_en_local():
     assert inventory in script and scan in script
     # chaque lundi aussi : une faille publiée entre deux commits, une exception expirée
     assert "schedule" not in job.get("if", "")
+
+
+# --- publication : ghcr.io par empreinte, signature sans clé, attestations --------------------
+
+IMAGE = "ghcr.io/${{ github.repository }}"
+IDENTITY = "https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main"
+
+
+def ci() -> dict:
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    return yaml.safe_load(text)
+
+
+def publication_steps() -> list[dict]:
+    return ci()["jobs"]["publication"]["steps"]
+
+
+def uses(step: dict, action: str) -> bool:
+    return step.get("uses", "").startswith(f"{action}@")
+
+
+def test_publication_apres_une_fusion_dans_main_seulement():
+    job = ci()["jobs"]["publication"]
+    assert job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    others = set(ci()["jobs"]) - {"publication"}
+    assert set(job["needs"]) == others  # tout est vert avant de publier
+
+
+def test_publication_droits_minimaux():
+    assert ci()["permissions"] == {"contents": "read"}
+    assert ci()["jobs"]["publication"]["permissions"] == {
+        "contents": "read",
+        "packages": "write",  # pousser l'image sur ghcr.io
+        "id-token": "write",  # identité OIDC : signature sans clé, attestations
+        "attestations": "write",  # attestations de provenance et d'inventaire
+    }
+    for name, job in ci()["jobs"].items():
+        if name != "publication":
+            assert "permissions" not in job, name
+
+
+def test_l_image_publiee_est_celle_testee_et_scannee():
+    image_steps = ci()["jobs"]["image"]["steps"]
+    [upload] = [s for s in image_steps if uses(s, "actions/upload-artifact")]
+    assert (
+        upload["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    )
+    assert upload["with"]["name"] == "image"
+    assert upload["with"]["path"].splitlines() == [
+        "${{ runner.temp }}/chaine/image.tar",
+        "${{ runner.temp }}/chaine/sbom.spdx.json",
+    ]
+    assert upload["with"]["if-no-files-found"] == "error"
+    steps = publication_steps()
+    [download] = [s for s in steps if uses(s, "actions/download-artifact")]
+    assert download["with"]["name"] == "image"
+    runs = " ".join(s.get("run", "") for s in steps)
+    assert 'docker load --input "$RUNNER_TEMP/chaine/image.tar"' in runs
+    assert not re.search(r"docker build\s", runs)  # jamais reconstruite
+
+
+def test_signature_et_attestations_par_empreinte():
+    steps = publication_steps()
+    [installer] = [s for s in steps if uses(s, "sigstore/cosign-installer")]
+    cosign = re.search(r":(v[\d.]+)@", chaine().COSIGN)[1]
+    assert installer["with"]["cosign-release"] == cosign  # le cosign des vérifications
+    runs = "\n".join(s.get("run", "") for s in steps)
+    assert 'cosign sign --yes "$IMAGE@$DIGEST"' in runs
+    attests = [s for s in steps if uses(s, "actions/attest")]
+    assert len(attests) == 2
+    for attest in attests:
+        assert attest["with"]["subject-name"] == "${{ env.IMAGE }}"
+        assert attest["with"]["subject-digest"] == "${{ env.DIGEST }}"
+        assert attest["with"]["push-to-registry"] is True
+        # traces de stockage : dépôts d'organisation seulement (actions/attest 4.2.2)
+        assert attest["with"]["create-storage-record"] is False
+    sbom = [a["with"].get("sbom-path") for a in attests]
+    assert sbom == [None, "${{ runner.temp }}/chaine/sbom.spdx.json"]
+
+
+def test_ce_qui_est_publie_est_verifie():
+    steps = publication_steps()
+    [check] = [s for s in steps if "cosign verify" in s.get("run", "")]
+    run = " ".join(check["run"].split())
+    assert '--certificate-identity "$IDENTITY"' in run
+    assert (
+        "--certificate-oidc-issuer https://token.actions.githubusercontent.com" in run
+    )
+    assert check["env"]["IDENTITY"] == IDENTITY
+    assert run.count("gh attestation verify") == 2
+    assert "--predicate-type https://spdx.dev/Document/v2.3" in run
+    assert '--signer-workflow "$WORKFLOW"' in run
+
+
+def test_aucune_expression_dans_les_scripts_de_publication():
+    # injection de script : les valeurs passent par l'environnement, jamais dans `run`
+    for step in publication_steps():
+        assert "${{" not in step.get("run", ""), step.get("name")
+    assert ci()["jobs"]["publication"]["env"]["IMAGE"] == IMAGE

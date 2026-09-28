@@ -53,7 +53,11 @@ def ci_commands() -> list[str]:
     service (`docker`)."""
     jobs = _load(".github/workflows/ci.yml")["jobs"]
     commands = []
-    for job in jobs.values():
+    for name, job in jobs.items():
+        if name == "publication":
+            # ne tourne qu'en CI, après une fusion dans main : identité OIDC du workflow,
+            # droit d'écriture sur le registre (ADR 005)
+            continue
         for step in job["steps"]:
             run = step.get("run")
             if run is None:
