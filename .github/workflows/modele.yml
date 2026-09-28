@@ -22,6 +22,7 @@ on:
       - uv.lock
       - config/decision.yaml
       - tests/test_modele.py
+      - tests/test_licences.py
       - .github/workflows/modele.yml
 
 permissions:

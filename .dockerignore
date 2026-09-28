@@ -2,6 +2,7 @@
 # est admis. Jamais .env, ni .git, ni les poids du modèle, ni les caches (tests/test_image.py).
 *
 !LICENSE
+!licences/
 !pyproject.toml
 !uv.lock
 !config/
