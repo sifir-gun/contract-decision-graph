@@ -1,0 +1,4 @@
+# Contexte de l'image de test : le seul serveur factice (BuildKit lit ce fichier, propre à
+# ce Dockerfile, à la place du .dockerignore de la racine).
+*
+!tests/mistral_factice.py
