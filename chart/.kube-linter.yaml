@@ -1,0 +1,17 @@
+# kube-linter 0.8.3 (ADR 005) : toutes les vérifications intégrées sont actives. Une
+# exclusion qui tient à un objet est posée sur cet objet (annotation
+# ignore-check.kube-linter.io/…, justifiée) ; ici, celles qui ne dépendent d'aucun objet,
+# justifiées ici et dans l'ADR 005. Une violation non exclue fait échouer la validation
+# (scripts/chart.py, job chart de la CI, scripts/check.sh).
+checks:
+  addAllBuiltIn: true
+  exclude:
+    # validation par kubeconform, que scripts/chart.py lance déjà, figé (0.8.0), strict,
+    # contre les schémas de Kubernetes 1.36.4 ; celle de kube-linter télécharge les schémas
+    # de la branche principale, sans version, et échoue en TLS depuis son image
+    - schema-validation
+    # conventions d'une organisation (adresse de contact, propriétaire) : aucune ici
+    - required-annotation-email
+    - required-label-owner
+    # ordre alphabétique des clés YAML : mise en forme, sans effet sur le déploiement
+    - sorted-keys

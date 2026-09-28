@@ -1,0 +1,15 @@
+{{- if has "migrations" (include "cdg.taches" . | splitList " ") }}
+{{- /* setup-db : tables du checkpointer, droits d'app_role, migrations idempotentes */}}
+{{- include "cdg.tache" (dict
+  "racine" .
+  "nom" "migrations"
+  "crochets" "pre-install,pre-upgrade"
+  "poids" 0
+  "delai" 600
+  "args" (list "--journaux" "json" "setup-db")
+  "administrateur" true
+  "modele" false
+  "ressources" .Values.ressources.jobs
+  "configMap" (printf "%s-configuration-a-venir" (include "cdg.nomComplet" .))
+) }}
+{{- end }}

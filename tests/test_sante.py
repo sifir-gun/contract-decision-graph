@@ -245,7 +245,7 @@ def test_embedder_du_processus_charge_une_seule_fois(monkeypatch, tmp_path):
     loads = []
 
     class Loaded:
-        def __init__(self, config, cache_dir):
+        def __init__(self, config, cache_dir, *, threads=None):
             loads.append(cache_dir)
 
     monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", Loaded)
@@ -254,3 +254,62 @@ def test_embedder_du_processus_charge_une_seule_fois(monkeypatch, tmp_path):
     config = load_config()
     first = PROCESS_EMBEDDER(config)
     assert PROCESS_EMBEDDER(config) is first and loads == [tmp_path]
+
+
+@pytest.mark.parametrize(
+    ("argv", "env", "expected"),
+    [([], None, None), ([], "3", 3), (["--fils-embedding", "2"], "3", 2)],
+)
+def test_fils_de_l_embedder_option_ou_environnement(
+    served, monkeypatch, tmp_path, argv, env, expected
+):
+    from conftest import PROCESS_EMBEDDER
+
+    from cdg import cli
+    from cdg.domain.config import load_config
+
+    seen = []
+
+    class Loaded:
+        def __init__(self, config, cache_dir, *, threads=None):
+            seen.append(threads)
+
+    if env is None:
+        monkeypatch.delenv("CDG_FILS_EMBEDDING", raising=False)
+    else:
+        monkeypatch.setenv("CDG_FILS_EMBEDDING", env)
+    monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", Loaded)
+    monkeypatch.setattr(cli.settings, "embedding_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_EMBEDDERS", {})
+    assert cli.main([*argv, "web", "--demo"]) == 0  # lit l'option, comme --connexions
+    PROCESS_EMBEDDER(load_config())
+    assert seen == [expected]
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "deux"])
+def test_fils_de_l_embedder_invalide_refuse(value):
+    from cdg import cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["--fils-embedding", value, "web", "--demo"])
+
+
+def test_ingestion_avec_les_fils_de_l_option(monkeypatch, tmp_path):
+    # le Job d'ingestion a lui aussi une limite CPU : même réglage que l'interface
+    from cdg import cli
+
+    seen = []
+
+    class Loaded:
+        model = "modele-de-test"
+
+        def __init__(self, config, cache_dir, *, threads=None):
+            seen.append(threads)
+
+    monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", Loaded)
+    monkeypatch.setattr(cli.settings, "embedding_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words: [])
+    monkeypatch.setattr(cli.rag_store, "sync", lambda conninfo, rows, model: {})
+    monkeypatch.setattr(cli.conninfo, "admin_conninfo", lambda: "base-de-test")
+    assert cli.main(["--fils-embedding", "2", "ingest"]) == 0
+    assert seen == [2]

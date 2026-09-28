@@ -1,4 +1,14 @@
-"""Environnement : .env (sans écraser les variables exportées), variables obligatoires.
+"""Environnement : .env (sans écraser les variables exportées), variables obligatoires,
+secrets.
+
+Secrets (clés d'API, mots de passe, utilisateur administrateur de PostgreSQL), par ordre
+de priorité :
+1. le fichier `SECRETS_DIR/<NOM>`, s'il existe : c'est ainsi que le chart les monte, en
+   lecture seule (CIS 5.4.1 : des fichiers plutôt que des variables d'environnement).
+   Espaces et fins de ligne retirés au début et à la fin ; un fichier présent mais vide,
+   illisible ou mal encodé est une erreur, jamais un repli sur la variable ;
+2. sinon, la variable d'environnement du même nom (CLI, poste local, .env).
+Aucun message ne reprend la valeur d'un secret.
 
 Les chaînes de connexion PostgreSQL sont dans `adapters/postgres/conninfo.py`.
 """
@@ -10,10 +20,19 @@ from dotenv import load_dotenv
 
 DEFAULT_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 APP_ROLE = "app_role"  # créé par migrations/001_audit.sql
+# secrets montés par le chart, un fichier par secret, en lecture seule (ADR 005)
+SECRETS_DIR = Path("/run/secrets/cdg")
+SECRETS = (
+    "MISTRAL_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "APP_DB_PASSWORD",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+)
 
 
 class SettingsError(Exception):
-    """Variable d'environnement obligatoire absente ou vide."""
+    """Variable d'environnement ou secret obligatoire absent, vide ou inexploitable."""
 
 
 def load_env(path: Path | str = DEFAULT_ENV_PATH) -> bool:
@@ -26,6 +45,36 @@ def require(name: str) -> str:
     if not value:
         raise SettingsError(
             f"variable d'environnement absente ou vide : {name} (voir .env.example)"
+        )
+    return value
+
+
+def secret(name: str) -> str | None:
+    """Le secret `name` : son fichier monté s'il existe, sinon sa variable d'environnement,
+    sinon None (voir l'ordre de priorité en tête du module)."""
+    if name not in SECRETS:
+        raise ValueError(f"secret inconnu : {name}")
+    path = SECRETS_DIR / name
+    if not path.exists():
+        return os.environ.get(name) or None
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    # le type seulement, et sans chaîner l'exception : son message pourrait citer la valeur
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SettingsError(
+            f"secret illisible : {path} ({type(exc).__name__})"
+        ) from None
+    if not value:
+        raise SettingsError(f"secret vide : {path}")
+    return value
+
+
+def require_secret(name: str) -> str:
+    value = secret(name)
+    if value is None:
+        raise SettingsError(
+            f"secret absent : ni fichier {SECRETS_DIR / name}, ni variable "
+            f"d'environnement {name} (voir .env.example)"
         )
     return value
 

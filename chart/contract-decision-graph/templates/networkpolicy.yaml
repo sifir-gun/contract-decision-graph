@@ -1,0 +1,97 @@
+{{- $web := dict "racine" . "composant" "web" -}}
+{{- $taches := dict "racine" . "composant" "taches" -}}
+{{- $test := dict "racine" . "composant" "test" -}}
+# Tout refusé par défaut, en entrée comme en sortie, pour chaque pod de l'espace de noms.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cdg.nomComplet" . }}-refus-par-defaut
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Interface : sondes en entrée (test Helm) ; en sortie, le DNS, PostgreSQL et le proxy de
+# sortie, seule voie vers Internet (ADR 005). Jamais le port 443 ouvert largement.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cdg.nomComplet" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+  annotations:
+    # exclusion de kube-linter, justifiée ici et dans l'ADR 005
+    ignore-check.kube-linter.io/dangling-networkpolicypeer-podselector: "le proxy de sortie et PostgreSQL ne sont pas rendus par ce chart (PR C3 : Smokescreen, CloudNativePG) : leurs pods existent hors du rendu"
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cdg.selecteur" $web | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "cdg.selecteur" $test | nindent 14 }}
+      ports:
+        - port: sante
+          protocol: TCP
+  egress:
+    {{- include "cdg.sortieDns" . | nindent 4 }}
+    {{- if eq .Values.mode "reel" }}
+    {{- include "cdg.sortieBase" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.proxy.selecteur | nindent 14 }}
+      ports:
+        - port: {{ .Values.proxy.port }}
+          protocol: TCP
+    {{- end }}
+{{- if include "cdg.taches" . | trim }}
+---
+# Tâches : en sortie, le DNS et PostgreSQL seulement ; aucune entrée.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cdg.nomComplet" . }}-taches
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+  annotations:
+    # exclusion de kube-linter, justifiée ici et dans l'ADR 005
+    ignore-check.kube-linter.io/dangling-networkpolicypeer-podselector: "PostgreSQL n'est pas rendu par ce chart (PR C3 : CloudNativePG) : ses pods existent hors du rendu"
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cdg.selecteur" $taches | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "cdg.sortieDns" . | nindent 4 }}
+    {{- include "cdg.sortieBase" . | nindent 4 }}
+{{- end }}
+---
+# Test Helm : en sortie, le DNS et les sondes de l'interface seulement.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cdg.nomComplet" . }}-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cdg.selecteur" $test | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  egress:
+    {{- include "cdg.sortieDns" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "cdg.selecteur" $web | nindent 14 }}
+      ports:
+        - port: {{ .Values.web.portSante }}
+          protocol: TCP

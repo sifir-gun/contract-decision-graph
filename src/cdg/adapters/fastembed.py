@@ -75,17 +75,26 @@ def materialize(snapshot: Path, flat: Path) -> None:
             ) from exc
 
 
-def _load(config: EmbeddingConfig, cache_dir: Path, *, local_files_only: bool):
+def _load(
+    config: EmbeddingConfig,
+    cache_dir: Path,
+    *,
+    local_files_only: bool,
+    threads: int | None = None,
+):
     _without_telemetry()
     from fastembed import TextEmbedding
 
     flat = flat_dir(config, cache_dir)
     materialize(_snapshot(config, cache_dir, local_files_only=local_files_only), flat)
+    # threads : fils de calcul d'onnxruntime, alignés sur la limite CPU du pod (ADR 005) ;
+    # None, défaut de fastembed 0.8.1 : celui d'onnxruntime, un fil par cœur visible
     return TextEmbedding(
         config.model,
         cache_dir=str(cache_dir),
         specific_model_path=str(flat),
         local_files_only=True,
+        threads=threads,
     )
 
 
@@ -97,18 +106,27 @@ def fetch_model(config: EmbeddingConfig, cache_dir: Path) -> None:
 
 class FastembedEmbedder:
     def __init__(
-        self, config: EmbeddingConfig, cache_dir: Path | None = None, *, model=None
+        self,
+        config: EmbeddingConfig,
+        cache_dir: Path | None = None,
+        *,
+        model=None,
+        threads: int | None = None,
     ):
         self.model = config.model
         self.dimension = config.dimension
         self._config = config
+        if threads is not None and threads < 1:
+            raise ValueError(
+                f"nombre de fils de calcul invalide : {threads} (entier ≥ 1)"
+            )
         if model is None:
             if cache_dir is None:
                 raise EmbeddingError(
                     f"poids de {config.model} : dossier du cache non indiqué (EMBEDDING_CACHE_DIR)"
                 )
             try:
-                model = _load(config, cache_dir, local_files_only=True)
+                model = _load(config, cache_dir, local_files_only=True, threads=threads)
             except Exception as exc:
                 raise EmbeddingError(
                     f"poids de {config.model} introuvables dans {cache_dir} : lancer "

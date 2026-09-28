@@ -155,6 +155,52 @@ def test_fournisseur_choisi_par_la_configuration(monkeypatch):
     assert isinstance(build_provider(CONFIG.llm), MistralProvider)
 
 
+def server_url(provider: MistralProvider) -> str:
+    return provider._client.sdk_configuration.get_server_details()[0]
+
+
+def test_adresse_de_l_api_mistral_par_defaut(monkeypatch):
+    monkeypatch.setenv("MISTRAL_API_KEY", "cle-de-test")
+    monkeypatch.delenv("MISTRAL_SERVER_URL", raising=False)
+    assert server_url(build_provider(CONFIG.llm)) == "https://api.mistral.ai"
+
+
+def test_adresse_de_l_api_mistral_reglable(monkeypatch):
+    # paramètre du chart (serveur factice des tests du cluster) ; en production, le
+    # proxy de sortie ne laisse passer que l'API de Mistral (ADR 005)
+    monkeypatch.setenv("MISTRAL_API_KEY", "cle-de-test")
+    monkeypatch.setenv("MISTRAL_SERVER_URL", "http://mistral-factice.test:8080")
+    assert server_url(build_provider(CONFIG.llm)) == "http://mistral-factice.test:8080"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "api.mistral.ai",  # sans schéma
+        "ftp://api.mistral.ai",
+        "https://",  # sans hôte
+        "https://utilisateur:secret@mistral-factice.test",  # identifiants dans l'adresse
+    ],
+)
+def test_adresse_de_l_api_mal_formee_refusee(monkeypatch, url):
+    monkeypatch.setenv("MISTRAL_API_KEY", "cle-de-test")
+    monkeypatch.setenv("MISTRAL_SERVER_URL", url)
+    with pytest.raises(SettingsError, match="MISTRAL_SERVER_URL"):
+        build_provider(CONFIG.llm)
+
+
+def test_cle_d_api_lue_dans_le_fichier_monte(monkeypatch, tmp_path):
+    from cdg import cli, settings
+
+    monkeypatch.setattr(settings, "SECRETS_DIR", tmp_path)
+    monkeypatch.setenv("MISTRAL_API_KEY", "")
+    (tmp_path / "MISTRAL_API_KEY").write_text("cle-du-fichier\n", encoding="utf-8")
+    provider = build_provider(CONFIG.llm)
+    assert isinstance(provider, MistralProvider)
+    assert provider._client.sdk_configuration.security.api_key == "cle-du-fichier"
+    assert not isinstance(cli.resume_explainer(CONFIG), cli.TemplateOnly)
+
+
 def test_cle_d_api_absente_erreur_explicite(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     llm = CONFIG.llm.model_copy(update={"provider": "anthropic"})

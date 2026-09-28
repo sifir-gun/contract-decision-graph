@@ -1,0 +1,42 @@
+{{- $test := dict "racine" . "composant" "test" -}}
+# helm test : l'interface est prête (sonde de disponibilité : modèle chargé, base joignable,
+# pas d'arrêt en cours), par le service des sondes. L'image de l'application fournit Python.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cdg.nomComplet" . }}-test-sante
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettesComposant" $test | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # exclusions de kube-linter, justifiées ici et dans l'ADR 005
+    ignore-check.kube-linter.io/restart-policy: "test Helm exécuté une fois : un échec reste un échec, sans nouvelle tentative"
+    ignore-check.kube-linter.io/no-liveness-probe: "test Helm qui s'exécute jusqu'au bout, en quelques secondes : aucune sonde de vie"
+    ignore-check.kube-linter.io/no-readiness-probe: "test Helm sans service ni trafic à recevoir : aucune sonde de disponibilité"
+    ignore-check.kube-linter.io/no-node-affinity: "aucune contrainte de matériel ni de zone : n'importe quel nœud convient, amd64 comme arm64 (images multi-architecture)"
+    ignore-check.kube-linter.io/dnsconfig-options: "ne résout que le service interne des sondes de l'interface"
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "cdg.nomComplet" . }}
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  securityContext:
+    {{- include "cdg.securitePod" . | nindent 4 }}
+  containers:
+    - name: sante
+      image: {{ include "cdg.image" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - python
+        - -c
+        - >-
+          import sys, urllib.request;
+          reponse = urllib.request.urlopen(sys.argv[1], timeout=10);
+          sys.exit(0 if reponse.status == 200 else 1)
+        - http://{{ include "cdg.nomComplet" . }}-sante:{{ .Values.web.portSante }}/sante/pret
+      resources:
+        {{- toYaml .Values.ressources.jobs | nindent 8 }}
+      securityContext:
+        {{- include "cdg.securiteConteneur" . | nindent 8 }}

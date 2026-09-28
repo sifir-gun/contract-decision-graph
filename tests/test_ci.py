@@ -49,8 +49,8 @@ def _one_line(command: str) -> str:
 
 def ci_commands() -> list[str]:
     """Commandes de vérification du workflow, dans l'ordre des jobs. Hors comparaison :
-    l'installation, propre à chaque job (`uv sync`), et la migration dans le conteneur de
-    service (`docker`)."""
+    l'installation, propre à chaque job (`uv sync`, étapes `installation-…`), et la
+    migration dans le conteneur de service (`docker`)."""
     jobs = _load(".github/workflows/ci.yml")["jobs"]
     commands = []
     for name, job in jobs.items():
@@ -60,7 +60,8 @@ def ci_commands() -> list[str]:
             continue
         for step in job["steps"]:
             run = step.get("run")
-            if run is None:
+            # installation d'un outil, propre à la CI (sur le poste : Homebrew)
+            if run is None or step.get("id", "").startswith("installation-"):
                 continue
             command = _one_line(run)
             if not command.startswith(("uv sync", "docker")):

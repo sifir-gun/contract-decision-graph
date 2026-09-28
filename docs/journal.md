@@ -2404,3 +2404,65 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Tests d'abord** (`tests/test_cli_web.py`) : port de l'interface déjà pris, erreur JSON `PortBusy` (« port N déjà utilisé… », avec l'option `--port`), code 1, et rien d'autre sur les deux sorties ; port des sondes pris, l'interface ne démarre pas et rend son port ; annonce faite une fois le port à l'écoute (une connexion y aboutit déjà) ; ni adresse ni avertissement d'écoute tant que le serveur n'a pas ouvert son port ; reprise lancée seulement ensuite. Avant la correction : `SystemExit: 3` après les messages de démarrage, l'interface démarrée malgré le port des sondes pris, l'annonce et la reprise faites avant le serveur.
 - **Réalisation** (`adapters/web/server.py`, `cli.py`) : tous les ports sont liés avant le lancement, comme les lie asyncio (`loop.create_server`, Python 3.12 : une socket par adresse résolue, SO_REUSEADDR, IPv6 seul sur une socket IPv6), puis passés à uvicorn (`Server.run(sockets=…)`). L'interface s'annonce depuis `on_started`, appelé après le démarrage d'uvicorn, qui lance aussi la reprise. Avec des sockets fournies, uvicorn n'écrit plus « Uvicorn running on » : l'annonce de la CLI le remplace, en dernier.
 - **Vérifié sur le poste** : relancée sur le port 8000 d'une interface en marche, la commande n'écrit que l'erreur et sort en code 1 ; même chose avec le port des sondes pris, le port de l'interface restant libre ; un lancement normal écrit l'annonce après « Application startup complete ».
+
+## 2026-09-28 · Kubernetes, PR C2 : chart et validation statique (branche `chart`)
+
+- **Vérifications exigées sur `main`, lues en lecture seule** : la règle `main` (24082568) n'exige toujours que lint, types, audit et tests ; elle n'a pas changé depuis le 27/09 à 21:40, et il n'existe ni autre règle ni protection classique. L'ajout des deux jobs `image` n'a pas été enregistré. Les deux jobs tournent sur toutes les pull requests (`pull_request` sans filtre, aucune condition), sous les noms `image (construction et vérifications, amd64)` et `image (construction et vérifications, arm64)`, application github-actions (15368).
+- **Outils** : helm 4.3.0 (09/09/2026 ; avis de sécurité jusqu'à 4.1.3) et k3d 5.9.0 (02/06/2026), à installer par le propriétaire (`brew install helm k3d`, versions identiques chez Homebrew) ; kubeconform 0.8.0 et kube-linter 0.8.3 dans leurs images figées.
+
+### Adresse de l'API de Mistral réglable
+
+- **Tests d'abord** (`tests/test_providers.py`) : adresse du SDK par défaut (`https://api.mistral.ai`) ; `MISTRAL_SERVER_URL` la remplace ; une adresse sans schéma http(s), sans hôte, ou avec des identifiants est refusée, et le message ne la reprend jamais.
+- **Lu dans le SDK installé** (mistralai 2.10.1, `client/sdk.py`, `sdkconfiguration.py`) : `server_url` remplace le serveur `https://api.mistral.ai` ; le client HTTP suit les redirections (`follow_redirects=True`), qui passeront elles aussi par le proxy de sortie.
+- **Pourquoi une variable d'environnement** : c'est un réglage de déploiement, comme la clé, pas un réglage de décision (`config/decision.yaml`). Elle sert au serveur factice des tests du cluster (PR C3) ; en production, le proxy de sortie ne laisse passer que l'API de Mistral, et un test du cluster le prouvera.
+
+### Mémoire et CPU d'un réplica, mesurés
+
+- **Script** : `scripts/mesure_memoire.py`, reproductible. L'image lancée comme dans un pod (lecture seule, sans privilège), poids montés en lecture seule depuis un volume rempli à partir de l'image du modèle, base locale ; relevés dans le cgroup du conteneur (`memory.current`, `memory.peak`, `memory.stat`, `cpu.stat`). Les mots de passe passent par l'environnement du processus Docker, jamais par la ligne de commande.
+- **Mesures du 28/09**, poste (arm64, Docker Desktop, 8 cœurs), trois essais :
+  - réplica réel prêt (modèle chargé, base joignable) en 9 à 22 s : environ **1 550 Mio de mémoire anonyme**. Le cache de fichiers varie d'un essai à l'autre (40 à 1 250 Mio) : il est compté au conteneur qui a lu les poids en premier, et le noyau le récupère ;
+  - une analyse, soit des embeddings de requêtes : **+16 Mio** ;
+  - l'ingestion, soit un lot de 16 passages longs : **+695 Mio** au pic (2 290 Mio au total) ;
+  - réplica de démonstration : **73 à 107 Mio**, prêt en 3 s.
+- **Premier essai raté, de mon fait** : le réplica de démonstration était lancé sans `--demo`, donc en mode réel sans variables ; le script l'a attendu 5 minutes. Corrigé ; chaque mesure s'affiche désormais dès qu'elle est prise.
+
+### Fils de calcul de l'embedder, alignés sur la limite CPU
+
+- **Constat de la mesure** : 40 requêtes ont consommé 384 s de CPU. onnxruntime ouvre un fil par cœur visible, sans tenir compte de la limite du conteneur, et ces fils attendent en tournant. Mesure par requête (poste, 8 cœurs visibles) :
+
+| Fils | Limite CPU | Temps par requête | CPU par requête |
+| --- | --- | --- | --- |
+| défaut (8) | aucune | 1,6 s | 12,3 s |
+| 4 | aucune | 1,8 s | 7,3 s |
+| 2 | aucune | 3,5 s | 6,9 s |
+| 1 | aucune | 7,3 s | 7,3 s |
+| défaut (8) | 2 CPU | **9,7 s** | 19,3 s |
+| 2 | 2 CPU | **3,6 s** | 7,2 s |
+
+- **Décision** : le nombre de fils suit la limite CPU du pod. Option `--fils-embedding` ou variable `CDG_FILS_EMBEDDING`, posée par le chart ; sans réglage, le défaut d'onnxruntime (le poste n'a pas de limite).
+- **Tests d'abord** (`tests/test_embeddings.py`, `tests/test_sante.py`) : le nombre est transmis à fastembed (`threads`, dont `None` est le défaut, vérifié dans fastembed 0.8.1) ; option ou variable ; valeur nulle, négative ou non entière refusée.
+
+
+### Chart et validation statique
+
+- **Reprise** : le chart, son script de validation, ses tests et le job `chart` étaient restés non commités ; basculés sur `main` avec le dépôt, ils ont été remis sur `chart` (autorisation du propriétaire), puis la branche rebasée sur `main`. **Règle du propriétaire (28/09)** : tout travail en cours est commité sur sa branche avant chaque arrêt, jamais laissé non commité.
+- **helm 4.3.0**, installé par le propriétaire (`brew install helm`) : les 18 tests du rendu passaient, mais la validation complète échouait.
+- **Étiquettes des pods en double** : kubeconform refusait 12 ressources (`app.kubernetes.io/name` et `instance`, posées par les étiquettes communes et par le sélecteur). Les tests ne le voyaient pas : PyYAML garde la dernière valeur d'une clé en double. Test d'abord : le rendu est lu par un chargeur qui refuse les clés en double ; puis une aide `cdg.etiquettesComposant` pose chaque étiquette une fois.
+- **kube-linter, 107 erreurs sur 7 vérifications** :
+  - `pdb-min-available` : les trois variantes étaient examinées ensemble, et le budget d'interruption du rendu réel était rapproché du Deployment de la démonstration (1 réplica). Test d'abord : une variante à la fois ;
+  - variante par variante, une vraie règle orpheline est apparue : en démonstration, la règle réseau des tâches ne désignait aucun pod. Test d'abord, sur chaque variante et sans aucune tâche ; la liste des tâches rendues (`cdg.taches`) décide désormais des Jobs, de leur règle et de leur compte de service ;
+  - `restart-policy` du Deployment : `Always` écrit (valeur par défaut) ;
+  - décisions du propriétaire : exceptions par annotation sur chaque objet, justifiées (`restart-policy`, sondes des Jobs et du Pod de test, `dnsconfig-options`, `env-value-from`) ; `schema-validation` seule dans la configuration, car elle ne dépend d'aucun objet ;
+  - `env-value-from`, lu dans la documentation de kube-linter 0.8.3 (`docs/generated/checks.md`) : elle signale un Secret ou une ConfigMap absent des objets examinés, et ne déconseille pas les variables d'environnement ; exclue, les Secrets étant créés hors du chart ;
+  - `dnsconfig-options` recommande `ndots: "2"` : exclue pour l'application, les tâches et le test, qui ne résolvent que des noms internes ; à appliquer au proxy de sortie en PR C3, qui résout `api.mistral.ai` ;
+  - syntaxe des annotations lue dans `docs/configuring-kubelinter.md` (0.8.3) : `ignore-check.kube-linter.io/<vérification>`, justification en valeur.
+- **Résultat** : `scripts/chart.py verifier` passe sur les trois variantes ; 37 tests du chart, dont 27 avec helm.
+
+### Secrets en fichiers ; exclusions par objet (décisions du propriétaire, 28/09)
+
+- **Question soulevée** : la vérification qui recommande les secrets en fichiers est `read-secret-from-env-var` (CIS 5.4.1), pas `env-value-from` ; elle était exclue globalement. pydantic-settings n'est pas une dépendance du projet (seul pydantic l'est). Décision : bibliothèque standard, dans cette PR.
+- **Application, tests d'abord** (`tests/test_settings.py`, `tests/test_providers.py`) : `settings.secret` lit `/run/secrets/cdg/<NOM>` s'il existe, espaces et fins de ligne retirés, sinon la variable d'environnement. Un fichier vide, blanc, illisible (un dossier) ou mal encodé est une erreur qui nomme le fichier, jamais un repli ; un témoin placé dans la variable et dans le fichier n'apparaît ni dans le message, ni dans le journal, ni dans la sortie JSON de la CLI ; l'exception d'origine n'est pas chaînée. Mots de passe, utilisateur administrateur et clés d'API passent par là. Une fixture commune pointe le dossier des secrets vers un dossier absent : le poste ne peut rien injecter dans les tests.
+- **Chart, tests d'abord** : un volume projeté, en lecture seule, un fichier par secret, seulement les siens pour chaque conteneur. Permissions lues dans la documentation des volumes projetés et dans le code du kubelet 1.36 (`pkg/volume/projected/projected.go`) : la documentation dit que les fichiers projetés prennent l'utilisateur du pod, mais le code ne le fait que pour les jetons de compte de service ; une source Secret reste à root. D'où `0440` et `fsGroup: 65532`, le minimum lisible par l'application. `read-secret-from-env-var` n'est plus exclue et passe.
+- **Anciennes exclusions globales**, lancées une à une sur le rendu : `no-node-affinity` (Deployment, Jobs, Pod de test) et `dangling-networkpolicypeer-podselector` (règles `web` et `taches`) passent en annotations justifiées ; `minimum-three-replicas` est justifiée sur le Deployment par la mémoire mesurée d'un réplica ; `priority-class-name` ne visait aucun objet (elle ne signale qu'une classe invalide), retirée ; `no-anti-affinity` est satisfaite.
+- **Anti-affinité préférée, pas exigée** (lu dans `pkg/templates/antiaffinity/template.go`, kube-linter 0.8.3 : les deux formes passent) : exigée, elle bloquerait la mise à jour progressive (`maxSurge: 1`, `maxUnavailable: 0`) sur un cluster qui a autant de nœuds que de réplicas. La répartition stricte reste celle des contraintes de topologie, qui tolèrent ce pod en plus.
+- **Configuration globale restante** : conventions d'une organisation, ordre des clés, `schema-validation`.

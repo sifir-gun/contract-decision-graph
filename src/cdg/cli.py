@@ -59,6 +59,8 @@ def today() -> date:
 
 # taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
 POOL = {"size": connexions.DEFAULT_SIZE}
+# fils de calcul de l'embedder : option --fils-embedding, ou CDG_FILS_EMBEDDING (main)
+EMBEDDER_THREADS: dict[str, int | None] = {"threads": None}
 
 
 @functools.cache
@@ -87,7 +89,9 @@ def process_embedder(config: DecisionConfig) -> fastembed.FastembedEmbedder:
     with _EMBEDDERS_GUARD:
         if key not in _EMBEDDERS:
             _EMBEDDERS[key] = fastembed.FastembedEmbedder(
-                config.embedding, settings.embedding_cache_dir()
+                config.embedding,
+                settings.embedding_cache_dir(),
+                threads=EMBEDDER_THREADS["threads"],
             )
         return _EMBEDDERS[key]
 
@@ -142,7 +146,7 @@ def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
     """resume : le LLM si la clé d'API du fournisseur est présente, sinon le gabarit, avec
     le motif scellé. La clé n'est pas exigée pour reprendre un contrat."""
     var = API_KEY_VARS[config.llm.provider]
-    if not os.environ.get(var):
+    if not settings.secret(var):
         return TemplateOnly(f"clé d'API absente ({var}) : explication par le gabarit")
     return LLMExplainer(build_provider(config.llm))
 
@@ -195,7 +199,9 @@ def _fetch_embedding_model(args: argparse.Namespace) -> dict:
 def _ingest(args: argparse.Namespace) -> dict:
     config = load_config()
     embedder = fastembed.FastembedEmbedder(
-        config.embedding, settings.embedding_cache_dir()
+        config.embedding,
+        settings.embedding_cache_dir(),
+        threads=EMBEDDER_THREADS["threads"],
     )
     rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
     summary = rag_store.sync(conninfo.admin_conninfo(), rows, embedder.model)
@@ -512,6 +518,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="taille maximale du pool de connexions d'app_role à PostgreSQL (défaut "
         f"{connexions.DEFAULT_SIZE}, ou CDG_CONNEXIONS) ; budget dans l'ADR 005",
     )
+    parser.add_argument(
+        "--fils-embedding",
+        type=_positive,
+        default=os.environ.get("CDG_FILS_EMBEDDING"),
+        help="fils de calcul de l'embedder (ou CDG_FILS_EMBEDDING) : la limite CPU du pod "
+        "(mesure dans l'ADR 005) ; par défaut, un par cœur visible (onnxruntime)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
         "setup-db",
@@ -699,6 +712,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handler: Callable[[argparse.Namespace], dict] = args.handler
     POOL["size"] = args.connexions
+    EMBEDDER_THREADS["threads"] = args.fils_embedding
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
         logging.config.dictConfig(journaux.config(args.journaux))

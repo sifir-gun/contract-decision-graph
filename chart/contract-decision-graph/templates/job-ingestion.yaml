@@ -1,0 +1,15 @@
+{{- if has "ingestion" (include "cdg.taches" . | splitList " ") }}
+{{- /* ingest : indexation du corpus, rejouable ; identifiants administrateur */}}
+{{- include "cdg.tache" (dict
+  "racine" .
+  "nom" "ingestion"
+  "crochets" "post-install,post-upgrade"
+  "poids" 0
+  "delai" 3600
+  "args" (list "--journaux" "json" "--fils-embedding" (include "cdg.fils" .Values.ressources.ingestion) "ingest")
+  "administrateur" true
+  "modele" true
+  "ressources" .Values.ressources.ingestion
+  "configMap" (printf "%s-configuration" (include "cdg.nomComplet" .))
+) }}
+{{- end }}

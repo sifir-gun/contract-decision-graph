@@ -1,0 +1,19 @@
+{{- if has "controle-configuration" (include "cdg.taches" . | splitList " ") }}
+{{- /*
+config-check, avant une mise à jour : refuse (code 1, la mise à jour échoue) si des
+contrats en attente ont été analysés sous une autre configuration que celle qui va être
+déployée. La tâche lit la configuration à venir : ConfigMap propre, créée juste avant.
+*/}}
+{{- include "cdg.tache" (dict
+  "racine" .
+  "nom" "controle-configuration"
+  "crochets" "pre-upgrade"
+  "poids" -10
+  "delai" 300
+  "args" (list "--journaux" "json" "config-check")
+  "administrateur" false
+  "modele" false
+  "ressources" .Values.ressources.jobs
+  "configMap" (printf "%s-configuration-a-venir" (include "cdg.nomComplet" .))
+) }}
+{{- end }}
