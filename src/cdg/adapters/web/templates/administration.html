@@ -2,6 +2,19 @@
 {% block title %}Administration{% endblock %}
 {% block content %}
 <h1>Administration</h1>
+<section aria-labelledby="configuration-titre">
+  <h2 id="configuration-titre">Contrats en attente sous une autre configuration</h2>
+  <p>Configuration courante : <code>{{ short_hash(check.configuration) }}</code>. Un contrat en attente analysé sous une autre configuration ne peut plus être tranché ici : l'expirer (NO GO système), ou revenir à sa configuration pour le trancher, puis le relancer si besoin. Commande équivalente : <code>config-check</code>.</p>
+  {% if check.a_trancher %}
+  <ul>
+    {% for c in check.a_trancher %}
+    <li><a href="{{ contract_path(c.thread_id) }}">{{ c.thread_id }}</a> : analysé sous la configuration <code>{{ short_hash(c.config_hash) }}</code></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Aucun contrat en attente sous une autre configuration.</p>
+  {% endif %}
+</section>
 <section aria-labelledby="expiration-titre">
   <h2 id="expiration-titre">Expiration des contrats en attente</h2>
   <p>Les contrats en attente d'une revue humaine depuis plus longtemps que le délai sont clos en NO GO système, jamais approuvés, expliqués par le gabarit, puis scellés. Aucun retour n'est possible.</p>

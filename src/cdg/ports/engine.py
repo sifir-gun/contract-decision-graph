@@ -48,3 +48,9 @@ class ContractEngine(Protocol):
     def expire(self, older_than: timedelta, now: datetime) -> list[dict[str, Any]]:
         """NO_GO système pour les threads en attente depuis plus de `older_than`."""
         ...
+
+    def resume_interrupted(self) -> list[dict[str, Any]]:
+        """Reprend, depuis leur dernier checkpoint, les analyses interrompues (processus
+        arrêté ou mort en cours d'analyse) ; laisse celles qu'un autre processus tient.
+        Statut de chaque analyse reprise."""
+        ...

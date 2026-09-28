@@ -18,13 +18,17 @@ from doubles import (
     make_deps,
 )
 
+from cdg.adapters.demo.locks import LocalContractLocks
+from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.fastembed import FastembedEmbedder
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
+from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.postgres.rag_store import PgvectorRetriever
+from cdg.adapters.postgres.resumes import PostgresResumeCounter
 from cdg.application.deps import Crag, Extractor
 from cdg.application.extraction import LLMExtractor
 from cdg.domain.config import load_config
@@ -32,6 +36,8 @@ from cdg.ports.audit_store import AuditStore
 from cdg.ports.embedder import Embedder
 from cdg.ports.engine import ContractEngine
 from cdg.ports.llm import LLMProvider
+from cdg.ports.locks import ContractLocks
+from cdg.ports.resumes import ResumeCounter
 from cdg.ports.retriever import Retriever
 
 CONFIG = load_config()
@@ -59,8 +65,14 @@ IMPLEMENTATIONS = [
             EngineDeps(
                 run=make_deps, resume=make_deps, expire=make_deps, read=make_deps
             ),
+            LocalContractLocks(),
+            LocalResumeCounter(),
         ),
     ),
+    (ContractLocks, LocalContractLocks),
+    (ContractLocks, lambda: PostgresContractLocks(lambda: "")),
+    (ResumeCounter, LocalResumeCounter),
+    (ResumeCounter, lambda: PostgresResumeCounter(lambda: "")),
 ]
 
 
@@ -118,6 +130,8 @@ def test_chaque_port_a_ses_methodes():
     assert _methods(Retriever) == ["search"]
     assert _methods(Extractor) == ["__call__"]
     assert _methods(Crag) == ["__call__"]
+    assert _methods(ContractLocks) == ["hold"]
+    assert _methods(ResumeCounter) == ["record"]
     assert _methods(ContractEngine) == [
         "run",
         "resume",
@@ -126,4 +140,5 @@ def test_chaque_port_a_ses_methodes():
         "history",
         "overview",
         "expire",
+        "resume_interrupted",
     ]

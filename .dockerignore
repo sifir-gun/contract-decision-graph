@@ -1,0 +1,13 @@
+# Contexte de construction de l'image : tout est exclu, puis seul ce que l'image utilise
+# est admis. Jamais .env, ni .git, ni les poids du modèle, ni les caches (tests/test_image.py).
+*
+!LICENSE
+!pyproject.toml
+!uv.lock
+!config/
+!data/
+!migrations/
+!src/
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store

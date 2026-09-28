@@ -492,6 +492,7 @@ def test_erreur_inattendue_page_sobre_avec_en_tetes(caplog):
     assert response.status_code == 500
     assert "RuntimeError" in response.text
     assert "détail qui ne doit pas sortir" not in response.text + caplog.text
+    assert "erreur inattendue (RuntimeError)" in caplog.text  # journalisée, type seul
     assert response.headers["content-security-policy"] == security.CSP
 
 
@@ -514,11 +515,27 @@ def test_noms_d_hote():
     assert security.host_name("[mal forme") is None
 
 
-def test_serveur_uvicorn_sans_en_tetes_de_mandataire(monkeypatch):
+def test_serveur_uvicorn_sans_en_tetes_de_mandataire():
+    from cdg.adapters import journaux
     from cdg.adapters.web import server
 
-    seen = {}
-    monkeypatch.setattr(server.uvicorn, "run", lambda app, **kw: seen.update(kw))
-    server.serve(object(), "127.0.0.1", 8000)
-    assert seen["proxy_headers"] is False and seen["server_header"] is False
-    assert (seen["host"], seen["port"]) == ("127.0.0.1", 8000)
+    main, _ = server.servers(
+        object(), "127.0.0.1", 8000, log_config=journaux.config("texte")
+    )
+    assert main.config.proxy_headers is False and main.config.server_header is False
+    assert (main.config.host, main.config.port) == ("127.0.0.1", 8000)
+
+
+@pytest.mark.parametrize(
+    "path", ["/", "/analyse", "/journal", "/journal/verification", "/administration"]
+)
+def test_pages_en_head_comme_en_get(path):
+    """RFC 9110 : un serveur généraliste accepte HEAD là où il accepte GET ; l'interface
+    répondait 405 à HEAD /."""
+    web = client()
+    got, head = web.get(path), web.head(path)
+    assert head.status_code == got.status_code == 200
+    assert (
+        head.content == b""
+        and head.headers["content-type"] == got.headers["content-type"]
+    )

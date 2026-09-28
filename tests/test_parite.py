@@ -21,6 +21,7 @@ METHODS = {
     "journal",
     "verify",
     "replay",
+    "config_check",
 }
 # action de l'interface -> commande de la CLI
 WEB_TO_CLI = {
@@ -32,6 +33,7 @@ WEB_TO_CLI = {
     "GET /journal": "journal",
     "GET /journal/verification": "verify",
     "GET /contrats/{id}/rejeu": "replay",
+    "GET /administration": "config-check",
 }
 
 
@@ -82,6 +84,7 @@ def cli_calls(tmp_path, monkeypatch, capsys) -> dict[str, set[str]]:
         "verify": ["verify"],
         "replay": ["replay", "c-attente"],
         "expire": ["expire", "--older-than", "24h"],
+        "config-check": ["config-check"],
     }
     calls = {}
     for name, argv in commands.items():
@@ -115,6 +118,8 @@ def web_calls() -> dict[str, set[str]]:
     calls["GET /journal"] = recorder.take()
     web.get("/journal/verification")
     calls["GET /journal/verification"] = recorder.take()
+    web.get("/administration")
+    calls["GET /administration"] = recorder.take()
     web.post(
         "/administration/expiration",
         data={"csrf": token, "heures": "24", "confirme": "oui"},

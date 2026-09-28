@@ -228,6 +228,13 @@ class RetrySettings(_Strict):
     jitter: bool
 
 
+class InterruptedConfig(_Strict):
+    """Analyse interrompue (processus arrêté ou mort) : reprises automatiques au plus,
+    comptées par contrat ; au-delà, ESCALADE (`domain/resumption.py`)."""
+
+    max_resumes: Annotated[int, Field(gt=0)]
+
+
 class CragConfig(_Strict):
     top_k: Annotated[int, Field(gt=0)]  # extraits rendus par recherche, soumis au juge
     max_passes: Annotated[int, Field(gt=0)]  # recherches au plus, réécritures comprises
@@ -295,6 +302,7 @@ class DecisionConfig(_Strict):
     extraction_retry: RetrySettings
     explain: ExplainConfig
     explain_retry: RetrySettings
+    interrupted: InterruptedConfig
 
     def weight(self, domain: Domain) -> float:
         weight: float = getattr(self.weights, domain)

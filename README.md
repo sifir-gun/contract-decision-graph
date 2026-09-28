@@ -189,11 +189,12 @@ Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règl
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
 - [ADR 003 : LangGraph Studio écarté](docs/adr-003-studio-ecarte.md). En usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot : ce qui a été observé le 27/09/2026, avec les versions, et ce qui n'a pas été mesuré.
 - [ADR 004 : interface web](docs/adr-004-interface-web.md). Rendu côté serveur avec HTMX plutôt qu'une application séparée ; aucune ressource externe ; sécurité ; pas d'authentification avant l'étape Kubernetes ; mode démonstration et ses limites.
+- [ADR 005 : déploiement Kubernetes](docs/adr-005-kubernetes.md), en cours. k3s et Helm, plusieurs réplicas, sources vérifiées et datées de chaque choix, bonnes pratiques écartées justifiées.
 - [Spécification de la phase 1](docs/spec-phase1.md), source de vérité ; [journal](docs/journal.md) des décisions, des séries réelles et des pièges ; [exploitation](docs/exploitation.md).
 
 ## Feuille de route
 
-- **Phase 2** : d'abord un rapport HTML par contrat ; puis l'API (FastAPI) et le déploiement sur Kubernetes (k3s, Helm), avec l'authentification, obligatoire avant toute exposition réseau. L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
+- **Phase 2** : d'abord le déploiement sur Kubernetes (k3s, Helm), avec l'authentification, obligatoire avant toute exposition réseau ; ensuite un rapport HTML par contrat ; puis l'API (FastAPI). L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
 - **Phase 3** : observabilité (Langfuse auto-hébergé, logs structurés) ; serveur MCP ; évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 

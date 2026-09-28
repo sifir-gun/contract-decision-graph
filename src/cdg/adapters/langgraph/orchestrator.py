@@ -3,8 +3,9 @@
 Le checkpointer PostgreSQL et son sérialiseur strict sont dans `checkpointer.py`.
 """
 
+import logging
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import date, datetime, timedelta
 from functools import partial
 from typing import Any, Protocol
@@ -16,7 +17,15 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import get_runtime
-from langgraph.types import Command, RetryPolicy, Send, StateSnapshot, interrupt
+from langgraph.types import (
+    Command,
+    Durability,
+    RetryPolicy,
+    Send,
+    StateSnapshot,
+    StateUpdate,
+    interrupt,
+)
 
 from cdg.adapters.langgraph import checkpointer
 from cdg.application import crag
@@ -31,12 +40,21 @@ from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.state import AnalystInput, ContractState
-from cdg.domain import audit, expiry, masking, policy
+from cdg.domain import audit, expiry, masking, policy, resumption
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.engine import ThreadError
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
+from cdg.ports.locks import ContractBusy
 from cdg.ports.retriever import Retriever
+
+log = logging.getLogger(__name__)
+
+# Checkpoints écrits avant l'étape suivante (LangGraph 1.2.12, `langgraph/types.py`,
+# `Durability`) : par défaut (« async »), l'écriture court pendant l'étape suivante, et
+# un processus tué à ce moment perd ou tronque son dernier checkpoint ; l'analyse ne peut
+# plus reprendre (ADR 005, arrêt propre et reprise).
+DURABILITY: Durability = "sync"
 
 
 def read_route(state: ContractState) -> str:
@@ -364,10 +382,11 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
 
 @contextmanager
 def open_graph(
-    config: DecisionConfig, deps: Deps, conninfo: str
+    config: DecisionConfig, deps: Deps, source: checkpointer.Source
 ) -> Iterator[CompiledStateGraph]:
-    """Graphe compilé avec le checkpointer PostgreSQL et le sérialiseur strict."""
-    with checkpointer.open_saver(conninfo) as saver:
+    """Graphe compilé avec le checkpointer PostgreSQL (pool du processus, ou chaîne de
+    connexion) et le sérialiseur strict."""
+    with checkpointer.open_saver(source) as saver:
         yield build_graph(config, deps).compile(checkpointer=saver)
 
 
@@ -453,6 +472,7 @@ def run_contract(
             **audit.analysis_context(config),
         },
         _thread(contract_id),
+        durability=DURABILITY,
     )
     return {**thread_status(graph, contract_id), "masquage": masked.counts}
 
@@ -491,7 +511,7 @@ def _awaiting(graph: CompiledStateGraph, thread_id: str) -> StateSnapshot:
 
 def _resume(graph: CompiledStateGraph, thread_id: str, answer: dict) -> dict:
     _awaiting(graph, thread_id)
-    graph.invoke(Command(resume=answer), _thread(thread_id))
+    graph.invoke(Command(resume=answer), _thread(thread_id), durability=DURABILITY)
     return thread_status(graph, thread_id)
 
 
@@ -553,8 +573,14 @@ def expire_threads(
     older_than: timedelta,
     now: datetime,
     thread_ids: set[str] | None = None,
+    *,
+    hold: Callable[[str], AbstractContextManager[None]],
 ) -> list[dict]:
     """Reprend en NO_GO système les threads en attente depuis plus de `older_than`.
+
+    Chaque thread est expiré sous son verrou (`hold`), puis relu : un thread tranché ou
+    suspendu de nouveau entre-temps n'est pas expiré ; un thread verrouillé ailleurs (une
+    revue en cours) est laissé, et un avertissement le dit.
 
     `thread_ids` restreint la recherche : les tests ne touchent ainsi jamais aux
     autres threads en attente de la base. La CLI n'en passe pas.
@@ -562,17 +588,114 @@ def expire_threads(
     found = set(list_threads(graph))
     if thread_ids is not None:
         found &= thread_ids
-    pending = []
+    expired = []
     for thread_id in sorted(found):
-        snapshot = graph.get_state(_thread(thread_id))
-        if _awaits_human(snapshot):
-            # dernier checkpoint = suspension : l'attente ne bouge plus ensuite
-            if snapshot.created_at is None:  # daté par le checkpointer
-                raise ThreadError(f"thread {thread_id} : checkpoint sans date")
-            pending.append((thread_id, datetime.fromisoformat(snapshot.created_at)))
-    return [
-        # expire continue même si la configuration a changé : NO_GO système, scellé avec
-        # les deux empreintes et le constat de configuration modifiée
-        _resume(graph, thread_id, expiry.system_decision(now - since, older_than))
-        for thread_id, since in expiry.expired(pending, older_than, now)
-    ]
+        if _pending_since(graph, thread_id) is None:
+            continue
+        try:
+            with hold(thread_id):
+                since = _pending_since(graph, thread_id)  # relu sous le verrou
+                if since is None or not expiry.expired(
+                    [(thread_id, since)], older_than, now
+                ):
+                    continue
+                # expire continue même si la configuration a changé : NO_GO système,
+                # scellé avec les deux empreintes et le constat de configuration modifiée
+                answer = expiry.system_decision(now - since, older_than)
+                expired.append(_resume(graph, thread_id, answer))
+        except ContractBusy as exc:
+            log.warning("expiration : contrat %s laissé (%s)", thread_id, exc)
+    return expired
+
+
+def resume_interrupted(
+    graph: CompiledStateGraph,
+    *,
+    hold: Callable[[str], AbstractContextManager[None]],
+    record: Callable[[str], int],
+    limit: int,
+    thread_ids: set[str] | None = None,
+) -> list[dict]:
+    """Reprend depuis leur dernier checkpoint les threads restés en cours (un processus
+    arrêté ou mort au milieu d'une analyse), chacun sous son verrou, relu sous le verrou.
+    Un thread verrouillé ailleurs est en cours là-bas : laissé. Le scellement est sans
+    doublon (`audit_seal` rejoué, index uniques du journal).
+
+    Chaque reprise est comptée (`record`, durable) avant d'être faite : une reprise qui
+    tue le processus est comptée quand même. Au-delà de `limit`, plus de reprise :
+    ESCALADE vers la revue humaine (`_escalate_interrupted`), et un avertissement.
+
+    `thread_ids` restreint la reprise, comme pour l'expiration : les tests ne touchent
+    jamais aux autres threads de la base. La CLI et l'interface n'en passent pas."""
+    found = set(list_threads(graph))
+    if thread_ids is not None:
+        found &= thread_ids
+    resumed = []
+    for thread_id in sorted(found):
+        if not _in_progress(graph, thread_id):
+            continue
+        try:
+            with hold(thread_id):
+                if not _in_progress(graph, thread_id):
+                    continue  # fini entre-temps
+                attempt = record(thread_id)
+                if resumption.exhausted(attempt, limit):
+                    _escalate_interrupted(graph, thread_id, attempt, limit)
+                else:
+                    log.info(
+                        "reprise %d de l'analyse interrompue %s", attempt, thread_id
+                    )
+                    graph.invoke(None, _thread(thread_id), durability=DURABILITY)
+                resumed.append(thread_status(graph, thread_id))
+        except ContractBusy:
+            continue  # en cours dans un autre processus
+    return resumed
+
+
+def _escalate_interrupted(
+    graph: CompiledStateGraph, thread_id: str, attempt: int, limit: int
+) -> None:
+    """Plus de reprise : l'analyse part en revue humaine, proposée ESCALADE, avec un
+    rapport d'échec qui cite le nombre de reprises. En deux mises à jour de l'état
+    (LangGraph 1.2.12, `bulk_update_state`) :
+    1. `END` sans valeur vide les tâches en attente, en gardant les écritures des tâches
+       déjà finies (verdicts des analystes rendus) ;
+    2. l'escalade est écrite au nom de `decision_gate`, dont l'arête lit `route` : la
+       revue humaine suit, comme après tout échec de nœud escaladé.
+    Puis l'exécution va jusqu'à l'interruption de `human_review` : le contrat attend un
+    humain, et n'est plus jamais repris."""
+    config = _thread(thread_id)
+    snapshot = graph.get_state(config)
+    failure = resumption.failure(snapshot.next, attempt, limit)
+    log.warning(
+        "analyse %s interrompue %d fois : plus de reprise au-delà de %d, ESCALADE "
+        "vers la revue humaine",
+        thread_id,
+        attempt,
+        limit,
+    )
+    update = {
+        "failures": [failure],
+        **escalate([*snapshot.values.get("failures", []), failure]),
+    }
+    graph.bulk_update_state(
+        config, [[StateUpdate(None, END)], [StateUpdate(update, "decision_gate")]]
+    )
+    graph.invoke(None, config, durability=DURABILITY)
+
+
+def _in_progress(graph: CompiledStateGraph, thread_id: str) -> bool:
+    """Analyse commencée, pas finie, et pas en attente d'un humain."""
+    snapshot = graph.get_state(_thread(thread_id))
+    return bool(snapshot.next) and not snapshot.interrupts
+
+
+def _pending_since(graph: CompiledStateGraph, thread_id: str) -> datetime | None:
+    """Date de la suspension d'un thread en attente d'un humain ; None sinon."""
+    snapshot = graph.get_state(_thread(thread_id))
+    if not _awaits_human(snapshot):
+        return None
+    # dernier checkpoint = suspension : l'attente ne bouge plus ensuite
+    if snapshot.created_at is None:  # daté par le checkpointer
+        raise ThreadError(f"thread {thread_id} : checkpoint sans date")
+    return datetime.fromisoformat(snapshot.created_at)

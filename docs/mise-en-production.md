@@ -12,13 +12,19 @@ Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.
 
 - [ ] **API FastAPI** : un adaptateur entrant de plus, sur le service des contrats, comme la CLI et l'interface web (ADR 004). *Fait quand* chaque action de l'API appelle la même méthode du service que sa commande, vérifié par `tests/test_parite.py`.
 - [ ] **Déploiement sur Kubernetes** (k3s, Helm), selon la feuille de route. *Fait quand* l'application se déploie depuis le chart, sans étape manuelle, et que les migrations et l'indexation du corpus tournent comme tâches de déploiement (voir plus bas).
+- [x] **Image de l'application** (28/09, PR A) : `Dockerfile` en deux étapes, bases figées par empreinte, dépendances strictement depuis uv.lock, utilisateur non root numérique, lecture seule, ni shell ni pip ; construite et vérifiée par le job `image` de la CI (ADR 005, « Image »). Publication sur ghcr.io, scan, inventaire, signature et provenance en PR B. *Fait quand* l'image construite en CI passe `tests/test_image.py`.
+
+### Santé et arrêt des pods
+
+- [x] **Sondes de santé**, côté application (28/09, PR A : `web --port-sante`) ; leur déclaration dans le chart vient en PR C : vie (le processus répond), disponibilité (la base répond, le modèle d'embedding est chargé), et une sonde de démarrage qui laisse le temps de charger le modèle. Aujourd'hui l'interface n'a aucun point de santé, et répond 405 à `HEAD /` (journal du serveur d'aperçu, 27/09). *Fait quand* chaque sonde a son point, sans logique métier, testé en GET et en HEAD.
+- [x] **Arrêt propre**, côté application (28/09, PR A : `--delai-arret`, reprise des analyses interrompues) ; la pause avant l'arrêt et le délai de grâce du pod viennent avec le chart (PR C) : à l'ordre d'arrêt, le réplica cesse d'accepter de nouvelles analyses et laisse finir celles en cours dans un délai configuré ; une analyse interrompue reprend depuis son dernier checkpoint, sans rien perdre ni sceller deux fois. Délai de grâce du pod aligné sur ce délai, et courte pause avant l'arrêt pour que le pod soit retiré du service avant de couper. *Fait quand* un test interrompt une analyse, puis la voit reprise et scellée une seule fois. Reprises comptées par contrat (28/09) : au-delà de `interrupted.max_resumes`, plus de reprise, ESCALADE vers la revue humaine ; vérifié avec de vrais processus tués à chaque reprise.
 
 ### Plusieurs copies de l'application
 
 Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans un processus (ADR 004, « Accès concurrents »).
 
 - [x] **Décision du 27/09** : plusieurs réplicas. La création d'un contrat sera rendue sûre en base, dans la phase Kubernetes ; le verrou du service reste, pour un processus.
-- [ ] **Création d'un contrat sûre en base**, dans la phase Kubernetes : rendre atomique en base la création d'un thread. Aujourd'hui, `run_contract` vérifie qu'un thread n'existe pas, puis le crée, sans verrou entre deux processus. *Fait quand* un test à deux processus lance deux analyses du même contrat et n'en obtient qu'une, la seconde refusée clairement, comme `tests/test_concurrence.py` le fait pour deux threads.
+- [x] **Création d'un contrat sûre en base** (28/09, PR A) : verrou consultatif PostgreSQL par contrat, pour la création, la revue et l'expiration ; vérifié par deux processus réels (`tests/test_verrous.py`). Avant : rendre atomique en base la création d'un thread. Aujourd'hui, `run_contract` vérifie qu'un thread n'existe pas, puis le crée, sans verrou entre deux processus. *Fait quand* un test à deux processus lance deux analyses du même contrat et n'en obtient qu'une, la seconde refusée clairement, comme `tests/test_concurrence.py` le fait pour deux threads.
 - Déjà en place, en base : le verrou consultatif et les index uniques du journal d'audit, qui empêchent un double scellement et une fourche de la chaîne.
 
 ### PostgreSQL de production
@@ -45,7 +51,7 @@ Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans u
 
 - [ ] **Processus de mise à jour** des textes publics et des fiches, avec leurs dates de validité : récupération, nettoyage, fiches revues, `ingest`, série de contrôle.
 - [ ] **Première échéance** : la version de l'article L441-10 du corpus et la fiche qui la reprend cessent d'être valides le 01/01/2027 (journal, mode démonstration).
-- [ ] **Alerte avant l'échéance** d'une version du corpus.
+- [x] **Alerte avant l'échéance** d'une version du corpus (27/09) : le job `audit` de la CI, à chaque pull request et chaque lundi, échoue si une source cesse d'être valide dans les 60 jours, avec la source et la date (`scripts/echeances_corpus.py`).
 
 ### Évaluation en CI
 

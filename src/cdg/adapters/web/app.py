@@ -18,7 +18,7 @@ concurrentes.
 import logging
 import re
 import secrets
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -36,10 +36,14 @@ from cdg.application import demo_set
 from cdg.application.service import ContractService
 from cdg.domain import audit
 from cdg.domain.identifiers import ContractIdError, check_contract_id
+from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
+from cdg.ports.locks import ContractBusy
 from cdg.settings import SettingsError
 
 WEB_ROOT = Path(__file__).parent
+# RFC 9110 : HEAD accepté là où GET l'est (FastAPI ne l'ajoute pas de lui-même)
+PAGE_METHODS = ["GET", "HEAD"]
 # caractères de contrôle hors tabulation et fins de ligne : pas du texte brut
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 log = logging.getLogger(__name__)
@@ -59,6 +63,7 @@ def create_app(
     demo: bool = False,
     hosts: Sequence[str] | None = security.LOOPBACK_NAMES,
     csrf_secret: bytes | None = None,
+    draining: Callable[[], bool] = lambda: False,
 ) -> FastAPI:
     """`hosts` : noms admis dans l'en-tête Host (None : tous, écoute non locale
     explicite). `demo` : bandeau permanent, contrats du jeu seulement."""
@@ -87,7 +92,7 @@ def create_app(
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=WEB_ROOT / "static"), name="static")
 
-    @app.get("/favicon.ico")
+    @app.api_route("/favicon.ico", methods=PAGE_METHODS)
     def favicon() -> FileResponse:
         """Demandée d'office par les navigateurs : l'icône des pages, servie localement."""
         return FileResponse(
@@ -150,6 +155,18 @@ def create_app(
             response: Response = HTMLResponse("Hôte non admis.", status_code=400)
         elif posted and not length:
             response = HTMLResponse("Longueur de l'envoi requise.", status_code=411)
+        elif posted and draining():
+            # arrêt en cours : toute modification est à rejouer sur un autre réplica
+            response = page(
+                request,
+                "erreur.html",
+                {
+                    "title": "Arrêt en cours",
+                    "message": "Ce serveur s'arrête : réessayez dans quelques secondes.",
+                },
+                503,
+            )
+            response.headers["Retry-After"] = "5"
         elif posted and (not length.isdigit() or int(length) > limit):
             response = page(
                 request,
@@ -178,6 +195,17 @@ def create_app(
             },
             403,
         )
+
+    @app.exception_handler(ConnectionsExhausted)
+    async def exhausted(request: Request, exc: ConnectionsExhausted) -> Response:
+        response = page(
+            request,
+            "erreur.html",
+            {"title": "Base de données saturée", "message": str(exc)},
+            503,
+        )
+        response.headers["Retry-After"] = "5"
+        return response
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> Response:
@@ -208,7 +236,7 @@ def create_app(
 
     # --- liste des contrats (list) ----------------------------------------------------
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.api_route("/", methods=PAGE_METHODS, response_class=HTMLResponse)
     def contracts(request: Request, attente: str = "") -> Response:
         rows = service.contracts(pending_only=bool(attente))
         return page(
@@ -228,7 +256,7 @@ def create_app(
             status,
         )
 
-    @app.get("/analyse", response_class=HTMLResponse)
+    @app.api_route("/analyse", methods=PAGE_METHODS, response_class=HTMLResponse)
     def analysis_form(request: Request) -> Response:
         return analysis_page(request)
 
@@ -244,7 +272,7 @@ def create_app(
             service.analyse(
                 text, contract_id=contract_id, parties=parties, analysis_date=on
             )
-        except ThreadError as exc:
+        except (ThreadError, ContractBusy) as exc:
             return analysis_page(request, str(exc), 409)
         except SettingsError as exc:
             message = (
@@ -277,7 +305,9 @@ def create_app(
             status,
         )
 
-    @app.get("/contrats/{thread_id}", response_class=HTMLResponse)
+    @app.api_route(
+        "/contrats/{thread_id}", methods=PAGE_METHODS, response_class=HTMLResponse
+    )
     def dossier(request: Request, thread_id: str) -> Response:
         return dossier_page(request, thread_id)
 
@@ -291,7 +321,7 @@ def create_app(
         }
         try:
             status = service.decide(thread_id, answer)
-        except ThreadError as exc:
+        except (ThreadError, ContractBusy) as exc:
             return page(
                 request,
                 "erreur.html",
@@ -303,7 +333,9 @@ def create_app(
             return dossier_page(request, thread_id, refused, 422)
         return RedirectResponse(presentation.contract_path(thread_id), status_code=303)
 
-    @app.get("/contrats/{thread_id}/rejeu", response_class=HTMLResponse)
+    @app.api_route(
+        "/contrats/{thread_id}/rejeu", methods=PAGE_METHODS, response_class=HTMLResponse
+    )
     def replay(request: Request, thread_id: str) -> Response:
         context: dict[str, Any] = {"thread_id": thread_id}
         try:
@@ -315,11 +347,13 @@ def create_app(
 
     # --- journal d'audit (journal, verify) --------------------------------------------
 
-    @app.get("/journal", response_class=HTMLResponse)
+    @app.api_route("/journal", methods=PAGE_METHODS, response_class=HTMLResponse)
     def journal(request: Request) -> Response:
         return page(request, "journal.html", {"entries": service.journal()})
 
-    @app.get("/journal/verification", response_class=HTMLResponse)
+    @app.api_route(
+        "/journal/verification", methods=PAGE_METHODS, response_class=HTMLResponse
+    )
     def verification(request: Request, tete: str = "") -> Response:
         expected = tete.strip() or None
         context: dict[str, Any]
@@ -336,9 +370,12 @@ def create_app(
 
     # --- administration : expiration (expire) -----------------------------------------
 
-    @app.get("/administration", response_class=HTMLResponse)
+    def admin_context(error: str | None) -> dict[str, Any]:
+        return {"error": error, "check": service.config_check()}
+
+    @app.api_route("/administration", methods=PAGE_METHODS, response_class=HTMLResponse)
     def administration(request: Request) -> Response:
-        return page(request, "administration.html", {"error": None})
+        return page(request, "administration.html", admin_context(None))
 
     @app.post("/administration/expiration")
     def expiration(request: Request, form: CheckedForm) -> Response:
@@ -347,7 +384,9 @@ def create_app(
             return page(
                 request,
                 "administration.html",
-                {"error": "nombre d'heures invalide : un entier positif est attendu"},
+                admin_context(
+                    "nombre d'heures invalide : un entier positif est attendu"
+                ),
                 400,
             )
         hours = int(raw)

@@ -3,6 +3,7 @@
 Aucun saut silencieux. Pour les exclure volontairement : `uv run pytest -m "not pg"`.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ from doubles import CONTRACT_TEXT, TEMPLATE, FakeCrag, FixedExtractor, clauses
 from psycopg import sql
 
 from cdg import cli, settings
+from cdg.adapters import journaux
 from cdg.adapters.langgraph import checkpointer
 from cdg.adapters.llm import API_KEY_VARS
 from cdg.adapters.postgres import conninfo, migrations, rag_store
@@ -26,6 +28,13 @@ def pytest_addoption(parser):
         action="store_true",
         help="exécute aussi les tests marqués llm (vrai modèle, payant)",
     )
+    parser.addoption(
+        "--image",
+        metavar="ÉTIQUETTE",
+        default=None,
+        help="exécute aussi les tests marqués image, sur l'image Docker déjà construite "
+        "sous cette étiquette (docker build --tag ÉTIQUETTE .)",
+    )
 
 
 def pytest_report_header(config):
@@ -36,13 +45,14 @@ def pytest_report_header(config):
 
 def pytest_collection_modifyitems(config, items):
     # exclusion par défaut, comptée comme « deselected » : jamais de saut silencieux,
-    # et -m "not pg" ne peut pas activer les tests llm par accident
-    if config.getoption("--llm"):
-        return
-    llm = [item for item in items if item.get_closest_marker("llm")]
-    if llm:
-        items[:] = [item for item in items if not item.get_closest_marker("llm")]
-        config.hook.pytest_deselected(items=llm)
+    # et -m "not pg" ne peut activer par accident ni les tests llm, ni les tests image
+    for marker, option in (("llm", "--llm"), ("image", "--image")):
+        if config.getoption(option):
+            continue
+        marked = [item for item in items if item.get_closest_marker(marker)]
+        if marked:
+            items[:] = [item for item in items if not item.get_closest_marker(marker)]
+            config.hook.pytest_deselected(items=marked)
 
 
 @dataclass(frozen=True)
@@ -78,10 +88,13 @@ def pg() -> Pg:
 
 @pytest.fixture
 def thread_id(pg) -> str:
-    """Un thread par test, supprimé ensuite avec les droits administrateur."""
+    """Un thread par test, supprimé ensuite avec les droits administrateur, avec son
+    compteur de reprises."""
     tid = f"test-{uuid.uuid4()}"
     yield tid
     checkpointer.delete_thread(pg.admin, tid)
+    with psycopg.connect(pg.admin, autocommit=True) as conn:
+        conn.execute("DELETE FROM contract_resumes WHERE thread_id = %s", (tid,))
 
 
 @pytest.fixture
@@ -121,6 +134,45 @@ class ForbiddenAuditStore:
 @pytest.fixture(autouse=True)
 def _journal_reel_interdit(monkeypatch):
     monkeypatch.setattr(cli, "open_audit_store", ForbiddenAuditStore)
+
+
+# chargement réel du modèle d'embedding et reprise périodique, gardés pour leurs tests
+PROCESS_EMBEDDER = cli.process_embedder
+RESUME_PERIODICALLY = cli.resume_periodically
+
+
+@pytest.fixture(autouse=True)
+def _aucun_modele_charge_en_arriere_plan(monkeypatch):
+    """`web` en mode réel charge le modèle d'embedding dès le lancement : jamais dans les
+    tests, qui n'ont ni les poids (CI) ni besoin de 2,2 Go en mémoire."""
+    monkeypatch.setattr(cli, "process_embedder", lambda config: None)
+    # ni reprise des analyses interrompues en arrière-plan (base réelle, sortie du test)
+    monkeypatch.setattr(cli, "resume_periodically", lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
+def _journaux_du_processus_restaures():
+    """`cli.main` applique sa configuration de journaux à tout le processus ; elle est
+    défaite après chaque test, pour que `caplog` voie encore les journaux des suivants
+    (sinon « jamais dans les journaux » passerait à vide)."""
+    names = ("cdg", "uvicorn", "uvicorn.error", "uvicorn.access")
+    saved = {
+        n: (lg.level, lg.handlers[:], lg.propagate)
+        for n in names
+        if (lg := logging.getLogger(n))
+    }
+    root_level = logging.getLogger().level
+    yield
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        if isinstance(handler.formatter, tuple(journaux.FORMATTERS.values())):
+            root.removeHandler(handler)
+    root.setLevel(root_level)
+    for name, (level, handlers, propagate) in saved.items():
+        logger = logging.getLogger(name)
+        logger.setLevel(level)
+        logger.handlers[:] = handlers
+        logger.propagate = propagate
 
 
 @pytest.fixture(autouse=True)

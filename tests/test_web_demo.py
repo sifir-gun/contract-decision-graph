@@ -191,7 +191,11 @@ def test_commande_web_demo(monkeypatch, capsys):
     monkeypatch.setattr(cli, "build_provider", forbidden)
     monkeypatch.setattr(cli.conninfo, "app_conninfo", forbidden)
     seen = {}
-    monkeypatch.setattr(server, "serve", lambda app, host, port: seen.update(app=app))
+    monkeypatch.setattr(
+        server,
+        "serve",
+        lambda app, host, port, **_: seen.update(app=app),
+    )
     assert cli.main(["web", "--demo"]) == 0
     assert json.loads(capsys.readouterr().out) == {"web": "arrêtée"}
     from fastapi.testclient import TestClient

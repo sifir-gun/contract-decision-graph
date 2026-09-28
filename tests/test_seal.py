@@ -21,6 +21,7 @@ from doubles import (
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.domain import audit
@@ -213,6 +214,7 @@ def test_11_expiration_no_go_systeme_scellee():
         timedelta(hours=24),
         now=since + timedelta(hours=25),
         thread_ids={"c-exp"},
+        hold=LocalContractLocks().hold,
     )
     [entry] = store.entries()
     human = decision_of(entry)["human"]
@@ -320,6 +322,7 @@ def test_expire_continue_et_scelle_les_deux_empreintes_avec_le_constat():
         timedelta(hours=24),
         now=since + timedelta(hours=25),
         thread_ids={"c-exp2"},
+        hold=LocalContractLocks().hold,
     )
     assert status["final_decision"] == "NO_GO"
     [entry] = store.entries()

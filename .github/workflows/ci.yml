@@ -81,6 +81,11 @@ jobs:
         run: >-
           uv run --no-sync pip-audit --require-hashes --disable-pip --strict
           --requirement "$RUNNER_TEMP/requirements-audit.txt"
+      - name: Projet, sans le groupe dev, pour le contrôle des échéances du corpus
+        run: uv sync --locked --no-dev
+      - name: Échéances du corpus, échec si une source expire dans les 60 jours
+        # aussi chaque lundi : le déclenchement planifié ne lance que ce job
+        run: uv run --no-sync python scripts/echeances_corpus.py --jours 60
 
   tests:
     name: tests (PostgreSQL + pgvector)
@@ -137,3 +142,25 @@ jobs:
       - name: Tests, tests pg compris (tests llm exclus par défaut), couverture et seuil
         # seuil : fail_under de [tool.coverage.report], lu par pytest-cov
         run: uv run --no-sync pytest --cov --cov-report=term
+
+  image:
+    name: image (construction et vérifications)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Dépendances, strictement depuis uv.lock (pytest et httpx pour les vérifications)
+        run: uv sync --locked
+      - name: Construction, bases figées par empreinte, dépendances strictement depuis uv.lock
+        # l'image n'est ni publiée ni signée ici : c'est l'objet de la PR B (ADR 005)
+        run: docker build --tag cdg:verification .
+      - name: Vérifications de l'image construite (non root, lecture seule, sans shell)
+        run: uv run --no-sync pytest -m image --image cdg:verification

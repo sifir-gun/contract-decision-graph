@@ -18,8 +18,9 @@ LIBRARIES = {
     "langchain_core": (
         "adapters/langgraph/",
     ),  # RunnableConfig, type des appels au graphe
-    # PostgresSaver exige une connexion psycopg
+    # PostgresSaver exige une connexion psycopg, ou un pool (décision du 28/09)
     "psycopg": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
+    "psycopg_pool": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
     "pgvector": ("adapters/postgres/",),
     "fastembed": ("adapters/fastembed.py",),
     # chargé par fastembed ; importé seulement pour en couper la télémétrie (J5)

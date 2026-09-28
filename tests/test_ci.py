@@ -88,3 +88,22 @@ def test_check_sh_executable_et_arrete_au_premier_echec():
     assert [line for line in text.splitlines() if line.startswith("uv sync")] == [
         "uv sync --locked --all-groups"
     ]
+
+
+# --- image : même construction et mêmes vérifications en CI et en local --------------------
+
+
+def docker_builds(lines: list[str]) -> list[str]:
+    return [
+        _one_line(line) for line in lines if line.strip().startswith("docker build")
+    ]
+
+
+def test_image_construite_comme_en_ci():
+    job = _load(".github/workflows/ci.yml")["jobs"]["image"]
+    ci = docker_builds([step["run"] for step in job["steps"] if "run" in step])
+    local = docker_builds(SCRIPT.read_text(encoding="utf-8").splitlines())
+    assert ci and local == ci, "construction de l'image différente en CI et en local"
+    tag = ci[0].split("--tag ")[1].split()[0]
+    checks = [s["run"] for s in job["steps"] if "pytest" in s.get("run", "")]
+    assert checks == [f"uv run --no-sync pytest -m image --image {tag}"]

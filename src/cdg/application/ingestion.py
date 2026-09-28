@@ -110,9 +110,8 @@ def pending_chunks(max_words: int) -> Pending:
     des fins de validité des articles qu'elle cite : elle les paraphrase, elle expire avec.
     """
     pending: Pending = []
-    validity: dict[tuple[str, str], date | None] = {}
+    validity = _article_validity()
     for article, kinds in articles():
-        validity[(article.source_id, article.article)] = article.valid_until
         header = article.reference + (
             f" — {article.heading}" if article.heading else ""
         )
@@ -137,18 +136,41 @@ def pending_chunks(max_words: int) -> Pending:
             pending.append((meta, f"{header}\n{text}", kinds))
     for fiche in load_fiches():
         reference = fiche_reference(fiche)
-        cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
-        ends = [end for c in cited if (end := validity[c]) is not None]
         for index, text in enumerate(chunk(fiche.body, max_words)):
             meta = {
                 "source_id": fiche.id,
                 "reference": reference,
                 "text": text,
                 "chunk_index": index,
-                "valid_until": min(ends, default=None),
+                "valid_until": _fiche_validity(fiche, validity),
             }
             pending.append((meta, f"{reference}\n{text}", fiche.kinds))
     return pending
+
+
+def _article_validity() -> dict[tuple[str, str], date | None]:
+    return {(a.source_id, a.article): a.valid_until for a, _ in articles()}
+
+
+def _fiche_validity(
+    fiche: Fiche, validity: dict[tuple[str, str], date | None]
+) -> date | None:
+    """Une fiche prend la plus proche des fins de validité des articles qu'elle cite :
+    elle les paraphrase, elle expire avec."""
+    cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
+    return min((end for c in cited if (end := validity[c]) is not None), default=None)
+
+
+def source_validities() -> dict[str, date | None]:
+    """Fin de validité de chaque source du corpus, par référence : articles du
+    manifeste et fiches (contrôle des échéances, `scripts/echeances_corpus.py`)."""
+    validity = _article_validity()
+    sources: dict[str, date | None] = {
+        a.reference: a.valid_until for a, _ in articles()
+    }
+    for fiche in load_fiches():
+        sources[fiche_reference(fiche)] = _fiche_validity(fiche, validity)
+    return sources
 
 
 def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:

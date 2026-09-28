@@ -35,9 +35,14 @@ def test_setup_db(pg, capsys):
             "003_rag_versions.sql",
             "004_audit_integrite.sql",
             "005_rag_clauses.sql",
+            "006_reprises.sql",
         ],
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
         "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
+        "reprises": {
+            "table": "contract_resumes",
+            "droits": ["SELECT", "INSERT", "UPDATE"],
+        },
     }
 
 
@@ -482,7 +487,7 @@ def test_expire_explication_toujours_par_le_gabarit(capsys, monkeypatch):
 
     monkeypatch.setattr(cli, "_graph", graph)
     monkeypatch.setattr(
-        cli.orchestrator, "expire_threads", lambda graph, older_than, now: []
+        cli.orchestrator, "expire_threads", lambda graph, older_than, now, *, hold: []
     )
     assert cli.main(["expire", "--older-than", "1d"]) == 0
     [deps] = seen

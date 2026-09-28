@@ -2188,3 +2188,116 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - Le navigateur demandait `/favicon.ico` et recevait un 404. L'icône est désormais un SVG écrit à la main (`static/favicon.svg`, 32 × 32, le bleu des liens de l'interface), déclaré dans l'en-tête des pages et servi aussi à `/favicon.ico`, avec les mêmes en-têtes de sécurité.
 - **Test d'abord** : icône servie aux deux adresses, en `image/svg+xml`, identique au fichier du dépôt, sans script ni lien. Le test des ressources externes lit aussi les SVG ; seul le nom de l'espace de noms SVG, exigé par un fichier autonome et jamais chargé, y est admis.
 - Vu dans le navigateur, mode démonstration : icône affichée, `/favicon.ico` et `/static/favicon.svg` en 200, console sans erreur.
+
+## 2026-09-27 · Kubernetes, PR A : application prête (branche `kubernetes`)
+
+### Plan validé
+
+- Quatre PR : A, application prête (création sûre en base, arrêt propre, santé, configuration, journaux JSON, image) ; B, chaîne d'approvisionnement (scan, inventaire, signature, provenance, image du modèle) ; C, chart et cluster, sans Ingress ; D, authentification (OIDC, oauth2-proxy en conteneur annexe, Dex en local) et Ingress. Arrêt entre deux PR pour la fusion.
+- Choix validés : CloudNativePG, SeaweedFS (le dépôt de MinIO est archivé), Syft et Grype (avis de sécurité sur Trivy), Smokescreen pour la sortie (maintenance à vérifier avant usage), volume `image` pour le modèle avec repli par copie, pas d'autoscaling, workflow à part pour l'image du modèle, CI plus longue.
+
+### Liste de contrôle : sondes de santé et arrêt propre
+
+- Décision du propriétaire : les deux points entrent dans la liste de contrôle, au déploiement. L'interface répondait 405 à `HEAD /`, et n'a aucun point de santé.
+
+### Feuille de route : Kubernetes d'abord
+
+- Décision du propriétaire : la phase 2 commence par le déploiement Kubernetes (avec l'authentification) ; le rapport HTML par contrat vient ensuite, puis l'API. README, spec et ADR 004 suivent ; l'ADR 003 garde sa rédaction du jour.
+
+### Échéances du corpus surveillées par la CI
+
+- **Décision du propriétaire** : l'audit hebdomadaire de la CI vérifie aussi qu'aucune source du corpus n'expire dans les 60 jours, et échoue sinon, avec la source et la date.
+- **Tests d'abord** (`tests/test_echeances_corpus.py`) : bornes de l'horizon, déjà expirées comprises, tri ; fins de validité des 29 sources (22 articles, 7 fiches ; seules L441-10 et sa fiche en ont une) ; script en réussite le 27/09 et le 01/11, en échec le 02/11/2026 avec les deux sources et le 01/01/2027 ; horizon invalide refusé ; câblage du job `audit`.
+- **Réalisation** : `domain/corpus.expiring` (règle pure), `ingestion.source_validities` (une fiche expire avec les articles qu'elle cite, logique mise en commun avec l'ingestion), `scripts/echeances_corpus.py` (JSON, code 1 et la liste en cas d'échéance). Job `audit` : installation du projet sans le groupe dev, puis le contrôle ; il tourne à chaque pull request et, seul, chaque lundi. Son nom reste « audit (pip-audit) », vérification exigée par la règle de protection de `main`. `scripts/check.sh` lance la même commande.
+- **Conséquence** : à partir du 02/11/2026, le job `audit` échoue à chaque pull request tant que L441-10 et sa fiche ne sont pas mises à jour. C'est le but.
+
+### Journaux structurés, sans texte de contrat
+
+- **Tests d'abord** (`tests/test_journaux.py`) :
+  - mise en forme : JSON d'une ligne, horodatage UTC ; journal d'accès réduit à la méthode, au chemin et au code, sans l'adresse du client ; exception réduite à son type et sa pile, en JSON comme en texte ;
+  - configuration : tout sur la sortie standard, bibliothèques à partir des avertissements, format inconnu refusé ;
+  - CLI : `--journaux`, défaut lu dans `CDG_JOURNAUX` ;
+  - de bout en bout, un vrai serveur uvicorn : une analyse par le formulaire avec un texte témoin dans le contrat, puis une erreur inattendue dont le message cite le témoin ; toutes les lignes sont du JSON, le témoin n'apparaît nulle part.
+- **Constat en passant** : sous uvicorn, une erreur inattendue était journalisée avec sa pile et son message. Starlette relance l'exception après la page d'erreur ; le test existant ne le voyait pas, le client de test ne passant pas par uvicorn. Corrigé par la mise en forme, en texte comme en JSON.
+- **Tests** : `cli.main` applique la configuration à tout le processus ; une fixture la défait après chaque test, sinon les assertions « jamais dans les journaux » de `caplog` passaient à vide. Le test des erreurs inattendues vérifie désormais aussi que l'erreur est journalisée, par son type.
+- ADR 005 ouvert : contexte, références vérifiées et datées (NSA et CISA, Kubernetes, k3s, CloudNativePG, MinIO, avis sur Trivy, code installé de mistralai), et cette première décision.
+
+### Création, revue et expiration sûres entre réplicas
+
+- **Tests d'abord** (`tests/test_verrous.py`) :
+  - verrou local exclusif, relâché à la sortie comme sur exception ; clé de 64 bits stable, distincte de celle du journal d'audit ;
+  - moteur : analyse et revue refusées sous le verrou (`ContractBusy`), rien de créé ; l'expiration laisse un contrat verrouillé, le dit dans le journal, puis l'expire une fois le verrou rendu ;
+  - PostgreSQL : verrou exclusif entre deux connexions ;
+  - deux vrais processus (méthode spawn), chacun avec son moteur, son checkpointer et ses verrous PostgreSQL : la seconde analyse du même contrat est refusée pendant la première (« en cours de traitement »), la première aboutit, une troisième reçoit « existe déjà », un seul enregistrement scellé ; un processus tué pendant l'analyse relâche le verrou.
+- **Réalisation** : port `ContractLocks`, verrou PostgreSQL (`pg_try_advisory_lock` sur une connexion dédiée, chaîne de connexion lue à chaque verrou) et verrou local (démonstration, tests) ; le moteur le prend pour `run`, `resume` et, contrat par contrat, pour l'expiration, qui relit l'état sous le verrou.
+- **Au-delà de la demande, signalé** : la revue et l'expiration passent aussi sous le verrou. Sans lui, deux réplicas qui tranchent le même contrat reprennent tous deux le graphe ; le journal refuse le second scellement, mais l'état du thread peut garder la décision du second.
+- **Mise au point des tests** : en mode spawn, un événement partagé que le parent libère avant que l'enfant l'ait repris disparaît (sémaphore nommé supprimé, `FileNotFoundError` chez l'enfant, sous macOS) ; chaque réplica de test garde ses événements. Contre-épreuve sans verrou : la seconde demande reçoit « existe déjà » au lieu de « en cours de traitement ». La double création elle-même avait été reproduite en un processus, par une barrière (`tests/test_concurrence.py`).
+- **Connexions** : l'application n'a pas de pool ; une analyse tient jusqu'à 6 connexions (verrou, checkpointer, 4 recherches en parallèle), les lectures ne sont bornées que par les 40 threads de FastAPI. **Décision du propriétaire** : un pool psycopg par processus, où le verrou compte.
+
+### Pool de connexions psycopg
+
+- **Décision du propriétaire** : un pool psycopg par processus, où le verrou compte ; `psycopg-pool` (3.3.3, LGPL-3.0, déjà dans `uv.lock` par langgraph-checkpoint-postgres) déclaré en dépendance directe : aucune autre version ne bouge dans `uv.lock`.
+- **Tests d'abord** (`tests/test_pool.py`) : réglages du pool (ceux qu'exige `PostgresSaver`, connexion vérifiée avant prêt, verrous de session relâchés au retour), taille invalide refusée ; journal d'audit, recherche, verrous et analyse complète par le pool ; un verrou de session oublié par son usager est relâché au retour de la connexion ; pool épuisé : `ConnectionsExhausted`, 503 avec `Retry-After` ; option `--connexions` et `CDG_CONNEXIONS`.
+- **Réalisation** : `adapters/postgres/connexions.py` (pool, ou connexion directe depuis une chaîne pour l'administration et les tests), `PostgresSaver` sur le pool, journal d'audit en transaction explicite et lignes en tuples, recherche et verrous par le pool ; la CLI ouvre le pool au premier usage et le ferme à la sortie. `psycopg_pool` confiné à `adapters/postgres/` et à `adapters/langgraph/checkpointer.py` (`tests/test_isolation.py`).
+- **Mesure de la taille** (28/09, base locale) : une première mesure, sans recherche en base (doublure du CRAG) et pool grandissant d'une connexion à la fois, ne disait rien du pic ; refaite avec la vraie recherche pgvector, les vrais poids d'embedding, les quatre domaines à justifier, et un compteur des connexions empruntées : 29 par analyse, au plus 4 en même temps, trois essais identiques. Plafond théorique : 9. Taille par défaut : 10.
+
+### Sondes de santé
+
+- **Tests d'abord** (`tests/test_sante.py`) : les trois sondes en GET et en HEAD, jamais en cache ; vie toujours vraie ; démarrage qui attend le modèle ; disponibilité qui dit pourquoi, sans le message d'une erreur ; aucune autre route sur le port des sondes ; sondes simultanées sans blocage ; deux vrais serveurs uvicorn, chacun ses routes, sondes arrêtées avec l'interface ; CLI (`--port-sante`, `--hote-sante`, démonstration prête aussitôt, mode réel prêt après chargement du modèle et base joignable) ; embedder du processus chargé une fois. Pages de l'interface en HEAD comme en GET.
+- **Constats** : chaque analyse de l'interface rechargeait le modèle d'embedding depuis le disque, désormais chargé une fois par processus ; `HEAD /` rendait 405, FastAPI n'ajoutant pas HEAD aux routes GET.
+- **Mise au point** : deux tests remplaçaient `uvicorn.run`, que le serveur n'appelle plus ; l'un a tenté un vrai serveur sur le port 8000, où tournait l'interface réelle du propriétaire (lancée le 27/09) : refusé par le système, rien de touché. Les tests lisent désormais la configuration des serveurs sans jamais les lancer ; une fixture empêche tout test de charger le vrai modèle en arrière-plan.
+
+### Arrêt propre et reprise des analyses interrompues
+
+- **Tests d'abord** (`tests/test_arret.py`, et `tests/test_verrous.py` pour PostgreSQL) :
+  - une analyse « tuée » au milieu de l'extraction (exception que rien n'intercepte, comme un SIGKILL) est reprise depuis son checkpoint : l'extraction seule est refaite, un seul scellement ; une reprise laisse un contrat tenu ailleurs, ne touche ni aux contrats finis ni à ceux en attente ;
+  - l'ordre d'arrêt rend la disponibilité à 503 ; pendant l'arrêt, analyse, décision et expiration sont refusées en 503 avec `Retry-After`, les lectures restent servies ;
+  - un vrai serveur uvicorn : l'analyse en cours à l'ordre d'arrêt finit, aucune nouvelle connexion n'est acceptée, puis le serveur s'arrête ; délai dépassé, il s'arrête quand même ;
+  - CLI : délai d'arrêt réglable, sondes plus prêtes après l'ordre d'arrêt, reprise périodique arrêtée avec le serveur ;
+  - PostgreSQL : un vrai processus tué pendant son analyse, un autre moteur la reprend et la finit, un seul enregistrement scellé.
+- **Réalisation** : `DrainingServer` (sous-classe d'`uvicorn.Server` : l'ordre d'arrêt lève d'abord le drapeau), `timeout_graceful_shutdown` d'uvicorn, refus des envois pendant l'arrêt dans l'intercepteur de l'interface, `ContractEngine.resume_interrupted` et `orchestrator.resume_interrupted` (sous le verrou, relu sous le verrou), `resume_periodically` dans la CLI.
+- **Garde-fou ajouté en cours de route** : la reprise parcourt tous les threads du checkpointer, ceux du vrai journal compris sur la base locale. Comme l'expiration, elle accepte `thread_ids`, réservé aux tests ; le test sur PostgreSQL ne reprend que son propre thread. Rien de réel n'a été touché (les trois contrats réels sont terminés). Deux fixtures automatiques empêchent aussi, dans tous les tests, le chargement du vrai modèle et la reprise en arrière-plan que lance `web` en mode réel.
+
+### Checkpoints écrits avant l'étape suivante (`durability="sync"`)
+
+- **Symptôme** : le test du processus tué (`tests/test_verrous.py`, un vrai processus tué par SIGKILL au milieu de l'extraction, repris par un autre moteur sur PostgreSQL) échouait environ une fois sur cinq, seulement quand il tournait après les autres tests PostgreSQL. Aucune erreur : la reprise ne trouvait rien à reprendre, et l'analyse restait inachevée, jamais scellée.
+- **Diagnostic**, par une instrumentation temporaire du test (retirée depuis) : dans le cas fautif, juste après la mort du processus, le dernier checkpoint n'avait plus d'étape suivante (`next=()`) ni de résultat, alors que le verrou était déjà relâché ; 1 272 essais de reprise n'y changeaient rien. Le thread n'était ni « en cours », ni « terminé », ni « en attente » : invisible pour la reprise.
+- **Cause**, lue dans le code installé (langgraph 1.2.12, `langgraph/types.py`, `Durability` ; `Pregel.invoke`, « defaults to `"async"` ») : par défaut, le checkpoint d'une étape s'écrit en arrière-plan pendant l'étape suivante. Un processus tué pendant cette écriture laisse un checkpoint incomplet. Le mode « sync » écrit le checkpoint avant de commencer l'étape suivante.
+- **Pourquoi c'est grave sur Kubernetes** : un pod est tué par SIGKILL à la fin de son délai de grâce, par le noyau quand il dépasse sa mémoire, ou avec son nœud. Sans correction, une analyse pouvait disparaître en silence, sans échec, sans escalade, sans scellement : exactement ce que la règle « aucun repli silencieux » interdit. Le défaut ne se voyait qu'avec de vrais processus tués au bon moment ; un test en un seul processus (mort simulée par une exception) ne pouvait pas le montrer, car le processus survivait pour finir l'écriture.
+- **Test d'abord** (`tests/test_arret.py`) : chaque appel au graphe avec checkpointer (analyse, reprise humaine, reprise d'une analyse interrompue, escalade) passe `durability="sync"` ; le test du processus tué garde la vérification de bout en bout.
+- **Correction** : `orchestrator.DURABILITY`, passée à chaque appel. Le sous-graphe CRAG, sans checkpointer, n'est pas concerné. Vingt essais du test du processus tué et huit passages de la combinaison qui échouait : aucun échec.
+- **Coût** : une écriture en base attendue à chaque étape, négligeable devant un appel au LLM.
+- **Leçon** : un réglage par défaut d'une bibliothèque se lit dans le code installé, surtout quand il touche à la durabilité ; ADR 005 complété (références datées).
+
+### Changement de configuration : contrôle avant déploiement
+
+- **Tests d'abord** (`tests/test_configuration_changee.py`, `tests/test_parite.py`) : deux services sur le même checkpointer, l'un sous une autre configuration ; `config_check` ne liste que les contrats en attente analysés sous une autre empreinte (ni ceux déjà terminés, ni ceux de la configuration courante) ; `config-check` réussit sans contrat à trancher, échoue avec la liste sinon ; l'administration de l'interface montre la même liste, avec un lien vers chaque contrat ; parité CLI et interface.
+- **Réalisation** : méthode `config_check` du service (lecture de `overview`), commande `config-check` (`ConfigChangeBlocked`, code 1, liste dans l'erreur JSON), section de la page d'administration. Constat en chemin : l'erreur JSON de la CLI ne savait pas écrire une date ; elle passe désormais par `default=str`, comme la sortie normale.
+- **Reste pour la PR C** : ConfigMap, annotation d'empreinte des pods, tâche Helm avant la mise à jour qui lance `config-check`, valeur pour passer outre.
+
+### Image de l'application
+
+- **Tests d'abord** (`tests/test_image.py`) :
+  - sur le Dockerfile, avec la suite : deux étapes, bases figées par empreinte, uv de la construction égal à celui de la CI, Python 3.12 figé, `uv sync --locked --no-dev --no-build --no-install-project`, image finale distroless sans instruction `RUN`, `USER 65532:65532`, lancement en forme exec, seules `/python` et `/app` copiées, environnement (journaux JSON, hors ligne, télémétrie coupée) ; contexte de construction limité à ce que l'image utilise ;
+  - sur l'image construite (`--image`, marqueur `image`, exclu par défaut comme `llm`) : configuration sans secret ; ni `sh`, ni `bash`, ni `apt-get`, ni `dpkg`, ni uv, ni pip ; Python de la bonne version, sans pip ni outils de développement, sous 65532 ; dépendances natives chargées en lecture seule, sans privilège ; code non modifiable par le processus ; démonstration en lecture seule : sondes prêtes, interface injoignable de l'extérieur, arrêt propre à `docker stop` (code 0), sortie entièrement en lignes JSON ;
+  - `tests/test_ci.py` : même construction et mêmes vérifications en CI et dans `check.sh`.
+- **Choix de la base** : distroless `cc-debian13:nonroot`, avec le Python géré par uv. `python:3.12-slim` garderait shell, `apt` et pip ; `distroless/python3-debian13` porte Python 3.13. Justifié et sourcé dans l'ADR 005.
+- **Constat en chemin** : en journaux JSON, `web` écrivait encore son adresse et son avertissement en texte sur la sortie d'erreur, et le résultat final sur plusieurs lignes ; un collecteur les aurait lus comme des lignes isolées. Test d'abord (`tests/test_journaux.py`), puis correction : en JSON, ils passent par le journal et le résultat tient sur une ligne ; au terminal, rien ne change.
+- **Mesures** : construction en 45 s à froid sur le poste (arm64), quelques secondes ensuite ; image de 423 Mo ; 22 tests de l'image en 20 s.
+- **Écart avec le plan validé** : le plan annonçait une « base officielle ». Les images officielles de Docker qui conviennent (`python:3.12-slim`, `debian:trixie-slim`) gardent shell et gestionnaire de paquets, contraires à « aucun outil inutile » ; distroless est publiée et signée par son propre projet. Signalé dans le rapport de la PR A.
+
+### Reprises comptées : ESCALADE au-delà du maximum (ajout à la PR A)
+
+- **Demande du propriétaire** (28/09, avant la fusion de la PR A) : une analyse qui fait planter le processus serait reprise à chaque redémarrage, avec un appel au LLM à chaque fois. Compter les reprises par contrat, durablement ; au-delà d'un maximum configuré, plus de reprise : ESCALADE, rapport d'échec qui cite le nombre de reprises, avertissement au journal.
+- **Écart signalé, puis tranché** : la demande plaçait le compteur dans l'état. Vérifié dans le code installé (ADR 005, références) : écrire dans l'état d'une analyse en cours (`update_state`) rejoue les arêtes du nœud choisi et vide les tâches en attente ; `Command(update=...)` répété sur le même checkpoint est ignoré par le checkpointer (`ON CONFLICT DO NOTHING`), et sortirait de la règle « `Command` ne sert qu'à `resume` ». Un essai jetable a montré que l'escalade, elle, fonctionne : tâches vidées en gardant les verdicts rendus, puis revue humaine. Décision du propriétaire : une table PostgreSQL (option recommandée), migration 006.
+- **Tests d'abord** (`tests/test_reprises.py`, 14 tests) :
+  - domaine : reprise permise jusqu'au maximum compris ; rapport d'échec avec l'étape en cours et le nombre de reprises ; configuration (`interrupted.max_resumes` ≥ 1) ;
+  - compteur en mémoire, par contrat, sans perte sous concurrence ;
+  - un contrat qui plante à chaque reprise, à travers des « redémarrages » successifs : 1 + 3 appels au LLM, puis ESCALADE sans nouvel appel, avertissement, plus jamais repris, scellé une fois après la décision humaine ;
+  - deux analystes sur quatre qui plantent à chaque fois : les verdicts des deux autres gardés, ni refaits ni repayés ;
+  - une reprise qui aboutit n'est comptée qu'une fois ; rien n'est compté sans reprise (contrat fini, en attente, ou tenu par un autre réplica) ;
+  - PostgreSQL : migration 006 idempotente, droits d'`app_role` sans suppression, appliquée aussi par le script d'initialisation ; compteur qui survit aux redémarrages et sans perte sous concurrence ;
+  - de vrais processus : un réplica tué pendant l'analyse, puis trois redémarrages tués chacun par la reprise (SIGKILL), puis l'escalade, sans nouvel appel ni scellement.
+- **Réalisation** : `domain/resumption.py` (règle et rapport d'échec), port `ResumeCounter`, adaptateurs `adapters/postgres/resumes.py` et `adapters/demo/resumes.py`, migration `006_reprises.sql`, section `interrupted` de `config/decision.yaml` (l'empreinte de configuration change ; aucun contrat réel en attente), `orchestrator._escalate_interrupted` (`bulk_update_state` : `END`, puis l'escalade au nom de `decision_gate`), `setup-db` qui annonce la table et ses droits.
+- **Pour la PR B, noté dans l'ADR 005** : Dependabot sur les images de base du `Dockerfile` (l'image PostgreSQL reste manuelle) ; signature des images distroless vérifiée en CI avant la construction.
+

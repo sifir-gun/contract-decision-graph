@@ -45,7 +45,7 @@ Aucune ressource externe : ni CDN, ni police web, ni outil de mesure d'audience.
   - il est lu en mémoire, puis passé au service, qui le masque avant le graphe, comme la CLI ;
   - la taille d'un envoi est bornée avant toute lecture (d'après `input.max_chars`), sous le seuil au-delà duquel l'analyseur de formulaires écrirait un fichier sur disque ; l'interface refuse de démarrer si la configuration dépasse ce seuil ;
   - un fichier doit être du texte brut en UTF-8, sans caractère de contrôle ;
-  - le texte n'est ni journalisé (le journal d'accès ne note ni corps ni formulaire ; une erreur inattendue n'y laisse que son type), ni renvoyé dans une page d'erreur, ni gardé en session.
+  - le texte n'est ni journalisé (le journal d'accès ne note ni corps ni formulaire ; une erreur inattendue n'y laisse que son type, jusque dans le journal d'uvicorn depuis le 28/09 : ADR 005, « Journaux structurés »), ni renvoyé dans une page d'erreur, ni gardé en session.
 - **Adresse d'un contrat, toujours interne** (alertes CodeQL `py/url-redirection`, 27/09) : une seule fonction (`presentation.contract_path`) forme les liens des pages et les redirections vers un contrat. Elle garde un préfixe fixe et encode l'identifiant comme un seul segment de chemin : « / », « \ », « ? », « # », « : », blancs et fins de ligne compris. Une redirection ne peut donc mener hors de l'interface, et l'identifiant revient intact. Avant, une redirection gardait « # » et « ? » tels quels : après la revue d'un contrat « revue 1#é », le navigateur ouvrait un autre dossier. Depuis, l'identifiant d'un nouveau contrat suit une seule règle, dans le domaine (`domain/identifiers.py`), pour la CLI comme pour l'interface ; l'encodage protège les contrats plus anciens, qui restent lisibles.
 - **Revue humaine** : la même politique que la CLI, dans le graphe (`domain/policy.py`) :
   - motif obligatoire, préfixe `systeme:` interdit au relecteur ;
@@ -96,4 +96,4 @@ Détail au journal.
 
 - **Dépendances** : quatre directes (fastapi, uvicorn, jinja2, python-multipart), trois transitives (starlette, markupsafe, annotated-doc). Licences MIT, BSD-3-Clause et Apache-2.0. Aucune dépendance du produit rétrogradée, aucune faille connue selon pip-audit, le 27/09/2026.
 - **L'interface affiche le texte masqué du contrat**, que le checkpointer conserve par conception ; jamais le texte original.
-- **Pour la suite** : le rapport HTML par contrat (premier chantier de la phase 2) pourra reprendre les gabarits du dossier ; l'API JSON et le déploiement Kubernetes viendront avec l'authentification.
+- **Pour la suite** : le rapport HTML par contrat pourra reprendre les gabarits du dossier ; l'API JSON et le déploiement Kubernetes viendront avec l'authentification. *Ordre décidé le 27/09 : la phase 2 commence par le déploiement Kubernetes, le rapport HTML vient ensuite.*

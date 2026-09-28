@@ -7,26 +7,36 @@ Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 """
 
 import argparse
+import atexit
+import functools
 import json
+import logging
+import logging.config
 import os
 import sys
+import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 from zoneinfo import ZoneInfo
 
 from cdg import settings
-from cdg.adapters import fastembed
+from cdg.adapters import fastembed, journaux
 from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.adapters.demo.extraction import ExpectedExtractor
+from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.references import DeclaredCrag
+from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm import API_KEY_VARS, build_provider
-from cdg.adapters.postgres import conninfo, migrations, rag_store
+from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
+from cdg.adapters.postgres.locks import PostgresContractLocks
+from cdg.adapters.postgres.resumes import PostgresResumeCounter
 from cdg.adapters.web import app as web_app
+from cdg.adapters.web import sante
 from cdg.adapters.web import security as web_security
 from cdg.adapters.web import server as web_server
 from cdg.application import demo_set, ingestion
@@ -47,10 +57,45 @@ def today() -> date:
     return datetime.now(LEGAL_TIMEZONE).date()
 
 
+# taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
+POOL = {"size": connexions.DEFAULT_SIZE}
+
+
+@functools.cache
+def app_pool() -> connexions.Source:
+    """Pool d'app_role du processus : ouvert au premier usage, fermé à la sortie. Le
+    checkpointer, le journal, la recherche et les verrous y prennent leurs connexions."""
+    pool = connexions.open_pool(conninfo.app_conninfo(), max_size=POOL["size"])
+    atexit.register(pool.close)
+    return pool
+
+
+# délai laissé aux requêtes en cours à l'ordre d'arrêt ; le chart aligne dessus le délai
+# de grâce du pod (pause avant l'arrêt + ce délai + marge)
+DEFAULT_GRACE_SECONDS = 60
+# intervalle de la reprise des analyses interrompues (mode réel)
+DEFAULT_RESUME_SECONDS = 60
+_EMBEDDERS: dict[str, fastembed.FastembedEmbedder] = {}
+_EMBEDDERS_GUARD = threading.Lock()
+log = logging.getLogger(__name__)
+
+
+def process_embedder(config: DecisionConfig) -> fastembed.FastembedEmbedder:
+    """Embedder du processus : poids chargés une fois, puis réutilisés par chaque analyse
+    (ONNX Runtime accepte les appels simultanés sur une même session)."""
+    key = config.embedding.model_dump_json()
+    with _EMBEDDERS_GUARD:
+        if key not in _EMBEDDERS:
+            _EMBEDDERS[key] = fastembed.FastembedEmbedder(
+                config.embedding, settings.embedding_cache_dir()
+            )
+        return _EMBEDDERS[key]
+
+
 def open_audit_store() -> AuditStore:
     """Journal d'audit réel, avec le rôle applicatif. Les tests le remplacent par un
     journal jetable : aucune option de la CLI ni de la configuration n'en change la table."""
-    return PostgresAuditStore(conninfo.app_conninfo())
+    return PostgresAuditStore(app_pool())
 
 
 def now() -> datetime:
@@ -66,10 +111,7 @@ def build_deps(config: DecisionConfig) -> Deps:
     modèle et avant la création du thread.
     """
     llm = build_provider(config.llm)
-    embedder = fastembed.FastembedEmbedder(
-        config.embedding, settings.embedding_cache_dir()
-    )
-    retriever = rag_store.PgvectorRetriever(conninfo.app_conninfo(), embedder)
+    retriever = rag_store.PgvectorRetriever(app_pool(), process_embedder(config))
     return Deps(
         extractor=LLMExtractor(llm),
         crag=orchestrator.crag_runner(retriever, llm, config),
@@ -132,6 +174,10 @@ def _setup_db(args: argparse.Namespace) -> dict:
         "migrations": applied,
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
         "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
+        "reprises": {
+            "table": "contract_resumes",
+            "droits": ["SELECT", "INSERT", "UPDATE"],
+        },
     }
 
 
@@ -157,7 +203,7 @@ def _ingest(args: argparse.Namespace) -> dict:
 
 
 def _graph(config: DecisionConfig, deps: Deps):
-    return orchestrator.open_graph(config, deps, conninfo.app_conninfo())
+    return orchestrator.open_graph(config, deps, app_pool())
 
 
 def build_service(config: DecisionConfig) -> ContractService:
@@ -173,6 +219,8 @@ def build_service(config: DecisionConfig) -> ContractService:
             expire=lambda: review_deps(config, EXPIRE_EXPLAINER),
             read=lambda: review_deps(config, HISTORY_EXPLAINER),
         ),
+        PostgresContractLocks(app_pool),
+        PostgresResumeCounter(app_pool),
     )
     return ContractService(
         engine=engine,
@@ -213,6 +261,8 @@ def demo_service(config: DecisionConfig) -> ContractService:
             expire=lambda: deps,
             read=lambda: deps,
         ),
+        LocalContractLocks(),  # démonstration : un seul processus
+        LocalResumeCounter(),
     )
     return ContractService(
         engine=engine,
@@ -305,6 +355,15 @@ def _expire(args: argparse.Namespace) -> dict:
     }
 
 
+def _tell(args: argparse.Namespace, level: int, message: str) -> None:
+    """Message à l'opérateur : sur la sortie d'erreur au terminal (journaux texte), dans le
+    journal en json, où un collecteur lit la sortie ligne à ligne (Kubernetes)."""
+    if args.journaux == "json":
+        log.log(level, message)
+    else:
+        print(message, file=sys.stderr)
+
+
 def _web(args: argparse.Namespace) -> dict:
     """Interface web, sur le même service que les autres commandes ; jusqu'à Ctrl+C."""
     warning = web_security.bind_warning(
@@ -312,23 +371,141 @@ def _web(args: argparse.Namespace) -> dict:
     )
     config = load_config()
     service = demo_service(config) if args.demo else build_service(config)
+    # ordre d'arrêt reçu : l'interface refuse toute modification, les sondes ne sont
+    # plus prêtes, la reprise des analyses interrompues s'arrête
+    stopping = threading.Event()
     app = web_app.create_app(
-        service, demo=args.demo, hosts=web_security.allowed_hosts(args.host)
+        service,
+        demo=args.demo,
+        hosts=web_security.allowed_hosts(args.host),
+        draining=stopping.is_set,
     )
     if warning:
-        print(warning, file=sys.stderr)
+        _tell(args, logging.WARNING, warning)
     shown = f"[{args.host}]" if ":" in args.host else args.host
     mode = "démonstration, en mémoire" if args.demo else "réel"
-    print(
+    _tell(
+        args,
+        logging.INFO,
         f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
-        file=sys.stderr,
     )
-    web_server.serve(app, args.host, args.port)
+    probes = _probes(args, config, stopping)
+    if not args.demo:  # démonstration : tout en mémoire, rien à reprendre
+        threading.Thread(
+            target=resume_periodically,
+            args=(service, args.reprise_intervalle, stopping),
+            name="reprise",
+            daemon=True,
+        ).start()
+    web_server.serve(
+        app,
+        args.host,
+        args.port,
+        log_config=journaux.config(args.journaux),
+        probes=probes,
+        on_exit=stopping.set,
+        grace_seconds=args.delai_arret,
+    )
     return {"web": "arrêtée"}
+
+
+class ConfigChangeBlocked(Exception):
+    """Des contrats en attente ont été analysés sous une autre configuration."""
+
+    def __init__(self, check: dict[str, Any]):
+        names = ", ".join(c["thread_id"] for c in check["a_trancher"])
+        super().__init__(
+            f"contrats en attente sous une autre configuration : {names} ; les trancher "
+            "(resume, sous leur configuration) ou les expirer (expire) avant le "
+            "changement, ou garder l'ancienne configuration"
+        )
+        self.payload = check
+
+
+def _config_check(args: argparse.Namespace) -> dict[str, Any]:
+    check = build_service(load_config()).config_check()
+    if check["a_trancher"]:
+        raise ConfigChangeBlocked(check)
+    return check
+
+
+def resume_periodically(
+    service: ContractService, interval: float, stopping: threading.Event
+) -> None:
+    """Reprend les analyses interrompues au démarrage, puis toutes les `interval`
+    secondes, jusqu'à l'ordre d'arrêt. Une reprise qui échoue est journalisée, par son
+    type, et retentée au tour suivant."""
+    while not stopping.is_set():
+        try:
+            resumed = service.resume_interrupted()
+            if resumed:
+                log.info("analyses interrompues reprises : %d", len(resumed))
+        # retentée au tour suivant ; le journal dit laquelle a échoué, par son type
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                "reprise des analyses interrompues en échec (%s)", type(exc).__name__
+            )
+        stopping.wait(interval)
+
+
+def _probes(
+    args: argparse.Namespace, config: DecisionConfig, stopping: threading.Event
+) -> web_server.Probes | None:
+    """En mode réel, le modèle d'embedding se charge en arrière-plan dès le lancement ;
+    les sondes, si un port leur est donné, disent quand il est chargé et si la base
+    répond. En démonstration, ni modèle ni base : prêtes aussitôt."""
+    started = threading.Event()
+    if args.demo:
+        started.set()
+    else:
+        threading.Thread(
+            target=_warm_up, args=(config, started), name="modele", daemon=True
+        ).start()
+    if args.port_sante is None:
+        return None
+    checks = sante.Checks(
+        started=started.is_set,
+        database=(lambda: True) if args.demo else lambda: connexions.ping(app_pool()),
+        draining=stopping.is_set,
+    )
+    return web_server.Probes(
+        sante.create_health_app(checks), args.hote_sante, args.port_sante
+    )
+
+
+def _warm_up(config: DecisionConfig, started: threading.Event) -> None:
+    try:
+        process_embedder(config)
+    # un modèle qui ne se charge pas : la sonde de démarrage échoue, le journal dit pourquoi
+    except Exception as exc:  # noqa: BLE001
+        log.error("modèle d'embedding non chargé (%s)", type(exc).__name__)
+        return
+    started.set()
+
+
+def _positive(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"entier ≥ 1 attendu : {text}")
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cdg", description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--journaux",
+        choices=journaux.FORMATS,
+        default=os.environ.get("CDG_JOURNAUX", "texte"),
+        help="format des journaux sur la sortie standard : texte (défaut) ou json "
+        "(Kubernetes) ; défaut aussi lu dans CDG_JOURNAUX",
+    )
+    parser.add_argument(
+        "--connexions",
+        type=_positive,
+        default=os.environ.get("CDG_CONNEXIONS", str(connexions.DEFAULT_SIZE)),
+        help="taille maximale du pool de connexions d'app_role à PostgreSQL (défaut "
+        f"{connexions.DEFAULT_SIZE}, ou CDG_CONNEXIONS) ; budget dans l'ADR 005",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
         "setup-db",
@@ -454,6 +631,13 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("thread_id")
     show.set_defaults(handler=_show)
 
+    sub.add_parser(
+        "config-check",
+        help="échoue (code 1) si des contrats en attente ont été analysés sous une autre "
+        "configuration que la courante : resume les refuserait. Avant un changement de "
+        "configuration (tâche Helm)",
+    ).set_defaults(handler=_config_check)
+
     web = sub.add_parser(
         "web",
         help="interface web : mêmes actions que la CLI, par le même service ; écoute "
@@ -473,6 +657,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="autorise une adresse non locale : l'interface n'a pas "
         "d'authentification, avertissement affiché",
     )
+    web.add_argument(
+        "--delai-arret",
+        type=_positive,
+        default=DEFAULT_GRACE_SECONDS,
+        help="secondes laissées aux requêtes en cours à l'ordre d'arrêt (défaut "
+        f"{DEFAULT_GRACE_SECONDS}) ; le délai de grâce du pod doit le dépasser",
+    )
+    web.add_argument(
+        "--reprise-intervalle",
+        type=_positive,
+        default=DEFAULT_RESUME_SECONDS,
+        help="secondes entre deux reprises des analyses interrompues (mode réel, "
+        f"défaut {DEFAULT_RESUME_SECONDS}) ; la première au lancement",
+    )
+    web.add_argument(
+        "--port-sante",
+        type=_positive,
+        default=None,
+        help="port des sondes de santé de Kubernetes (/sante/vie, /sante/demarrage, "
+        "/sante/pret) ; aucune sonde par défaut",
+    )
+    web.add_argument(
+        "--hote-sante",
+        default="127.0.0.1",
+        help="adresse d'écoute des sondes (0.0.0.0 dans un pod : le kubelet appelle "
+        "l'adresse du pod) ; elles ne servent aucune donnée",
+    )
     web.set_defaults(handler=_web)
     return parser
 
@@ -481,7 +692,10 @@ def main(argv: list[str] | None = None) -> int:
     settings.load_env()
     args = build_parser().parse_args(argv)
     handler: Callable[[argparse.Namespace], dict] = args.handler
+    POOL["size"] = args.connexions
     try:
+        # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
+        logging.config.dictConfig(journaux.config(args.journaux))
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
@@ -489,9 +703,11 @@ def main(argv: list[str] | None = None) -> int:
         payload = getattr(exc, "payload", None)  # rapport structuré, s'il y en a un
         if isinstance(payload, dict):
             error |= payload
-        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(error, ensure_ascii=False, default=str), file=sys.stderr)
         return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    # en json, le résultat tient sur une ligne, comme chaque entrée du journal
+    indent = None if args.journaux == "json" else 2
+    print(json.dumps(result, ensure_ascii=False, indent=indent, default=str))
     return 0
 
 
