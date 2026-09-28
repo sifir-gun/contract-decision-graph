@@ -2,7 +2,10 @@
 sur le service des contrats en mémoire (vrai graphe, doublures du LLM et du CRAG)."""
 
 import html
+import os
 import re
+import shutil
+import time
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -17,6 +20,7 @@ from web_helpers import (
     memory_service,
 )
 
+from cdg.adapters.web import app as web_app
 from cdg.adapters.web.presentation import DECISION_LABELS, STATE_LABELS
 from cdg.application import demo_set
 
@@ -50,6 +54,26 @@ def test_page_en_francais_navigation_et_feuille_de_style_locale():
     assert '<script src="/static/htmx.min.js"' in page
     assert '<link rel="stylesheet" href="/static/style.css"' in page
     assert "Démonstration" not in page  # bandeau du mode démo seulement
+
+
+def test_gabarits_du_code_lance_malgre_une_mise_a_jour_du_depot(tmp_path, monkeypatch):
+    """Gabarits lus au démarrage, jamais relus. Relus sur disque, ceux d'un autre commit
+    (checkout, pull) étaient servis avec le code resté en mémoire : nom inconnu,
+    UndefinedError et 500 sur toutes les pages (28/09)."""
+    for folder in ("templates", "static"):
+        shutil.copytree(web_app.WEB_ROOT / folder, tmp_path / folder)
+    monkeypatch.setattr(web_app, "WEB_ROOT", tmp_path)
+    web = client()
+    journal = web.get("/journal")  # une page déjà servie ; la liste, jamais
+    assert journal.status_code == 200
+    later = time.time() + 60  # date de modification changée à coup sûr
+    for template in (tmp_path / "templates").iterdir():
+        template.write_text("{{ nom_d_un_commit_ulterieur() }}", encoding="utf-8")
+        os.utime(template, (later, later))
+    listing = web.get("/")
+    assert listing.status_code == 200
+    assert "<h1>Contrats</h1>" in listing.text
+    assert web.get("/journal").text == journal.text
 
 
 def test_page_inconnue():

@@ -219,7 +219,9 @@ def test_serveur_reel_delai_depasse_s_arrete_quand_meme():
 def served(monkeypatch):
     seen = {}
 
-    def serve(app, host, port, *, log_config, probes=None, on_exit, grace_seconds):
+    def serve(
+        app, host, port, *, log_config, probes=None, on_exit, grace_seconds, on_started
+    ):
         seen.update(app=app, probes=probes, on_exit=on_exit, grace=grace_seconds)
 
     monkeypatch.setattr(cli.web_server, "serve", serve)

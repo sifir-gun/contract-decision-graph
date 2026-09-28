@@ -21,7 +21,7 @@ L'interface (`adapters/web/`) ne fait que lire des formulaires et mettre en page
 
 ### Rendu côté serveur, HTMX, sans application séparée
 
-Les pages sont rendues par Jinja2, avec l'échappement automatique ; HTMX ajoute l'interactivité. Toutes les actions fonctionnent sans JavaScript, par des formulaires et des liens ordinaires. HTMX ajoute l'indicateur pendant l'analyse, le rejeu et la vérification affichés dans la page, et la navigation sans rechargement complet.
+Les pages sont rendues par Jinja2, avec l'échappement automatique ; HTMX ajoute l'interactivité. Les gabarits sont lus une fois, au démarrage : un processus resté en marche après une mise à jour du dépôt sert les siens, jamais ceux d'un autre commit (`tests/test_web_ecrans.py`). Toutes les actions fonctionnent sans JavaScript, par des formulaires et des liens ordinaires. HTMX ajoute l'indicateur pendant l'analyse, le rejeu et la vérification affichés dans la page, et la navigation sans rechargement complet.
 
 - **Écartée : une application séparée (React ou autre) et une API JSON.** Elle demanderait une chaîne de compilation Node, un second modèle des données côté client et une API à maintenir en parallèle du service. Tout ce qu'elle montrerait existe déjà côté serveur. Une API JSON, prévue en phase 2, sera un autre adaptateur entrant sur le même service.
 - **Écarté : LangGraph Studio**, pour les raisons de l'ADR 003.
@@ -96,4 +96,5 @@ Détail au journal.
 
 - **Dépendances** : quatre directes (fastapi, uvicorn, jinja2, python-multipart), trois transitives (starlette, markupsafe, annotated-doc). Licences MIT, BSD-3-Clause et Apache-2.0. Aucune dépendance du produit rétrogradée, aucune faille connue selon pip-audit, le 27/09/2026.
 - **L'interface affiche le texte masqué du contrat**, que le checkpointer conserve par conception ; jamais le texte original.
+- **Limite connue (28/09) : les fichiers statiques sont lus sur disque.** La feuille de style, HTMX et l'icône sont servis depuis `static/` à chaque requête, contrairement aux gabarits, lus au démarrage. Une instance restée en marche après une mise à jour du dépôt sert donc la feuille de style d'un autre commit, sans erreur : sa mise en page peut ne plus correspondre à ses gabarits. Non corrigée pour l'instant : dans l'image, au système de fichiers en lecture seule, ces fichiers ne changent pas ; sur le poste, relancer l'interface après une mise à jour.
 - **Pour la suite** : le rapport HTML par contrat pourra reprendre les gabarits du dossier ; l'API JSON et le déploiement Kubernetes viendront avec l'authentification. *Ordre décidé le 27/09 : la phase 2 commence par le déploiement Kubernetes, le rapport HTML vient ensuite.*

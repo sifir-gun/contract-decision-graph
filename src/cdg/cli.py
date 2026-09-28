@@ -380,23 +380,28 @@ def _web(args: argparse.Namespace) -> dict:
         hosts=web_security.allowed_hosts(args.host),
         draining=stopping.is_set,
     )
-    if warning:
-        _tell(args, logging.WARNING, warning)
     shown = f"[{args.host}]" if ":" in args.host else args.host
     mode = "démonstration, en mémoire" if args.demo else "réel"
-    _tell(
-        args,
-        logging.INFO,
-        f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
-    )
+
+    def opened() -> None:
+        """Port à l'écoute : l'interface s'annonce, puis la reprise des analyses
+        interrompues commence. Sur un port déjà pris, ni annonce ni reprise."""
+        if warning:
+            _tell(args, logging.WARNING, warning)
+        _tell(
+            args,
+            logging.INFO,
+            f"Interface ({mode}) : http://{shown}:{args.port} ; Ctrl+C pour l'arrêter.",
+        )
+        if not args.demo:  # démonstration : tout en mémoire, rien à reprendre
+            threading.Thread(
+                target=resume_periodically,
+                args=(service, args.reprise_intervalle, stopping),
+                name="reprise",
+                daemon=True,
+            ).start()
+
     probes = _probes(args, config, stopping)
-    if not args.demo:  # démonstration : tout en mémoire, rien à reprendre
-        threading.Thread(
-            target=resume_periodically,
-            args=(service, args.reprise_intervalle, stopping),
-            name="reprise",
-            daemon=True,
-        ).start()
     web_server.serve(
         app,
         args.host,
@@ -405,6 +410,7 @@ def _web(args: argparse.Namespace) -> dict:
         probes=probes,
         on_exit=stopping.set,
         grace_seconds=args.delai_arret,
+        on_started=opened,
     )
     return {"web": "arrêtée"}
 

@@ -27,7 +27,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from jinja2 import DictLoader, Environment, StrictUndefined
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 
@@ -70,7 +70,7 @@ def create_app(
     limit = security.check_body_limit(service.config)
     csrf = security.Csrf(csrf_secret)
     env = Environment(
-        loader=FileSystemLoader(WEB_ROOT / "templates"),
+        loader=DictLoader(_templates(WEB_ROOT / "templates")),
         autoescape=True,
         undefined=StrictUndefined,
         trim_blocks=True,
@@ -400,6 +400,17 @@ def create_app(
         )
 
     return app
+
+
+def _templates(directory: Path) -> dict[str, str]:
+    """Gabarits lus une fois, à la création de l'application : ceux du code lancé. Relus
+    sur disque (`FileSystemLoader`, rechargé par défaut à chaque modification), ceux d'un
+    autre commit servaient au code resté en mémoire : nom inconnu, 500 sur toutes les
+    pages (28/09)."""
+    return {
+        path.relative_to(directory).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(directory.rglob("*.html"))
+    }
 
 
 # --- lecture des formulaires ---------------------------------------------------------
