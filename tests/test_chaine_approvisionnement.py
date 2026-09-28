@@ -126,6 +126,30 @@ def test_chaque_base_du_dockerfile_a_sa_verification():
     ]
 
 
+def test_une_etape_du_meme_dockerfile_n_est_pas_une_base(tmp_path):
+    """`FROM etape` reprend une étape précédente, y compris choisie par une variable
+    (`go-${TARGETARCH}`) : seules les images sont des bases, chacune une fois."""
+    dockerfile = tmp_path / "Dockerfile"
+    uv = "ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:" + "a" * 64
+    static = "gcr.io/distroless/static-debian13:nonroot@sha256:" + "b" * 64
+    dockerfile.write_text(
+        "ARG TARGETARCH\n"
+        f"FROM {uv} AS go-amd64\n"
+        f"FROM --platform=$BUILDPLATFORM {uv} AS go-arm64\n"
+        "FROM go-${TARGETARCH} AS construction\n"
+        "FROM construction AS verification\n"
+        f"FROM {static}\n"
+    )
+    assert chaine().bases(dockerfile) == [uv, static]
+
+
+def test_base_choisie_par_une_variable_hors_des_etapes_refusee(tmp_path):
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("ARG BASE\nFROM ${BASE}\n")
+    with pytest.raises(ValueError, match="BASE"):
+        chaine().bases(dockerfile)
+
+
 def test_base_sans_verification_refusee():
     with pytest.raises(ValueError, match="docker.io/library/python"):
         chaine().command("docker.io/library/python:3.12-slim@sha256:" + "0" * 64)
@@ -295,7 +319,22 @@ def test_inventaire_et_scan_apres_la_construction_en_ci_et_en_local():
 
 # --- publication : ghcr.io par empreinte, signature sans clé, attestations --------------------
 
-IMAGE = "ghcr.io/${{ github.repository }}"
+IMAGE = "ghcr.io/${{ github.repository }}${{ matrix.depot }}"
+# images publiées : l'application et le proxy de sortie (PR C3), par la même chaîne
+PUBLISHED = [
+    {
+        "image": "application",
+        "artefact": "image",
+        "locale": "cdg:verification",
+        "depot": "",
+    },
+    {
+        "image": "proxy de sortie",
+        "artefact": "proxy",
+        "locale": "cdg-proxy:verification",
+        "depot": "/proxy-sortie",
+    },
+]
 IDENTITY = "https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main"
 
 
@@ -355,23 +394,57 @@ def test_image_construite_et_verifiee_sur_chaque_architecture():
     assert builds and not [b for b in builds if "--platform" in b]
 
 
-def test_l_image_publiee_est_celle_testee_et_scannee():
+def test_les_images_publiees_sont_celles_testees_et_scannees():
     image_steps = ci()["jobs"]["image"]["steps"]
-    [upload] = [s for s in image_steps if uses(s, "actions/upload-artifact")]
-    assert upload["if"] == ONLY_MAIN
-    assert upload["with"]["name"] == "image-${{ matrix.arch }}"
-    assert upload["with"]["path"].splitlines() == [
-        "${{ runner.temp }}/chaine/image.tar",
-        "${{ runner.temp }}/chaine/sbom.spdx.json",
-    ]
-    assert upload["with"]["if-no-files-found"] == "error"
+    uploads = {
+        s["with"]["name"]: s for s in image_steps if uses(s, "actions/upload-artifact")
+    }
+    assert set(uploads) == {"image-${{ matrix.arch }}", "proxy-${{ matrix.arch }}"}
+    for folder, upload in (
+        ("chaine", uploads["image-${{ matrix.arch }}"]),
+        ("chaine-proxy", uploads["proxy-${{ matrix.arch }}"]),
+    ):
+        assert upload["if"] == ONLY_MAIN
+        assert upload["with"]["path"].splitlines() == [
+            f"${{{{ runner.temp }}}}/{folder}/image.tar",
+            f"${{{{ runner.temp }}}}/{folder}/sbom.spdx.json",
+        ]
+        assert upload["with"]["if-no-files-found"] == "error"
+    job = ci()["jobs"]["publication"]
+    assert job["strategy"] == {"fail-fast": False, "matrix": {"include": PUBLISHED}}
+    assert "${{ matrix.image }}" in job["name"]
+    assert job["env"]["ARTEFACT"] == "${{ matrix.artefact }}"
+    assert job["env"]["LOCALE"] == "${{ matrix.locale }}"
     steps = publication_steps()
     [download] = [s for s in steps if uses(s, "actions/download-artifact")]
-    assert download["with"]["pattern"] == "image-*"  # un dossier par architecture
+    # un dossier par architecture
+    assert download["with"]["pattern"] == "${{ matrix.artefact }}-*"
     runs = " ".join(s.get("run", "") for s in steps)
-    assert 'docker load --input "$RUNNER_TEMP/chaine/image-$arch/image.tar"' in runs
+    assert 'docker load --input "$RUNNER_TEMP/chaine/$ARTEFACT-$arch/image.tar"' in runs
+    assert 'docker tag "$LOCALE" "$IMAGE:sha-$GITHUB_SHA-$arch"' in runs
     assert "for arch in amd64 arm64" in runs
     assert not re.search(r"docker build\s", runs)  # jamais reconstruite
+
+
+def test_proxy_de_sortie_verifie_comme_l_application_avant_son_artefact():
+    runs = [s.get("run", "") for s in ci()["jobs"]["image"]["steps"]]
+    proxy = "docker/proxy-sortie/Dockerfile"
+    order = [
+        f"uv run --no-sync python scripts/chaine.py bases --dockerfile {proxy}",
+        f"docker build --file {proxy} --tag cdg-proxy:verification docker/proxy-sortie",
+        (
+            "uv run --no-sync pytest -m proxy --proxy cdg-proxy:verification "
+            "--image cdg:verification"
+        ),
+        (
+            "uv run --no-sync python scripts/chaine.py inventaire cdg-proxy:verification "
+            '--dossier "$RUNNER_TEMP/chaine-proxy"'
+        ),
+        'uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"',
+    ]
+    flat = [" ".join(r.split()) for r in runs]
+    positions = [flat.index(command) for command in order]
+    assert positions == sorted(positions)
 
 
 def test_index_multi_architecture_verifie():
@@ -403,11 +476,11 @@ def test_signature_et_attestations_par_empreinte():
         ("${{ env.DIGEST }}", None),  # provenance : l'index
         (
             "${{ env.DIGEST_AMD64 }}",
-            "${{ runner.temp }}/chaine/image-amd64/sbom.spdx.json",
+            "${{ runner.temp }}/chaine/${{ matrix.artefact }}-amd64/sbom.spdx.json",
         ),
         (
             "${{ env.DIGEST_ARM64 }}",
-            "${{ runner.temp }}/chaine/image-arm64/sbom.spdx.json",
+            "${{ runner.temp }}/chaine/${{ matrix.artefact }}-arm64/sbom.spdx.json",
         ),
     ]
 

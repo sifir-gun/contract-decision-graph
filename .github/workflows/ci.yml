@@ -228,14 +228,52 @@ jobs:
             ${{ runner.temp }}/chaine/sbom.spdx.json
           if-no-files-found: error
           retention-days: 1
+      # proxy de sortie (PR C3) : Smokescreen construit par nous, même chaîne
+      - name: Proxy de sortie, signatures des images de base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/chaine.py bases --dockerfile docker/proxy-sortie/Dockerfile
+      - name: Proxy de sortie, construction (Go et source figés par empreinte et commit)
+        run: docker build --file docker/proxy-sortie/Dockerfile --tag cdg-proxy:verification docker/proxy-sortie
+      - name: Proxy de sortie, vérifications (non root, licences, filtrage réel)
+        run: uv run --no-sync pytest -m proxy --proxy cdg-proxy:verification --image cdg:verification
+      - name: Proxy de sortie, inventaire des composants (Syft)
+        run: >-
+          uv run --no-sync python scripts/chaine.py inventaire cdg-proxy:verification
+          --dossier "$RUNNER_TEMP/chaine-proxy"
+      - name: Proxy de sortie, scan (Grype)
+        run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"
+      - name: Proxy de sortie, image et inventaire, pour la publication (main seulement)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: proxy-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/chaine-proxy/image.tar
+            ${{ runner.temp }}/chaine-proxy/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 1
 
   publication:
-    name: publication (ghcr.io, signature, attestations)
+    name: publication (${{ matrix.image }}, ghcr.io, signature, attestations)
     # après une fusion dans main seulement : ni pull request, ni lundi. Les images publiées
     # sont celles que le job image a construites, testées, inventoriées et scannées sur
-    # chaque architecture, jamais reconstruites ; un index les réunit
+    # chaque architecture, jamais reconstruites ; un index les réunit. Mêmes étapes pour
+    # l'application et le proxy de sortie (PR C3)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint, types, audit, tests, chart, image]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: application
+            artefact: image
+            locale: cdg:verification
+            depot: ""
+          - image: proxy de sortie
+            artefact: proxy
+            locale: cdg-proxy:verification
+            depot: /proxy-sortie
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -244,11 +282,13 @@ jobs:
       id-token: write # identité OIDC du workflow : signature sans clé, attestations
       attestations: write # attestations de provenance et d'inventaire
     env:
-      IMAGE: ghcr.io/${{ github.repository }}
+      IMAGE: ghcr.io/${{ github.repository }}${{ matrix.depot }}
+      ARTEFACT: ${{ matrix.artefact }}
+      LOCALE: ${{ matrix.locale }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: image-* # un dossier par architecture : image-amd64, image-arm64
+          pattern: ${{ matrix.artefact }}-* # un dossier par architecture (image-amd64…)
           path: ${{ runner.temp }}/chaine
       - name: Connexion à ghcr.io (jeton du workflow ; droit packages limité à ce job)
         env:
@@ -258,9 +298,9 @@ jobs:
         run: |
           docker version --format 'Docker {{.Server.Version}}'
           for arch in amd64 arm64; do
-            docker load --input "$RUNNER_TEMP/chaine/image-$arch/image.tar"
-            docker tag cdg:verification "$IMAGE:sha-$GITHUB_SHA-$arch"
-            docker image rm cdg:verification
+            docker load --input "$RUNNER_TEMP/chaine/$ARTEFACT-$arch/image.tar"
+            docker tag "$LOCALE" "$IMAGE:sha-$GITHUB_SHA-$arch"
+            docker image rm "$LOCALE"
             docker push "$IMAGE:sha-$GITHUB_SHA-$arch"
             digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA-$arch" \
               --format '{{json .Manifest}}' | jq -r .digest)"
@@ -305,7 +345,7 @@ jobs:
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ env.DIGEST_AMD64 }}
-          sbom-path: ${{ runner.temp }}/chaine/image-amd64/sbom.spdx.json
+          sbom-path: ${{ runner.temp }}/chaine/${{ matrix.artefact }}-amd64/sbom.spdx.json
           push-to-registry: true
           create-storage-record: false
       - name: Attestation de l'inventaire arm64 (SPDX 2.3, Syft), celui qui a été scanné
@@ -313,7 +353,7 @@ jobs:
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ env.DIGEST_ARM64 }}
-          sbom-path: ${{ runner.temp }}/chaine/image-arm64/sbom.spdx.json
+          sbom-path: ${{ runner.temp }}/chaine/${{ matrix.artefact }}-arm64/sbom.spdx.json
           push-to-registry: true
           create-storage-record: false
       - name: Vérification de ce qui est publié (signatures, provenance, inventaires)
@@ -335,7 +375,7 @@ jobs:
       - name: Empreintes publiées ; le chart référence celle de l'index
         run: |
           {
-            echo "### Image publiée"
+            echo "### Image publiée : $IMAGE"
             echo
             echo "- index : \`$IMAGE@$DIGEST\`"
             echo "- amd64 : \`$IMAGE@$DIGEST_AMD64\`"

@@ -18,6 +18,7 @@ de failles de Grype (gardée dans le volume Docker `cdg-grype-db`).
 """
 
 import argparse
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -108,12 +109,31 @@ POLICIES: dict[str, Cosign | GitHubAttestation] = {
 
 
 def bases(dockerfile: Path) -> list[str]:
-    """Images de base (FROM), dans l'ordre du Dockerfile."""
-    found = []
+    """Images de base (FROM), dans l'ordre du Dockerfile, chacune une fois. `FROM etape`
+    reprend une étape précédente, y compris choisie par une variable (`go-${TARGETARCH}`) :
+    ce n'est pas une base. Une variable qui ne désigne aucune étape est refusée : la base
+    ne serait pas vérifiable."""
+    found: list[str] = []
+    stages: list[str] = []
     for line in dockerfile.read_text(encoding="utf-8").splitlines():
         words = line.split()
-        if words and words[0].upper() == "FROM":
-            found.append(next(w for w in words[1:] if not w.startswith("--")))
+        if not words or words[0].upper() != "FROM":
+            continue
+        rest = [w for w in words[1:] if not w.startswith("--")]
+        image = rest[0]
+        # une variable (${VAR} ou $VAR) peut désigner n'importe quel nom d'étape
+        pattern = re.sub(r"\\\$\\\{\w+\\\}|\\\$\w+", "[^/:@]+", re.escape(image))
+        is_stage = any(re.fullmatch(pattern, stage) for stage in stages)
+        if len(rest) >= 3 and rest[1].upper() == "AS":
+            stages.append(rest[2])
+        if is_stage:
+            continue
+        if "$" in image:
+            raise ValueError(
+                f"base choisie par une variable qui ne désigne aucune étape : {image}"
+            )
+        if image not in found:
+            found.append(image)
     return found
 
 

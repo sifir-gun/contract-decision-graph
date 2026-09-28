@@ -110,5 +110,9 @@ def test_image_construite_comme_en_ci():
     local = docker_builds(SCRIPT.read_text(encoding="utf-8").splitlines())
     assert ci and local == ci, "construction de l'image différente en CI et en local"
     tag = ci[0].split("--tag ")[1].split()[0]
+    proxy = ci[1].split("--tag ")[1].split()[0]  # proxy de sortie (PR C3)
     checks = [s["run"] for s in job["steps"] if "pytest" in s.get("run", "")]
-    assert checks == [f"uv run --no-sync pytest -m image --image {tag}"]
+    assert checks == [
+        f"uv run --no-sync pytest -m image --image {tag}",
+        f"uv run --no-sync pytest -m proxy --proxy {proxy} --image {tag}",
+    ]

@@ -45,6 +45,7 @@ markers = [
     "image: vérifie l'image Docker construite ; exclu par défaut, activé par --image ÉTIQUETTE",
     "modele: vérifie l'image du modèle d'embedding ; exclu par défaut, activé par --modele ÉTIQUETTE (et --image)",
     "chart: rend le chart Helm (helm requis) ; exclu par défaut, activé par --chart",
+    "proxy: vérifie l'image du proxy de sortie ; exclu par défaut, activé par --proxy ÉTIQUETTE (et --image)",
 ]
 
 [dependency-groups]

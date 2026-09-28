@@ -54,5 +54,10 @@ docker build --tag cdg:verification .
 uv run --no-sync pytest -m image --image cdg:verification
 uv run --no-sync python scripts/chaine.py inventaire cdg:verification --dossier "$RUNNER_TEMP/chaine"
 uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"
+uv run --no-sync python scripts/chaine.py bases --dockerfile docker/proxy-sortie/Dockerfile
+docker build --file docker/proxy-sortie/Dockerfile --tag cdg-proxy:verification docker/proxy-sortie
+uv run --no-sync pytest -m proxy --proxy cdg-proxy:verification --image cdg:verification
+uv run --no-sync python scripts/chaine.py inventaire cdg-proxy:verification --dossier "$RUNNER_TEMP/chaine-proxy"
+uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"
 
 echo "==> vérifications de la CI : toutes passées"
