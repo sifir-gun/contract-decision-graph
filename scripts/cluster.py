@@ -396,6 +396,37 @@ def _secret(
     kubectl("apply", "-f", "-", stdin=json.dumps(manifest), what=f"Secret {name}")
 
 
+def generated(
+    namespace: str,
+    name: str,
+    generators: dict[str, Callable[[], str]],
+    *,
+    get: Callable[..., str] | None = None,
+) -> dict[str, str]:
+    """Valeurs d'un Secret tiré au hasard : celles du Secret s'il existe déjà (installation
+    relancée), sinon tirées. Une clé attendue qui manque est une erreur, jamais retirée."""
+    found = (get or kubectl)(
+        "get",
+        "secret",
+        name,
+        "-n",
+        namespace,
+        "-o",
+        "json",
+        "--ignore-not-found",
+        what=f"Secret {name}",
+    )
+    if not found.strip():
+        return {key: generate() for key, generate in generators.items()}
+    data = json.loads(found).get("data") or {}
+    missing = sorted(set(generators) - set(data))
+    if missing:
+        raise ClusterError(
+            f"Secret {name} existant sans {', '.join(missing)} : à supprimer ou compléter"
+        )
+    return {key: base64.b64decode(data[key]).decode() for key in generators}
+
+
 def _namespaces() -> None:
     for namespace, level in (
         (NAMESPACE, "restricted"),
@@ -465,15 +496,28 @@ def install(profile: Profile, folder: Path) -> None:
     images = json.loads((folder / "images.json").read_text(encoding="utf-8"))
     _apply_components()
     _namespaces()
-    access, secret = secrets.token_hex(16), secrets.token_urlsafe(32)
-    _storage(access, secret)
-    _secret(NAMESPACE, "cdg-s3", {"ACCESS_KEY_ID": access, "ACCESS_SECRET_KEY": secret})
+    # secrets tirés au premier passage, repris ensuite (installation rejouable)
+    s3 = generated(
+        NAMESPACE,
+        "cdg-s3",
+        {
+            "ACCESS_KEY_ID": lambda: secrets.token_hex(16),
+            "ACCESS_SECRET_KEY": lambda: secrets.token_urlsafe(32),
+        },
+    )
+    _storage(s3["ACCESS_KEY_ID"], s3["ACCESS_SECRET_KEY"])
+    _secret(NAMESPACE, "cdg-s3", s3)
     # rôle géré par CloudNativePG (chart cdg-postgres) : Secret basic-auth, rechargé
     # aussitôt qu'il change (rotation) ; l'application en lit la clé password
+    application = generated(
+        NAMESPACE,
+        "cdg-base-application",
+        {"username": lambda: "app_role", "password": lambda: secrets.token_urlsafe(24)},
+    )
     _secret(
         NAMESPACE,
         "cdg-base-application",
-        {"username": "app_role", "password": secrets.token_urlsafe(24)},
+        application,
         kind="kubernetes.io/basic-auth",
         labels={"cnpg.io/reload": "true"},
     )

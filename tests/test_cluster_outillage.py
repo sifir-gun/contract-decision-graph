@@ -4,6 +4,7 @@ empreinte, profils CI et local réduit."""
 
 import base64
 import importlib.util
+import json
 import re
 from pathlib import Path
 
@@ -111,6 +112,35 @@ def test_attente_de_l_application_couvre_la_tache_d_ingestion():
     )
     assert module.APPLICATION_WAIT == f"{delai}s"
     assert ci_job()["timeout-minutes"] >= int(delai) // 60 + 30
+
+
+def test_installation_relancee_reprend_les_secrets_deja_crees():
+    """`installer` est rejouable : les secrets tirés au premier passage (identités S3,
+    mot de passe d'app_role) sont repris, jamais retirés en silence. SeaweedFS ne relit
+    ses identités qu'au démarrage : une nouvelle clé casserait les sauvegardes."""
+    module = cluster()
+    generators = {"ACCESS_KEY_ID": lambda: "neuve", "ACCESS_SECRET_KEY": lambda: "neuf"}
+
+    def existing(*args, what):
+        assert args[:2] == ("get", "secret") and "--ignore-not-found" in args
+        data = {"ACCESS_KEY_ID": "ancienne", "ACCESS_SECRET_KEY": "ancien"}
+        encoded = {k: base64.b64encode(v.encode()).decode() for k, v in data.items()}
+        return json.dumps({"data": encoded})
+
+    assert module.generated("cdg", "cdg-s3", generators, get=existing) == {
+        "ACCESS_KEY_ID": "ancienne",
+        "ACCESS_SECRET_KEY": "ancien",
+    }
+    assert module.generated("cdg", "cdg-s3", generators, get=lambda *a, what: "") == {
+        "ACCESS_KEY_ID": "neuve",
+        "ACCESS_SECRET_KEY": "neuf",
+    }
+
+    def partial(*args, what):
+        return json.dumps({"data": {"ACCESS_KEY_ID": base64.b64encode(b"a").decode()}})
+
+    with pytest.raises(module.ClusterError, match="ACCESS_SECRET_KEY"):
+        module.generated("cdg", "cdg-s3", generators, get=partial)
 
 
 def test_version_de_k3d_verifiee():
