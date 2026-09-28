@@ -3,7 +3,7 @@
   "title": "Valeurs du chart cdg-postgres",
   "type": "object",
   "additionalProperties": false,
-  "required": ["nom", "instances", "image", "base", "roleApplicatif", "stockage", "ressources", "sauvegardes", "reseau"],
+  "required": ["nom", "instances", "image", "base", "roleApplicatif", "restauration", "stockage", "ressources", "sauvegardes", "reseau"],
   "definitions": {
     "quantiteCpu": {"type": "string", "pattern": "^([0-9]+m|[0-9]+(\\.[0-9]+)?)$"},
     "quantiteMemoire": {"type": "string", "pattern": "^[0-9]+(Ki|Mi|Gi)$"},
@@ -63,6 +63,12 @@
         "nom": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
         "secret": {"$ref": "#/definitions/nomDns"}
       }
+    },
+    "restauration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {"source": {"type": "string", "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$"}}
     },
     "stockage": {
       "type": "object",

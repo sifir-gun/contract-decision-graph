@@ -27,6 +27,11 @@ roleApplicatif:
   nom: app_role
   secret: cdg-base-application
 
+# Restauration : nom du cluster dont les sauvegardes amorcent celui-ci (vide : base neuve).
+# Le cluster restauré archive ses propres WAL, sous son nom (docs/exploitation.md).
+restauration:
+  source: ""
+
 stockage:
   taille: 10Gi
   classe: ""  # vide : la classe par défaut du cluster

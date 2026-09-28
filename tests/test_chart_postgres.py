@@ -215,3 +215,41 @@ def test_role_applicatif_gere_par_cloudnativepg(rendu):
             "passwordSecret": {"name": "cdg-base-application"},
         }
     ]
+
+
+@pytest.mark.chart
+def test_restauration_depuis_les_sauvegardes_d_un_autre_cluster():
+    """Nouveau cluster amorcé depuis les sauvegardes de la source (lecture seule), qui
+    archive ses propres WAL sous son nom : jamais par-dessus ceux de la source."""
+    docs = render(
+        "--set",
+        "nom=cdg-postgres-restauree",
+        "--set",
+        "restauration.source=cdg-postgres",
+    )
+    [cluster] = of_kind(docs, "Cluster")
+    spec = cluster["spec"]
+    assert spec["bootstrap"] == {"recovery": {"source": "origine"}}
+    assert spec["externalClusters"] == [
+        {
+            "name": "origine",
+            "plugin": {
+                "name": PLUGIN,
+                "parameters": {
+                    "barmanObjectName": "cdg-postgres-sauvegardes",
+                    "serverName": "cdg-postgres",
+                },
+            },
+        }
+    ]
+    [plugin] = spec["plugins"]
+    assert plugin["parameters"] == {
+        "barmanObjectName": "cdg-postgres-restauree-sauvegardes"
+    }
+
+
+@pytest.mark.chart
+def test_sans_restauration_base_neuve(rendu):
+    [cluster] = of_kind(rendu, "Cluster")
+    assert "initdb" in cluster["spec"]["bootstrap"]
+    assert "externalClusters" not in cluster["spec"]

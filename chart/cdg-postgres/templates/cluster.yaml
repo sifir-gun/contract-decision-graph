@@ -13,9 +13,24 @@ spec:
   imageName: {{ printf "%s:%s@%s" .Values.image.repository .Values.image.tag .Values.image.digest }}
   enableSuperuserAccess: true
   bootstrap:
+    {{- if .Values.restauration.source }}
+    # restauration : les sauvegardes de la source, en lecture seule
+    recovery:
+      source: origine
+    {{- else }}
     initdb:
       database: {{ .Values.base.nom }}
       owner: {{ .Values.base.proprietaire }}
+    {{- end }}
+  {{- with .Values.restauration.source }}
+  externalClusters:
+    - name: origine
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: {{ . }}-sauvegardes
+          serverName: {{ . }}
+  {{- end }}
   storage:
     size: {{ .Values.stockage.taille }}
     {{- with .Values.stockage.classe }}
