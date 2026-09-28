@@ -23,6 +23,19 @@ spec:
     {{- end }}
   resources:
     {{- toYaml .Values.ressources | nindent 4 }}
+  # rôle de l'application : déclaré, comparé au catalogue et corrigé par l'opérateur,
+  # sans aucun privilège ; les migrations (setup-db) lui donnent ses droits
+  managed:
+    roles:
+      - name: {{ .Values.roleApplicatif.nom }}
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        replication: false
+        passwordSecret:
+          name: {{ .Values.roleApplicatif.secret }}
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true

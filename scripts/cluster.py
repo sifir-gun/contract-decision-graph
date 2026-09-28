@@ -357,12 +357,19 @@ def _apply_components() -> None:
         print(f"composant prêt : {name}")
 
 
-def _secret(namespace: str, name: str, data: dict[str, str]) -> None:
+def _secret(
+    namespace: str,
+    name: str,
+    data: dict[str, str],
+    *,
+    kind: str = "Opaque",
+    labels: dict[str, str] | None = None,
+) -> None:
     manifest = {
         "apiVersion": "v1",
         "kind": "Secret",
-        "metadata": {"name": name, "namespace": namespace},
-        "type": "Opaque",
+        "metadata": {"name": name, "namespace": namespace, "labels": labels or {}},
+        "type": kind,
         "stringData": data,
     }
     kubectl("apply", "-f", "-", stdin=json.dumps(manifest), what=f"Secret {name}")
@@ -440,7 +447,15 @@ def install(profile: Profile, folder: Path) -> None:
     access, secret = secrets.token_hex(16), secrets.token_urlsafe(32)
     _storage(access, secret)
     _secret(NAMESPACE, "cdg-s3", {"ACCESS_KEY_ID": access, "ACCESS_SECRET_KEY": secret})
-    _secret(NAMESPACE, "cdg-base-application", {"password": secrets.token_urlsafe(24)})
+    # rôle géré par CloudNativePG (chart cdg-postgres) : Secret basic-auth, rechargé
+    # aussitôt qu'il change (rotation) ; l'application en lit la clé password
+    _secret(
+        NAMESPACE,
+        "cdg-base-application",
+        {"username": "app_role", "password": secrets.token_urlsafe(24)},
+        kind="kubernetes.io/basic-auth",
+        labels={"cnpg.io/reload": "true"},
+    )
     _secret(NAMESPACE, "cdg-mistral", {"MISTRAL_API_KEY": "cle-du-serveur-factice"})
     helm(
         "upgrade",

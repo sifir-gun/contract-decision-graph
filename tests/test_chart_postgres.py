@@ -195,3 +195,23 @@ def test_exclusions_de_kube_linter_justifiees(rendu):
         "dangling-networkpolicypeer-podselector",
     }
     assert all(len(reason.split()) >= 5 for reason in ignored.values())
+
+
+@pytest.mark.chart
+def test_role_applicatif_gere_par_cloudnativepg(rendu):
+    """app_role : déclaré dans le Cluster, mot de passe lu dans le Secret basic-auth que
+    l'application lit aussi (clé password), haché par l'opérateur, rotation comprise
+    (étiquette cnpg.io/reload du Secret) ; setup-db le trouve et ne le crée pas."""
+    [cluster] = of_kind(rendu, "Cluster")
+    assert cluster["spec"]["managed"]["roles"] == [
+        {
+            "name": "app_role",
+            "ensure": "present",
+            "login": True,
+            "superuser": False,
+            "createdb": False,
+            "createrole": False,
+            "replication": False,
+            "passwordSecret": {"name": "cdg-base-application"},
+        }
+    ]

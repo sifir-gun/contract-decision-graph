@@ -19,6 +19,14 @@ base:
   nom: cdg
   proprietaire: cdg
 
+# Rôle de l'application, géré par l'opérateur : mot de passe lu dans ce Secret, de type
+# kubernetes.io/basic-auth (username : app_role, password), étiqueté cnpg.io/reload: "true"
+# pour que tout changement soit appliqué aussitôt (rotation). L'application lit le même
+# Secret (clé password). L'opérateur hache le mot de passe avant de l'envoyer.
+roleApplicatif:
+  nom: app_role
+  secret: cdg-base-application
+
 stockage:
   taille: 10Gi
   classe: ""  # vide : la classe par défaut du cluster
