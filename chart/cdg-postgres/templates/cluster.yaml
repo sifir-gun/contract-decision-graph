@@ -1,0 +1,30 @@
+# Cluster CloudNativePG : PostgreSQL 16 avec pgvector, WAL archivés par le greffon Barman
+# Cloud. Le superutilisateur (Secret <nom>-superuser) sert aux seules migrations
+# (setup-db : extension vector, rôle app_role) ; l'application se connecte en app_role.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.nom }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-postgres.etiquettes" . | nindent 4 }}
+spec:
+  instances: {{ .Values.instances }}
+  imageName: {{ printf "%s@%s" .Values.image.repository .Values.image.digest }}
+  enableSuperuserAccess: true
+  bootstrap:
+    initdb:
+      database: {{ .Values.base.nom }}
+      owner: {{ .Values.base.proprietaire }}
+  storage:
+    size: {{ .Values.stockage.taille }}
+    {{- with .Values.stockage.classe }}
+    storageClass: {{ . }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.ressources | nindent 4 }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ .Values.nom }}-sauvegardes

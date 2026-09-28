@@ -1,0 +1,59 @@
+# Valeurs du chart cdg-postgres (ADR 005, PR C3). Schéma : values.schema.json.
+# Prérequis du cluster : CloudNativePG (1.26 au moins), le greffon Barman Cloud et
+# cert-manager, que le greffon exige (README).
+
+# Nom du cluster : ses services s'appellent cdg-postgres-rw, -ro, -r (base.hote de
+# l'application) ; son superutilisateur, le Secret cdg-postgres-superuser.
+nom: cdg-postgres
+instances: 2
+
+# PostgreSQL 16.15, image « standard » de CloudNativePG : pgvector compris.
+image:
+  repository: ghcr.io/cloudnative-pg/postgresql
+  digest: sha256:46ee4bd3d36f4cbbc95a883487a596f17471e6bc9da2e8218eafdde8d20c3270
+
+base:
+  nom: cdg
+  proprietaire: cdg
+
+stockage:
+  taille: 10Gi
+  classe: ""  # vide : la classe par défaut du cluster
+
+ressources:
+  requests: {cpu: 250m, memory: 512Mi}
+  limits: {cpu: "2", memory: 2Gi}
+
+# Sauvegardes : WAL archivés en continu, sauvegarde complète planifiée, par le greffon
+# Barman Cloud, vers un stockage objet compatible S3.
+sauvegardes:
+  destination: s3://cdg-sauvegardes/
+  adresse: ""  # endpointURL ; vide : AWS S3
+  identifiants:
+    secret: cdg-s3
+    cleAcces: ACCESS_KEY_ID
+    cleSecret: ACCESS_SECRET_KEY
+  # format de CloudNativePG : secondes, minutes, heures, jour, mois, jour de la semaine
+  planification: "0 0 3 * * *"
+  retention: 30d
+  compressionWal: gzip
+  ressourcesAnnexe:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+
+# Règles réseau des instances.
+reseau:
+  # pods qui se connectent à la base : l'interface et les tâches de l'application
+  clients:
+    app.kubernetes.io/name: contract-decision-graph
+  # espace de noms de l'opérateur, qui lit l'état des instances (port 8000)
+  operateur: cnpg-system
+  # serveur d'API de Kubernetes : le gestionnaire d'instance le consulte (443 par le
+  # service kubernetes, 6443 après traduction vers le nœud qui le porte)
+  portsApi: [443, 6443]
+  dns:
+    espaceDeNoms: kube-system
+    selecteur:
+      k8s-app: kube-dns
+  # stockage objet dans le cluster (profil de test : SeaweedFS) ; sinon, S3 sur Internet
+  stockageInterne: {}

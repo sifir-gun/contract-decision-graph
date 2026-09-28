@@ -25,6 +25,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CHART = ROOT / "chart" / "contract-decision-graph"
 PROXY_CHART = ROOT / "chart" / "cdg-proxy"
+POSTGRES_CHART = ROOT / "chart" / "cdg-postgres"
+# ressources de CloudNativePG et du greffon : kubeconform n'a pas leurs schémas ; le
+# serveur d'API du cluster de test les valide (PR C3)
+CRD_KINDS = ["Cluster", "ObjectStore", "ScheduledBackup"]
 LINTER_CONFIG = ROOT / "chart"
 HELM_VERSION = "v4.3.0"
 KUBERNETES = "1.36.4"  # canal stable de k3s au 27/09/2026
@@ -60,10 +64,26 @@ PROXY_VARIANTS: dict[str, list[str]] = {
         "sortiesInternes[0].port=8080",
     ],
 }
+POSTGRES_VARIANTS: dict[str, list[str]] = {
+    "production": [],
+    "test": [
+        "--set",
+        "instances=1",
+        "--set",
+        "sauvegardes.adresse=http://seaweedfs.cdg-stockage.svc.cluster.local:8333",
+        "--set",
+        "reseau.stockageInterne.espaceDeNoms=cdg-stockage",
+        "--set",
+        "reseau.stockageInterne.selecteur.app=seaweedfs",
+        "--set",
+        "reseau.stockageInterne.port=8333",
+    ],
+}
 # chaque chart, ses variantes, le préfixe de leurs rendus
 CHARTS: list[tuple[Path, dict[str, list[str]], str]] = [
     (CHART, VARIANTS, ""),
     (PROXY_CHART, PROXY_VARIANTS, "proxy-"),
+    (POSTGRES_CHART, POSTGRES_VARIANTS, "postgres-"),
 ]
 
 Run = Callable[..., subprocess.CompletedProcess[str]]
@@ -110,7 +130,8 @@ def verify(folder: Path, *, run: Run = subprocess.run) -> int:
         _checked(
             run,
             ["docker", "run", "--rm", "-v", f"{folder}:/rendu:ro", KUBECONFORM]
-            + ["-strict", "-summary", "-kubernetes-version", KUBERNETES, "/rendu"],
+            + ["-strict", "-summary", "-kubernetes-version", KUBERNETES]
+            + ["-skip", ",".join(CRD_KINDS), "/rendu"],
             "kubeconform",
         )
         # chaque variante à part : kube-linter relie les objets d'un même lot (budget

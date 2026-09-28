@@ -577,6 +577,7 @@ def test_lint_rendu_schemas_et_bonnes_pratiques(tmp_path):
     assert {chart.name for chart, _ in renders} == {
         "contract-decision-graph",
         "cdg-proxy",
+        "cdg-postgres",
     }
     lints = [c for c in run.commands if c[:2] == ["helm", "lint"]]
     assert [c[3] for c in lints] == [str(chart) for chart, _ in renders]
@@ -588,6 +589,10 @@ def test_lint_rendu_schemas_et_bonnes_pratiques(tmp_path):
     [kubeconform] = [c for c in run.commands if module.KUBECONFORM in c]
     assert {"-strict", "-summary"} <= set(kubeconform)
     assert kubeconform[kubeconform.index("-kubernetes-version") + 1] == "1.36.4"
+    # ressources propres à CloudNativePG et au greffon : schémas inconnus de kubeconform,
+    # validées par le serveur d'API du cluster de test (tests/test_cluster.py)
+    skipped = kubeconform[kubeconform.index("-skip") + 1].split(",")
+    assert skipped == ["Cluster", "ObjectStore", "ScheduledBackup"]
     # kube-linter relie les objets d'un même lot : chaque variante à part, sinon le
     # budget d'interruption du rendu réel est rapproché du Deployment de la démo (28/09)
     linters = [c for c in run.commands if module.KUBE_LINTER in c]

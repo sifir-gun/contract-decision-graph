@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Valeurs du chart cdg-postgres",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["nom", "instances", "image", "base", "stockage", "ressources", "sauvegardes", "reseau"],
+  "definitions": {
+    "quantiteCpu": {"type": "string", "pattern": "^([0-9]+m|[0-9]+(\\.[0-9]+)?)$"},
+    "quantiteMemoire": {"type": "string", "pattern": "^[0-9]+(Ki|Mi|Gi)$"},
+    "ressources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {"cpu": {"$ref": "#/definitions/quantiteCpu"}, "memory": {"$ref": "#/definitions/quantiteMemoire"}}
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {"cpu": {"$ref": "#/definitions/quantiteCpu"}, "memory": {"$ref": "#/definitions/quantiteMemoire"}}
+        }
+      }
+    },
+    "etiquettes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "nomDns": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"}
+  },
+  "properties": {
+    "nom": {"$ref": "#/definitions/nomDns"},
+    "instances": {"type": "integer", "minimum": 1},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$"},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nom", "proprietaire"],
+      "properties": {
+        "nom": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
+        "proprietaire": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"}
+      }
+    },
+    "stockage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taille", "classe"],
+      "properties": {
+        "taille": {"$ref": "#/definitions/quantiteMemoire"},
+        "classe": {"type": "string"}
+      }
+    },
+    "ressources": {"$ref": "#/definitions/ressources"},
+    "sauvegardes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["destination", "adresse", "identifiants", "planification", "retention", "compressionWal", "ressourcesAnnexe"],
+      "properties": {
+        "destination": {"type": "string", "pattern": "^s3://[a-z0-9.-]+/.*$"},
+        "adresse": {"type": "string", "pattern": "^(https?://[^/\\s@]+)?$"},
+        "identifiants": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["secret", "cleAcces", "cleSecret"],
+          "properties": {
+            "secret": {"$ref": "#/definitions/nomDns"},
+            "cleAcces": {"type": "string", "minLength": 1},
+            "cleSecret": {"type": "string", "minLength": 1}
+          }
+        },
+        "planification": {"type": "string", "pattern": "^\\S+( \\S+){5}$"},
+        "retention": {"type": "string", "pattern": "^[1-9][0-9]*[dwm]$"},
+        "compressionWal": {"enum": ["gzip", "bzip2", "snappy", "lz4", "zstd", "xz"]},
+        "ressourcesAnnexe": {"$ref": "#/definitions/ressources"}
+      }
+    },
+    "reseau": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clients", "operateur", "portsApi", "dns", "stockageInterne"],
+      "properties": {
+        "clients": {"$ref": "#/definitions/etiquettes"},
+        "operateur": {"$ref": "#/definitions/nomDns"},
+        "portsApi": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
+        "dns": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["espaceDeNoms", "selecteur"],
+          "properties": {
+            "espaceDeNoms": {"type": "string", "minLength": 1},
+            "selecteur": {"$ref": "#/definitions/etiquettes"}
+          }
+        },
+        "stockageInterne": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "espaceDeNoms": {"$ref": "#/definitions/nomDns"},
+            "selecteur": {"$ref": "#/definitions/etiquettes"},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+          }
+        }
+      }
+    }
+  }
+}

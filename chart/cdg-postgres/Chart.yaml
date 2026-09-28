@@ -1,0 +1,18 @@
+apiVersion: v2
+name: cdg-postgres
+description: >-
+  Base PostgreSQL de contract-decision-graph : cluster CloudNativePG avec pgvector,
+  sauvegardes vers un stockage objet (greffon Barman Cloud), règles réseau (ADR 005, PR C3).
+type: application
+version: 0.1.0
+# PostgreSQL de l'image (16.15-standard-trixie, pgvector compris)
+appVersion: "16.15"
+kubeVersion: ">=1.33.0-0"
+home: https://github.com/sifir-gun/contract-decision-graph
+sources:
+  - https://github.com/sifir-gun/contract-decision-graph
+  - https://github.com/cloudnative-pg/cloudnative-pg
+  - https://github.com/cloudnative-pg/plugin-barman-cloud
+maintainers:
+  - name: sifir-gun
+    url: https://github.com/sifir-gun
