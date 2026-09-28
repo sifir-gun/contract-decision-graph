@@ -79,6 +79,8 @@ spec:
             - {{ .Values.web.connexions | quote }}
             - --fils-embedding
             - {{ include "cdg.fils" $ressources | quote }}
+            - --lot-embedding
+            - {{ .Values.embedding.lot | quote }}
             {{- end }}
             - web
             {{- if not $reel }}

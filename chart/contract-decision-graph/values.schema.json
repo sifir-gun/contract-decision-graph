@@ -3,7 +3,7 @@
   "title": "Valeurs du chart contract-decision-graph",
   "type": "object",
   "additionalProperties": false,
-  "required": ["mode", "image", "modele", "replicas", "web", "ressources", "tmp", "repartition", "budgetInterruption", "base", "llm", "proxy", "dns", "taches", "configuration", "espaceDeNoms"],
+  "required": ["mode", "image", "modele", "replicas", "web", "ressources", "embedding", "tmp", "repartition", "budgetInterruption", "base", "llm", "proxy", "dns", "taches", "configuration", "espaceDeNoms"],
   "definitions": {
     "empreinte": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "depot": {"type": "string", "pattern": "^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$"},
@@ -103,6 +103,12 @@
         "jobs": {"$ref": "#/definitions/ressources"},
         "copie": {"$ref": "#/definitions/ressources"}
       }
+    },
+    "embedding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lot"],
+      "properties": {"lot": {"type": "integer", "minimum": 1}}
     },
     "tmp": {
       "type": "object",

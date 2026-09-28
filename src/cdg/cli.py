@@ -59,8 +59,9 @@ def today() -> date:
 
 # taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
 POOL = {"size": connexions.DEFAULT_SIZE}
-# fils de calcul de l'embedder : option --fils-embedding, ou CDG_FILS_EMBEDDING (main)
-EMBEDDER_THREADS: dict[str, int | None] = {"threads": None}
+# fils de calcul et taille des lots de l'embedder : options --fils-embedding et
+# --lot-embedding, ou CDG_FILS_EMBEDDING et CDG_LOT_EMBEDDING (main)
+EMBEDDER_THREADS: dict[str, int | None] = {"threads": None, "batch_size": None}
 
 
 @functools.cache
@@ -92,6 +93,7 @@ def process_embedder(config: DecisionConfig) -> fastembed.FastembedEmbedder:
                 config.embedding,
                 settings.embedding_cache_dir(),
                 threads=EMBEDDER_THREADS["threads"],
+                batch_size=EMBEDDER_THREADS["batch_size"],
             )
         return _EMBEDDERS[key]
 
@@ -209,6 +211,7 @@ def _ingest(args: argparse.Namespace) -> dict:
         config.embedding,
         settings.embedding_cache_dir(),
         threads=EMBEDDER_THREADS["threads"],
+        batch_size=EMBEDDER_THREADS["batch_size"],
     )
     rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
     summary = rag_store.sync(conninfo.admin_conninfo(), rows, embedder.model)
@@ -532,6 +535,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="fils de calcul de l'embedder (ou CDG_FILS_EMBEDDING) : la limite CPU du pod "
         "(mesure dans l'ADR 005) ; par défaut, un par cœur visible (onnxruntime)",
     )
+    parser.add_argument(
+        "--lot-embedding",
+        type=_positive,
+        default=os.environ.get("CDG_LOT_EMBEDDING"),
+        help="textes embarqués à la fois (ou CDG_LOT_EMBEDDING) : borne le pic mémoire de "
+        "l'ingestion (mesure dans l'ADR 005) ; par défaut, celui de fastembed (256)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
         "setup-db",
@@ -720,6 +730,7 @@ def main(argv: list[str] | None = None) -> int:
     handler: Callable[[argparse.Namespace], dict] = args.handler
     POOL["size"] = args.connexions
     EMBEDDER_THREADS["threads"] = args.fils_embedding
+    EMBEDDER_THREADS["batch_size"] = args.lot_embedding
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
         logging.config.dictConfig(journaux.config(args.journaux))

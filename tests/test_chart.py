@@ -387,6 +387,20 @@ def test_interface_disponible_arret_propre_et_repartie(reel):
 
 
 @pytest.mark.chart
+def test_lots_de_l_embedder_et_memoire_au_dessus_des_pics_mesures(reel):
+    """Mesure du 28/09 (ADR 005) : 2,55 à 2,65 Gio au chargement du modèle, 2,9 Gio pour
+    un lot de 16 passages longs, plus de 3,7 Gio pour 64 ; fastembed prend 256 par défaut.
+    Les limites de 3 et 3,5 Gio tuaient l'interface au démarrage et l'ingestion."""
+    web = of_kind(reel, "Deployment")[0]["spec"]["template"]["spec"]["containers"][0]
+    assert web["args"][web["args"].index("--lot-embedding") + 1] == "16"
+    assert web["resources"]["limits"]["memory"] == "4Gi"
+    ingestion = named(reel, "Job", "-ingestion")["spec"]["template"]["spec"]
+    job = ingestion["containers"][0]
+    assert job["args"][job["args"].index("--lot-embedding") + 1] == "16"
+    assert job["resources"]["limits"]["memory"] == "4Gi"
+
+
+@pytest.mark.chart
 def test_fils_de_l_embedder_egaux_a_la_limite_cpu(reel):
     web = of_kind(reel, "Deployment")[0]["spec"]["template"]["spec"]["containers"][0]
     args = web["args"]

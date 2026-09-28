@@ -48,20 +48,28 @@ web:
 # La limite CPU est un entier : elle fixe aussi le nombre de fils de calcul de l'embedder.
 ressources:
   reel:
+    # 1,55 Gio une fois prêt, 2,55 à 2,65 Gio au chargement du modèle (pic mesuré)
     requests: {cpu: "1", memory: 2Gi}
-    limits: {cpu: "2", memory: 3Gi}
+    limits: {cpu: "2", memory: 4Gi}
   demo:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {cpu: "1", memory: 256Mi}
   ingestion:
+    # 2,9 Gio au pic avec des lots de 16 (embedding.lot)
     requests: {cpu: "2", memory: 3Gi}
-    limits: {cpu: "2", memory: 3584Mi}
+    limits: {cpu: "2", memory: 4Gi}
   jobs:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: "1", memory: 512Mi}
   copie:
     requests: {cpu: 100m, memory: 32Mi}
     limits: {cpu: "1", memory: 64Mi}
+
+# Taille des lots d'embeddings (mesure du 28/09, ADR 005) : fastembed en prend 256 par
+# défaut, et l'ingestion dépassait toute limite raisonnable ; 16 bornent son pic à 2,9 Gio
+# (64 : plus de 3,7 Gio).
+embedding:
+  lot: 16
 
 # Volume éphémère /tmp (système de fichiers racine en lecture seule).
 tmp:
