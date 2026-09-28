@@ -2328,3 +2328,17 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Vérifié sur le poste, sans rien publier** : l'aller-retour `docker save` puis `docker load` rend la même image (même identifiant) ; l'empreinte d'une image publique se lit par la commande du job. La première exécution réelle du job se lit après la fusion.
 - **À décider avec la PR C** : visibilité du paquet (privé à la première publication, public de façon irréversible), ou secret de tirage dans le chart.
 
+### Données fictives : l'identité de signature de distroless
+
+- **Constat** : `tests/test_donnees_fictives.py` refuse toute adresse hors des domaines réservés ; l'identité qui signe les images distroless (`keyless@` sur `distroless.iam.gserviceaccount.com`), écrite dans les tests de la vérification des bases, en a la forme. Les commits `148ca16` à `4ffde95` laissaient donc ce test en échec : seuls les tests ciblés avaient été lancés à chacun, pas toute la suite. Leçon : toute la suite à chaque commit.
+- **Décision** : ce n'est pas le courriel d'une personne, mais le compte de service public du projet distroless, qu'il faut écrire tel quel pour vérifier sa signature. Exception étroite, pour ce seul domaine, justifiée dans le test ; un second test échoue si elle ne sert plus.
+
+### Image du modèle d'embedding, workflow à part
+
+- **Constat en chemin** : le dépôt amont (`Qdrant/multilingual-e5-large-onnx`) est passé de la révision `66076b8d…` (cache local, corpus indexé) à `ac6781cd…` le 24/09/2026. Seul le README a changé (licence Apache-2.0 remplacée par MIT) : les six fichiers chargés ont les mêmes empreintes. Mais fastembed télécharge toujours la dernière révision : sans contrôle, un changement de poids aurait faussé la recherche sans rien signaler (requêtes et corpus indexé par deux modèles différents).
+- **Décision** : figer le contenu, pas la révision. `docker/modele/empreintes.sha256` (SHA-256 des six fichiers ; les trois gros correspondent aux empreintes LFS publiées) et `scripts/modele.py verifier`, avant toute construction.
+- **Tests d'abord** (`tests/test_modele.py`) : manifeste des fichiers que charge l'application ; vérification d'un cache conforme, puis refus d'un fichier modifié, absent ou en trop ; Dockerfile `FROM scratch` sans `RUN`, licence MIT et notice ; notice qui cite les sources et reprend la licence de microsoft/unilm ; workflow à la demande et sur les pull requests qui le touchent, lecture seule pour la vérification, écriture pour la seule publication depuis `main`, téléchargement vérifié avant la construction, signature et attestation ; sur l'image construite, contenu conforme, liens physiques conservés, poids chargés par l'application sans réseau et en lecture seule.
+- **Vérifié sur le poste** : image construite depuis le cache local en 1 min (2,25 Go : les liens physiques sont gardés, sinon 4,5 Go) ; les trois tests de bout en bout passent en 45 s, dont le chargement des poids avec `--network none`, système de fichiers racine en lecture seule.
+- **Écarté** : le montage d'image de Docker 29 (`--mount type=image`), qui fonctionne mais reste expérimental ; le test extrait le contenu de l'image (`docker export`) et le monte en lecture seule.
+- **Écart avec le plan** : le plan disait « révision et empreintes figées » ; seules les empreintes le sont, pour la raison ci-dessus.
+

@@ -37,7 +37,7 @@ Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans u
 
 ### Modèle d'embedding et corpus
 
-- [ ] **Poids du modèle d'embedding** (environ 2,2 Go) livrés avec l'application, dans l'image ou sur un volume, sans téléchargement au démarrage. *Fait quand* l'application démarre sans réseau vers Hugging Face.
+- [x] **Poids du modèle d'embedding**, côté image (28/09, PR B : image dédiée, figée par les empreintes de ses fichiers, testée sans réseau ; montage dans les pods en PR C) (environ 2,2 Go) livrés avec l'application, dans l'image ou sur un volume, sans téléchargement au démarrage. *Fait quand* l'application démarre sans réseau vers Hugging Face.
 - [ ] **Indexation du corpus** (`ingest`) comme tâche de déploiement, rejouable, identifiants administrateur.
 
 ## Tenir dans la durée (phase 3)
