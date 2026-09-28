@@ -13,7 +13,8 @@ le schéma demandé (`response_format.json_schema.name`) :
   texte neutre qui ne nomme ni décision ni article.
 
 Pour les scénarios : `POST /controle` règle un délai avant chaque réponse
-(`{"delai": secondes}`), `GET /controle` rend le délai, les appels par schéma et les refus.
+(`{"delai": secondes}`), `GET /controle` rend le délai, les requêtes reçues (comptées à l'arrivée), les appels
+réussis par schéma et les refus.
 Bibliothèque standard seulement.
 """
 
@@ -45,6 +46,7 @@ class State:
         self.lock = threading.Lock()
         self.delay = 0.0
         self.calls: dict[str, int] = {}
+        self.received = 0  # à l'arrivée, avant le délai : une analyse en cours se voit
         self.refused = 0
         _, contracts = demo_set.load()
         self.by_text = {
@@ -153,6 +155,7 @@ def handler(state: State) -> type[BaseHTTPRequestHandler]:
             with state.lock:
                 body = {
                     "delai": state.delay,
+                    "recues": state.received,
                     "appels": dict(state.calls),
                     "refus": state.refused,
                 }
@@ -174,6 +177,7 @@ def handler(state: State) -> type[BaseHTTPRequestHandler]:
                 m["content"] for m in request["messages"] if m["role"] == "user"
             )
             with state.lock:
+                state.received += 1
                 delay = state.delay
             time.sleep(delay)
             try:

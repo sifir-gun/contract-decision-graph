@@ -135,7 +135,29 @@ def test_delai_reglable_et_appels_comptes(factice):
     assert time.monotonic() - start >= 0.4
     counts = control(factice)
     assert counts["appels"] == {"RewriteOutput": 1}
+    assert counts["recues"] == 1  # comptée à l'arrivée, avant le délai
     assert counts["delai"] == 0.4
+
+
+def test_requete_comptee_des_son_arrivee(factice):
+    """Une analyse en cours se voit avant la réponse : le scénario d'arrêt coupe le pod à
+    ce moment-là."""
+    control(factice, {"delai": 1.0})
+    worker = threading.Thread(
+        target=provider(factice).structured,
+        kwargs={
+            "tier": "light",
+            "system": "s",
+            "user": "Requêtes déjà essayées :\n- q",
+            "schema": RewriteOutput,
+            "node": "r",
+        },
+    )
+    worker.start()
+    time.sleep(0.3)
+    counts = control(factice)
+    assert counts["recues"] == 1 and counts["appels"] == {}
+    worker.join(5)
 
 
 # --- image de test à part ----------------------------------------------------------------

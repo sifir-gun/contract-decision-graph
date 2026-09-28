@@ -302,7 +302,7 @@ def test_image_de_test_du_serveur_factice_repond(image):
                     body = json.load(response)
             except OSError:
                 time.sleep(0.5)
-        assert body == {"delai": 0.0, "appels": {}, "refus": 0}, docker(
+        assert body == {"delai": 0.0, "recues": 0, "appels": {}, "refus": 0}, docker(
             "logs", container
         ).stdout
     finally:
