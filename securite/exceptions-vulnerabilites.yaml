@@ -1,0 +1,20 @@
+# Exceptions au scan de vulnérabilités de l'image (Grype ; scripts/chaine.py scan ; ADR 005).
+# Le scan échoue sur toute faille critique ou haute qui a un correctif. Une exception ne
+# couvre qu'une faille, pour un paquet et une version exacts ; elle est justifiée, datée, et
+# expire au plus 90 jours après la décision : passé ce délai, le scan échoue jusqu'à ce
+# qu'elle soit revue (le job image tourne aussi chaque lundi).
+exceptions:
+  - vulnerabilite: CVE-2026-82049
+    paquet:
+      nom: python
+      type: binary
+      version: 3.12.14
+    motif: >-
+      Correctif publié pour CPython 3.14 et au-delà seulement : le report sur 3.12
+      (python/cpython#157454) n'est pas fusionné au 28/09/2026, et uv 0.12.19 ne propose
+      pas de CPython 3.12 plus récent que 3.12.14. La faille touche l'extraction d'archives
+      tar piégées par le module tarfile (python/cpython#157190) : le projet n'extrait aucune
+      archive, et fastembed ne télécharge jamais de modèle en production
+      (HF_HUB_OFFLINE=1). À revoir dès la sortie de CPython 3.12.15.
+    decidee: 2026-09-28
+    expire: 2026-10-28

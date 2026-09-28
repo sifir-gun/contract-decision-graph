@@ -2314,3 +2314,10 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Réalisation** : `scripts/chaine.py bases`. cosign 3.1.3 dans son image officielle (`docker run`), `gh attestation verify` pour uv (`GH_TOKEN` en CI).
 - **Vérifié sur le poste** : les deux bases passent (9 s) ; cosign refuse une autre identité (code 12), `gh` un autre propriétaire (code 1). `gh attestation verify` ne dit rien sans terminal : son format JSON a confirmé une attestation SLSA v1 du workflow `publish-docker-image.yml` d'astral-sh/uv.
 
+### Inventaire (Syft) et scan (Grype), exceptions datées
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`) : commandes exactes de l'inventaire (image sauvegardée, Syft en SPDX et au format de Syft) et du scan (Grype sur l'inventaire, `--only-fixed --fail-on high`, base de failles dans un volume) ; code 2 de Grype rendu en échec avec un message clair ; exceptions passées à Grype avec leur motif ; exception expirée, sans motif, sans version, ou de plus de 90 jours refusée ; en CI et dans `check.sh`, inventaire et scan après les tests de l'image ; job `image` aussi le lundi.
+- **Premier scan réel** (28/09) : 34 correspondances, dont 4 hautes. Trois sans correctif (glibc et zlib de Debian 13), qui ne bloquent pas. Une corrigeable, CVE-2026-82049, sur le binaire CPython 3.12.14 : `tarfile`, corrigée pour 3.14 et au-delà ; le report sur 3.12 (python/cpython#157454) n'est pas fusionné, et uv ne propose pas de 3.12 plus récent. Aucun paquet Python vulnérable (comme le dit pip-audit).
+- **Décision** : exception justifiée, datée du 28/09, expirant le 28/10/2026. Le projet n'extrait aucune archive, et fastembed ne télécharge rien en production. Contre-épreuve : sans elle, le scan échoue (code 1), la faille affichée.
+- **Mesures sur le poste** : inventaire en 17 s ; premier scan en 2 min 30 (téléchargement de la base de failles), quelques secondes ensuite.
+

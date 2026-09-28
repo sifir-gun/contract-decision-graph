@@ -7,8 +7,9 @@ on:
   push:
     branches: [main]
   pull_request:
-  # audit hebdomadaire de main : une faille publiée entre deux commits est vue sans
-  # attendre le suivant ; lint, types et tests ne tournent pas sur ce déclenchement
+  # audit hebdomadaire de main (dépendances Python, échéances du corpus, image : signatures
+  # des bases, scan, exceptions expirées) : une faille publiée entre deux commits est vue
+  # sans attendre le suivant ; lint, types et tests ne tournent pas sur ce déclenchement
   schedule:
     - cron: "17 7 * * 1" # lundi 7 h 17, après Dependabot, hors du début d'heure chargé
       timezone: "Europe/Paris"
@@ -145,7 +146,7 @@ jobs:
 
   image:
     name: image (construction et vérifications)
-    if: github.event_name != 'schedule'
+    # aussi chaque lundi : une faille publiée entre deux commits, une exception expirée
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -170,3 +171,10 @@ jobs:
         run: docker build --tag cdg:verification .
       - name: Vérifications de l'image construite (non root, lecture seule, sans shell)
         run: uv run --no-sync pytest -m image --image cdg:verification
+      - name: Inventaire des composants (Syft), en SPDX et au format de Syft
+        run: >-
+          uv run --no-sync python scripts/chaine.py inventaire cdg:verification
+          --dossier "$RUNNER_TEMP/chaine"
+      - name: Scan (Grype), échec sur une faille critique ou haute corrigeable
+        # exceptions justifiées, datées et expirantes : securite/exceptions-vulnerabilites.yaml
+        run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"

@@ -39,9 +39,11 @@ echo "==> tests (PostgreSQL + pgvector)"
 uv run --no-sync python -m cdg.cli setup-db
 uv run --no-sync pytest --cov --cov-report=term
 
-echo "==> image (signatures des bases, construction et vérifications)"
+echo "==> image (signatures des bases, construction, vérifications, inventaire, scan)"
 uv run --no-sync python scripts/chaine.py bases
 docker build --tag cdg:verification .
 uv run --no-sync pytest -m image --image cdg:verification
+uv run --no-sync python scripts/chaine.py inventaire cdg:verification --dossier "$RUNNER_TEMP/chaine"
+uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"
 
 echo "==> vérifications de la CI : toutes passées"

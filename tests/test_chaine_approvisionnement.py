@@ -11,6 +11,7 @@
 import importlib.util
 import re
 import subprocess
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -163,3 +164,130 @@ def test_bases_verifiees_avant_la_construction_en_ci_et_en_local():
     assert script.index(verify) < next(
         i for i, line in enumerate(script) if line.startswith("docker build")
     )
+
+
+# --- inventaire (Syft) et scan (Grype), exceptions datées -------------------------------------
+
+EXCEPTIONS = ROOT / "securite" / "exceptions-vulnerabilites.yaml"
+TODAY = date(2026, 9, 28)
+
+
+def ok(command, **_):
+    return subprocess.CompletedProcess(command, 0, "", "")
+
+
+class Recorder:
+    def __init__(self, code=0):
+        self.commands, self.code = [], code
+
+    def __call__(self, command, **_):
+        self.commands.append(command)
+        return subprocess.CompletedProcess(command, self.code, "", "sortie de l'outil")
+
+
+def test_inventaire_de_l_image_par_syft(tmp_path):
+    module, run = chaine(), Recorder()
+    assert module.inventory("cdg:verification", tmp_path, run=run) == 0
+    save, syft = run.commands
+    assert save == [
+        "docker",
+        "save",
+        "cdg:verification",
+        "-o",
+        str(tmp_path / "image.tar"),
+    ]
+    assert syft == [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{tmp_path}:/travail",
+        module.SYFT,
+        "docker-archive:/travail/image.tar",
+        "-o",
+        "syft-json=/travail/sbom.syft.json",
+        "-o",
+        "spdx-json=/travail/sbom.spdx.json",
+        "-q",
+    ]
+
+
+def test_scan_par_grype_echec_sur_faille_haute_corrigeable(tmp_path):
+    module, run = chaine(), Recorder()
+    assert module.scan(tmp_path, EXCEPTIONS, today=TODAY, run=run) == 0
+    [grype] = run.commands
+    assert grype[:4] == ["docker", "run", "--rm", "-v"]
+    assert module.GRYPE in grype
+    tail = grype[grype.index(module.GRYPE) + 1 :]
+    assert tail[0] == "sbom:/travail/sbom.syft.json"
+    options = " ".join(tail[1:])
+    assert "--only-fixed --fail-on high" in options
+    assert "-c /travail/grype.yaml" in options
+    assert "-o json=/travail/grype.json" in options
+    assert "cdg-grype-db:/cache" in grype  # base de failles gardée entre deux scans
+
+
+def test_scan_rend_1_si_grype_trouve_une_faille(tmp_path, capsys):
+    module = chaine()
+    assert module.scan(tmp_path, EXCEPTIONS, today=TODAY, run=Recorder(code=2)) == 1
+    assert "critique ou haute" in capsys.readouterr().err
+    assert module.scan(tmp_path, EXCEPTIONS, today=TODAY, run=Recorder(code=1)) == 1
+
+
+def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
+    module = chaine()
+    module.scan(tmp_path, EXCEPTIONS, today=TODAY, run=ok)
+    config = yaml.safe_load((tmp_path / "grype.yaml").read_text(encoding="utf-8"))
+    [rule] = config["ignore"]
+    assert rule["vulnerability"] == "CVE-2026-82049"
+    assert rule["package"] == {"name": "python", "type": "binary", "version": "3.12.14"}
+    assert "157454" in rule["reason"]  # report sur 3.12 non fusionné
+
+
+def exceptions(tmp_path, **changes) -> Path:
+    entry = {
+        "vulnerabilite": "CVE-2026-1",
+        "paquet": {"nom": "zlib1g", "type": "deb", "version": "1.3"},
+        "motif": "justification",
+        "decidee": date(2026, 9, 1),
+        "expire": date(2026, 10, 1),
+    } | changes
+    path = tmp_path / "exceptions.yaml"
+    path.write_text(yaml.safe_dump({"exceptions": [entry]}), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"expire": date(2026, 9, 27)}, "expirée le 2026-09-27"),
+        ({"motif": ""}, "motif"),
+        ({"expire": date(2027, 1, 1)}, "90 jours"),
+        ({"paquet": {"nom": "zlib1g", "type": "deb"}}, "version"),
+    ],
+)
+def test_exception_expiree_ou_incomplete_refusee(tmp_path, changes, message):
+    module = chaine()
+    with pytest.raises(ValueError, match=message):
+        module.scan(tmp_path, exceptions(tmp_path, **changes), today=TODAY, run=ok)
+
+
+def test_inventaire_et_scan_apres_la_construction_en_ci_et_en_local():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    job = workflow["jobs"]["image"]
+    runs = [s.get("run", "") for s in job["steps"]]
+    inventory = (
+        "uv run --no-sync python scripts/chaine.py inventaire cdg:verification "
+        '--dossier "$RUNNER_TEMP/chaine"'
+    )
+    scan = (
+        'uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"'
+    )
+    tests = "uv run --no-sync pytest -m image --image cdg:verification"
+    assert runs.index(tests) < runs.index(inventory) < runs.index(scan)
+    script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
+    assert inventory in script and scan in script
+    # chaque lundi aussi : une faille publiée entre deux commits, une exception expirée
+    assert "schedule" not in job.get("if", "")
