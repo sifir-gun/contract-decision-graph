@@ -2466,3 +2466,40 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Anciennes exclusions globales**, lancées une à une sur le rendu : `no-node-affinity` (Deployment, Jobs, Pod de test) et `dangling-networkpolicypeer-podselector` (règles `web` et `taches`) passent en annotations justifiées ; `minimum-three-replicas` est justifiée sur le Deployment par la mémoire mesurée d'un réplica ; `priority-class-name` ne visait aucun objet (elle ne signale qu'une classe invalide), retirée ; `no-anti-affinity` est satisfaite.
 - **Anti-affinité préférée, pas exigée** (lu dans `pkg/templates/antiaffinity/template.go`, kube-linter 0.8.3 : les deux formes passent) : exigée, elle bloquerait la mise à jour progressive (`maxSurge: 1`, `maxUnavailable: 0`) sur un cluster qui a autant de nœuds que de réplicas. La répartition stricte reste celle des contraintes de topologie, qui tolèrent ce pod en plus.
 - **Configuration globale restante** : conventions d'une organisation, ordre des clés, `schema-validation`.
+
+## 2026-09-28 · Kubernetes, PR C3 : cluster de test et scénarios (branche `cluster`)
+
+Plan validé par le propriétaire : cluster k3d de plusieurs nœuds, CloudNativePG avec sauvegardes vers SeaweedFS et restauration vérifiée, proxy de sortie Smokescreen avec sa configuration DNS, serveur factice de Mistral dans une image de test à part, tous les scénarios en CI.
+
+### Décisions du propriétaire (28/09)
+
+- **Modèle en CI** : le job `cluster` tire l'image publiée du modèle, figée par empreinte, après vérification de sa signature et de sa provenance ; exception écrite dans l'ADR 005 et CLAUDE.md.
+- **cert-manager 1.21.2**, figé par version et empreinte ; exigé par le greffon de sauvegarde, il est aussi un prérequis de production (README du chart de la base, exploitation, mise en production).
+- **Smokescreen** : un commit récent de `master` porteur des trois correctifs publiés après la v0.1.0, figé et construit par notre chaîne ; procédure de surveillance et passage à la prochaine étiquette officielle dans l'ADR 005.
+- **Profil local réduit** : deux nœuds, une instance PostgreSQL.
+- **setup-db** : sur une base vide, toutes les migrations dans l'ordre ; rien ne change sur une base existante ; idempotent. Rôle `app_role` : gestion déclarative de CloudNativePG si elle convient, création conditionnelle par la 001 pour Docker Compose ; si `setup-db` crée le rôle, mot de passe haché côté client (SCRAM-SHA-256, bibliothèque standard), absent de tout journal.
+
+### Rôle applicatif : CloudNativePG retenu
+
+Lu dans `docs/src/declarative_role_management.md` (v1.30.1) : rôle déclaré, comparé et corrigé par l'opérateur ; mot de passe dans un Secret basic-auth, appliqué aussitôt s'il porte `cnpg.io/reload` (rotation) ; haché en SCRAM-SHA-256 par l'opérateur, journalisation des requêtes et des erreurs suspendue pendant la commande. Toutes les garanties demandées, sans code à nous. La 001 ne crée plus le rôle que s'il manque ; `setup-db` le crée s'il manque encore (ni opérateur ni Compose), avec un vérificateur calculé côté client, identique à celui de libpq à sel égal (testé), dans une transaction qui suspend `log_statement` et `log_min_error_statement`.
+
+### Défauts trouvés en montant le cluster
+
+- **Image PostgreSQL** : l'admission de CloudNativePG refuse une image désignée par sa seule empreinte ; étiquette et empreinte.
+- **Contexte de kubectl** : k3d rendait le cluster courant sur le poste ; kubeconfig à part, `.cache/cluster/kubeconfig`.
+- **Images importées dans k3d** : sans empreinte de dépôt, un pod qui les tire par empreinte échoue ; registre local (`registry:3`, par empreinte).
+- **Base neuve** : `setup-db` échouait (rôle absent, 001 non passée) ; amorçage ci-dessus, tests d'abord.
+- **Mémoire** : l'interface, tuée à 3 Gi (pic de 2,55 à 2,65 Gio au chargement du modèle, 1,55 Gio ensuite) ; l'ingestion, au-delà de 3,5 Gi (fastembed : lots de 256 par défaut). Lots de 16 (2,9 Gio au pic ; 64 : plus de 3,7), limites à 4 Gi.
+- **Durée de l'ingestion** : 64 extraits, 18 min 24 s dans k3d sur 2 CPU ; 79 s pour un lot de 16 sur le poste, 2 fils. `helm --wait` (600 s) abandonnait l'installation : l'attente couvre le délai de la tâche (3 600 s), job CI à 90 minutes. Les mises à jour des scénarios ne réindexent pas le corpus, inchangé.
+- **Installation relancée** : elle tirait de nouvelles clés S3 ; SeaweedFS, qui ne relit ses identités qu'au démarrage, refusait l'archivage des WAL depuis la première relance, sans que rien d'autre ne le montre avant la sauvegarde. Secrets repris ; le scénario vérifie l'archivage continu avant de sauvegarder.
+- **Règle réseau des tâches** : mise à jour après les crochets `pre-upgrade`, elle laissait la tâche de migrations sous l'ancienne règle lors de la bascule vers la base restaurée (connexion refusée). Devenue un crochet, comme le compte des tâches ; lu dans la documentation des crochets de Helm.
+- **Base restaurée** : la condition `Ready` précédait l'instance qui sert ; le scénario attend l'état sain.
+
+### Scénarios, profil local (poste, 28/09)
+
+Les onze passent, un par un, sur le même cluster : deux réplicas sur deux nœuds et création concurrente (18 s) ; arrêt propre et pod tué (1 min 17 s) ; mise à jour sans interruption et retour arrière (8 min 27 s) ; blocage réseau (29 s) ; contrôle de configuration (2 min 10 s) ; sauvegarde et restauration (4 min 18 s). L'adresse d'API autre que Mistral n'est pas refusée par un code HTTP de l'interface : l'analyse aboutit à un rapport d'échec (407 du proxy, qui nomme l'hôte refusé), ESCALADE et revue humaine ; le scénario vérifie ce dossier et qu'aucune requête n'a atteint le serveur factice.
+
+### Suites
+
+- Empreinte par défaut du proxy dans son chart, après la première publication.
+- N'embarquer que les extraits absents de la base : réindexer un corpus inchangé ne prendrait plus près de 20 minutes.

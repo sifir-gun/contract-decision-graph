@@ -11,7 +11,7 @@ Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.
 ### API et hébergement
 
 - [ ] **API FastAPI** : un adaptateur entrant de plus, sur le service des contrats, comme la CLI et l'interface web (ADR 004). *Fait quand* chaque action de l'API appelle la même méthode du service que sa commande, vérifié par `tests/test_parite.py`.
-- [ ] **Déploiement sur Kubernetes** (k3s, Helm), selon la feuille de route. *Fait quand* l'application se déploie depuis le chart, sans étape manuelle, et que les migrations et l'indexation du corpus tournent comme tâches de déploiement (voir plus bas).
+- [x] **Déploiement sur Kubernetes** (28/09, PR C2 et C3 : charts de l'application, de la base et du proxy de sortie ; installés et éprouvés à chaque pull request sur un cluster k3d de plusieurs nœuds, ADR 005) (k3s, Helm), selon la feuille de route. *Fait quand* l'application se déploie depuis le chart, sans étape manuelle, et que les migrations et l'indexation du corpus tournent comme tâches de déploiement (voir plus bas).
 - [x] **Image de l'application** (28/09, PR A) : `Dockerfile` en deux étapes, bases figées par empreinte, dépendances strictement depuis uv.lock, utilisateur non root numérique, lecture seule, ni shell ni pip ; construite et vérifiée par le job `image` de la CI (ADR 005, « Image »). Publication sur ghcr.io, scan, inventaire, signature et provenance en PR B. *Fait quand* l'image construite en CI passe `tests/test_image.py`.
 - [x] **Notices de licence complètes dans les images publiques** (28/09) : chaque composant porte sa licence (paquets Python, Debian, Python et ses bibliothèques liées, projet, HTMX, corpus, modèle), vérifié sur les images construites (`tests/test_licences.py`).
 - [x] **Image publiée, signée et attestée** (28/09, PR B) : ghcr.io, étiquette du commit, jamais `latest` ; signature sans clé (cosign), provenance SLSA et inventaire SPDX attestés ; signatures des bases vérifiées avant la construction ; scan (Grype) bloquant sur toute faille critique ou haute corrigeable, exceptions datées ; Dependabot sur les bases (ADR 005). *Fait quand* la première publication, après la fusion, passe sa propre vérification (`cosign verify`, `gh attestation verify`).
@@ -31,15 +31,16 @@ Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans u
 
 ### PostgreSQL de production
 
-- [ ] **Sauvegardes** planifiées, et une **restauration testée**. *Fait quand* une base restaurée passe `verify --expect-head` contre la tête conservée ailleurs.
+- [x] **Sauvegardes** planifiées, et une **restauration testée** (28/09, PR C3 : CloudNativePG et son greffon Barman Cloud ; le scénario du cluster de test restaure une sauvegarde dans un nouveau cluster et y passe `verify --expect-head` ; procédure dans `docs/exploitation.md`). En production, un stockage objet géré. *Fait quand* une base restaurée passe `verify --expect-head` contre la tête conservée ailleurs.
 - [ ] **Tête du journal d'audit conservée hors de la base** après chaque scellement, et comparée régulièrement par `verify --expect-head`. La chaîne seule ne voit pas la suppression des derniers enregistrements (README, limites connues).
+- [ ] **cert-manager sur le cluster de production** : le greffon de sauvegarde de CloudNativePG l'exige (ADR 005, documentation du greffon) ; testé avec la 1.21.2. *Fait quand* il est installé avant le greffon et que `cmctl check api` répond que l'API est prête.
 - [ ] **Base de test séparée** de la base qui contient le vrai journal (déjà prévue en phase 3, spec).
-- [ ] **Migrations** (`setup-db`) lancées comme tâche de déploiement, avant l'application, avec des identifiants administrateur distincts de ceux d'`app_role`.
+- [x] **Migrations** (28/09, PR C2 et C3 : tâche Helm avant l'installation et chaque mise à jour, superutilisateur de CloudNativePG ; l'application en `app_role`, rôle géré par l'opérateur ; `setup-db` amorce une base vide) (`setup-db`) lancées comme tâche de déploiement, avant l'application, avec des identifiants administrateur distincts de ceux d'`app_role`.
 
 ### Modèle d'embedding et corpus
 
 - [x] **Poids du modèle d'embedding**, côté image (28/09, PR B : image dédiée, figée par les empreintes de ses fichiers, testée sans réseau ; montage dans les pods en PR C) (environ 2,2 Go) livrés avec l'application, dans l'image ou sur un volume, sans téléchargement au démarrage. *Fait quand* l'application démarre sans réseau vers Hugging Face.
-- [ ] **Indexation du corpus** (`ingest`) comme tâche de déploiement, rejouable, identifiants administrateur.
+- [x] **Indexation du corpus** (28/09, PR C2 et C3 : tâche Helm après l'installation, plus de 10 minutes sur 2 CPU ; désactivable pour une mise à jour qui ne touche pas au corpus) (`ingest`) comme tâche de déploiement, rejouable, identifiants administrateur.
 
 ## Tenir dans la durée (phase 3)
 

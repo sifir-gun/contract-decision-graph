@@ -15,8 +15,8 @@ Déploiement de contract-decision-graph sur Kubernetes (k3s), selon l'ADR 005 : 
   kubectl label namespace cdg pod-security.kubernetes.io/enforce=restricted pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/audit=restricted
   ```
 
-- **Secrets**, créés à part (jamais dans les valeurs), montés en fichiers en lecture seule dans `/run/secrets/cdg`, jamais en variables d'environnement : clé de Mistral (`cdg-mistral`, clé `MISTRAL_API_KEY`), mot de passe d'`app_role` (`cdg-base-application`, clé `password`), administrateur de PostgreSQL (`cdg-base-administrateur`, clés `username` et `password`).
-- **PostgreSQL** avec pgvector (CloudNativePG, PR C3) et le **proxy de sortie** (Smokescreen, PR C3), joignables aux adresses des valeurs `base` et `proxy`.
+- **Secrets**, créés à part (jamais dans les valeurs), montés en fichiers en lecture seule dans `/run/secrets/cdg`, jamais en variables d'environnement : clé de Mistral (`cdg-mistral`, clé `MISTRAL_API_KEY`), mot de passe d'`app_role` (`cdg-base-application`, clé `password` ; avec CloudNativePG, un Secret `kubernetes.io/basic-auth` dont `username` vaut `app_role`, étiqueté `cnpg.io/reload: "true"`, que l'opérateur lit aussi : chart `cdg-postgres`), administrateur de PostgreSQL (`cdg-base-administrateur`, clés `username` et `password` ; avec CloudNativePG, le Secret `cdg-postgres-superuser` qu'il crée, par `base.administrateur.secret`).
+- **PostgreSQL** avec pgvector et le **proxy de sortie**, joignables aux adresses des valeurs `base` et `proxy` : charts `chart/cdg-postgres` (CloudNativePG, sauvegardes) et `chart/cdg-proxy` (Smokescreen), installés avant l'application. Le chart de la base exige CloudNativePG, son greffon Barman Cloud et **cert-manager**, que le greffon exige : prérequis de production (`chart/cdg-postgres/README.md`).
 
 ## Installation et mise à jour
 
@@ -39,10 +39,11 @@ Avant chaque mise à jour, la tâche de contrôle de configuration refuse de dé
 | `modele.image.digest` | index publié | Empreinte de l'index de l'image du modèle d'embedding. |
 | `modele.montage` | `image` | `image` (volume image, lecture seule) ou `copie` (conteneurs d'initialisation). |
 | `replicas` | `2` | Réplicas de l'interface ; pas d'autoscaling (ADR 005). |
-| `ressources.reel` | 1 CPU / 2 Gi, limite 2 CPU / 3 Gi | Mesurées (`scripts/mesure_memoire.py`) ; la limite CPU fixe les fils de l'embedder. |
+| `ressources.reel` | 1 CPU / 2 Gi, limite 2 CPU / 4 Gi | Mesurées (`scripts/mesure_memoire.py`, puis dans le cluster : 2,65 Gio au chargement du modèle) ; la limite CPU fixe les fils de l'embedder. |
+| `embedding.lot` | `16` | Taille des lots d'embeddings : 2,9 Gio au pic de l'ingestion (fastembed en prend 256 par défaut). |
 | `llm.adresseApi` | vide | Adresse de l'API de Mistral ; vide, celle du SDK. Le proxy ne laisse passer que Mistral. |
 | `configuration.decision` | vide | Autre configuration de décision, en texte ; vide, `files/decision.yaml`. |
-| `taches.*` | actives | Migrations (avant), ingestion (après), contrôle de configuration (avant une mise à jour). |
+| `taches.*` | actives | Migrations (avant), ingestion (après : plus de 10 minutes ; `taches.ingestion.active=false` pour une mise à jour qui ne touche pas au corpus), contrôle de configuration (avant une mise à jour). |
 
 Le schéma complet est `values.schema.json` : toute valeur inconnue ou mal formée fait échouer l'installation.
 
