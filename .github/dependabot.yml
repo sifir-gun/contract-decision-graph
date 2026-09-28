@@ -1,5 +1,8 @@
-# Mises à jour hebdomadaires : dépendances Python (uv.lock) et actions GitHub des workflows.
-# Chaque pull request de Dependabot passe par la CI (lint, types, audit, tests).
+# Mises à jour hebdomadaires : dépendances Python (uv.lock), actions GitHub des workflows et
+# images de base du Dockerfile. Chaque pull request de Dependabot passe par la CI (lint,
+# types, audit, tests, image : signatures des bases, construction, inventaire, scan).
+# Hors de Dependabot, délibérément : l'image PostgreSQL (docker-compose.yml, workflow), qui
+# touche aux données, et uv (ci-dessous).
 version: 2
 updates:
   - package-ecosystem: "uv" # pyproject.toml et uv.lock
@@ -21,3 +24,17 @@ updates:
       timezone: "Europe/Paris"
     commit-message:
       prefix: "CI : "
+
+  - package-ecosystem: "docker" # Dockerfile : images de base, empreintes comprises
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    commit-message:
+      prefix: "Image : "
+    ignore:
+      # uv : mis à jour à la main, avec celui de la CI et du poste de développement
+      # (tests/test_image.py) ; l'étape de construction ne part pas dans l'image finale
+      - dependency-name: "astral-sh/uv"

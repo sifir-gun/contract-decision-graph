@@ -2301,3 +2301,10 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Réalisation** : `domain/resumption.py` (règle et rapport d'échec), port `ResumeCounter`, adaptateurs `adapters/postgres/resumes.py` et `adapters/demo/resumes.py`, migration `006_reprises.sql`, section `interrupted` de `config/decision.yaml` (l'empreinte de configuration change ; aucun contrat réel en attente), `orchestrator._escalate_interrupted` (`bulk_update_state` : `END`, puis l'escalade au nom de `decision_gate`), `setup-db` qui annonce la table et ses droits.
 - **Pour la PR B, noté dans l'ADR 005** : Dependabot sur les images de base du `Dockerfile` (l'image PostgreSQL reste manuelle) ; signature des images distroless vérifiée en CI avant la construction.
 
+## 2026-09-28 · Kubernetes, PR B : chaîne d'approvisionnement (branche `chaine-approvisionnement`)
+
+### Dependabot sur les images de base
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`) : écosystème `docker` sur le dossier racine, même horaire que les autres ; uv exclu ; ni écosystème `docker-compose`, ni fichier YAML à la racine que l'écosystème `docker` prendrait pour un manifeste Kubernetes ; toutes les actions des workflows épinglées par empreinte, version en commentaire.
+- **Vérifié dans dependabot-core** (`file_fetcher.rb`) : l'écosystème `docker` lit les Dockerfile et les YAML qui portent `apiVersion` et `kind` ; `docker-compose.yml` n'en est pas un. L'image PostgreSQL reste donc manuelle sans règle d'exclusion à entretenir. Les images sont nommées sans leur registre : l'exclusion de uv porte sur `astral-sh/uv`.
+
