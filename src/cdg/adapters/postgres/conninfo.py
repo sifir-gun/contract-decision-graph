@@ -1,10 +1,12 @@
-"""Chaînes de connexion PostgreSQL, lues dans l'environnement (.env)."""
+"""Chaînes de connexion PostgreSQL : adresse dans l'environnement (.env), utilisateur
+administrateur et mots de passe par `settings.require_secret` (fichier monté, sinon
+variable d'environnement)."""
 
 import os
 
 from psycopg.conninfo import make_conninfo
 
-from cdg.settings import APP_ROLE, require
+from cdg.settings import APP_ROLE, require, require_secret
 
 
 def _conninfo(user: str, password_var: str) -> str:
@@ -13,13 +15,13 @@ def _conninfo(user: str, password_var: str) -> str:
         port=require("POSTGRES_PORT"),
         dbname=require("POSTGRES_DB"),
         user=user,
-        password=require(password_var),
+        password=require_secret(password_var),
     )
 
 
 def admin_conninfo() -> str:
     """Superutilisateur : setup-db (tables du checkpointer, droits) uniquement."""
-    return _conninfo(require("POSTGRES_USER"), "POSTGRES_PASSWORD")
+    return _conninfo(require_secret("POSTGRES_USER"), "POSTGRES_PASSWORD")
 
 
 def app_conninfo() -> str:

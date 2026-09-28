@@ -155,6 +155,7 @@ def _journal_reel_interdit(monkeypatch):
 
 # chargement réel du modèle d'embedding et reprise périodique, gardés pour leurs tests
 PROCESS_EMBEDDER = cli.process_embedder
+SECRETS_DIR = settings.SECRETS_DIR  # avant que _aucun_secret_du_poste ne le remplace
 RESUME_PERIODICALLY = cli.resume_periodically
 
 
@@ -190,6 +191,13 @@ def _journaux_du_processus_restaures():
         logger.setLevel(level)
         logger.handlers[:] = handlers
         logger.propagate = propagate
+
+
+@pytest.fixture(autouse=True)
+def _aucun_secret_du_poste(tmp_path_factory, monkeypatch):
+    """Dossier des secrets montés : un dossier absent, quel que soit le poste ; les tests
+    des secrets en posent un à eux."""
+    monkeypatch.setattr(settings, "SECRETS_DIR", tmp_path_factory.mktemp("sans") / "x")
 
 
 @pytest.fixture(autouse=True)

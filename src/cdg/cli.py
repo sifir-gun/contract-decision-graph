@@ -146,7 +146,7 @@ def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
     """resume : le LLM si la clé d'API du fournisseur est présente, sinon le gabarit, avec
     le motif scellé. La clé n'est pas exigée pour reprendre un contrat."""
     var = API_KEY_VARS[config.llm.provider]
-    if not os.environ.get(var):
+    if not settings.secret(var):
         return TemplateOnly(f"clé d'API absente ({var}) : explication par le gabarit")
     return LLMExplainer(build_provider(config.llm))
 

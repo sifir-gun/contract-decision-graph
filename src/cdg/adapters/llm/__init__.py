@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from cdg.domain.config import LLMConfig
 from cdg.ports.llm import LLMProvider
-from cdg.settings import SettingsError
+from cdg.settings import SettingsError, secret
 
 API_KEY_VARS = {"mistral": "MISTRAL_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
 SERVER_URL_VAR = "MISTRAL_SERVER_URL"
@@ -39,10 +39,10 @@ def mistral_server_url() -> str | None:
 
 def build_provider(config: LLMConfig) -> LLMProvider:
     var = API_KEY_VARS[config.provider]
-    api_key = os.environ.get(var, "")
+    api_key = secret(var)  # fichier monté, sinon variable d'environnement
     if not api_key:
         raise SettingsError(
-            f"variable d'environnement absente ou vide : {var} (fournisseur {config.provider})"
+            f"clé d'API absente : {var} (fournisseur {config.provider})"
         )
     if config.provider == "mistral":
         from cdg.adapters.llm.mistral import MistralProvider

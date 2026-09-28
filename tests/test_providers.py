@@ -189,6 +189,18 @@ def test_adresse_de_l_api_mal_formee_refusee(monkeypatch, url):
         build_provider(CONFIG.llm)
 
 
+def test_cle_d_api_lue_dans_le_fichier_monte(monkeypatch, tmp_path):
+    from cdg import cli, settings
+
+    monkeypatch.setattr(settings, "SECRETS_DIR", tmp_path)
+    monkeypatch.setenv("MISTRAL_API_KEY", "")
+    (tmp_path / "MISTRAL_API_KEY").write_text("cle-du-fichier\n", encoding="utf-8")
+    provider = build_provider(CONFIG.llm)
+    assert isinstance(provider, MistralProvider)
+    assert provider._client.sdk_configuration.security.api_key == "cle-du-fichier"
+    assert not isinstance(cli.resume_explainer(CONFIG), cli.TemplateOnly)
+
+
 def test_cle_d_api_absente_erreur_explicite(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     llm = CONFIG.llm.model_copy(update={"provider": "anthropic"})
