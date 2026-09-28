@@ -18,8 +18,10 @@ from test_chart import UniqueKeys, named, of_kind
 ROOT = Path(__file__).resolve().parents[1]
 CHART = ROOT / "chart" / "cdg-postgres"
 PLUGIN = "barman-cloud.cloudnative-pg.io"
+# étiquette et empreinte : le webhook de CloudNativePG refuse une empreinte seule (il lit
+# la version dans l'étiquette pour détecter les mises à jour ; vu dans le cluster, 28/09)
 IMAGE = (
-    "ghcr.io/cloudnative-pg/postgresql@"
+    "ghcr.io/cloudnative-pg/postgresql:16.15-standard-trixie@"
     "sha256:46ee4bd3d36f4cbbc95a883487a596f17471e6bc9da2e8218eafdde8d20c3270"
 )
 TEST = [

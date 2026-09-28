@@ -10,7 +10,7 @@ metadata:
     {{- include "cdg-postgres.etiquettes" . | nindent 4 }}
 spec:
   instances: {{ .Values.instances }}
-  imageName: {{ printf "%s@%s" .Values.image.repository .Values.image.digest }}
+  imageName: {{ printf "%s:%s@%s" .Values.image.repository .Values.image.tag .Values.image.digest }}
   enableSuperuserAccess: true
   bootstrap:
     initdb:

@@ -7,9 +7,12 @@
 nom: cdg-postgres
 instances: 2
 
-# PostgreSQL 16.15, image « standard » de CloudNativePG : pgvector compris.
+# PostgreSQL 16.15, image « standard » de CloudNativePG : pgvector compris. Étiquette et
+# empreinte : CloudNativePG lit la version dans l'étiquette (mises à jour), et refuse une
+# empreinte seule ; l'empreinte fige l'image.
 image:
   repository: ghcr.io/cloudnative-pg/postgresql
+  tag: 16.15-standard-trixie
   digest: sha256:46ee4bd3d36f4cbbc95a883487a596f17471e6bc9da2e8218eafdde8d20c3270
 
 base:
