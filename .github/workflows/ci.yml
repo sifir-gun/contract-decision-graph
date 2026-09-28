@@ -159,6 +159,12 @@ jobs:
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock (pytest et httpx pour les vérifications)
         run: uv sync --locked
+      - name: Signatures des images de base, avant la construction
+        # distroless : signature cosign sans clé du projet ; uv : attestation de provenance
+        # de GitHub (astral-sh/uv) ; toute base sans politique de vérification est refusée
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/chaine.py bases
       - name: Construction, bases figées par empreinte, dépendances strictement depuis uv.lock
         # l'image n'est ni publiée ni signée ici : c'est l'objet de la PR B (ADR 005)
         run: docker build --tag cdg:verification .

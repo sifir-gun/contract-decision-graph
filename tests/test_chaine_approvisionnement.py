@@ -3,11 +3,17 @@
 - Dependabot propose les mises à jour des images de base du Dockerfile, qui passent par la
   CI ; uv et l'image PostgreSQL restent mis à jour à la main.
 - Toute action des workflows est épinglée par empreinte de commit, version en commentaire.
+- `scripts/chaine.py` : outils dans leurs images officielles, figées par version et
+  empreinte ; la signature de chaque image de base est vérifiée avant la construction, en
+  CI comme dans `scripts/check.sh`.
 """
 
+import importlib.util
 import re
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,3 +67,99 @@ def test_actions_epinglees_par_empreinte_version_en_commentaire():
             if line.strip().startswith(("uses:", "- uses:")):
                 used = line.strip().removeprefix("- ")
                 assert PINNED_ACTION.fullmatch(used), f"{workflow.name} : {used}"
+
+
+# --- scripts/chaine.py : outils figés, bases vérifiées avant la construction -----------------
+
+TOOL = re.compile(r"(?P<name>[^@\s]+):v(?P<version>\d+\.\d+\.\d+)@sha256:[0-9a-f]{64}")
+
+
+def chaine():
+    path = ROOT / "scripts" / "chaine.py"
+    spec = importlib.util.spec_from_file_location("chaine", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def version(image: str) -> tuple[int, ...]:
+    match = TOOL.fullmatch(image)
+    assert match, f"outil non figé par version et empreinte : {image}"
+    return tuple(int(n) for n in match["version"].split("."))
+
+
+def test_outils_figes_et_au_dela_des_failles_publiees():
+    module = chaine()
+    # avis de sécurité GitHub, relevés le 28/09/2026 (ADR 005)
+    assert version(module.COSIGN) >= (3, 1, 3)  # GHSA-fx35-mq7g-6g98, haute
+    assert version(module.SYFT) >= (1, 52, 0)  # GHSA-mw2c-m758-9v5q
+    assert version(module.GRYPE) >= (0, 104, 1)  # GHSA-6gxw-85q2-q646, haute
+
+
+def test_chaque_base_du_dockerfile_a_sa_verification():
+    module = chaine()
+    bases = module.bases(ROOT / "Dockerfile")
+    assert [b.split("@")[0] for b in bases] == [
+        "ghcr.io/astral-sh/uv:0.12.19-trixie-slim",
+        "gcr.io/distroless/cc-debian13:nonroot",
+    ]
+    distroless = module.command(bases[1])
+    assert distroless[:4] == ["docker", "run", "--rm", module.COSIGN]
+    assert distroless[4:6] == ["verify", bases[1]]
+    assert distroless[6:] == [
+        "--certificate-identity",
+        "keyless@distroless.iam.gserviceaccount.com",
+        "--certificate-oidc-issuer",
+        "https://accounts.google.com",
+    ]
+    assert module.command(bases[0]) == [
+        "gh",
+        "attestation",
+        "verify",
+        f"oci://{bases[0]}",
+        "--owner",
+        "astral-sh",
+        "--signer-workflow",
+        "astral-sh/uv/.github/workflows/publish-docker-image.yml",
+    ]
+
+
+def test_base_sans_verification_refusee():
+    with pytest.raises(ValueError, match="docker.io/library/python"):
+        chaine().command("docker.io/library/python:3.12-slim@sha256:" + "0" * 64)
+
+
+def test_verification_echouee_arrete_avec_la_base_en_cause(tmp_path, capsys):
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "FROM gcr.io/distroless/cc-debian13:nonroot@sha256:" + "a" * 64 + "\n"
+    )
+    module = chaine()
+
+    def refused(command, **_):
+        return subprocess.CompletedProcess(command, 12, "", "no matching signatures")
+
+    def accepted(command, **_):
+        return subprocess.CompletedProcess(command, 0, "[]", "")
+
+    assert module.verify_bases(dockerfile, run=refused) == 1
+    err = capsys.readouterr().err
+    assert "gcr.io/distroless/cc-debian13" in err and "no matching signatures" in err
+    assert module.verify_bases(dockerfile, run=accepted) == 0
+
+
+def test_bases_verifiees_avant_la_construction_en_ci_et_en_local():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    runs = [s.get("run", "") for s in workflow["jobs"]["image"]["steps"]]
+    verify = "uv run --no-sync python scripts/chaine.py bases"
+    build = next(i for i, r in enumerate(runs) if r.startswith("docker build"))
+    assert runs.index(verify) < build
+    [step] = [s for s in workflow["jobs"]["image"]["steps"] if s.get("run") == verify]
+    assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8").splitlines()
+    assert script.index(verify) < next(
+        i for i, line in enumerate(script) if line.startswith("docker build")
+    )

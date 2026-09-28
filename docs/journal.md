@@ -2308,3 +2308,9 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Tests d'abord** (`tests/test_chaine_approvisionnement.py`) : écosystème `docker` sur le dossier racine, même horaire que les autres ; uv exclu ; ni écosystème `docker-compose`, ni fichier YAML à la racine que l'écosystème `docker` prendrait pour un manifeste Kubernetes ; toutes les actions des workflows épinglées par empreinte, version en commentaire.
 - **Vérifié dans dependabot-core** (`file_fetcher.rb`) : l'écosystème `docker` lit les Dockerfile et les YAML qui portent `apiVersion` et `kind` ; `docker-compose.yml` n'en est pas un. L'image PostgreSQL reste donc manuelle sans règle d'exclusion à entretenir. Les images sont nommées sans leur registre : l'exclusion de uv porte sur `astral-sh/uv`.
 
+### Signatures des images de base, avant la construction
+
+- **Tests d'abord** (`tests/test_chaine_approvisionnement.py`) : outils figés par version et empreinte, au-delà des avis de sécurité publiés (cosign ≥ 3.1.3, Syft ≥ 1.52.0, Grype ≥ 0.104.1) ; chaque base du Dockerfile a sa vérification (commande exacte) ; une base sans politique refusée ; une vérification échouée arrête, avec l'image et le message de l'outil ; en CI et dans `check.sh`, la vérification précède la construction.
+- **Réalisation** : `scripts/chaine.py bases`. cosign 3.1.3 dans son image officielle (`docker run`), `gh attestation verify` pour uv (`GH_TOKEN` en CI).
+- **Vérifié sur le poste** : les deux bases passent (9 s) ; cosign refuse une autre identité (code 12), `gh` un autre propriétaire (code 1). `gh attestation verify` ne dit rien sans terminal : son format JSON a confirmé une attestation SLSA v1 du workflow `publish-docker-image.yml` d'astral-sh/uv.
+

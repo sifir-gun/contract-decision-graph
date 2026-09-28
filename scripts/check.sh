@@ -11,7 +11,9 @@
 # - l'image est construite pour l'architecture du poste (arm64 sur un Mac récent), celle
 #   de la CI pour amd64 : les bases figées sont des index multi-architecture.
 # Payant : non (tests llm exclus). Réseau : pip-audit interroge la base de failles de PyPI ;
-# docker build tire les bases figées et les paquets de uv.lock (puis les garde en cache).
+# docker build tire les bases figées et les paquets de uv.lock (puis les garde en cache) ;
+# la vérification des bases interroge les registres, Sigstore et l'API de GitHub (gh
+# authentifié).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
@@ -37,7 +39,8 @@ echo "==> tests (PostgreSQL + pgvector)"
 uv run --no-sync python -m cdg.cli setup-db
 uv run --no-sync pytest --cov --cov-report=term
 
-echo "==> image (construction et vérifications)"
+echo "==> image (signatures des bases, construction et vérifications)"
+uv run --no-sync python scripts/chaine.py bases
 docker build --tag cdg:verification .
 uv run --no-sync pytest -m image --image cdg:verification
 
