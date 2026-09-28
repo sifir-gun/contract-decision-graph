@@ -307,3 +307,10 @@ explain_retry:
   backoff_factor: 2.0
   max_interval_seconds: 20.0
   jitter: false
+
+# Analyse interrompue (processus arrêté ou mort au milieu d'une analyse, phase Kubernetes) :
+# un réplica la reprend depuis son dernier checkpoint. Chaque reprise est comptée en base,
+# par contrat, avant d'être faite ; au-delà de max_resumes, plus de reprise automatique :
+# ESCALADE vers la revue humaine, avec un rapport d'échec qui cite le nombre de reprises.
+interrupted:
+  max_resumes: 3                  # reprises au plus, après la première exécution

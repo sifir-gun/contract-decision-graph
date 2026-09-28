@@ -88,10 +88,13 @@ def pg() -> Pg:
 
 @pytest.fixture
 def thread_id(pg) -> str:
-    """Un thread par test, supprimé ensuite avec les droits administrateur."""
+    """Un thread par test, supprimé ensuite avec les droits administrateur, avec son
+    compteur de reprises."""
     tid = f"test-{uuid.uuid4()}"
     yield tid
     checkpointer.delete_thread(pg.admin, tid)
+    with psycopg.connect(pg.admin, autocommit=True) as conn:
+        conn.execute("DELETE FROM contract_resumes WHERE thread_id = %s", (tid,))
 
 
 @pytest.fixture

@@ -23,6 +23,7 @@ from langgraph.types import (
     RetryPolicy,
     Send,
     StateSnapshot,
+    StateUpdate,
     interrupt,
 )
 
@@ -39,7 +40,7 @@ from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.state import AnalystInput, ContractState
-from cdg.domain import audit, expiry, masking, policy
+from cdg.domain import audit, expiry, masking, policy, resumption
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.engine import ThreadError
@@ -611,12 +612,18 @@ def resume_interrupted(
     graph: CompiledStateGraph,
     *,
     hold: Callable[[str], AbstractContextManager[None]],
+    record: Callable[[str], int],
+    limit: int,
     thread_ids: set[str] | None = None,
 ) -> list[dict]:
     """Reprend depuis leur dernier checkpoint les threads restés en cours (un processus
     arrêté ou mort au milieu d'une analyse), chacun sous son verrou, relu sous le verrou.
     Un thread verrouillé ailleurs est en cours là-bas : laissé. Le scellement est sans
     doublon (`audit_seal` rejoué, index uniques du journal).
+
+    Chaque reprise est comptée (`record`, durable) avant d'être faite : une reprise qui
+    tue le processus est comptée quand même. Au-delà de `limit`, plus de reprise :
+    ESCALADE vers la revue humaine (`_escalate_interrupted`), et un avertissement.
 
     `thread_ids` restreint la reprise, comme pour l'expiration : les tests ne touchent
     jamais aux autres threads de la base. La CLI et l'interface n'en passent pas."""
@@ -631,12 +638,50 @@ def resume_interrupted(
             with hold(thread_id):
                 if not _in_progress(graph, thread_id):
                     continue  # fini entre-temps
-                log.info("reprise de l'analyse interrompue %s", thread_id)
-                graph.invoke(None, _thread(thread_id), durability=DURABILITY)
+                attempt = record(thread_id)
+                if resumption.exhausted(attempt, limit):
+                    _escalate_interrupted(graph, thread_id, attempt, limit)
+                else:
+                    log.info(
+                        "reprise %d de l'analyse interrompue %s", attempt, thread_id
+                    )
+                    graph.invoke(None, _thread(thread_id), durability=DURABILITY)
                 resumed.append(thread_status(graph, thread_id))
         except ContractBusy:
             continue  # en cours dans un autre processus
     return resumed
+
+
+def _escalate_interrupted(
+    graph: CompiledStateGraph, thread_id: str, attempt: int, limit: int
+) -> None:
+    """Plus de reprise : l'analyse part en revue humaine, proposée ESCALADE, avec un
+    rapport d'échec qui cite le nombre de reprises. En deux mises à jour de l'état
+    (LangGraph 1.2.12, `bulk_update_state`) :
+    1. `END` sans valeur vide les tâches en attente, en gardant les écritures des tâches
+       déjà finies (verdicts des analystes rendus) ;
+    2. l'escalade est écrite au nom de `decision_gate`, dont l'arête lit `route` : la
+       revue humaine suit, comme après tout échec de nœud escaladé.
+    Puis l'exécution va jusqu'à l'interruption de `human_review` : le contrat attend un
+    humain, et n'est plus jamais repris."""
+    config = _thread(thread_id)
+    snapshot = graph.get_state(config)
+    failure = resumption.failure(snapshot.next, attempt, limit)
+    log.warning(
+        "analyse %s interrompue %d fois : plus de reprise au-delà de %d, ESCALADE "
+        "vers la revue humaine",
+        thread_id,
+        attempt,
+        limit,
+    )
+    update = {
+        "failures": [failure],
+        **escalate([*snapshot.values.get("failures", []), failure]),
+    }
+    graph.bulk_update_state(
+        config, [[StateUpdate(None, END)], [StateUpdate(update, "decision_gate")]]
+    )
+    graph.invoke(None, config, durability=DURABILITY)
 
 
 def _in_progress(graph: CompiledStateGraph, thread_id: str) -> bool:

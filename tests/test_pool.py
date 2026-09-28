@@ -16,6 +16,7 @@ from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine
 from cdg.adapters.postgres import connexions, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks, contract_lock_key
+from cdg.adapters.postgres.resumes import PostgresResumeCounter
 from cdg.adapters.web.app import create_app
 from cdg.domain.config import load_config
 from cdg.ports.connections import ConnectionsExhausted
@@ -112,6 +113,7 @@ def test_analyse_complete_par_le_pool_de_taille_par_defaut(pool, thread_id, jour
             read=lambda: deps,
         ),
         PostgresContractLocks(lambda: pool),
+        PostgresResumeCounter(lambda: pool),
     )
     status = engine.run(thread_id, CONTRACT_TEXT, (), ANALYSIS_DATE)
     assert status["statut"] == "termine" and status["chain_hash"]

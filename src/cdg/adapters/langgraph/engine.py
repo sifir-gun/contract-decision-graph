@@ -33,6 +33,7 @@ from cdg.application.deps import Deps
 from cdg.domain.config import DecisionConfig
 from cdg.ports.engine import ThreadError
 from cdg.ports.locks import ContractLocks
+from cdg.ports.resumes import ResumeCounter
 
 GraphOpener = Callable[[Deps], AbstractContextManager[CompiledStateGraph]]
 
@@ -126,9 +127,10 @@ class LangGraphEngine:
         open_graph: GraphOpener,
         deps: EngineDeps,
         locks: ContractLocks,
+        resumes: ResumeCounter,
     ):
         self._config, self._open, self._deps = config, open_graph, deps
-        self._locks = locks
+        self._locks, self._resumes = locks, resumes
 
     def run(
         self,
@@ -182,7 +184,12 @@ class LangGraphEngine:
     def resume_interrupted(self) -> list[dict[str, Any]]:
         # les dépendances d'une analyse : la reprise refait les étapes interrompues
         with self._open(self._deps.run()) as graph:
-            return orchestrator.resume_interrupted(graph, hold=self._locks.hold)
+            return orchestrator.resume_interrupted(
+                graph,
+                hold=self._locks.hold,
+                record=self._resumes.record,
+                limit=self._config.interrupted.max_resumes,
+            )
 
 
 def _known(graph: CompiledStateGraph, thread_id: str) -> dict[str, Any]:

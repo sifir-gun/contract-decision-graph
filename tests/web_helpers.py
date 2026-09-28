@@ -17,6 +17,7 @@ from doubles import (
 from fastapi.testclient import TestClient
 
 from cdg.adapters.demo.locks import LocalContractLocks
+from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.web.app import create_app
 from cdg.application.service import ContractService
@@ -50,6 +51,7 @@ def memory_service(
             read=lambda: deps,
         ),
         LocalContractLocks(),
+        LocalResumeCounter(),
     )
     return ContractService(
         engine=engine,

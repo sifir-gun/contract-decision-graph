@@ -16,6 +16,7 @@ from test_service import PENDING_TEXT, answer, make_service
 from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.postgres.audit_store import lock_key
 from cdg.adapters.postgres.locks import PostgresContractLocks, contract_lock_key
+from cdg.adapters.postgres.resumes import PostgresResumeCounter
 from cdg.ports.locks import ContractBusy
 
 SPAWN = multiprocessing.get_context("spawn")
@@ -189,15 +190,19 @@ def test_analyse_d_un_processus_tue_reprise_par_un_autre_scellee_une_fois(
         FakeCrag(()),
         audit_store=PostgresAuditStore(pg.app, table=journal),
     )
-    hold = PostgresContractLocks(lambda: pg.app).hold
-    only = {thread_id}  # jamais les autres threads de la base
+    options = {
+        "hold": PostgresContractLocks(lambda: pg.app).hold,
+        "record": PostgresResumeCounter(lambda: pg.app).record,
+        "limit": config.interrupted.max_resumes,
+        "thread_ids": {thread_id},  # jamais les autres threads de la base
+    }
     with orchestrator.open_graph(config, deps, pg.app) as graph:
         deadline = datetime.now(UTC) + timedelta(seconds=10)
-        resumed = orchestrator.resume_interrupted(graph, hold=hold, thread_ids=only)
+        resumed = orchestrator.resume_interrupted(graph, **options)
         while not resumed and datetime.now(UTC) < deadline:  # verrou vu relâché
-            resumed = orchestrator.resume_interrupted(graph, hold=hold, thread_ids=only)
+            resumed = orchestrator.resume_interrupted(graph, **options)
         assert [(s["thread_id"], s["statut"]) for s in resumed] == [
             (thread_id, "termine")
         ]
-        assert orchestrator.resume_interrupted(graph, hold=hold, thread_ids=only) == []
+        assert orchestrator.resume_interrupted(graph, **options) == []
     assert sealed(pg, journal) == [thread_id]  # scellé une seule fois

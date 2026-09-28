@@ -19,6 +19,7 @@ from doubles import (
 )
 
 from cdg.adapters.demo.locks import LocalContractLocks
+from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.application import ingestion
 from cdg.application.service import ContractService, extraction_refusals, state_label
@@ -42,9 +43,12 @@ def make_service(
     opener=None,
     locks=None,
     now=lambda: FIXED_NOW,
+    resumes=None,
+    crag=None,
 ):
     store = store if store is not None else MemoryAuditStore()
-    deps = make_deps(extractor, FakeCrag(empty), audit_store=store)
+    crag = crag if crag is not None else FakeCrag(empty)
+    deps = make_deps(extractor, crag, audit_store=store)
     engine = LangGraphEngine(
         config,
         opener or memory_opener(config),
@@ -55,6 +59,7 @@ def make_service(
             read=lambda: deps,
         ),
         locks if locks is not None else LocalContractLocks(),
+        resumes if resumes is not None else LocalResumeCounter(),
     )
     return ContractService(
         engine=engine,

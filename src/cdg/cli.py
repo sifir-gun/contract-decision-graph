@@ -27,12 +27,14 @@ from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.adapters.demo.extraction import ExpectedExtractor
 from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.references import DeclaredCrag
+from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm import API_KEY_VARS, build_provider
 from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
+from cdg.adapters.postgres.resumes import PostgresResumeCounter
 from cdg.adapters.web import app as web_app
 from cdg.adapters.web import sante
 from cdg.adapters.web import security as web_security
@@ -172,6 +174,10 @@ def _setup_db(args: argparse.Namespace) -> dict:
         "migrations": applied,
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
         "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
+        "reprises": {
+            "table": "contract_resumes",
+            "droits": ["SELECT", "INSERT", "UPDATE"],
+        },
     }
 
 
@@ -214,6 +220,7 @@ def build_service(config: DecisionConfig) -> ContractService:
             read=lambda: review_deps(config, HISTORY_EXPLAINER),
         ),
         PostgresContractLocks(app_pool),
+        PostgresResumeCounter(app_pool),
     )
     return ContractService(
         engine=engine,
@@ -255,6 +262,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
             read=lambda: deps,
         ),
         LocalContractLocks(),  # démonstration : un seul processus
+        LocalResumeCounter(),
     )
     return ContractService(
         engine=engine,

@@ -2285,3 +2285,19 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Constat en chemin** : en journaux JSON, `web` écrivait encore son adresse et son avertissement en texte sur la sortie d'erreur, et le résultat final sur plusieurs lignes ; un collecteur les aurait lus comme des lignes isolées. Test d'abord (`tests/test_journaux.py`), puis correction : en JSON, ils passent par le journal et le résultat tient sur une ligne ; au terminal, rien ne change.
 - **Mesures** : construction en 45 s à froid sur le poste (arm64), quelques secondes ensuite ; image de 423 Mo ; 22 tests de l'image en 20 s.
 - **Écart avec le plan validé** : le plan annonçait une « base officielle ». Les images officielles de Docker qui conviennent (`python:3.12-slim`, `debian:trixie-slim`) gardent shell et gestionnaire de paquets, contraires à « aucun outil inutile » ; distroless est publiée et signée par son propre projet. Signalé dans le rapport de la PR A.
+
+### Reprises comptées : ESCALADE au-delà du maximum (ajout à la PR A)
+
+- **Demande du propriétaire** (28/09, avant la fusion de la PR A) : une analyse qui fait planter le processus serait reprise à chaque redémarrage, avec un appel au LLM à chaque fois. Compter les reprises par contrat, durablement ; au-delà d'un maximum configuré, plus de reprise : ESCALADE, rapport d'échec qui cite le nombre de reprises, avertissement au journal.
+- **Écart signalé, puis tranché** : la demande plaçait le compteur dans l'état. Vérifié dans le code installé (ADR 005, références) : écrire dans l'état d'une analyse en cours (`update_state`) rejoue les arêtes du nœud choisi et vide les tâches en attente ; `Command(update=...)` répété sur le même checkpoint est ignoré par le checkpointer (`ON CONFLICT DO NOTHING`), et sortirait de la règle « `Command` ne sert qu'à `resume` ». Un essai jetable a montré que l'escalade, elle, fonctionne : tâches vidées en gardant les verdicts rendus, puis revue humaine. Décision du propriétaire : une table PostgreSQL (option recommandée), migration 006.
+- **Tests d'abord** (`tests/test_reprises.py`, 14 tests) :
+  - domaine : reprise permise jusqu'au maximum compris ; rapport d'échec avec l'étape en cours et le nombre de reprises ; configuration (`interrupted.max_resumes` ≥ 1) ;
+  - compteur en mémoire, par contrat, sans perte sous concurrence ;
+  - un contrat qui plante à chaque reprise, à travers des « redémarrages » successifs : 1 + 3 appels au LLM, puis ESCALADE sans nouvel appel, avertissement, plus jamais repris, scellé une fois après la décision humaine ;
+  - deux analystes sur quatre qui plantent à chaque fois : les verdicts des deux autres gardés, ni refaits ni repayés ;
+  - une reprise qui aboutit n'est comptée qu'une fois ; rien n'est compté sans reprise (contrat fini, en attente, ou tenu par un autre réplica) ;
+  - PostgreSQL : migration 006 idempotente, droits d'`app_role` sans suppression, appliquée aussi par le script d'initialisation ; compteur qui survit aux redémarrages et sans perte sous concurrence ;
+  - de vrais processus : un réplica tué pendant l'analyse, puis trois redémarrages tués chacun par la reprise (SIGKILL), puis l'escalade, sans nouvel appel ni scellement.
+- **Réalisation** : `domain/resumption.py` (règle et rapport d'échec), port `ResumeCounter`, adaptateurs `adapters/postgres/resumes.py` et `adapters/demo/resumes.py`, migration `006_reprises.sql`, section `interrupted` de `config/decision.yaml` (l'empreinte de configuration change ; aucun contrat réel en attente), `orchestrator._escalate_interrupted` (`bulk_update_state` : `END`, puis l'escalade au nom de `decision_gate`), `setup-db` qui annonce la table et ses droits.
+- **Pour la PR B, noté dans l'ADR 005** : Dependabot sur les images de base du `Dockerfile` (l'image PostgreSQL reste manuelle) ; signature des images distroless vérifiée en CI avant la construction.
+
