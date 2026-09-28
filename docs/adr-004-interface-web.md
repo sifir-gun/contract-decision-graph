@@ -21,7 +21,7 @@ L'interface (`adapters/web/`) ne fait que lire des formulaires et mettre en page
 
 ### Rendu côté serveur, HTMX, sans application séparée
 
-Les pages sont rendues par Jinja2, avec l'échappement automatique ; HTMX ajoute l'interactivité. Toutes les actions fonctionnent sans JavaScript, par des formulaires et des liens ordinaires. HTMX ajoute l'indicateur pendant l'analyse, le rejeu et la vérification affichés dans la page, et la navigation sans rechargement complet.
+Les pages sont rendues par Jinja2, avec l'échappement automatique ; HTMX ajoute l'interactivité. Les gabarits sont lus une fois, au démarrage : un processus resté en marche après une mise à jour du dépôt sert les siens, jamais ceux d'un autre commit (`tests/test_web_ecrans.py`). Toutes les actions fonctionnent sans JavaScript, par des formulaires et des liens ordinaires. HTMX ajoute l'indicateur pendant l'analyse, le rejeu et la vérification affichés dans la page, et la navigation sans rechargement complet.
 
 - **Écartée : une application séparée (React ou autre) et une API JSON.** Elle demanderait une chaîne de compilation Node, un second modèle des données côté client et une API à maintenir en parallèle du service. Tout ce qu'elle montrerait existe déjà côté serveur. Une API JSON, prévue en phase 2, sera un autre adaptateur entrant sur le même service.
 - **Écarté : LangGraph Studio**, pour les raisons de l'ADR 003.
