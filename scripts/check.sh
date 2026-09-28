@@ -7,7 +7,7 @@
 # - une seule synchronisation, tous groupes (la CI en fait une par job) ;
 # - la base est celle de docker compose (docker compose up -d), déjà migrée : setup-db
 #   applique les migrations idempotentes, sans le script d'init du conteneur de service ;
-# - RUNNER_TEMP, fourni par GitHub Actions, est ici un dossier temporaire ;
+# - RUNNER_TEMP, fourni par GitHub Actions, est ici un dossier temporaire, supprimé à la fin ;
 # - l'image est construite pour l'architecture du poste (arm64 sur un Mac récent), celle
 #   de la CI pour amd64 : les bases figées sont des index multi-architecture.
 # Payant : non (tests llm exclus). Réseau : pip-audit interroge la base de failles de PyPI ;
@@ -16,7 +16,10 @@
 # authentifié).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
+if [[ -z "${RUNNER_TEMP:-}" ]]; then
+    RUNNER_TEMP="$(mktemp -d)"
+    trap 'rm -rf "$RUNNER_TEMP"' EXIT # l'image sauvegardée pèse plusieurs centaines de Mo
+fi
 
 echo "==> dépendances, strictement depuis uv.lock (tous groupes)"
 uv sync --locked --all-groups
