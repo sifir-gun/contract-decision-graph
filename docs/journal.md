@@ -2375,3 +2375,10 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Réalisation** : `licences/` (19 licences de python-build-standalone, extraites des archives complètes x86_64 et aarch64 de la publication 20260924 après vérification de leurs empreintes, identiques ; quatre licences amont, au tag et au commit de chaque version), copié dans l'image sous `/app/licences/`.
 - **Contre-épreuve** : lancé sur l'image publiée ce matin, le test nomme les quatre paquets et les licences de Python manquantes ; sur les images reconstruites, les 12 tests passent.
 - **Mise au point** : `uv python list --all-platforms` ne rend qu'une entrée par système ; interrogé par clé (`cpython-3.12.14-linux-x86_64-gnu`), il rend la bonne publication. Le lien `cpython-3.12-…` vers `cpython-3.12.14-…` fait voir deux fois la licence de CPython : chemins résolus.
+
+### langsmith
+
+- **Lu dans le code installé** (langsmith 0.14.0, `utils.tracing_is_enabled`) : le traçage n'est actif que si `LANGSMITH_TRACING` (ou `LANGCHAIN_TRACING_V2`, ou leurs formes courtes) vaut `true`. L'image pose `LANGSMITH_TRACING=false`, `.env.example` aussi ; le `.env` du poste n'en contient aucune.
+- **Tests** (`tests/test_embeddings.py`) : une analyse complète (graphe, doublures) ne tente aucune connexion, sans variable comme avec la configuration de l'image. Deux gardes : portable (résolution de nom et connexion de Python refusées et comptées, en CI) et noyau de macOS (bac à sable existant, sur le poste). Témoins : traçage activé avec une clé fictive, la garde voit la tentative, le noyau tue le processus.
+- **Dans le cluster** : le proxy de sortie (PR C) ne laissera passer que l'API de Mistral ; LangSmith y serait refusé de toute façon (ADR 005).
+
