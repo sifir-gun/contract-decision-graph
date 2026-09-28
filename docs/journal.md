@@ -2426,3 +2426,19 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
   - réplica de démonstration : **73 à 107 Mio**, prêt en 3 s.
 - **Premier essai raté, de mon fait** : le réplica de démonstration était lancé sans `--demo`, donc en mode réel sans variables ; le script l'a attendu 5 minutes. Corrigé ; chaque mesure s'affiche désormais dès qu'elle est prise.
 
+### Fils de calcul de l'embedder, alignés sur la limite CPU
+
+- **Constat de la mesure** : 40 requêtes ont consommé 384 s de CPU. onnxruntime ouvre un fil par cœur visible, sans tenir compte de la limite du conteneur, et ces fils attendent en tournant. Mesure par requête (poste, 8 cœurs visibles) :
+
+| Fils | Limite CPU | Temps par requête | CPU par requête |
+| --- | --- | --- | --- |
+| défaut (8) | aucune | 1,6 s | 12,3 s |
+| 4 | aucune | 1,8 s | 7,3 s |
+| 2 | aucune | 3,5 s | 6,9 s |
+| 1 | aucune | 7,3 s | 7,3 s |
+| défaut (8) | 2 CPU | **9,7 s** | 19,3 s |
+| 2 | 2 CPU | **3,6 s** | 7,2 s |
+
+- **Décision** : le nombre de fils suit la limite CPU du pod. Option `--fils-embedding` ou variable `CDG_FILS_EMBEDDING`, posée par le chart ; sans réglage, le défaut d'onnxruntime (le poste n'a pas de limite).
+- **Tests d'abord** (`tests/test_embeddings.py`, `tests/test_sante.py`) : le nombre est transmis à fastembed (`threads`, dont `None` est le défaut, vérifié dans fastembed 0.8.1) ; option ou variable ; valeur nulle, négative ou non entière refusée.
+

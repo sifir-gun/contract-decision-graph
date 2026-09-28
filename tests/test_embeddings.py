@@ -321,3 +321,54 @@ def test_langsmith_aucune_connexion_vue_par_le_noyau(extra):
 
 def test_temoin_le_noyau_tue_langsmith_quand_le_tracage_est_active():
     assert langsmith_sandboxed(TRACING).returncode == -9
+
+
+# --- nombre de fils de calcul : aligné sur la limite CPU du pod -------------------------------
+#
+# Mesure du 28/09 (ADR 005) : sous une limite de 2 CPU, onnxruntime ouvre par défaut un fil
+# par cœur visible (8) ; bridés, ils attendent en tournant : 9,7 s par requête, contre 3,6 s
+# avec 2 fils. Le nombre de fils suit donc la limite CPU (option ou variable, posée par
+# le chart) ; sans réglage, le défaut d'onnxruntime.
+
+
+def fake_fastembed(monkeypatch, tmp_path, seen):
+    snapshot = tmp_path / "instantane"
+    snapshot.mkdir()
+    (snapshot / "model.onnx").write_bytes(b"poids")
+
+    class Model:
+        @staticmethod
+        def _get_model_description(model):
+            return model
+
+        @staticmethod
+        def download_model(description, cache_dir, local_files_only):
+            return str(snapshot)
+
+        def __init__(self, *args, **kwargs):
+            seen.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        types.SimpleNamespace(disable_telemetry_events=lambda: None),
+    )
+    monkeypatch.setitem(
+        sys.modules, "fastembed", types.SimpleNamespace(TextEmbedding=Model)
+    )
+
+
+@pytest.mark.parametrize(("threads", "expected"), [(None, None), (2, 2)])
+def test_nombre_de_fils_transmis_a_fastembed(monkeypatch, tmp_path, threads, expected):
+    seen = []
+    fake_fastembed(monkeypatch, tmp_path, seen)
+    fastembed.FastembedEmbedder(CONFIG, cache_dir=tmp_path / "cache", threads=threads)
+    [kwargs] = seen
+    assert (
+        kwargs["threads"] == expected
+    )  # None : défaut de fastembed, puis d'onnxruntime
+
+
+def test_nombre_de_fils_invalide_refuse(tmp_path):
+    with pytest.raises(ValueError, match="fils"):
+        fastembed.FastembedEmbedder(CONFIG, cache_dir=tmp_path, threads=0)

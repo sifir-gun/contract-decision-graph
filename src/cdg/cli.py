@@ -59,6 +59,8 @@ def today() -> date:
 
 # taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
 POOL = {"size": connexions.DEFAULT_SIZE}
+# fils de calcul de l'embedder : option --fils-embedding, ou CDG_FILS_EMBEDDING (main)
+EMBEDDER_THREADS: dict[str, int | None] = {"threads": None}
 
 
 @functools.cache
@@ -87,7 +89,9 @@ def process_embedder(config: DecisionConfig) -> fastembed.FastembedEmbedder:
     with _EMBEDDERS_GUARD:
         if key not in _EMBEDDERS:
             _EMBEDDERS[key] = fastembed.FastembedEmbedder(
-                config.embedding, settings.embedding_cache_dir()
+                config.embedding,
+                settings.embedding_cache_dir(),
+                threads=EMBEDDER_THREADS["threads"],
             )
         return _EMBEDDERS[key]
 
@@ -512,6 +516,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="taille maximale du pool de connexions d'app_role à PostgreSQL (défaut "
         f"{connexions.DEFAULT_SIZE}, ou CDG_CONNEXIONS) ; budget dans l'ADR 005",
     )
+    parser.add_argument(
+        "--fils-embedding",
+        type=_positive,
+        default=os.environ.get("CDG_FILS_EMBEDDING"),
+        help="fils de calcul de l'embedder (ou CDG_FILS_EMBEDDING) : la limite CPU du pod "
+        "(mesure dans l'ADR 005) ; par défaut, un par cœur visible (onnxruntime)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
         "setup-db",
@@ -699,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handler: Callable[[argparse.Namespace], dict] = args.handler
     POOL["size"] = args.connexions
+    EMBEDDER_THREADS["threads"] = args.fils_embedding
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
         logging.config.dictConfig(journaux.config(args.journaux))
