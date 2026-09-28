@@ -66,6 +66,20 @@ jobs:
         run: >-
           uv run --no-sync pytest -m modele --image cdg:verification
           --modele cdg-modele:verification
+      - name: Variante arm64 de l'image du modèle, au contenu identique
+        # FROM scratch, aucune commande exécutée : pas d'émulation ; les couches (contenu
+        # décompressé) doivent être exactement celles de la variante amd64 testée
+        run: |
+          docker build --platform linux/arm64 --file docker/modele/Dockerfile \
+            --build-context notice=docker/modele --tag cdg-modele:verification-arm64 \
+            "$RUNNER_TEMP/modele"
+          amd64="$(docker image inspect cdg-modele:verification --format '{{json .RootFS.Layers}}')"
+          arm64="$(docker image inspect cdg-modele:verification-arm64 \
+            --format '{{json .RootFS.Layers}}')"
+          if [ "$amd64" != "$arm64" ]; then
+            echo "couches différentes entre amd64 et arm64" >&2
+            exit 1
+          fi
 
   publication:
     name: publication (ghcr.io, signature, attestation)
@@ -111,27 +125,62 @@ jobs:
         run: >-
           uv run --no-sync pytest -m modele --image cdg:verification
           --modele cdg-modele:verification
+      - name: Variante arm64 de l'image du modèle, au contenu identique
+        # FROM scratch, aucune commande exécutée : pas d'émulation ; les couches (contenu
+        # décompressé) doivent être exactement celles de la variante amd64 testée
+        run: |
+          docker build --platform linux/arm64 --file docker/modele/Dockerfile \
+            --build-context notice=docker/modele --tag cdg-modele:verification-arm64 \
+            "$RUNNER_TEMP/modele"
+          amd64="$(docker image inspect cdg-modele:verification --format '{{json .RootFS.Layers}}')"
+          arm64="$(docker image inspect cdg-modele:verification-arm64 \
+            --format '{{json .RootFS.Layers}}')"
+          if [ "$amd64" != "$arm64" ]; then
+            echo "couches différentes entre amd64 et arm64" >&2
+            exit 1
+          fi
       - name: Connexion à ghcr.io (jeton du workflow ; droit packages limité à ce job)
         env:
           TOKEN: ${{ github.token }}
         run: echo "$TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-      - name: Publication, étiquetée par le commit, empreinte relue dans le registre
+      - name: Publication de chaque architecture, empreinte relue dans le registre
         run: |
-          docker tag cdg-modele:verification "$IMAGE:sha-$GITHUB_SHA"
-          docker push "$IMAGE:sha-$GITHUB_SHA"
-          digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" \
-            --format '{{json .Manifest}}' | jq -r .digest)"
+          docker tag cdg-modele:verification "$IMAGE:sha-$GITHUB_SHA-amd64"
+          docker tag cdg-modele:verification-arm64 "$IMAGE:sha-$GITHUB_SHA-arm64"
+          for arch in amd64 arm64; do
+            docker push "$IMAGE:sha-$GITHUB_SHA-$arch"
+            digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA-$arch" \
+              --format '{{json .Manifest}}' | jq -r .digest)"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "empreinte publiée illisible ($arch) : $digest" >&2
+              exit 1
+            fi
+            echo "DIGEST_$(tr '[:lower:]' '[:upper:]' <<< "$arch")=$digest" >> "$GITHUB_ENV"
+          done
+      - name: Index amd64 et arm64, étiqueté par le commit
+        run: |
+          docker buildx imagetools create --tag "$IMAGE:sha-$GITHUB_SHA" \
+            "$IMAGE@$DIGEST_AMD64" "$IMAGE@$DIGEST_ARM64"
+          manifest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA" \
+            --format '{{json .Manifest}}')"
+          digest="$(jq -r .digest <<< "$manifest")"
+          platforms="$(jq -r '[.manifests[].platform | "\(.os)/\(.architecture)"]
+            | sort | join(",")' <<< "$manifest")"
+          test "$platforms" = "linux/amd64,linux/arm64" || {
+            echo "plateformes de l'index inattendues : $platforms" >&2
+            exit 1
+          }
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "empreinte publiée illisible : $digest" >&2
+            echo "empreinte de l'index illisible : $digest" >&2
             exit 1
           fi
           echo "DIGEST=$digest" >> "$GITHUB_ENV"
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3 # celui des vérifications (scripts/chaine.py)
-      - name: Signature sans clé, par l'identité OIDC du workflow
-        run: cosign sign --yes "$IMAGE@$DIGEST"
-      - name: Attestation de provenance (SLSA)
+      - name: Signature sans clé de l'index et de chaque image qu'il désigne
+        run: cosign sign --yes --recursive "$IMAGE@$DIGEST"
+      - name: Attestation de provenance (SLSA), sur l'index
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
@@ -144,16 +193,20 @@ jobs:
           IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/modele.yml@refs/heads/main
           WORKFLOW: ${{ github.repository }}/.github/workflows/modele.yml
         run: |
-          cosign verify "$IMAGE@$DIGEST" --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          for digest in "$DIGEST" "$DIGEST_AMD64" "$DIGEST_ARM64"; do
+            cosign verify "$IMAGE@$digest" --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          done
           gh attestation verify "oci://$IMAGE@$DIGEST" --owner "$GITHUB_REPOSITORY_OWNER" \
             --signer-workflow "$WORKFLOW"
-      - name: Empreinte publiée, celle que le chart référence
+      - name: Empreintes publiées ; le chart référence celle de l'index
         run: |
           {
             echo "### Image du modèle publiée"
             echo
-            echo "\`$IMAGE@$DIGEST\`"
+            echo "- index : \`$IMAGE@$DIGEST\`"
+            echo "- amd64 : \`$IMAGE@$DIGEST_AMD64\`"
+            echo "- arm64 : \`$IMAGE@$DIGEST_ARM64\`"
             echo
             echo "Poids conformes à docker/modele/empreintes.sha256 ; signée, provenance attestée."
           } >> "$GITHUB_STEP_SUMMARY"

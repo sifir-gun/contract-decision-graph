@@ -833,6 +833,7 @@ Pas d'interface graphique au cœur de la phase 1 ; l'interface web locale est ve
   - identifiant d'un contrat : une seule règle, dans le domaine (`domain/identifiers.py`), appliquée à la création par le service, donc par la CLI comme par l'interface : lettres, chiffres, `.`, `_` et `-`, 100 caractères au plus, en commençant par une lettre ou un chiffre ; les contrats existants restent lisibles ;
   - icône de l'interface servie localement (`static/favicon.svg`, aussi à `/favicon.ico`) : plus de 404 ;
   - feuille de route : la phase 2 commence par le déploiement Kubernetes, le rapport HTML par contrat vient ensuite ;
+- **28 septembre 2026, Kubernetes, PR C1** (ADR 005) : images publiées en amd64 et arm64, construites et vérifiées sur des runners natifs, réunies dans un index signé et attesté ; image du modèle aussi, au contenu identique entre architectures ;
 - **28 septembre 2026, notices de licence** (ADR 005) :
   - `licences/` : licences de Python et de ses bibliothèques liées (python-build-standalone) et des paquets Python sans texte dans leur roue, copiées dans l'image ; `tests/test_licences.py` vérifie chaque composant des deux images publiées ;
   - langsmith : aucun envoi pendant une analyse dans notre configuration, vérifié en CI et sous le bac à sable de macOS ;

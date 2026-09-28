@@ -168,7 +168,10 @@ def workflow() -> dict:
 
 def runs(job: str) -> list[str]:
     steps = workflow()["jobs"][job]["steps"]
-    return [" ".join(s["run"].split()) for s in steps if "run" in s]
+    # continuations de ligne jointes, comme le ferait le shell
+    return [
+        " ".join(s["run"].replace("\\\n", " ").split()) for s in steps if "run" in s
+    ]
 
 
 def test_workflow_a_la_demande_et_sur_les_pull_requests_qui_le_touchent():
@@ -206,6 +209,27 @@ def test_telechargement_verifie_puis_image_testee(job):
     assert "HF_HUB_OFFLINE" not in fetch.get("env", {})
 
 
+BUILD_MODEL_ARM64 = (
+    "docker build --platform linux/arm64 --file docker/modele/Dockerfile "
+    "--build-context notice=docker/modele --tag cdg-modele:verification-arm64 "
+    '"$RUNNER_TEMP/modele"'
+)
+SAME_CONTENT = 'if [ "$amd64" != "$arm64" ]; then'
+
+
+@pytest.mark.parametrize("job", ["verification", "publication"])
+def test_variante_arm64_au_contenu_identique(job):
+    """L'image du modèle ne contient que des données : sa variante arm64 se construit
+    sans émulation (FROM scratch, aucune commande exécutée), et ses couches doivent être
+    exactement celles de la variante amd64 testée."""
+    steps = runs(job)
+    [variant] = [i for i, step in enumerate(steps) if BUILD_MODEL_ARM64 in step]
+    assert steps.index(BUILD_MODEL) < variant
+    compare = steps[variant]  # construite, puis comparée, dans la même étape
+    assert compare.index(BUILD_MODEL_ARM64) < compare.index(SAME_CONTENT)
+    assert "{{json .RootFS.Layers}}" in compare
+
+
 def test_verification_sur_pull_request_sans_aucun_droit_d_ecriture():
     job = workflow()["jobs"]["verification"]
     assert job["if"] == "github.event_name == 'pull_request'"
@@ -225,7 +249,11 @@ def test_publication_a_la_demande_depuis_main_signee_et_attestee():
     }
     assert job["env"]["IMAGE"] == "ghcr.io/${{ github.repository }}/modele-embedding"
     text = "\n".join(runs("publication"))
-    assert 'cosign sign --yes "$IMAGE@$DIGEST"' in text
+    # un index amd64 et arm64, signé avec chaque image qu'il désigne, puis vérifié
+    assert "docker buildx imagetools create" in text
+    assert 'test "$platforms" = "linux/amd64,linux/arm64"' in text
+    assert 'cosign sign --yes --recursive "$IMAGE@$DIGEST"' in text
+    assert 'for digest in "$DIGEST" "$DIGEST_AMD64" "$DIGEST_ARM64"' in text
     assert "cosign verify" in text and "gh attestation verify" in text
     [installer] = [
         s

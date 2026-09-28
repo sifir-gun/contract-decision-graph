@@ -332,13 +332,34 @@ def test_publication_droits_minimaux():
             assert "permissions" not in job, name
 
 
+ARCHITECTURES = [
+    {"arch": "amd64", "runner": "ubuntu-24.04"},
+    {"arch": "arm64", "runner": "ubuntu-24.04-arm"},  # runner ARM de GitHub, natif
+]
+ONLY_MAIN = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+
+
+def test_image_construite_et_verifiee_sur_chaque_architecture():
+    job = ci()["jobs"]["image"]
+    assert job["strategy"]["matrix"] == {"include": ARCHITECTURES}
+    assert (
+        job["strategy"]["fail-fast"] is False
+    )  # une architecture n'éclipse pas l'autre
+    assert job["runs-on"] == "${{ matrix.runner }}"
+    assert "${{ matrix.arch }}" in job["name"]
+    # construction native : ni émulation, ni plateforme forcée
+    assert not [s for s in job["steps"] if "qemu" in s.get("uses", "")]
+    builds = [
+        s["run"] for s in job["steps"] if s.get("run", "").startswith("docker build")
+    ]
+    assert builds and not [b for b in builds if "--platform" in b]
+
+
 def test_l_image_publiee_est_celle_testee_et_scannee():
     image_steps = ci()["jobs"]["image"]["steps"]
     [upload] = [s for s in image_steps if uses(s, "actions/upload-artifact")]
-    assert (
-        upload["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
-    )
-    assert upload["with"]["name"] == "image"
+    assert upload["if"] == ONLY_MAIN
+    assert upload["with"]["name"] == "image-${{ matrix.arch }}"
     assert upload["with"]["path"].splitlines() == [
         "${{ runner.temp }}/chaine/image.tar",
         "${{ runner.temp }}/chaine/sbom.spdx.json",
@@ -346,10 +367,19 @@ def test_l_image_publiee_est_celle_testee_et_scannee():
     assert upload["with"]["if-no-files-found"] == "error"
     steps = publication_steps()
     [download] = [s for s in steps if uses(s, "actions/download-artifact")]
-    assert download["with"]["name"] == "image"
+    assert download["with"]["pattern"] == "image-*"  # un dossier par architecture
     runs = " ".join(s.get("run", "") for s in steps)
-    assert 'docker load --input "$RUNNER_TEMP/chaine/image.tar"' in runs
+    assert 'docker load --input "$RUNNER_TEMP/chaine/image-$arch/image.tar"' in runs
+    assert "for arch in amd64 arm64" in runs
     assert not re.search(r"docker build\s", runs)  # jamais reconstruite
+
+
+def test_index_multi_architecture_verifie():
+    runs = "\n".join(s.get("run", "") for s in publication_steps())
+    assert "docker buildx imagetools create" in runs
+    assert '"$IMAGE@$DIGEST_AMD64" "$IMAGE@$DIGEST_ARM64"' in runs
+    # l'index publié ne désigne que les deux architectures attendues
+    assert 'test "$platforms" = "linux/amd64,linux/arm64"' in runs
 
 
 def test_signature_et_attestations_par_empreinte():
@@ -358,29 +388,42 @@ def test_signature_et_attestations_par_empreinte():
     cosign = re.search(r":(v[\d.]+)@", chaine().COSIGN)[1]
     assert installer["with"]["cosign-release"] == cosign  # le cosign des vérifications
     runs = "\n".join(s.get("run", "") for s in steps)
-    assert 'cosign sign --yes "$IMAGE@$DIGEST"' in runs
+    # l'index et chaque image qu'il désigne
+    assert 'cosign sign --yes --recursive "$IMAGE@$DIGEST"' in runs
     attests = [s for s in steps if uses(s, "actions/attest")]
-    assert len(attests) == 2
     for attest in attests:
         assert attest["with"]["subject-name"] == "${{ env.IMAGE }}"
-        assert attest["with"]["subject-digest"] == "${{ env.DIGEST }}"
         assert attest["with"]["push-to-registry"] is True
         # traces de stockage : dépôts d'organisation seulement (actions/attest 4.2.2)
         assert attest["with"]["create-storage-record"] is False
-    sbom = [a["with"].get("sbom-path") for a in attests]
-    assert sbom == [None, "${{ runner.temp }}/chaine/sbom.spdx.json"]
+    subjects = [
+        (a["with"]["subject-digest"], a["with"].get("sbom-path")) for a in attests
+    ]
+    assert subjects == [
+        ("${{ env.DIGEST }}", None),  # provenance : l'index
+        (
+            "${{ env.DIGEST_AMD64 }}",
+            "${{ runner.temp }}/chaine/image-amd64/sbom.spdx.json",
+        ),
+        (
+            "${{ env.DIGEST_ARM64 }}",
+            "${{ runner.temp }}/chaine/image-arm64/sbom.spdx.json",
+        ),
+    ]
 
 
 def test_ce_qui_est_publie_est_verifie():
     steps = publication_steps()
     [check] = [s for s in steps if "cosign verify" in s.get("run", "")]
     run = " ".join(check["run"].split())
+    assert 'for digest in "$DIGEST" "$DIGEST_AMD64" "$DIGEST_ARM64"' in run
     assert '--certificate-identity "$IDENTITY"' in run
     assert (
         "--certificate-oidc-issuer https://token.actions.githubusercontent.com" in run
     )
     assert check["env"]["IDENTITY"] == IDENTITY
-    assert run.count("gh attestation verify") == 2
+    assert 'gh attestation verify "oci://$IMAGE@$DIGEST"' in run
+    assert 'for digest in "$DIGEST_AMD64" "$DIGEST_ARM64"' in run
     assert "--predicate-type https://spdx.dev/Document/v2.3" in run
     assert '--signer-workflow "$WORKFLOW"' in run
 
