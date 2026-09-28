@@ -59,6 +59,9 @@ BUCKET = "cdg-sauvegardes"
 FACTICE_URL = "http://mistral-factice.cdg-tests.svc.cluster.local:8080"
 SERVICE_CIDR = "10.43.0.0/16"  # plage des services de k3s (par défaut)
 WAIT = "600s"
+# l'application attend sa tâche d'ingestion (crochet post-install : 64 extraits, plus
+# de 10 minutes sur 2 CPU, mesure du 28/09) : délai de la tâche (job-ingestion.yaml)
+APPLICATION_WAIT = "3600s"
 K3D_VERSION = "v5.9.0"  # celle de la CI et de Homebrew (ADR 005)
 
 # canal stable de k3s au 27/09/2026 (ADR 005) : volume image stable
@@ -558,7 +561,7 @@ def install(profile: Profile, folder: Path) -> None:
         f"ressources.reel.requests.memory={profile.web_memory_request}",
         "--wait",
         "--timeout",
-        WAIT,
+        APPLICATION_WAIT,
         what="application",
     )
     print("cluster installé : base, serveur factice, proxy, application")

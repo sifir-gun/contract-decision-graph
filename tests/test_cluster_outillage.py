@@ -100,6 +100,19 @@ def test_profil_choisi_d_apres_l_environnement():
     assert module.default_profile({"CI": "false"}) == "local"
 
 
+def test_attente_de_l_application_couvre_la_tache_d_ingestion():
+    """L'installation de l'application attend sa tâche d'ingestion (crochet post-install :
+    64 extraits, plus de 10 minutes sur 2 CPU, mesure du 28/09) : l'attente de Helm couvre
+    le délai de la tâche, et le job de CI laisse ce délai plus 30 minutes au reste."""
+    module = cluster()
+    template = ROOT / "chart" / "contract-decision-graph" / "templates"
+    [delai] = re.findall(
+        r'"delai" (\d+)', (template / "job-ingestion.yaml").read_text(encoding="utf-8")
+    )
+    assert module.APPLICATION_WAIT == f"{delai}s"
+    assert ci_job()["timeout-minutes"] >= int(delai) // 60 + 30
+
+
 def test_version_de_k3d_verifiee():
     module = cluster()
 
