@@ -257,6 +257,30 @@ def test_deroule_du_cluster_et_destruction_quoi_qu_il_arrive():
     assert model["env"]["GH_TOKEN"] == "${{ github.token }}"  # provenance vérifiée
 
 
+def test_runner_libere_les_outils_inutilises_avant_le_cluster():
+    """Un runner public garantit 14 Go (documentation de GitHub) ; un nœud stocke le
+    modèle deux fois (couches et contenu décompressé, 2,25 Go chacun). Avant le cluster,
+    le job retire des outils préinstallés qu'il n'utilise pas, et journalise l'espace
+    libre avant et après. Jamais dans scripts/check.sh : le poste n'est pas un runner."""
+    steps = ci_job()["steps"]
+    ids = [s.get("id") for s in steps]
+    [space] = [s for s in steps if s.get("id") == "installation-espace-disque"]
+    create = [s.get("run", "") for s in steps].index(f"{SCRIPT} creer")
+    assert ids.index("installation-espace-disque") < create
+    lines = [line.strip() for line in space["run"].splitlines() if line.strip()]
+    assert lines[0] == lines[-1] == "df -h /"
+    removed = " ".join(lines[1:-1])
+    for folder in (
+        "/usr/local/lib/android",
+        "/usr/share/dotnet",
+        "/usr/local/.ghcup",
+        "/opt/hostedtoolcache/CodeQL",
+    ):
+        assert folder in removed
+    script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
+    assert "rm -rf /usr" not in script and "/usr/local/lib/android" not in script
+
+
 def test_check_sh_deroule_le_meme_cluster():
     script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
     lines = [" ".join(line.split()) for line in script.splitlines()]

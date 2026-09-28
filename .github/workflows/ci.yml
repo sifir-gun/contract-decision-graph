@@ -310,6 +310,12 @@ jobs:
           docker load --input "$RUNNER_TEMP/chaine-proxy/image.tar"
       - name: Image de test du serveur factice, sur l'image de l'application
         run: docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
+      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés
+        id: installation-espace-disque
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: Aucun cluster d'un essai précédent
         run: uv run --no-sync python scripts/cluster.py detruire
       - name: Image publiée du modèle, signature et provenance vérifiées
@@ -331,6 +337,7 @@ jobs:
         if: failure()
         run: |
           KC=.cache/cluster/kubeconfig
+          df -h /
           kubectl --kubeconfig "$KC" --context k3d-cdg get pods,jobs,events -A || true
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg -l app.kubernetes.io/instance=cdg --all-containers --tail=200 || true
       - name: Cluster détruit, quoi qu'il arrive
