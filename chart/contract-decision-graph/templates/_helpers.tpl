@@ -62,11 +62,18 @@ chacune une seule fois (une clé en double est refusée, par kubeconform notamme
 {{- .limits.cpu | toString -}}
 {{- end -}}
 
-{{/* Sécurité du pod : non root, seccomp du runtime (Pod Security « restricted »). */}}
+{{/*
+Sécurité du pod : non root, seccomp du runtime (Pod Security « restricted »). fsGroup : le
+kubelet crée pour root les fichiers d'un Secret projeté (seul un jeton de compte de service
+prend l'utilisateur du pod, pkg/volume/projected, Kubernetes 1.36) ; l'utilisateur 65532
+les lit par son groupe.
+*/}}
 {{- define "cdg.securitePod" -}}
 runAsNonRoot: true
 runAsUser: 65532
 runAsGroup: 65532
+fsGroup: 65532
+fsGroupChangePolicy: OnRootMismatch
 seccompProfile:
   type: RuntimeDefault
 {{- end -}}
@@ -80,7 +87,7 @@ capabilities:
   drop: ["ALL"]
 {{- end -}}
 
-{{/* Connexion d'app_role à PostgreSQL : adresse, et mot de passe par le Secret. */}}
+{{/* Adresse de PostgreSQL ; les identifiants passent par les fichiers de secrets. */}}
 {{- define "cdg.envBase" -}}
 - name: POSTGRES_HOST
   value: {{ .Values.base.hote | quote }}
@@ -88,25 +95,48 @@ capabilities:
   value: {{ .Values.base.port | quote }}
 - name: POSTGRES_DB
   value: {{ .Values.base.nom | quote }}
-- name: APP_DB_PASSWORD
-  valueFrom:
-    secretKeyRef:
-      name: {{ .Values.base.application.secret }}
-      key: {{ .Values.base.application.cle }}
 {{- end -}}
 
-{{/* Administrateur de PostgreSQL : migrations et ingestion seulement. */}}
-{{- define "cdg.envAdministrateur" -}}
-- name: POSTGRES_USER
-  valueFrom:
-    secretKeyRef:
-      name: {{ .Values.base.administrateur.secret }}
-      key: {{ .Values.base.administrateur.cleUtilisateur }}
-- name: POSTGRES_PASSWORD
-  valueFrom:
-    secretKeyRef:
-      name: {{ .Values.base.administrateur.secret }}
-      key: {{ .Values.base.administrateur.cleMotDePasse }}
+{{/*
+Secrets en fichiers, jamais en variables d'environnement (CIS 5.4.1) : un volume projeté,
+monté en lecture seule au dossier que lit l'application (settings.SECRETS_DIR), un fichier
+par secret, nommé comme sa variable (settings.SECRETS). 0440 : root et le groupe du pod.
+Chaque conteneur ne reçoit que les siens : `llm` (clé de Mistral), `administrateur`
+(migrations et ingestion).
+*/}}
+{{- define "cdg.volumeSecrets" -}}
+{{- $v := .racine.Values -}}
+- name: secrets
+  projected:
+    defaultMode: 0440
+    sources:
+      - secret:
+          name: {{ $v.base.application.secret }}
+          items:
+            - key: {{ $v.base.application.cle }}
+              path: APP_DB_PASSWORD
+      {{- if .llm }}
+      - secret:
+          name: {{ $v.llm.secret }}
+          items:
+            - key: {{ $v.llm.cle }}
+              path: MISTRAL_API_KEY
+      {{- end }}
+      {{- if .administrateur }}
+      - secret:
+          name: {{ $v.base.administrateur.secret }}
+          items:
+            - key: {{ $v.base.administrateur.cleUtilisateur }}
+              path: POSTGRES_USER
+            - key: {{ $v.base.administrateur.cleMotDePasse }}
+              path: POSTGRES_PASSWORD
+      {{- end }}
+{{- end -}}
+
+{{- define "cdg.montageSecrets" -}}
+- name: secrets
+  mountPath: /run/secrets/cdg
+  readOnly: true
 {{- end -}}
 
 {{/* Volume du modèle : volume image, ou volume éphémère rempli par copie. */}}

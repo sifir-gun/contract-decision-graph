@@ -153,10 +153,9 @@ IGNORE = "ignore-check.kube-linter.io/"
 # des tâches qui s'exécutent jusqu'au bout, sans sonde, un nouveau pod par tentative ; des
 # Secrets créés hors du chart ; des noms à résoudre tous internes au cluster
 IGNORED_BY_KIND = {
-    "Deployment": {"dnsconfig-options", "env-value-from"},
+    "Deployment": {"dnsconfig-options"},
     "Job": {
         "dnsconfig-options",
-        "env-value-from",
         "no-liveness-probe",
         "no-readiness-probe",
         "restart-policy",
@@ -189,6 +188,7 @@ def test_configuration_de_kube_linter_sans_exclusion_globale_d_un_objet():
     excluded = set(config["checks"]["exclude"])
     assert config["checks"]["addAllBuiltIn"] is True
     assert "schema-validation" in excluded  # kubeconform la fait, figé et strict
+    assert "read-secret-from-env-var" not in excluded  # secrets en fichiers
     assert not excluded & set().union(*IGNORED_BY_KIND.values())
 
 
@@ -264,14 +264,61 @@ def test_images_par_empreinte_jamais_par_etiquette(reel):
 
 
 @pytest.mark.chart
-def test_aucun_secret_rendu_mots_de_passe_et_cle_par_reference(reel):
+def secret_files(spec: dict, container: dict) -> set[str]:
+    """Fichiers de secrets que voit un conteneur : le volume projeté monté, en lecture
+    seule, au dossier des secrets de l'application."""
+    from conftest import SECRETS_DIR
+
+    mounts = {m["name"]: m for m in container.get("volumeMounts", [])}
+    files: set[str] = set()
+    for volume in spec.get("volumes", []):
+        mount = mounts.get(volume["name"])
+        if mount is None or mount["mountPath"] != str(SECRETS_DIR):
+            continue
+        assert mount["readOnly"] is True
+        assert volume["projected"]["defaultMode"] == 0o440
+        for source in volume["projected"]["sources"]:
+            files |= {item["path"] for item in source["secret"]["items"]}
+    return files
+
+
+SECRET_FILES = {
+    "cdg-contract-decision-graph": {"APP_DB_PASSWORD", "MISTRAL_API_KEY"},
+    "cdg-contract-decision-graph-migrations": {
+        "APP_DB_PASSWORD",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    },
+    "cdg-contract-decision-graph-ingestion": {
+        "APP_DB_PASSWORD",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+    },
+    "cdg-contract-decision-graph-controle-configuration": {"APP_DB_PASSWORD"},
+    "cdg-contract-decision-graph-test-sante": set(),
+}
+
+
+@pytest.mark.chart
+def test_secrets_en_fichiers_en_lecture_seule_jamais_en_variables(reel):
+    """CIS 5.4.1 : des fichiers plutôt que des variables d'environnement (kube-linter,
+    read-secret-from-env-var) ; même dossier et mêmes noms que l'application. Le kubelet
+    crée les fichiers d'un Secret projeté pour root : 0440, lus par le groupe du pod."""
+    from cdg import settings
+
     assert not of_kind(reel, "Secret")
+    assert {name for name, _ in pod_specs(reel)} == set(SECRET_FILES)
     for name, spec in pod_specs(reel):
+        assert spec["securityContext"]["fsGroup"] == 65532, name
         for container in containers(spec):
             for variable in env(container).values():
-                if re.search("PASSWORD|API_KEY", variable["name"]):
-                    assert "secretKeyRef" in variable["valueFrom"], (name, variable)
-                    assert "value" not in variable
+                assert "secretKeyRef" not in variable.get("valueFrom", {}), name
+                assert variable["name"] not in settings.SECRETS, name
+        [main] = spec["containers"]
+        assert secret_files(spec, main) == SECRET_FILES[name]
+        assert SECRET_FILES[name] <= set(settings.SECRETS)
+        for init in spec.get("initContainers", []):
+            assert not secret_files(spec, init), (name, init["name"])
 
 
 @pytest.mark.chart
@@ -373,10 +420,11 @@ def test_taches_helm_ordonnees_limitees_et_nettoyees(reel):
         assert job["spec"]["backoffLimit"] == 2
         assert job["spec"]["ttlSecondsAfterFinished"] == 3600
         assert "activeDeadlineSeconds" in job["spec"]
-    administrator = env(jobs["migrations"]["spec"]["template"]["spec"]["containers"][0])
-    assert "POSTGRES_PASSWORD" in administrator
-    control = env(jobs["configuration"]["spec"]["template"]["spec"]["containers"][0])
-    assert "POSTGRES_PASSWORD" not in control  # app_role suffit
+    migrations = jobs["migrations"]["spec"]["template"]["spec"]
+    assert "POSTGRES_PASSWORD" in secret_files(migrations, migrations["containers"][0])
+    control = jobs["configuration"]["spec"]["template"]["spec"]
+    # app_role suffit au contrôle
+    assert "POSTGRES_PASSWORD" not in secret_files(control, control["containers"][0])
     forced = render("--set", "taches.controleConfiguration.passerOutre=true")
     assert not [
         j for j in of_kind(forced, "Job") if "configuration" in j["metadata"]["name"]
@@ -418,7 +466,7 @@ def test_mode_demonstration_sans_base_ni_modele_ni_cle():
     pod = of_kind(docs, "Deployment")[0]["spec"]["template"]["spec"]
     web = pod["containers"][0]
     assert "--demo" in web["args"] and "env" not in web
-    assert "modele" not in {v["name"] for v in pod["volumes"]}
+    assert not {"modele", "secrets"} & {v["name"] for v in pod["volumes"]}
     assert web["resources"]["limits"]["memory"] == "256Mi"
 
 

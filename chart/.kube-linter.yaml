@@ -25,10 +25,6 @@ checks:
     # répartition sur des nœuds différents par topologySpreadConstraints (maxSkew 1,
     # DoNotSchedule), plus souple et plus lisible qu'une anti-affinité
     - no-anti-affinity
-    # la clé de Mistral et le mot de passe d'app_role arrivent par variables
-    # d'environnement : image sans shell ni sous-processus, racine en lecture seule, jamais
-    # journalisés ; l'étape suivante, un gestionnaire de secrets externe (ADR 005)
-    - read-secret-from-env-var
     # le proxy de sortie et PostgreSQL ne sont pas rendus par ce chart (PR C3 : Smokescreen,
     # CloudNativePG) : leurs sélecteurs ne désignent aucun pod du rendu
     - dangling-networkpolicypeer-podselector

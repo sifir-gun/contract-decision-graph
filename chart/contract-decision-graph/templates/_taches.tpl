@@ -38,7 +38,6 @@ metadata:
     ignore-check.kube-linter.io/no-liveness-probe: "tâche qui s'exécute jusqu'au bout, bornée par activeDeadlineSeconds : aucune sonde de vie"
     ignore-check.kube-linter.io/no-readiness-probe: "tâche sans service ni trafic à recevoir : aucune sonde de disponibilité"
     ignore-check.kube-linter.io/dnsconfig-options: "ne résout que des noms internes au cluster ; api.mistral.ai est résolu par le proxy de sortie, qui porte ndots 2 (ADR 005)"
-    ignore-check.kube-linter.io/env-value-from: "Secrets créés hors du chart par conception (PostgreSQL, clé de Mistral) : aucun secret dans les valeurs (ADR 005)"
 spec:
   backoffLimit: {{ $v.taches.tentatives }}
   ttlSecondsAfterFinished: {{ $v.taches.conservation }}
@@ -68,9 +67,6 @@ spec:
             {{- toYaml .args | nindent 12 }}
           env:
             {{- include "cdg.envBase" $racine | nindent 12 }}
-            {{- if .administrateur }}
-            {{- include "cdg.envAdministrateur" $racine | nindent 12 }}
-            {{- end }}
             {{- if .modele }}
             - name: EMBEDDING_CACHE_DIR
               value: /modele
@@ -85,6 +81,7 @@ spec:
             - name: configuration
               mountPath: /app/config
               readOnly: true
+            {{- include "cdg.montageSecrets" $racine | nindent 12 }}
             {{- if .modele }}
             - name: modele
               mountPath: /modele
@@ -97,6 +94,7 @@ spec:
         - name: configuration
           configMap:
             name: {{ .configMap }}
+        {{- include "cdg.volumeSecrets" (dict "racine" $racine "llm" false "administrateur" .administrateur) | nindent 8 }}
         {{- if .modele }}
         {{- include "cdg.volumeModele" $racine | nindent 8 }}
         {{- end }}
