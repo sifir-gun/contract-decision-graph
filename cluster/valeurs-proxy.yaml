@@ -1,0 +1,12 @@
+# Profil de test du chart cdg-proxy : le serveur factice de Mistral, dans le cluster, à la
+# place de l'API de Mistral. Le scénario « configuration de production » repasse aux
+# valeurs par défaut (seulement api.mistral.ai, aucune adresse privée).
+domainesAutorises:
+  - mistral-factice.cdg-tests.svc.cluster.local
+plagesAutorisees:
+  - 10.43.0.0/16
+sortiesInternes:
+  - espaceDeNoms: cdg-tests
+    selecteur:
+      app: mistral-factice
+    port: 8080

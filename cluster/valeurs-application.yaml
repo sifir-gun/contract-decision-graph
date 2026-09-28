@@ -1,0 +1,9 @@
+# Profil de test du chart de l'application : l'API de Mistral est le serveur factice (par le
+# proxy), l'administrateur de la base est le superutilisateur de CloudNativePG.
+llm:
+  adresseApi: http://mistral-factice.cdg-tests.svc.cluster.local:8080
+base:
+  administrateur:
+    secret: cdg-postgres-superuser
+    cleUtilisateur: username
+    cleMotDePasse: password

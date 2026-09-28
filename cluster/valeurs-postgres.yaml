@@ -1,0 +1,14 @@
+# Profil de test du chart cdg-postgres : sauvegardes vers SeaweedFS, dans le cluster.
+stockage:
+  taille: 1Gi
+ressources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: "1", memory: 1Gi}
+sauvegardes:
+  adresse: http://seaweedfs.cdg-stockage.svc.cluster.local:8333
+reseau:
+  stockageInterne:
+    espaceDeNoms: cdg-stockage
+    selecteur:
+      app: seaweedfs
+    port: 8333

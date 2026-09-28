@@ -1,0 +1,59 @@
+# Serveur factice de Mistral du cluster de test (tests/mistral_factice.py, image de test à
+# part). Test seulement : jamais dans l'image ni dans le chart de l'application.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mistral-factice
+  namespace: cdg-tests
+  labels:
+    app: mistral-factice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mistral-factice
+  template:
+    metadata:
+      labels:
+        app: mistral-factice
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mistral-factice
+          image: ${FACTICE}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /controle
+              port: http
+            periodSeconds: 3
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mistral-factice
+  namespace: cdg-tests
+spec:
+  selector:
+    app: mistral-factice
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
