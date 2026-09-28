@@ -622,10 +622,23 @@ def test_mise_a_jour_refusee_tant_qu_un_contrat_attend_sous_l_ancienne_configura
 # --- 7. sauvegarde et restauration --------------------------------------------------------
 
 
+def postgres_ready(name: str) -> bool:
+    """Cluster CloudNativePG sain : toutes ses instances prêtes, WAL archivés en continu."""
+    cluster = json.loads(kubectl("get", "cluster", "-n", "cdg", name, "-o", "json"))
+    status = cluster.get("status", {})
+    conditions = {c["type"]: c["status"] for c in status.get("conditions", [])}
+    return (
+        status.get("phase") == "Cluster in healthy state"
+        and status.get("readyInstances") == cluster["spec"]["instances"]
+        and conditions.get("ContinuousArchiving") == "True"
+    )
+
+
 def test_sauvegarde_puis_restauration_verifiee_contre_la_tete_conservee():
     """La tête du journal est relevée hors de la base ; une sauvegarde est faite ; un
     nouveau cluster est restauré depuis elle ; l'application, basculée dessus, vérifie la
     chaîne contre la tête conservée (verify --expect-head)."""
+    wait_for(lambda: postgres_ready("cdg-postgres"), "base saine, WAL archivés", 300, 5)
     pod = web_pods()[0]["metadata"]["name"]
     code, report = cli(pod, "verify")
     assert code == 0 and report["enregistrements"] > 0, report
@@ -667,14 +680,9 @@ def test_sauvegarde_puis_restauration_verifiee_contre_la_tete_conservee():
         "restauration.source=cdg-postgres",
     )
     assert restored.returncode == 0, restored.stderr
-    kubectl(
-        "wait",
-        "--for=condition=Ready",
-        "cluster.postgresql.cnpg.io/cdg-postgres-restauree",
-        "-n",
-        "cdg",
-        "--timeout=900s",
-        timeout=960,
+    # la condition Ready peut précéder l'instance qui sert : l'état sain est attendu
+    wait_for(
+        lambda: postgres_ready("cdg-postgres-restauree"), "base restaurée saine", 900, 5
     )
     switched = helm(
         "upgrade",
