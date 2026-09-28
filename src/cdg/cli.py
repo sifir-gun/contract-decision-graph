@@ -199,7 +199,9 @@ def _fetch_embedding_model(args: argparse.Namespace) -> dict:
 def _ingest(args: argparse.Namespace) -> dict:
     config = load_config()
     embedder = fastembed.FastembedEmbedder(
-        config.embedding, settings.embedding_cache_dir()
+        config.embedding,
+        settings.embedding_cache_dir(),
+        threads=EMBEDDER_THREADS["threads"],
     )
     rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
     summary = rag_store.sync(conninfo.admin_conninfo(), rows, embedder.model)

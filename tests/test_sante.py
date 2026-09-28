@@ -292,3 +292,24 @@ def test_fils_de_l_embedder_invalide_refuse(value):
 
     with pytest.raises(SystemExit):
         cli.main(["--fils-embedding", value, "web", "--demo"])
+
+
+def test_ingestion_avec_les_fils_de_l_option(monkeypatch, tmp_path):
+    # le Job d'ingestion a lui aussi une limite CPU : même réglage que l'interface
+    from cdg import cli
+
+    seen = []
+
+    class Loaded:
+        model = "modele-de-test"
+
+        def __init__(self, config, cache_dir, *, threads=None):
+            seen.append(threads)
+
+    monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", Loaded)
+    monkeypatch.setattr(cli.settings, "embedding_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words: [])
+    monkeypatch.setattr(cli.rag_store, "sync", lambda conninfo, rows, model: {})
+    monkeypatch.setattr(cli.conninfo, "admin_conninfo", lambda: "base-de-test")
+    assert cli.main(["--fils-embedding", "2", "ingest"]) == 0
+    assert seen == [2]

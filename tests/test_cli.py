@@ -385,7 +385,7 @@ def test_ingest_indexe_le_corpus_puis_rejouable(pg, capsys, monkeypatch, tmp_pat
     monkeypatch.setenv("EMBEDDING_CACHE_DIR", str(tmp_path))
     embedder, cache_dirs = HashEmbedder(), []
 
-    def factory(config, cache_dir):
+    def factory(config, cache_dir, *, threads=None):
         cache_dirs.append(cache_dir)
         return embedder
 
