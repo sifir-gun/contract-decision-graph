@@ -260,26 +260,57 @@ def test_deroule_du_cluster_et_destruction_quoi_qu_il_arrive():
     assert model["env"]["GH_TOKEN"] == "${{ github.token }}"  # provenance vérifiée
 
 
-def test_runner_libere_les_outils_inutilises_avant_le_cluster():
-    """Un runner public garantit 14 Go (documentation de GitHub) ; un nœud stocke le
-    modèle deux fois (couches et contenu décompressé, 2,25 Go chacun). Avant le cluster,
-    le job retire des outils préinstallés qu'il n'utilise pas, et journalise l'espace
-    libre avant et après. Jamais dans scripts/check.sh : le poste n'est pas un runner."""
+def test_besoin_de_disque_calcule_sur_la_taille_reelle_des_images():
+    """Tailles mesurées le 29/09 (registre, linux/amd64 ; décompressées : docker) : le
+    modèle pèse 1,33 Go compressé et 2,25 Go décompressé. Au pire, chaque image est sur
+    chaque nœud, deux fois (couches compressées et contenu décompressé), nos images en
+    plus dans le registre local et sur l'hôte, avec les données et le seuil
+    d'éviction."""
+    module = cluster()
+    assert module.IMAGE_SIZES_GB["modele"] == (1.33, 2.25)
+    assert module.IMAGE_SIZES_GB["application"] == (0.14, 0.42)
+    nodes = module.PROFILES["ci"].agents + 1
+    need = module.disk_need_gb(nodes)
+    assert 28 < need < 29
+    assert module.disk_need_gb(nodes + 1) - need == pytest.approx(7.26)
+
+
+def test_runner_libere_les_outils_inutilises_sous_le_seuil_de_disque():
+    """Un runner public ne garantit que 14 Go (documentation de GitHub), sous le besoin
+    du cluster au pire. Avant le cluster, le job retire des outils préinstallés qu'il
+    n'utilise pas, seulement si l'espace libre est sous ce besoin, et journalise l'espace
+    libre avant et, en fin de job, l'espace restant. Jamais dans scripts/check.sh : le
+    poste n'est pas un runner."""
+    module = cluster()
     steps = ci_job()["steps"]
     ids = [s.get("id") for s in steps]
     [space] = [s for s in steps if s.get("id") == "installation-espace-disque"]
     create = [s.get("run", "") for s in steps].index(f"{SCRIPT} creer")
     assert ids.index("installation-espace-disque") < create
+    threshold = int(space["env"]["ESPACE_MIN_GO"])
+    assert threshold >= module.disk_need_gb(module.PROFILES["ci"].agents + 1)
+    assert threshold < module.disk_need_gb(module.PROFILES["ci"].agents + 1) + 2
     lines = [line.strip() for line in space["run"].splitlines() if line.strip()]
-    assert lines[0] == lines[-1] == "df -h /"
-    removed = " ".join(lines[1:-1])
+    assert lines[0] == "df -h /"
+    assert (
+        'libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")' in lines
+    )
+    guarded = lines.index("if (( libre < ESPACE_MIN_GO )); then")
+    removal = next(i for i, line in enumerate(lines) if line.startswith("sudo rm -rf"))
+    assert guarded < removal < lines.index("else") < lines.index("fi")
     for folder in (
         "/usr/local/lib/android",
         "/usr/share/dotnet",
         "/usr/local/.ghcup",
         "/opt/hostedtoolcache/CodeQL",
     ):
-        assert folder in removed
+        assert folder in lines[removal]
+    [left] = [s for s in steps if s.get("id") == "diagnostic-espace-disque"]
+    assert left["if"] == "always()" and left["run"].strip() == "df -h /"
+    destroy = [
+        i for i, s in enumerate(steps) if s.get("run", "") == f"{SCRIPT} detruire"
+    ][-1]
+    assert ids.index("diagnostic-espace-disque") < destroy
     script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
     assert "rm -rf /usr" not in script and "/usr/local/lib/android" not in script
 

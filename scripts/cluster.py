@@ -167,6 +167,31 @@ PROFILES = {
 }
 
 
+# taille des images en Go, compressées (registre) et décompressées : mesure du 29/09,
+# linux/amd64 (docker buildx imagetools inspect, docker image inspect) ; pour les images
+# tierces (cert-manager, CloudNativePG, greffon, PostgreSQL, SeaweedFS, k3s, registre),
+# 0,78 Go compressés, décompressés estimés au triple, comme l'application (ADR 005)
+IMAGE_SIZES_GB = {
+    "modele": (1.33, 2.25),
+    "application": (0.14, 0.42),
+    "tierces": (0.78, 2.34),
+}
+DATA_GB = 1.0  # bases (trois instances au plus), WAL, sauvegardes : mesurés sous 1 Go
+EVICTION_GB = 1.07  # seuil d'éviction des nœuds (1 Gi, KUBELET_ARGS)
+
+
+def disk_need_gb(nodes: int) -> float:
+    """Besoin du cluster, au pire, sur le disque de Docker : chaque image sur chaque nœud,
+    en couches compressées et en contenu décompressé ; nos images dans le registre local
+    (compressées) et sur l'hôte (décompressées, plus l'archive de l'application) ; les
+    données ; le seuil d'éviction."""
+    per_node = sum(c + u for c, u in IMAGE_SIZES_GB.values())
+    ours = [IMAGE_SIZES_GB[name] for name in ("modele", "application")]
+    registry = sum(c for c, _ in ours)
+    host = sum(u for _, u in ours) + IMAGE_SIZES_GB["application"][1]
+    return nodes * per_node + registry + host + DATA_GB + EVICTION_GB
+
+
 def default_profile(environ: Mapping[str, str] = os.environ) -> str:
     """Profil tiré de l'environnement : mêmes commandes en CI et dans scripts/check.sh."""
     return "ci" if environ.get("CI") == "true" else "local"
