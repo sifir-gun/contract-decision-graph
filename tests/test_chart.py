@@ -491,12 +491,45 @@ def test_regle_reseau_des_taches_posee_avant_elles(reel):
     annotations = named(reel, "NetworkPolicy", "-taches")["metadata"]["annotations"]
     account = named(reel, "ServiceAccount", "-taches")["metadata"]["annotations"]
     assert annotations["helm.sh/hook"] == account["helm.sh/hook"]
-    assert annotations["helm.sh/hook-delete-policy"] == "before-hook-creation"
+    assert annotations["helm.sh/hook-delete-policy"] == (
+        "before-hook-creation,hook-succeeded"
+    )
     weights = [
         int(job["metadata"]["annotations"]["helm.sh/hook-weight"])
         for job in of_kind(reel, "Job")
     ]
     assert int(annotations["helm.sh/hook-weight"]) < min(weights)
+
+
+@pytest.mark.chart
+@pytest.mark.parametrize("variant", ["reel", "demo", "copie", "sans-taches"])
+def test_aucune_ressource_de_crochet_ne_survit_a_un_deploiement_reussi(variant):
+    """Helm 4.3.0 ne supprime à la désinstallation que les ressources ordinaires de la
+    release (pkg/action/uninstall.go) : une ressource de crochet laissée après son crochet
+    survivrait à `helm uninstall`. Chacune est donc supprimée après succès, et les
+    journaux d'une tâche sont recopiés par Helm avant (hook-output-log-policy). Une tâche
+    en échec reste pour le diagnostic, jusqu'à son délai de conservation ; son nettoyage
+    après désinstallation est documenté (docs/exploitation.md) et testé (scénario du
+    cluster)."""
+    options = (
+        SANS_TACHES if variant == "sans-taches" else chart_script().VARIANTS[variant]
+    )
+    docs = render(*options)
+    hooks = [
+        d for d in docs if "helm.sh/hook" in (d["metadata"].get("annotations") or {})
+    ]
+    assert hooks
+    for doc in hooks:
+        annotations = doc["metadata"]["annotations"]
+        policies = annotations.get("helm.sh/hook-delete-policy", "").split(",")
+        name = f"{doc['kind']}/{doc['metadata']['name']}"
+        assert "before-hook-creation" in policies and "hook-succeeded" in policies, name
+        assert "hook-failed" not in policies, name  # diagnostic d'une tâche en échec
+    for job in of_kind(docs, "Job"):
+        annotations = job["metadata"]["annotations"]
+        assert annotations["helm.sh/hook-output-log-policy"] == (
+            "hook-succeeded,hook-failed"
+        )
 
 
 @pytest.mark.chart
