@@ -9,10 +9,13 @@ mesure). La CLI ne sert qu'aux commandes sans modèle (list, journal, verify, re
 Les scénarios s'enchaînent sur le même cluster, dans l'ordre du fichier.
 """
 
+import base64
 import contextlib
+import hashlib
 import importlib.util
 import json
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -48,6 +51,13 @@ def _cluster_module():
 
 
 CLUSTER = _cluster_module()
+KUBECTL = [
+    "kubectl",
+    "--kubeconfig",
+    str(CLUSTER.KUBECONFIG),
+    "--context",
+    CLUSTER.CONTEXT,
+]
 
 
 @pytest.fixture(scope="module")
@@ -567,7 +577,236 @@ def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
         assert restored.returncode == 0, restored.stderr
 
 
-# --- 6. contrôle de configuration avant une mise à jour -----------------------------------
+# --- 6. rotation du mot de passe d'app_role, absent de tous les journaux -----------------
+
+APPLICATION_SECRET = "cdg-base-application"
+FILE_DIGEST = (
+    "import hashlib; print(hashlib.sha256(open('/run/secrets/cdg/APP_DB_PASSWORD', 'rb')"
+    ".read().strip()).hexdigest())"
+)
+# depuis un pod de l'interface : la chaîne à jour (fichier monté) ouvre une session, et le
+# mot de passe lu sur l'entrée standard (jamais en argument) est refusé ou accepté
+AUTHENTICATION = """
+import sys, psycopg
+from psycopg.conninfo import make_conninfo
+from cdg.adapters.postgres import conninfo
+current = conninfo.app_conninfo()
+psycopg.connect(current, connect_timeout=5).close()
+other = make_conninfo(current, password=sys.stdin.read().strip())
+try:
+    psycopg.connect(other, connect_timeout=5).close()
+    print("accepte")
+except psycopg.OperationalError:
+    print("refuse")
+"""
+
+
+# sorties des tâches, recopiées par Helm 4.3 : son journal standard passe par slog, qui les
+# rend en texte, guillemets échappés (internal/logging/logging.go ; log/slog de Go)
+TASK_OUTPUTS = (
+    re.compile(r'setup_db\\?": \\?"ok'),  # migrations
+    re.compile(r'a_trancher\\?": \[\]'),  # contrôle de configuration
+)
+
+
+def web_exec(pod: str, code: str, stdin: str | None = None):
+    """Python dans le conteneur de l'interface ; code et sorties, sans exiger le succès."""
+    return subprocess.run(
+        KUBECTL
+        + ["exec", "-i", "-n", "cdg", pod, "-c", "web", "--", "python", "-c", code],
+        input=stdin or "",
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
+def application_password() -> str:
+    encoded = kubectl(
+        "get",
+        "secret",
+        APPLICATION_SECRET,
+        "-n",
+        "cdg",
+        "-o",
+        "jsonpath={.data.password}",
+    )
+    return base64.b64decode(encoded).decode()
+
+
+def container_logs() -> tuple[str, set[str]]:
+    """Journaux de tous les conteneurs de tous les pods du cluster, conteneurs
+    d'initialisation et exécutions précédentes compris ; et les pods lus. Un conteneur
+    démarré dont le journal est illisible est une erreur, jamais un trou silencieux."""
+    pods = json.loads(kubectl("get", "pods", "--all-namespaces", "-o", "json"))["items"]
+    chunks, read = [], set()
+    for pod in pods:
+        meta, status = pod["metadata"], pod.get("status", {})
+        states = {
+            s["name"]: s
+            for s in status.get("initContainerStatuses", [])
+            + status.get("containerStatuses", [])
+        }
+        containers = pod["spec"].get("initContainers", []) + pod["spec"]["containers"]
+        for container in containers:
+            state = states.get(container["name"], {})
+            runs = []
+            if {"running", "terminated"} & set(state.get("state", {})):
+                runs.append([])
+            if state.get("restartCount"):
+                runs.append(["--previous"])
+            for extra in runs:
+                result = subprocess.run(
+                    KUBECTL
+                    + ["logs", "-n", meta["namespace"], meta["name"]]
+                    + ["-c", container["name"], *extra],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
+                where = f"{meta['namespace']}/{meta['name']}/{container['name']}"
+                assert result.returncode == 0, f"journal illisible : {where}"
+                chunks.append(result.stdout)
+                read.add(f"{meta['namespace']}/{meta['name']}")
+    return "\n".join(chunks), read
+
+
+def assert_covered(read: set[str]) -> None:
+    """L'opérateur, les instances PostgreSQL et l'application ont bien été lus."""
+    names = {name.split("/", 1)[1] for name in read}
+    assert any(n.startswith("cnpg-controller-manager-") for n in names), names
+    assert any(n.startswith("cdg-postgres-") for n in names), names
+    assert {p["metadata"]["name"] for p in web_pods()} <= names
+
+
+def assert_absent(password: str, text: str) -> None:
+    for form in (password, base64.b64encode(password.encode()).decode()):
+        assert form not in text, "mot de passe d'app_role trouvé dans un journal"
+
+
+def upgrade_without_changes() -> str:
+    """Mise à jour aux mêmes valeurs : ses tâches tournent (migrations en superutilisateur,
+    contrôle de configuration en app_role) et Helm recopie leurs journaux sur sa sortie
+    (hook-output-log-policy) avant de les supprimer ; le Deployment ne change pas."""
+    result = helm(
+        "upgrade",
+        "cdg",
+        str(ROOT / "chart" / "contract-decision-graph"),
+        "--namespace",
+        "cdg",
+        "--reuse-values",
+        *SANS_INGESTION,
+        "--set",
+        "taches.controleConfiguration.passerOutre=false",
+        "--wait",
+        "--timeout",
+        "600s",
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert all(pattern.search(output) for pattern in TASK_OUTPUTS), output
+    return output
+
+
+def restarts() -> dict[str, int]:
+    return {
+        p["metadata"]["name"]: sum(
+            s.get("restartCount", 0) for s in p["status"].get("containerStatuses", [])
+        )
+        for p in web_pods()
+    }
+
+
+def primary() -> str:
+    return kubectl(
+        "get",
+        "cluster",
+        "cdg-postgres",
+        "-n",
+        "cdg",
+        "-o",
+        "jsonpath={.status.currentPrimary}",
+    ).strip()
+
+
+def test_rotation_du_mot_de_passe_sans_redemarrage_ni_trace_dans_les_journaux():
+    """Le mot de passe d'app_role tiré par l'installation, puis celui de la rotation,
+    témoins, n'apparaissent dans aucun journal : opérateur, instances PostgreSQL,
+    application, tâches (recopiées par Helm), avant et après la rotation. Après la
+    rotation (Secret changé, appliqué par CloudNativePG ; fichier monté mis à jour par le
+    kubelet), l'ancien mot de passe est refusé ; les connexions d'app_role sont coupées
+    côté serveur, et chaque réplica en ouvre de nouvelles avec le nouveau mot de passe
+    pour analyser et sceller un contrat, sans redémarrage."""
+    first = application_password()
+    before = upgrade_without_changes()
+    logs, read = container_logs()
+    assert_covered(read)
+    assert_absent(first, logs + before)
+
+    pods = restarts()
+    assert len(pods) == 2, pods
+    second = secrets.token_urlsafe(24)
+    kubectl(
+        "patch",
+        "secret",
+        APPLICATION_SECRET,
+        "-n",
+        "cdg",
+        "--type",
+        "merge",
+        "--patch-file",
+        "/dev/stdin",
+        stdin=json.dumps({"stringData": {"password": second}}),
+    )
+    digest = hashlib.sha256(second.encode()).hexdigest()
+    for pod in pods:
+        wait_for(
+            lambda pod=pod: web_exec(pod, FILE_DIGEST).stdout.strip() == digest,
+            f"fichier du secret mis à jour dans {pod}",
+            300,
+            5,
+        )
+
+        def refused(pod=pod) -> bool:
+            result = web_exec(pod, AUTHENTICATION, stdin=first)
+            return result.returncode == 0 and result.stdout.strip() == "refuse"
+
+        wait_for(refused, "nouveau mot de passe appliqué, ancien refusé", 300, 5)
+    terminated = kubectl(
+        "exec",
+        "-n",
+        "cdg",
+        primary(),
+        "-c",
+        "postgres",
+        "--",
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "cdg",
+        "-Atc",
+        "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity"
+        " WHERE usename = 'app_role'",
+    )
+    assert int(terminated.strip()) >= 2  # au moins une connexion par réplica
+    for pod in pods:
+        thread = f"rotation-{uuid.uuid4().hex[:8]}"
+        with interface(pod) as client:
+            assert analyse(client, GO, thread).status_code == 303
+        seal_if_pending(pod, thread)
+        assert sealed(pod, thread) == 1
+    after = upgrade_without_changes()  # le contrôle se connecte avec le nouveau
+    assert restarts() == pods  # mêmes pods, aucun redémarrage
+    logs, read = container_logs()
+    assert_covered(read)
+    for password in (first, second):
+        assert_absent(password, logs + before + after)
+
+
+# --- 7. contrôle de configuration avant une mise à jour -----------------------------------
 
 
 def test_mise_a_jour_refusee_tant_qu_un_contrat_attend_sous_l_ancienne_configuration(
@@ -620,7 +859,7 @@ def test_mise_a_jour_refusee_tant_qu_un_contrat_attend_sous_l_ancienne_configura
     assert forced.returncode == 0, forced.stderr
 
 
-# --- 7. sauvegarde et restauration --------------------------------------------------------
+# --- 8. sauvegarde et restauration, puis désinstallation ----------------------------------
 
 
 def postgres_ready(name: str) -> bool:
@@ -635,10 +874,37 @@ def postgres_ready(name: str) -> bool:
     )
 
 
+def release_resources(selector: str) -> set[str]:
+    """Ressources de l'espace de noms qui portent ces étiquettes, de toutes les sortes
+    listables (métriques et événements exceptés)."""
+    kinds = [
+        kind
+        for kind in kubectl(
+            "api-resources", "--verbs=list", "--namespaced", "-o", "name"
+        ).split()
+        if not kind.endswith(".metrics.k8s.io")
+        and kind not in {"events", "events.events.k8s.io"}
+    ]
+    listed = kubectl(
+        "get",
+        ",".join(kinds),
+        "-n",
+        "cdg",
+        "-l",
+        selector,
+        "-o",
+        "name",
+        "--ignore-not-found",
+    )
+    return set(listed.split())
+
+
 def test_sauvegarde_puis_restauration_verifiee_contre_la_tete_conservee():
     """La tête du journal est relevée hors de la base ; une sauvegarde est faite ; un
     nouveau cluster est restauré depuis elle ; l'application, basculée dessus, vérifie la
-    chaîne contre la tête conservée (verify --expect-head)."""
+    chaîne contre la tête conservée (verify --expect-head). Puis la release est
+    désinstallée : aucune de ses ressources ne reste, crochets compris, hormis une tâche
+    en échec gardée pour le diagnostic, que le nettoyage documenté supprime."""
     wait_for(lambda: postgres_ready("cdg-postgres"), "base saine, WAL archivés", 300, 5)
     pod = web_pods()[0]["metadata"]["name"]
     code, report = cli(pod, "verify")
@@ -712,3 +978,26 @@ def test_sauvegarde_puis_restauration_verifiee_contre_la_tete_conservee():
     )
     assert code == 0, report
     assert (report["tete"], report["enregistrements"]) == (head, count)
+
+    release = "app.kubernetes.io/instance=cdg"
+    tasks = f"{release},app.kubernetes.io/component=taches"
+    assert release_resources(release)
+    uninstalled = helm(
+        "uninstall", "cdg", "--namespace", "cdg", "--wait", "--timeout", "300s"
+    )
+    assert uninstalled.returncode == 0, uninstalled.stderr
+    # le temps que les pods, le ReplicaSet et les EndpointSlices suivent leur propriétaire
+    wait_for(
+        lambda: release_resources(release) <= release_resources(tasks),
+        "plus que des tâches après la désinstallation",
+        300,
+        5,
+    )
+    jobs = json.loads(kubectl("get", "jobs", "-n", "cdg", "-l", tasks, "-o", "json"))
+    for job in jobs["items"]:  # seule une tâche en échec reste, pour le diagnostic
+        assert job["status"].get("failed"), job["metadata"]["name"]
+    # nettoyage documenté (docs/exploitation.md, « Désinstallation »)
+    kubectl("delete", "jobs", "--namespace", "cdg", "--selector", release)
+    wait_for(
+        lambda: not release_resources(release), "aucune ressource de la release", 300, 5
+    )
