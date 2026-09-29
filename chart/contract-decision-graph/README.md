@@ -55,4 +55,5 @@ Par `scripts/chart.py` (helm lint, kubeconform, kube-linter) et `tests/test_char
 - images par empreinte seulement ; aucun Secret rendu ; secrets en fichiers (0440, groupe du pod), chaque conteneur ne recevant que les siens ;
 - interface : mise à jour progressive sans interruption, budget d'interruption, répartition sur des nœuds différents (contraintes de topologie, anti-affinité préférée), trois sondes, pause avant l'arrêt et délai de grâce calculé ;
 - configuration en ConfigMap, dont l'empreinte relance les pods ;
+- tâches et autres ressources de crochet supprimées après leur crochet, journaux des tâches recopiés sur la sortie de Helm : `helm uninstall` ne laisse rien, hormis une tâche en échec gardée pour le diagnostic (nettoyage dans `docs/exploitation.md`) ;
 - réseau : tout refusé par défaut ; en sortie, DNS, PostgreSQL et proxy seulement ; jamais le port 443 ouvert largement.

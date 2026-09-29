@@ -2506,3 +2506,12 @@ Les onze passent, un par un, sur le même cluster : deux réplicas sur deux nœu
 
 - Empreinte par défaut du proxy dans son chart, après la première publication.
 - N'embarquer que les extraits absents de la base : réindexer un corpus inchangé ne prendrait plus près de 20 minutes.
+
+### Avant la fusion (29/09) : rotation, journaux, désinstallation, disque
+
+- **Rapport demandé par le propriétaire** : la preuve que le mot de passe d'`app_role` n'apparaît dans aucun journal n'existait que pour la voie `setup-db` (tests automatiques) ; pour la voie CloudNativePG retenue, seule la documentation de l'opérateur. La vérification sur un cluster local a été interrompue : Docker Desktop a redémarré vers 01 h 37 (heure de Paris) pendant l'installation, les nœuds k3d ne sont pas repartis ; cause probable, la mémoire de la VM (8 Go, profil local à 7 Go au pic).
+- **Constat de relecture** : le pool figeait sa chaîne de connexion au démarrage ; après une rotation, toute nouvelle connexion aurait gardé l'ancien mot de passe. Décision du propriétaire : chaîne appelable, relue à chaque connexion (psycopg-pool 3.3.3 l'accepte), pour le pool et hors du pool. Tests d'abord ; un premier contrôle passait à tort, le pool ouvrant une seconde connexion d'avance, avant la rotation : le test attend désormais un pool prêt, à une connexion.
+- **Scénario 12**, en CI seulement (décision du propriétaire) : mots de passe témoins cherchés dans les journaux de tous les conteneurs et dans ceux des tâches recopiés par Helm, avant et après une rotation ; ancien refusé ; connexions coupées côté serveur, puis chaque réplica analyse et scelle avec le nouveau, sans redémarrage. Helm 4.3 fait passer les journaux recopiés par `slog`, guillemets échappés : les marques des tâches sont cherchées sans dépendre de l'échappement.
+- **Désinstallation** : compte et règle réseau des tâches, configuration à venir survivaient à `helm uninstall` (Helm ne supprime que les ressources ordinaires). Supprimés après leur crochet ; une tâche en échec reste pour le diagnostic, et son nettoyage, documenté, est vérifié à la fin du scénario de restauration.
+- **Disque du runner** : tailles mesurées (registre, linux/amd64) : modèle 1,33 Go compressé, 2,25 Go décompressé ; application 0,14 et 0,42 ; images tierces 0,78 Go compressés. Besoin au pire, 28,4 Go pour trois nœuds ; nettoyage sous 30 Go libres seulement (85 Go constatés).
+- **`check.sh --sans-cluster`**, pour le poste ; le cluster n'est alors vérifié que par la CI.
