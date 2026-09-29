@@ -338,6 +338,30 @@ def test_commande_des_scenarios_comprise_par_pytest_hors_du_depot(tmp_path):
     assert re.match(r"11/\d+ tests collected", result.stdout.splitlines()[-1])
 
 
+def test_check_sh_sans_cluster_le_dit_et_ne_saute_que_le_cluster():
+    """`--sans-cluster` : le profil local monte à 7 Go sur les 8 de la VM Docker du poste
+    (redémarrée le 29/09 pendant une installation) ; seul le job cluster de la CI le
+    vérifie alors. Le saut est annoncé, jamais silencieux, et ne touche qu'au cluster."""
+    script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
+    lines = [" ".join(line.split()) for line in script.splitlines()]
+    start = lines.index('if [[ "$SANS_CLUSTER" == true ]]; then')
+    skipped = lines[start + 1]
+    assert skipped.startswith('echo "==> cluster : NON LANCÉ (--sans-cluster)')
+    other = lines.index("else", start)
+    end = lines.index("fi", other)
+    assert all(start < lines.index(command) < end for command in ORDER)
+    assert all(other < lines.index(command) for command in ORDER)
+    assert "--sans-cluster) SANS_CLUSTER=true ;;" in lines
+    refused = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "check.sh"), "--inconnue"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert refused.returncode == 2 and "option inconnue : --inconnue" in refused.stderr
+
+
 def test_check_sh_deroule_le_meme_cluster():
     script = (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8")
     lines = [" ".join(line.split()) for line in script.splitlines()]
