@@ -68,7 +68,9 @@ EMBEDDER_THREADS: dict[str, int | None] = {"threads": None, "batch_size": None}
 def app_pool() -> connexions.Source:
     """Pool d'app_role du processus : ouvert au premier usage, fermé à la sortie. Le
     checkpointer, le journal, la recherche et les verrous y prennent leurs connexions."""
-    pool = connexions.open_pool(conninfo.app_conninfo(), max_size=POOL["size"])
+    # la fonction, relue à chaque nouvelle connexion : rotation du mot de passe sans
+    # redémarrage (ADR 005)
+    pool = connexions.open_pool(conninfo.app_conninfo, max_size=POOL["size"])
     atexit.register(pool.close)
     return pool
 
@@ -171,7 +173,7 @@ def _setup_db(args: argparse.Namespace) -> dict:
     """Amorce une base vide (toutes les migrations, dans l'ordre) ou met à jour une base
     existante ; relancé, ne change rien. Le rôle applicatif d'abord, s'il manque (mot de
     passe haché côté client), car migrations et checkpointer lui donnent ses droits."""
-    admin = conninfo.admin_conninfo()
+    admin = conninfo.admin_conninfo  # relue à chaque connexion
     created = migrations.ensure_role_at(
         admin, settings.APP_ROLE, lambda: settings.require_secret("APP_DB_PASSWORD")
     )
@@ -214,7 +216,7 @@ def _ingest(args: argparse.Namespace) -> dict:
         batch_size=EMBEDDER_THREADS["batch_size"],
     )
     rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
-    summary = rag_store.sync(conninfo.admin_conninfo(), rows, embedder.model)
+    summary = rag_store.sync(conninfo.admin_conninfo, rows, embedder.model)
     return {"ingest": "ok", "model": embedder.model, **summary}
 
 

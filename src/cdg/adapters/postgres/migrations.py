@@ -21,6 +21,8 @@ from pathlib import Path
 import psycopg
 from psycopg import sql
 
+from cdg.adapters.postgres.connexions import Conninfo, resolve
+
 MIGRATIONS = Path(__file__).resolve().parents[4] / "migrations"
 FIRST = MIGRATIONS / "001_audit.sql"
 IDEMPOTENT = sorted(
@@ -82,9 +84,11 @@ def ensure_role(
     return True
 
 
-def ensure_role_at(admin_conninfo: str, role: str, password: Callable[[], str]) -> bool:
+def ensure_role_at(
+    admin_conninfo: Conninfo, role: str, password: Callable[[], str]
+) -> bool:
     """`ensure_role` sur une connexion administrateur ouverte pour l'occasion."""
-    with psycopg.connect(admin_conninfo) as conn:
+    with psycopg.connect(resolve(admin_conninfo)) as conn:
         return ensure_role(conn, role, password)
 
 
@@ -94,11 +98,11 @@ def is_empty(conn: psycopg.Connection) -> bool:
     return row is None or row[0] is None
 
 
-def apply(admin_conninfo: str) -> list[str]:
+def apply(admin_conninfo: Conninfo) -> list[str]:
     """Migrations manquantes, dans l'ordre ; rend leurs noms. Le rôle applicatif doit
     exister (voir en tête du module)."""
     applied = []
-    with psycopg.connect(admin_conninfo, autocommit=True) as conn:
+    with psycopg.connect(resolve(admin_conninfo), autocommit=True) as conn:
         if is_empty(conn):
             conn.execute(FIRST.read_text(encoding="utf-8"))
             applied.append(FIRST.name)
