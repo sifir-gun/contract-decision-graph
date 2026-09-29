@@ -49,8 +49,8 @@ def _one_line(command: str) -> str:
 
 def ci_commands() -> list[str]:
     """Commandes de vérification du workflow, dans l'ordre des jobs. Hors comparaison :
-    l'installation, propre à chaque job (`uv sync`, étapes `installation-…`), et la
-    migration dans le conteneur de service (`docker`)."""
+    l'installation, propre à chaque job (`uv sync`, étapes `installation-…`), le diagnostic
+    en cas d'échec (étapes `diagnostic-…`), et les commandes `docker`."""
     jobs = _load(".github/workflows/ci.yml")["jobs"]
     commands = []
     for name, job in jobs.items():
@@ -61,7 +61,9 @@ def ci_commands() -> list[str]:
         for step in job["steps"]:
             run = step.get("run")
             # installation d'un outil, propre à la CI (sur le poste : Homebrew)
-            if run is None or step.get("id", "").startswith("installation-"):
+            if run is None or step.get("id", "").startswith(
+                ("installation-", "diagnostic-")
+            ):
                 continue
             command = _one_line(run)
             if not command.startswith(("uv sync", "docker")):
@@ -105,10 +107,25 @@ def docker_builds(lines: list[str]) -> list[str]:
 
 
 def test_image_construite_comme_en_ci():
-    job = _load(".github/workflows/ci.yml")["jobs"]["image"]
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    job = jobs["image"]
     ci = docker_builds([step["run"] for step in job["steps"] if "run" in step])
+    # toutes les constructions, dans l'ordre des jobs : image, puis cluster (PR C3)
+    every = docker_builds(
+        [
+            s["run"]
+            for name, j in jobs.items()
+            if name != "publication"  # ne tourne qu'en CI, après une fusion
+            for s in j["steps"]
+            if "run" in s
+        ]
+    )
     local = docker_builds(SCRIPT.read_text(encoding="utf-8").splitlines())
-    assert ci and local == ci, "construction de l'image différente en CI et en local"
+    assert ci and local == every, "construction des images différente en CI et en local"
     tag = ci[0].split("--tag ")[1].split()[0]
+    proxy = ci[1].split("--tag ")[1].split()[0]  # proxy de sortie (PR C3)
     checks = [s["run"] for s in job["steps"] if "pytest" in s.get("run", "")]
-    assert checks == [f"uv run --no-sync pytest -m image --image {tag}"]
+    assert checks == [
+        f"uv run --no-sync pytest -m image --image {tag}",
+        f"uv run --no-sync pytest -m proxy --proxy {proxy} --image {tag}",
+    ]

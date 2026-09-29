@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Valeurs du chart cdg-proxy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "replicas", "port", "domainesAutorises", "plagesAutorisees", "clients", "sortiesInternes", "dns", "ressources", "limites", "delaiConnexion", "repartition", "budgetInterruption"],
+  "definitions": {
+    "quantiteCpu": {"type": "string", "pattern": "^([0-9]+m|[0-9]+(\\.[0-9]+)?)$"},
+    "quantiteMemoire": {"type": "string", "pattern": "^[0-9]+(Ki|Mi|Gi)$"},
+    "etiquettes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+  },
+  "properties": {
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest", "pullPolicy"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$"},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "pullPolicy": {"enum": ["IfNotPresent", "Always", "Never"]}
+      }
+    },
+    "replicas": {"type": "integer", "minimum": 1},
+    "port": {"$ref": "#/definitions/port"},
+    "domainesAutorises": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^(\\*\\.)?[a-z0-9-]+(\\.[a-z0-9-]+)+$"}
+    },
+    "plagesAutorisees": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"}
+    },
+    "clients": {"$ref": "#/definitions/etiquettes"},
+    "sortiesInternes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["espaceDeNoms", "selecteur", "port"],
+        "properties": {
+          "espaceDeNoms": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+          "selecteur": {"$ref": "#/definitions/etiquettes"},
+          "port": {"$ref": "#/definitions/port"}
+        }
+      }
+    },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["espaceDeNoms", "selecteur"],
+      "properties": {
+        "espaceDeNoms": {"type": "string", "minLength": 1},
+        "selecteur": {"$ref": "#/definitions/etiquettes"}
+      }
+    },
+    "ressources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {"cpu": {"$ref": "#/definitions/quantiteCpu"}, "memory": {"$ref": "#/definitions/quantiteMemoire"}}
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu", "memory"],
+          "properties": {"cpu": {"$ref": "#/definitions/quantiteCpu"}, "memory": {"$ref": "#/definitions/quantiteMemoire"}}
+        }
+      }
+    },
+    "limites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requetesSimultanees", "tunnelsSimultanes"],
+      "properties": {
+        "requetesSimultanees": {"type": "integer", "minimum": 1},
+        "tunnelsSimultanes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "delaiConnexion": {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"},
+    "repartition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["siImpossible"],
+      "properties": {"siImpossible": {"enum": ["DoNotSchedule", "ScheduleAnyway"]}}
+    },
+    "budgetInterruption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minDisponibles"],
+      "properties": {"minDisponibles": {"type": "integer", "minimum": 0}}
+    }
+  }
+}

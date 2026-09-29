@@ -1,0 +1,58 @@
+# Cluster CloudNativePG : PostgreSQL 16 avec pgvector, WAL archivés par le greffon Barman
+# Cloud. Le superutilisateur (Secret <nom>-superuser) sert aux seules migrations
+# (setup-db : extension vector, rôle app_role) ; l'application se connecte en app_role.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.nom }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-postgres.etiquettes" . | nindent 4 }}
+spec:
+  instances: {{ .Values.instances }}
+  imageName: {{ printf "%s:%s@%s" .Values.image.repository .Values.image.tag .Values.image.digest }}
+  enableSuperuserAccess: true
+  bootstrap:
+    {{- if .Values.restauration.source }}
+    # restauration : les sauvegardes de la source, en lecture seule
+    recovery:
+      source: origine
+    {{- else }}
+    initdb:
+      database: {{ .Values.base.nom }}
+      owner: {{ .Values.base.proprietaire }}
+    {{- end }}
+  {{- with .Values.restauration.source }}
+  externalClusters:
+    - name: origine
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: {{ . }}-sauvegardes
+          serverName: {{ . }}
+  {{- end }}
+  storage:
+    size: {{ .Values.stockage.taille }}
+    {{- with .Values.stockage.classe }}
+    storageClass: {{ . }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.ressources | nindent 4 }}
+  # rôle de l'application : déclaré, comparé au catalogue et corrigé par l'opérateur,
+  # sans aucun privilège ; les migrations (setup-db) lui donnent ses droits
+  managed:
+    roles:
+      - name: {{ .Values.roleApplicatif.nom }}
+        ensure: present
+        login: true
+        superuser: false
+        createdb: false
+        createrole: false
+        replication: false
+        passwordSecret:
+          name: {{ .Values.roleApplicatif.secret }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ .Values.nom }}-sauvegardes

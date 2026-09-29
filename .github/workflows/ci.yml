@@ -218,8 +218,7 @@ jobs:
       - name: Scan (Grype), échec sur une faille critique ou haute corrigeable
         # exceptions justifiées, datées et expirantes : securite/exceptions-vulnerabilites.yaml
         run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"
-      - name: Image et inventaire, pour la publication (main seulement)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Image et inventaire, pour le cluster de test et la publication
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-${{ matrix.arch }}
@@ -228,14 +227,156 @@ jobs:
             ${{ runner.temp }}/chaine/sbom.spdx.json
           if-no-files-found: error
           retention-days: 1
+      # proxy de sortie (PR C3) : Smokescreen construit par nous, même chaîne
+      - name: Proxy de sortie, signatures des images de base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/chaine.py bases --dockerfile docker/proxy-sortie/Dockerfile
+      - name: Proxy de sortie, construction (Go et source figés par empreinte et commit)
+        run: docker build --file docker/proxy-sortie/Dockerfile --tag cdg-proxy:verification docker/proxy-sortie
+      - name: Proxy de sortie, vérifications (non root, licences, filtrage réel)
+        run: uv run --no-sync pytest -m proxy --proxy cdg-proxy:verification --image cdg:verification
+      - name: Proxy de sortie, inventaire des composants (Syft)
+        run: >-
+          uv run --no-sync python scripts/chaine.py inventaire cdg-proxy:verification
+          --dossier "$RUNNER_TEMP/chaine-proxy"
+      - name: Proxy de sortie, scan (Grype)
+        run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"
+      - name: Proxy de sortie, image et inventaire, pour le cluster et la publication
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: proxy-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/chaine-proxy/image.tar
+            ${{ runner.temp }}/chaine-proxy/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 1
+
+  cluster:
+    name: cluster (k3d, scénarios)
+    # un vrai cluster de plusieurs nœuds à chaque pull request (ADR 005, PR C3) : les
+    # images testées par le job image, CloudNativePG et ses sauvegardes, le proxy de sortie,
+    # le serveur factice de Mistral ; profil ci (CI=true, scripts/cluster.py)
+    if: github.event_name != 'schedule'
+    needs: [image]
+    runs-on: ubuntu-24.04
+    # ingestion du corpus (60 min au plus, tâche Helm) et scénarios
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Dépendances, strictement depuis uv.lock (pytest et httpx pour les scénarios)
+        run: uv sync --locked
+      - name: k3d 5.9.0, binaire officiel vérifié par son empreinte
+        # sur le poste : Homebrew, même version (scripts/cluster.py la contrôle)
+        id: installation-k3d
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/k3d" https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64
+          echo "06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0  $RUNNER_TEMP/k3d" \
+            | sha256sum --check --strict
+          sudo install -m 0755 "$RUNNER_TEMP/k3d" /usr/local/bin/k3d
+      - name: kubectl 1.36.4, binaire officiel vérifié par son empreinte
+        id: installation-kubectl
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/kubectl" https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl
+          echo "8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a  $RUNNER_TEMP/kubectl" \
+            | sha256sum --check --strict
+          sudo install -m 0755 "$RUNNER_TEMP/kubectl" /usr/local/bin/kubectl
+      - name: helm 4.3.0, archive officielle vérifiée par son empreinte
+        id: installation-helm
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/helm.tar.gz" https://get.helm.sh/helm-v4.3.0-linux-amd64.tar.gz
+          echo "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb  $RUNNER_TEMP/helm.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP" linux-amd64/helm
+          sudo install -m 0755 "$RUNNER_TEMP/linux-amd64/helm" /usr/local/bin/helm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: image-amd64
+          path: ${{ runner.temp }}/chaine
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: proxy-amd64
+          path: ${{ runner.temp }}/chaine-proxy
+      - name: Images testées par le job image, jamais reconstruites
+        run: |
+          docker load --input "$RUNNER_TEMP/chaine/image.tar"
+          docker load --input "$RUNNER_TEMP/chaine-proxy/image.tar"
+      - name: Image de test du serveur factice, sur l'image de l'application
+        run: docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
+      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 30 Go libres
+        id: installation-espace-disque
+        env:
+          # besoin du cluster au pire, 28,4 Go, calculé sur la taille des images
+          # (scripts/cluster.py, disk_need_gb ; ADR 005)
+          ESPACE_MIN_GO: "30"
+        run: |
+          df -h /
+          libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")
+          if (( libre < ESPACE_MIN_GO )); then
+            sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+            df -h /
+          else
+            echo "espace suffisant : ${libre} Go libres, ${ESPACE_MIN_GO} exigés ; aucun nettoyage"
+          fi
+      - name: Aucun cluster d'un essai précédent
+        run: uv run --no-sync python scripts/cluster.py detruire
+      - name: Image publiée du modèle, signature et provenance vérifiées
+        # seule exception, avec modele.yml, à « aucun téléchargement du modèle en CI » :
+        # le mode réel ne démarre pas sans lui (ADR 005)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/cluster.py tirer-modele
+      - name: Cluster k3d de trois nœuds, registre local
+        run: uv run --no-sync python scripts/cluster.py creer
+      - name: Images poussées dans le registre local, tirées par empreinte
+        run: uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
+      - name: Composants, base, proxy, serveur factice, application
+        run: uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
+      - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, restauration)
+        run: uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
+      - name: Diagnostic en cas d'échec
+        id: diagnostic-cluster
+        if: failure()
+        run: |
+          KC=.cache/cluster/kubeconfig
+          df -h /
+          kubectl --kubeconfig "$KC" --context k3d-cdg get pods,jobs,events -A || true
+          kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg -l app.kubernetes.io/instance=cdg --all-containers --tail=200 || true
+      - name: Espace disque restant, à comparer au besoin calculé
+        id: diagnostic-espace-disque
+        if: always()
+        run: df -h /
+      - name: Cluster détruit, quoi qu'il arrive
+        if: always()
+        run: uv run --no-sync python scripts/cluster.py detruire
 
   publication:
-    name: publication (ghcr.io, signature, attestations)
+    name: publication (${{ matrix.image }}, ghcr.io, signature, attestations)
     # après une fusion dans main seulement : ni pull request, ni lundi. Les images publiées
     # sont celles que le job image a construites, testées, inventoriées et scannées sur
-    # chaque architecture, jamais reconstruites ; un index les réunit
+    # chaque architecture, jamais reconstruites ; un index les réunit. Mêmes étapes pour
+    # l'application et le proxy de sortie (PR C3)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, types, audit, tests, chart, image]
+    needs: [lint, types, audit, tests, chart, image, cluster]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: application
+            artefact: image
+            locale: cdg:verification
+            depot: ""
+          - image: proxy de sortie
+            artefact: proxy
+            locale: cdg-proxy:verification
+            depot: /proxy-sortie
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -244,11 +385,13 @@ jobs:
       id-token: write # identité OIDC du workflow : signature sans clé, attestations
       attestations: write # attestations de provenance et d'inventaire
     env:
-      IMAGE: ghcr.io/${{ github.repository }}
+      IMAGE: ghcr.io/${{ github.repository }}${{ matrix.depot }}
+      ARTEFACT: ${{ matrix.artefact }}
+      LOCALE: ${{ matrix.locale }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: image-* # un dossier par architecture : image-amd64, image-arm64
+          pattern: ${{ matrix.artefact }}-* # un dossier par architecture (image-amd64…)
           path: ${{ runner.temp }}/chaine
       - name: Connexion à ghcr.io (jeton du workflow ; droit packages limité à ce job)
         env:
@@ -258,9 +401,9 @@ jobs:
         run: |
           docker version --format 'Docker {{.Server.Version}}'
           for arch in amd64 arm64; do
-            docker load --input "$RUNNER_TEMP/chaine/image-$arch/image.tar"
-            docker tag cdg:verification "$IMAGE:sha-$GITHUB_SHA-$arch"
-            docker image rm cdg:verification
+            docker load --input "$RUNNER_TEMP/chaine/$ARTEFACT-$arch/image.tar"
+            docker tag "$LOCALE" "$IMAGE:sha-$GITHUB_SHA-$arch"
+            docker image rm "$LOCALE"
             docker push "$IMAGE:sha-$GITHUB_SHA-$arch"
             digest="$(docker buildx imagetools inspect "$IMAGE:sha-$GITHUB_SHA-$arch" \
               --format '{{json .Manifest}}' | jq -r .digest)"
@@ -305,7 +448,7 @@ jobs:
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ env.DIGEST_AMD64 }}
-          sbom-path: ${{ runner.temp }}/chaine/image-amd64/sbom.spdx.json
+          sbom-path: ${{ runner.temp }}/chaine/${{ matrix.artefact }}-amd64/sbom.spdx.json
           push-to-registry: true
           create-storage-record: false
       - name: Attestation de l'inventaire arm64 (SPDX 2.3, Syft), celui qui a été scanné
@@ -313,7 +456,7 @@ jobs:
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ env.DIGEST_ARM64 }}
-          sbom-path: ${{ runner.temp }}/chaine/image-arm64/sbom.spdx.json
+          sbom-path: ${{ runner.temp }}/chaine/${{ matrix.artefact }}-arm64/sbom.spdx.json
           push-to-registry: true
           create-storage-record: false
       - name: Vérification de ce qui est publié (signatures, provenance, inventaires)
@@ -335,7 +478,7 @@ jobs:
       - name: Empreintes publiées ; le chart référence celle de l'index
         run: |
           {
-            echo "### Image publiée"
+            echo "### Image publiée : $IMAGE"
             echo
             echo "- index : \`$IMAGE@$DIGEST\`"
             echo "- amd64 : \`$IMAGE@$DIGEST_AMD64\`"

@@ -10,6 +10,12 @@
 # - RUNNER_TEMP, fourni par GitHub Actions, est ici un dossier temporaire, supprimé à la fin ;
 # - helm vient de Homebrew (brew install helm), à la version de la CI, que scripts/chart.py
 #   contrôle ; la CI l'installe depuis l'archive officielle vérifiée par son empreinte ;
+# - k3d et kubectl aussi (brew install k3d kubernetes-cli) ; le cluster prend le profil
+#   local réduit (scripts/cluster.py), et reste en place si un scénario échoue, pour le
+#   diagnostic (scripts/cluster.py detruire) ;
+# - `--sans-cluster` saute le cluster, en l'annonçant : le profil local monte à 7 Go sur
+#   les 8 de la VM Docker du poste, qui a redémarré le 29/09 pendant une installation ;
+#   seul le job cluster de la CI le vérifie alors ;
 # - l'image est construite pour l'architecture du poste (arm64 sur un Mac récent), celle
 #   de la CI pour amd64 : les bases figées sont des index multi-architecture.
 # Payant : non (tests llm exclus). Réseau : pip-audit interroge la base de failles de PyPI ;
@@ -18,6 +24,16 @@
 # authentifié).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+SANS_CLUSTER=false
+for option in "$@"; do
+    case "$option" in
+        --sans-cluster) SANS_CLUSTER=true ;;
+        *)
+            echo "option inconnue : $option (seule --sans-cluster existe)" >&2
+            exit 2
+            ;;
+    esac
+done
 if [[ -z "${RUNNER_TEMP:-}" ]]; then
     RUNNER_TEMP="$(mktemp -d)"
     trap 'rm -rf "$RUNNER_TEMP"' EXIT # l'image sauvegardée pèse plusieurs centaines de Mo
@@ -54,5 +70,28 @@ docker build --tag cdg:verification .
 uv run --no-sync pytest -m image --image cdg:verification
 uv run --no-sync python scripts/chaine.py inventaire cdg:verification --dossier "$RUNNER_TEMP/chaine"
 uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"
+uv run --no-sync python scripts/chaine.py bases --dockerfile docker/proxy-sortie/Dockerfile
+docker build --file docker/proxy-sortie/Dockerfile --tag cdg-proxy:verification docker/proxy-sortie
+uv run --no-sync pytest -m proxy --proxy cdg-proxy:verification --image cdg:verification
+uv run --no-sync python scripts/chaine.py inventaire cdg-proxy:verification --dossier "$RUNNER_TEMP/chaine-proxy"
+uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"
 
-echo "==> vérifications de la CI : toutes passées"
+if [[ "$SANS_CLUSTER" == true ]]; then
+    echo "==> cluster : NON LANCÉ (--sans-cluster) ; seul le job cluster de la CI le vérifie"
+else
+    echo "==> cluster (k3d, profil local réduit ; k3d et kubectl par Homebrew)"
+    docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
+    uv run --no-sync python scripts/cluster.py detruire
+    uv run --no-sync python scripts/cluster.py tirer-modele
+    uv run --no-sync python scripts/cluster.py creer
+    uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
+    uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
+    uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
+    uv run --no-sync python scripts/cluster.py detruire
+fi
+
+if [[ "$SANS_CLUSTER" == true ]]; then
+    echo "==> vérifications de la CI : toutes passées, sauf le cluster (--sans-cluster)"
+else
+    echo "==> vérifications de la CI : toutes passées"
+fi

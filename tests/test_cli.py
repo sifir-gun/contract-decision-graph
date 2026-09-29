@@ -28,6 +28,7 @@ def test_setup_db(pg, capsys):
     assert out == {
         "setup_db": "ok",
         "role": "app_role",
+        "role_cree": False,  # base existante : rôle déjà là, rien ne change
         "tables": ["checkpoints", "checkpoint_blobs", "checkpoint_writes"],
         "droits": ["SELECT", "INSERT", "UPDATE"],
         "migrations": [
@@ -383,17 +384,18 @@ def test_ingest_indexe_le_corpus_puis_rejouable(pg, capsys, monkeypatch, tmp_pat
     # environnement déclaré par le test, jamais lu dans le .env du poste : la commande exige
     # EMBEDDING_CACHE_DIR avant de construire l'embedder, même remplacé par une doublure
     monkeypatch.setenv("EMBEDDING_CACHE_DIR", str(tmp_path))
-    embedder, cache_dirs = HashEmbedder(), []
+    embedder, cache_dirs, batches = HashEmbedder(), [], []
 
-    def factory(config, cache_dir, *, threads=None):
+    def factory(config, cache_dir, *, threads=None, batch_size=None):
         cache_dirs.append(cache_dir)
+        batches.append(batch_size)
         return embedder
 
     monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", factory)
     try:
-        code, first = run_cli(capsys, "ingest")
+        code, first = run_cli(capsys, "--lot-embedding", "16", "ingest")
         assert code == 0 and first["model"] == "hash-test"
-        assert cache_dirs == [tmp_path]
+        assert cache_dirs == [tmp_path] and batches == [16]
         assert first["inserted"] == first["chunks"] > 0 and first["deleted"] == 0
         code, again = run_cli(capsys, "ingest")
         assert (again["inserted"], again["deleted"], again["unchanged"]) == (

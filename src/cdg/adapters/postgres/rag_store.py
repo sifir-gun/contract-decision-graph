@@ -6,7 +6,7 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 from psycopg.rows import tuple_row
 
-from cdg.adapters.postgres.connexions import Source, connection
+from cdg.adapters.postgres.connexions import Conninfo, Source, connection, resolve
 from cdg.domain.corpus import ChunkRow
 from cdg.domain.models import Domain
 from cdg.ports.embedder import Embedder
@@ -17,9 +17,9 @@ class RagStoreError(Exception):
     """Schéma du corpus incompatible avec la configuration."""
 
 
-def column_dimension(conninfo: str) -> int:
+def column_dimension(conninfo: Conninfo) -> int:
     """Dimension déclarée de rag_chunks.embedding (atttypmod d'une colonne vector)."""
-    with psycopg.connect(conninfo) as conn:
+    with psycopg.connect(resolve(conninfo)) as conn:
         row = conn.execute(
             "SELECT atttypmod FROM pg_attribute "
             "WHERE attrelid = 'rag_chunks'::regclass AND attname = 'embedding'"
@@ -31,7 +31,7 @@ def column_dimension(conninfo: str) -> int:
     return row[0]
 
 
-def check_dimension(admin_conninfo: str, dimension: int) -> None:
+def check_dimension(admin_conninfo: Conninfo, dimension: int) -> None:
     """Vérifie que rag_chunks.embedding a la dimension de la configuration."""
     actual = column_dimension(admin_conninfo)
     if actual != dimension:
@@ -41,10 +41,10 @@ def check_dimension(admin_conninfo: str, dimension: int) -> None:
         )
 
 
-def insert(admin_conninfo: str, rows: list[ChunkRow]) -> int:
+def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
     """Insère les extraits ; un extrait déjà présent (même hash, même modèle) est ignoré."""
     inserted = 0
-    with psycopg.connect(admin_conninfo) as conn:
+    with psycopg.connect(resolve(admin_conninfo)) as conn:
         register_vector(conn)
         for row in rows:
             cursor = conn.execute(
@@ -154,7 +154,7 @@ def _hashable(values: tuple) -> tuple:
     return tuple(tuple(v) if isinstance(v, list) else v for v in values)
 
 
-def sync(admin_conninfo: str, rows: list[ChunkRow], model: str) -> dict:
+def sync(admin_conninfo: Conninfo, rows: list[ChunkRow], model: str) -> dict:
     """Aligne rag_chunks sur le corpus, source par source, pour un modèle d'embedding :
     supprime les extraits disparus (texte nettoyé autrement, article retiré) ou dont une
     métadonnée a changé (fin de validité…), insère les nouveaux. Rejouable : un second
@@ -164,7 +164,7 @@ def sync(admin_conninfo: str, rows: list[ChunkRow], model: str) -> dict:
         values = (row.domain, row.content_hash, *(getattr(row, f) for f in _METADATA))
         wanted.setdefault(row.source_id, set()).add(_hashable(values))
     deleted = 0
-    with psycopg.connect(admin_conninfo) as conn:
+    with psycopg.connect(resolve(admin_conninfo)) as conn:
         existing = conn.execute(
             "SELECT id, source_id, domain, content_hash, "
             + ", ".join(_METADATA)

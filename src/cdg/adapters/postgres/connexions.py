@@ -16,7 +16,7 @@ Les commandes d'administration (migrations, ingestion) et les tests passent une 
 connexion : une connexion directe, aux mêmes réglages, ouverte le temps de l'opération.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -36,8 +36,16 @@ KWARGS: dict[str, Any] = {
 
 # le pool du processus : connexions à lignes en dictionnaires, comme l'exige PostgresSaver
 Pool = ConnectionPool[psycopg.Connection[DictRow]]
-# une chaîne de connexion (administration, tests) ou le pool du processus
-Source = str | Pool
+# une chaîne de connexion, ou la fonction qui la rend, relue à chaque nouvelle connexion :
+# un mot de passe tourné (fichier de secret monté) vaut ensuite, sans redémarrage (ADR 005)
+Conninfo = str | Callable[[], str]
+# une chaîne ou sa fonction (administration, tests), ou le pool du processus
+Source = Conninfo | Pool
+
+
+def resolve(conninfo: Conninfo) -> str:
+    """La chaîne de connexion à jour : relue si c'est une fonction."""
+    return conninfo() if callable(conninfo) else conninfo
 
 
 def release_session_locks(conn: psycopg.Connection[Any]) -> None:
@@ -45,7 +53,7 @@ def release_session_locks(conn: psycopg.Connection[Any]) -> None:
 
 
 def open_pool(
-    conninfo: str, *, max_size: int, timeout: float = 10.0, open: bool = True
+    conninfo: Conninfo, *, max_size: int, timeout: float = 10.0, open: bool = True
 ) -> Pool:
     if max_size < 1:
         raise ValueError(f"taille du pool invalide : {max_size} (entier ≥ 1)")
@@ -66,8 +74,10 @@ def open_pool(
 def ping(source: Source, timeout: float = 2.0) -> bool:
     """Base joignable : `SELECT 1` sur une connexion prêtée en `timeout` secondes au
     plus. Lève si la base ne répond pas (sonde de disponibilité)."""
-    if isinstance(source, str):
-        with psycopg.connect(source, connect_timeout=int(timeout) or 1) as conn:
+    if not isinstance(source, ConnectionPool):
+        with psycopg.connect(
+            resolve(source), connect_timeout=int(timeout) or 1
+        ) as conn:
             conn.execute("SELECT 1")
         return True
     with source.connection(timeout=timeout) as conn:
@@ -77,10 +87,11 @@ def ping(source: Source, timeout: float = 2.0) -> bool:
 
 @contextmanager
 def connection(source: Source) -> Iterator[psycopg.Connection[DictRow]]:
-    """Connexion empruntée au pool, ou ouverte directement depuis une chaîne."""
-    if isinstance(source, str):
+    """Connexion empruntée au pool, ou ouverte directement depuis une chaîne (relue si
+    c'est une fonction)."""
+    if not isinstance(source, ConnectionPool):
         with psycopg.connect(
-            source, autocommit=True, prepare_threshold=0, row_factory=dict_row
+            resolve(source), autocommit=True, prepare_threshold=0, row_factory=dict_row
         ) as conn:
             yield conn
         return

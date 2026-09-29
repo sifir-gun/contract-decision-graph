@@ -2466,3 +2466,52 @@ Le vrai journal d'audit compte 3 enregistrements ; tête de chaîne :
 - **Anciennes exclusions globales**, lancées une à une sur le rendu : `no-node-affinity` (Deployment, Jobs, Pod de test) et `dangling-networkpolicypeer-podselector` (règles `web` et `taches`) passent en annotations justifiées ; `minimum-three-replicas` est justifiée sur le Deployment par la mémoire mesurée d'un réplica ; `priority-class-name` ne visait aucun objet (elle ne signale qu'une classe invalide), retirée ; `no-anti-affinity` est satisfaite.
 - **Anti-affinité préférée, pas exigée** (lu dans `pkg/templates/antiaffinity/template.go`, kube-linter 0.8.3 : les deux formes passent) : exigée, elle bloquerait la mise à jour progressive (`maxSurge: 1`, `maxUnavailable: 0`) sur un cluster qui a autant de nœuds que de réplicas. La répartition stricte reste celle des contraintes de topologie, qui tolèrent ce pod en plus.
 - **Configuration globale restante** : conventions d'une organisation, ordre des clés, `schema-validation`.
+
+## 2026-09-28 · Kubernetes, PR C3 : cluster de test et scénarios (branche `cluster`)
+
+Plan validé par le propriétaire : cluster k3d de plusieurs nœuds, CloudNativePG avec sauvegardes vers SeaweedFS et restauration vérifiée, proxy de sortie Smokescreen avec sa configuration DNS, serveur factice de Mistral dans une image de test à part, tous les scénarios en CI.
+
+### Décisions du propriétaire (28/09)
+
+- **Modèle en CI** : le job `cluster` tire l'image publiée du modèle, figée par empreinte, après vérification de sa signature et de sa provenance ; exception écrite dans l'ADR 005 et CLAUDE.md.
+- **cert-manager 1.21.2**, figé par version et empreinte ; exigé par le greffon de sauvegarde, il est aussi un prérequis de production (README du chart de la base, exploitation, mise en production).
+- **Smokescreen** : un commit récent de `master` porteur des trois correctifs publiés après la v0.1.0, figé et construit par notre chaîne ; procédure de surveillance et passage à la prochaine étiquette officielle dans l'ADR 005.
+- **Profil local réduit** : deux nœuds, une instance PostgreSQL.
+- **setup-db** : sur une base vide, toutes les migrations dans l'ordre ; rien ne change sur une base existante ; idempotent. Rôle `app_role` : gestion déclarative de CloudNativePG si elle convient, création conditionnelle par la 001 pour Docker Compose ; si `setup-db` crée le rôle, mot de passe haché côté client (SCRAM-SHA-256, bibliothèque standard), absent de tout journal.
+
+### Rôle applicatif : CloudNativePG retenu
+
+Lu dans `docs/src/declarative_role_management.md` (v1.30.1) : rôle déclaré, comparé et corrigé par l'opérateur ; mot de passe dans un Secret basic-auth, appliqué aussitôt s'il porte `cnpg.io/reload` (rotation) ; haché en SCRAM-SHA-256 par l'opérateur, journalisation des requêtes et des erreurs suspendue pendant la commande. Toutes les garanties demandées, sans code à nous. La 001 ne crée plus le rôle que s'il manque ; `setup-db` le crée s'il manque encore (ni opérateur ni Compose), avec un vérificateur calculé côté client, identique à celui de libpq à sel égal (testé), dans une transaction qui suspend `log_statement` et `log_min_error_statement`.
+
+### Défauts trouvés en montant le cluster
+
+- **Image PostgreSQL** : l'admission de CloudNativePG refuse une image désignée par sa seule empreinte ; étiquette et empreinte.
+- **Contexte de kubectl** : k3d rendait le cluster courant sur le poste ; kubeconfig à part, `.cache/cluster/kubeconfig`.
+- **Images importées dans k3d** : sans empreinte de dépôt, un pod qui les tire par empreinte échoue ; registre local (`registry:3`, par empreinte).
+- **Base neuve** : `setup-db` échouait (rôle absent, 001 non passée) ; amorçage ci-dessus, tests d'abord.
+- **Mémoire** : l'interface, tuée à 3 Gi (pic de 2,55 à 2,65 Gio au chargement du modèle, 1,55 Gio ensuite) ; l'ingestion, au-delà de 3,5 Gi (fastembed : lots de 256 par défaut). Lots de 16 (2,9 Gio au pic ; 64 : plus de 3,7), limites à 4 Gi.
+- **Durée de l'ingestion** : 64 extraits, 18 min 24 s dans k3d sur 2 CPU ; 79 s pour un lot de 16 sur le poste, 2 fils. `helm --wait` (600 s) abandonnait l'installation : l'attente couvre le délai de la tâche (3 600 s), job CI à 90 minutes. Les mises à jour des scénarios ne réindexent pas le corpus, inchangé.
+- **Installation relancée** : elle tirait de nouvelles clés S3 ; SeaweedFS, qui ne relit ses identités qu'au démarrage, refusait l'archivage des WAL depuis la première relance, sans que rien d'autre ne le montre avant la sauvegarde. Secrets repris ; le scénario vérifie l'archivage continu avant de sauvegarder.
+- **Règle réseau des tâches** : mise à jour après les crochets `pre-upgrade`, elle laissait la tâche de migrations sous l'ancienne règle lors de la bascule vers la base restaurée (connexion refusée). Devenue un crochet, comme le compte des tâches ; lu dans la documentation des crochets de Helm.
+- **Base restaurée** : la condition `Ready` précédait l'instance qui sert ; le scénario attend l'état sain.
+- **Disque plein pendant `check.sh`** : après les constructions d'images, la VM Docker du poste (110 Go, partagée avec d'autres projets) était à 86 % ; k3s, qui évince à 5 % libres et récupère 10 % de plus, a évincé tout le cluster. Seuils absolus sur les nœuds (1 Gi, 500 Mi), vérifiés dans la configuration des kubelets ; images orphelines de ce dépôt supprimées (étiquette `org.opencontainers.image.source`), rien d'autre. En CI (14 Go garantis), le job retire les outils préinstallés inutilisés avant le cluster.
+- **Test de l'ingestion par la CLI** : la doublure de l'embedder refusait la taille des lots ; vu par `check.sh` (test `pg`, hors de ma passe sans PostgreSQL).
+- **Commande des scénarios** : `--cluster "$RUNNER_TEMP/cluster"`, en deux mots, faisait prendre ce dossier hors du dépôt pour une cible ; pytest y cherchait sa racine, sans charger `tests/conftest.py`, et refusait l'option (code 4). Mes essais nommaient `tests/test_cluster.py` et ne le voyaient pas ; vu par `check.sh`, il aurait frappé la CI. En un mot (`--cluster=…`) ; un test lance la commande du job telle quelle, avec un dossier hors du dépôt.
+
+### Scénarios, profil local (poste, 28/09)
+
+Les onze passent, un par un, sur le même cluster : deux réplicas sur deux nœuds et création concurrente (18 s) ; arrêt propre et pod tué (1 min 17 s) ; mise à jour sans interruption et retour arrière (8 min 27 s) ; blocage réseau (29 s) ; contrôle de configuration (2 min 10 s) ; sauvegarde et restauration (4 min 18 s). L'adresse d'API autre que Mistral n'est pas refusée par un code HTTP de l'interface : l'analyse aboutit à un rapport d'échec (407 du proxy, qui nomme l'hôte refusé), ESCALADE et revue humaine ; le scénario vérifie ce dossier et qu'aucune requête n'a atteint le serveur factice.
+
+### Suites
+
+- Empreinte par défaut du proxy dans son chart, après la première publication.
+- N'embarquer que les extraits absents de la base : réindexer un corpus inchangé ne prendrait plus près de 20 minutes.
+
+### Avant la fusion (29/09) : rotation, journaux, désinstallation, disque
+
+- **Rapport demandé par le propriétaire** : la preuve que le mot de passe d'`app_role` n'apparaît dans aucun journal n'existait que pour la voie `setup-db` (tests automatiques) ; pour la voie CloudNativePG retenue, seule la documentation de l'opérateur. La vérification sur un cluster local a été interrompue : Docker Desktop a redémarré vers 01 h 37 (heure de Paris) pendant l'installation, les nœuds k3d ne sont pas repartis ; cause probable, la mémoire de la VM (8 Go, profil local à 7 Go au pic).
+- **Constat de relecture** : le pool figeait sa chaîne de connexion au démarrage ; après une rotation, toute nouvelle connexion aurait gardé l'ancien mot de passe. Décision du propriétaire : chaîne appelable, relue à chaque connexion (psycopg-pool 3.3.3 l'accepte), pour le pool et hors du pool. Tests d'abord ; un premier contrôle passait à tort, le pool ouvrant une seconde connexion d'avance, avant la rotation : le test attend désormais un pool prêt, à une connexion.
+- **Scénario 12**, en CI seulement (décision du propriétaire) : mots de passe témoins cherchés dans les journaux de tous les conteneurs et dans ceux des tâches recopiés par Helm, avant et après une rotation ; ancien refusé ; connexions coupées côté serveur, puis chaque réplica analyse et scelle avec le nouveau, sans redémarrage. Helm 4.3 fait passer les journaux recopiés par `slog`, guillemets échappés : les marques des tâches sont cherchées sans dépendre de l'échappement.
+- **Désinstallation** : compte et règle réseau des tâches, configuration à venir survivaient à `helm uninstall` (Helm ne supprime que les ressources ordinaires). Supprimés après leur crochet ; une tâche en échec reste pour le diagnostic, et son nettoyage, documenté, est vérifié à la fin du scénario de restauration.
+- **Disque du runner** : tailles mesurées (registre, linux/amd64) : modèle 1,33 Go compressé, 2,25 Go décompressé ; application 0,14 et 0,42 ; images tierces 0,78 Go compressés. Besoin au pire, 28,4 Go pour trois nœuds ; nettoyage sous 30 Go libres seulement (85 Go constatés).
+- **`check.sh --sans-cluster`**, pour le poste ; le cluster n'est alors vérifié que par la CI.

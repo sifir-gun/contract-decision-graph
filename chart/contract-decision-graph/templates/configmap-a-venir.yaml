@@ -15,7 +15,9 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-20"
-    "helm.sh/hook-delete-policy": before-hook-creation
+    # supprimée après son crochet : Helm ne supprime pas une ressource de crochet à la
+    # désinstallation (ADR 005)
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 data:
   decision.yaml: |-
     {{- default (.Files.Get "files/decision.yaml") .Values.configuration.decision | nindent 4 }}

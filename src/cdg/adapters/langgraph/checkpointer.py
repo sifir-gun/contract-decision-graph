@@ -5,7 +5,7 @@ une connexion psycopg.
 """
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -33,7 +33,10 @@ from cdg.ports.connections import ConnectionsExhausted
 from cdg.settings import APP_ROLE
 
 # une chaîne de connexion (administration, tests) ou le pool du processus
-Source = str | ConnectionPool[Connection[DictRow]]
+# une chaîne de connexion, ou la fonction qui la rend, relue à chaque connexion (mot de
+# passe tourné sans redémarrage, ADR 005) ; ou le pool du processus
+Conninfo = str | Callable[[], str]
+Source = Conninfo | ConnectionPool[Connection[DictRow]]
 
 # --- Sérialiseur des checkpoints ---------------------------------------------------
 
@@ -129,12 +132,15 @@ def open_saver(source: Source) -> Iterator[PostgresSaver]:
         return
     # paramètres de PostgresSaver.from_conn_string, qui n'accepte pas de serde
     with Connection.connect(
-        source, autocommit=True, prepare_threshold=0, row_factory=dict_row
+        source() if callable(source) else source,
+        autocommit=True,
+        prepare_threshold=0,
+        row_factory=dict_row,
     ) as conn:
         yield PostgresSaver(conn, serde=strict_serializer())
 
 
-def setup_database(admin_conninfo: str) -> None:
+def setup_database(admin_conninfo: Conninfo) -> None:
     """Tables du checkpointer (droits administrateur), puis droits d'app_role."""
     with open_saver(admin_conninfo) as saver:
         saver.setup()
@@ -146,7 +152,7 @@ def setup_database(admin_conninfo: str) -> None:
             conn.execute(statement.format(role=sql.Identifier(APP_ROLE)))
 
 
-def delete_thread(conninfo: str, thread_id: str) -> None:
+def delete_thread(conninfo: Conninfo, thread_id: str) -> None:
     """Ménage des tests uniquement : exige DELETE, qu'app_role n'a pas."""
     with open_saver(conninfo) as saver:
         saver.delete_thread(thread_id)

@@ -6,7 +6,7 @@
   "crochets" "post-install,post-upgrade"
   "poids" 0
   "delai" 3600
-  "args" (list "--journaux" "json" "--fils-embedding" (include "cdg.fils" .Values.ressources.ingestion) "ingest")
+  "args" (list "--journaux" "json" "--fils-embedding" (include "cdg.fils" .Values.ressources.ingestion) "--lot-embedding" (toString .Values.embedding.lot) "ingest")
   "administrateur" true
   "modele" true
   "ressources" .Values.ressources.ingestion

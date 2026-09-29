@@ -112,6 +112,7 @@ class FastembedEmbedder:
         *,
         model=None,
         threads: int | None = None,
+        batch_size: int | None = None,
     ):
         self.model = config.model
         self.dimension = config.dimension
@@ -120,6 +121,11 @@ class FastembedEmbedder:
             raise ValueError(
                 f"nombre de fils de calcul invalide : {threads} (entier ≥ 1)"
             )
+        if batch_size is not None and batch_size < 1:
+            raise ValueError(f"taille des lots invalide : {batch_size} (entier ≥ 1)")
+        # textes embarqués à la fois ; None : défaut de fastembed 0.8.1 (256), dont le pic
+        # mémoire dépasse la limite d'un pod à l'ingestion (mesure du 28/09, ADR 005)
+        self._batch = {} if batch_size is None else {"batch_size": batch_size}
         if model is None:
             if cache_dir is None:
                 raise EmbeddingError(
@@ -135,7 +141,7 @@ class FastembedEmbedder:
         self._model = model
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
-        vectors = [list(map(float, v)) for v in self._model.embed(texts)]
+        vectors = [list(map(float, v)) for v in self._model.embed(texts, **self._batch)]
         for vector in vectors:
             if len(vector) != self.dimension:
                 raise EmbeddingError(

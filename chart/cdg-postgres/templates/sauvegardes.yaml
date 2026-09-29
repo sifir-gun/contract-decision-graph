@@ -1,0 +1,43 @@
+# Stockage objet des sauvegardes (greffon Barman Cloud) et sauvegarde planifiée.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ .Values.nom }}-sauvegardes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-postgres.etiquettes" . | nindent 4 }}
+spec:
+  retentionPolicy: {{ .Values.sauvegardes.retention | quote }}
+  configuration:
+    destinationPath: {{ .Values.sauvegardes.destination | quote }}
+    {{- with .Values.sauvegardes.adresse }}
+    endpointURL: {{ . | quote }}
+    {{- end }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ .Values.sauvegardes.identifiants.secret }}
+        key: {{ .Values.sauvegardes.identifiants.cleAcces }}
+      secretAccessKey:
+        name: {{ .Values.sauvegardes.identifiants.secret }}
+        key: {{ .Values.sauvegardes.identifiants.cleSecret }}
+    wal:
+      compression: {{ .Values.sauvegardes.compressionWal }}
+  instanceSidecarConfiguration:
+    resources:
+      {{- toYaml .Values.sauvegardes.ressourcesAnnexe | nindent 6 }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ .Values.nom }}-quotidienne
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-postgres.etiquettes" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.sauvegardes.planification | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ .Values.nom }}
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

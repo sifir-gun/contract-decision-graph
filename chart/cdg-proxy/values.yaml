@@ -1,0 +1,51 @@
+# Valeurs du chart cdg-proxy (ADR 005, PR C3). Schéma : values.schema.json ; toute valeur
+# inconnue ou mal formée fait échouer l'installation.
+
+# Image du proxy : l'empreinte de l'index amd64/arm64 publié par la CI (résumé du job
+# publication), jamais une étiquette. Obligatoire, sans valeur par défaut tant que la
+# première publication n'a pas eu lieu : sans elle, l'installation est refusée.
+image:
+  repository: ghcr.io/sifir-gun/contract-decision-graph/proxy-sortie
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicas: 2
+port: 4750
+
+# Liste d'accès : seuls ces domaines passent (Smokescreen, politique « enforce »). Sans
+# certificat client, toute requête prend la règle par défaut.
+domainesAutorises:
+  - api.mistral.ai
+# Adresses privées : refusées par Smokescreen. Profil de test seulement : la plage des
+# services du cluster, pour joindre le serveur factice de Mistral.
+plagesAutorisees: []
+
+# Pods autorisés à passer par le proxy (même espace de noms) : l'interface.
+clients:
+  app.kubernetes.io/name: contract-decision-graph
+  app.kubernetes.io/component: web
+
+# Sorties internes au cluster, profil de test seulement : [{espaceDeNoms, selecteur, port}].
+sortiesInternes: []
+
+# DNS du cluster, pour les règles de sortie.
+dns:
+  espaceDeNoms: kube-system
+  selecteur:
+    k8s-app: kube-dns
+
+# Mesure du 28/09 : 4,7 Mio au repos, 6 Mio après 43 requêtes.
+ressources:
+  requests: {cpu: 50m, memory: 32Mi}
+  limits: {cpu: 500m, memory: 128Mi}
+
+# Protections de Smokescreen contre l'épuisement.
+limites:
+  requetesSimultanees: 100
+  tunnelsSimultanes: 50
+delaiConnexion: 10s
+
+repartition:
+  siImpossible: DoNotSchedule
+budgetInterruption:
+  minDisponibles: 1

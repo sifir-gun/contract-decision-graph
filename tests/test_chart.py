@@ -387,6 +387,20 @@ def test_interface_disponible_arret_propre_et_repartie(reel):
 
 
 @pytest.mark.chart
+def test_lots_de_l_embedder_et_memoire_au_dessus_des_pics_mesures(reel):
+    """Mesure du 28/09 (ADR 005) : 2,55 à 2,65 Gio au chargement du modèle, 2,9 Gio pour
+    un lot de 16 passages longs, plus de 3,7 Gio pour 64 ; fastembed prend 256 par défaut.
+    Les limites de 3 et 3,5 Gio tuaient l'interface au démarrage et l'ingestion."""
+    web = of_kind(reel, "Deployment")[0]["spec"]["template"]["spec"]["containers"][0]
+    assert web["args"][web["args"].index("--lot-embedding") + 1] == "16"
+    assert web["resources"]["limits"]["memory"] == "4Gi"
+    ingestion = named(reel, "Job", "-ingestion")["spec"]["template"]["spec"]
+    job = ingestion["containers"][0]
+    assert job["args"][job["args"].index("--lot-embedding") + 1] == "16"
+    assert job["resources"]["limits"]["memory"] == "4Gi"
+
+
+@pytest.mark.chart
 def test_fils_de_l_embedder_egaux_a_la_limite_cpu(reel):
     web = of_kind(reel, "Deployment")[0]["spec"]["template"]["spec"]["containers"][0]
     args = web["args"]
@@ -466,6 +480,56 @@ def test_taches_helm_ordonnees_limitees_et_nettoyees(reel):
     assert not [
         j for j in of_kind(forced, "Job") if "configuration" in j["metadata"]["name"]
     ]
+
+
+@pytest.mark.chart
+def test_regle_reseau_des_taches_posee_avant_elles(reel):
+    """Les tâches d'avant mise à jour tournent avant les ressources ordinaires du chart :
+    leur règle réseau est un crochet, comme leur compte, posé avant elles. Sinon une mise à
+    jour qui change de base (restauration) les laisse sous l'ancienne règle, qui ne mène
+    qu'à l'ancienne base (scénario du cluster, 28/09)."""
+    annotations = named(reel, "NetworkPolicy", "-taches")["metadata"]["annotations"]
+    account = named(reel, "ServiceAccount", "-taches")["metadata"]["annotations"]
+    assert annotations["helm.sh/hook"] == account["helm.sh/hook"]
+    assert annotations["helm.sh/hook-delete-policy"] == (
+        "before-hook-creation,hook-succeeded"
+    )
+    weights = [
+        int(job["metadata"]["annotations"]["helm.sh/hook-weight"])
+        for job in of_kind(reel, "Job")
+    ]
+    assert int(annotations["helm.sh/hook-weight"]) < min(weights)
+
+
+@pytest.mark.chart
+@pytest.mark.parametrize("variant", ["reel", "demo", "copie", "sans-taches"])
+def test_aucune_ressource_de_crochet_ne_survit_a_un_deploiement_reussi(variant):
+    """Helm 4.3.0 ne supprime à la désinstallation que les ressources ordinaires de la
+    release (pkg/action/uninstall.go) : une ressource de crochet laissée après son crochet
+    survivrait à `helm uninstall`. Chacune est donc supprimée après succès, et les
+    journaux d'une tâche sont recopiés par Helm avant (hook-output-log-policy). Une tâche
+    en échec reste pour le diagnostic, jusqu'à son délai de conservation ; son nettoyage
+    après désinstallation est documenté (docs/exploitation.md) et testé (scénario du
+    cluster)."""
+    options = (
+        SANS_TACHES if variant == "sans-taches" else chart_script().VARIANTS[variant]
+    )
+    docs = render(*options)
+    hooks = [
+        d for d in docs if "helm.sh/hook" in (d["metadata"].get("annotations") or {})
+    ]
+    assert hooks
+    for doc in hooks:
+        annotations = doc["metadata"]["annotations"]
+        policies = annotations.get("helm.sh/hook-delete-policy", "").split(",")
+        name = f"{doc['kind']}/{doc['metadata']['name']}"
+        assert "before-hook-creation" in policies and "hook-succeeded" in policies, name
+        assert "hook-failed" not in policies, name  # diagnostic d'une tâche en échec
+    for job in of_kind(docs, "Job"):
+        annotations = job["metadata"]["annotations"]
+        assert annotations["helm.sh/hook-output-log-policy"] == (
+            "hook-succeeded,hook-failed"
+        )
 
 
 @pytest.mark.chart
@@ -568,19 +632,35 @@ def test_lint_rendu_schemas_et_bonnes_pratiques(tmp_path):
     run = Recorder({"version": "v4.3.0", "template": "kind: ConfigMap\n"})
     assert module.verify(tmp_path, run=run) == 0
     tools = [c[0] if c[0] == "helm" else c[c.index("--rm") + 1 :] for c in run.commands]
+    # le chart de l'application et celui du proxy de sortie (PR C3), chacun ses variantes
+    renders = [
+        (chart, name)
+        for chart, variants, prefix in module.CHARTS
+        for name in (f"{prefix}{variant}" for variant in variants)
+    ]
+    assert {chart.name for chart, _ in renders} == {
+        "contract-decision-graph",
+        "cdg-proxy",
+        "cdg-postgres",
+    }
     lints = [c for c in run.commands if c[:2] == ["helm", "lint"]]
-    assert len(lints) == len(module.VARIANTS) and all("--strict" in c for c in lints)
+    assert [c[3] for c in lints] == [str(chart) for chart, _ in renders]
+    assert all("--strict" in c for c in lints)
     templates = [c for c in run.commands if c[:2] == ["helm", "template"]]
-    assert len(templates) == len(module.VARIANTS)
-    for variant in module.VARIANTS:
-        assert (tmp_path / f"{variant}.yaml").read_text() == "kind: ConfigMap\n"
+    assert len(templates) == len(renders)
+    for _, name in renders:
+        assert (tmp_path / f"{name}.yaml").read_text() == "kind: ConfigMap\n"
     [kubeconform] = [c for c in run.commands if module.KUBECONFORM in c]
     assert {"-strict", "-summary"} <= set(kubeconform)
     assert kubeconform[kubeconform.index("-kubernetes-version") + 1] == "1.36.4"
+    # ressources propres à CloudNativePG et au greffon : schémas inconnus de kubeconform,
+    # validées par le serveur d'API du cluster de test (tests/test_cluster.py)
+    skipped = kubeconform[kubeconform.index("-skip") + 1].split(",")
+    assert skipped == ["Cluster", "ObjectStore", "ScheduledBackup"]
     # kube-linter relie les objets d'un même lot : chaque variante à part, sinon le
     # budget d'interruption du rendu réel est rapproché du Deployment de la démo (28/09)
     linters = [c for c in run.commands if module.KUBE_LINTER in c]
-    assert [c[-1] for c in linters] == [f"/rendu/{v}.yaml" for v in module.VARIANTS]
+    assert [c[-1] for c in linters] == [f"/rendu/{name}.yaml" for _, name in renders]
     assert all("lint" in c and "/configuration/.kube-linter.yaml" in c for c in linters)
     assert tools  # la liste des commandes n'est pas vide
 

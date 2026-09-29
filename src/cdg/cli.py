@@ -59,15 +59,18 @@ def today() -> date:
 
 # taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
 POOL = {"size": connexions.DEFAULT_SIZE}
-# fils de calcul de l'embedder : option --fils-embedding, ou CDG_FILS_EMBEDDING (main)
-EMBEDDER_THREADS: dict[str, int | None] = {"threads": None}
+# fils de calcul et taille des lots de l'embedder : options --fils-embedding et
+# --lot-embedding, ou CDG_FILS_EMBEDDING et CDG_LOT_EMBEDDING (main)
+EMBEDDER_THREADS: dict[str, int | None] = {"threads": None, "batch_size": None}
 
 
 @functools.cache
 def app_pool() -> connexions.Source:
     """Pool d'app_role du processus : ouvert au premier usage, fermé à la sortie. Le
     checkpointer, le journal, la recherche et les verrous y prennent leurs connexions."""
-    pool = connexions.open_pool(conninfo.app_conninfo(), max_size=POOL["size"])
+    # la fonction, relue à chaque nouvelle connexion : rotation du mot de passe sans
+    # redémarrage (ADR 005)
+    pool = connexions.open_pool(conninfo.app_conninfo, max_size=POOL["size"])
     atexit.register(pool.close)
     return pool
 
@@ -92,6 +95,7 @@ def process_embedder(config: DecisionConfig) -> fastembed.FastembedEmbedder:
                 config.embedding,
                 settings.embedding_cache_dir(),
                 threads=EMBEDDER_THREADS["threads"],
+                batch_size=EMBEDDER_THREADS["batch_size"],
             )
         return _EMBEDDERS[key]
 
@@ -166,13 +170,20 @@ def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> 
 
 
 def _setup_db(args: argparse.Namespace) -> dict:
-    admin = conninfo.admin_conninfo()
-    checkpointer.setup_database(admin)
+    """Amorce une base vide (toutes les migrations, dans l'ordre) ou met à jour une base
+    existante ; relancé, ne change rien. Le rôle applicatif d'abord, s'il manque (mot de
+    passe haché côté client), car migrations et checkpointer lui donnent ses droits."""
+    admin = conninfo.admin_conninfo  # relue à chaque connexion
+    created = migrations.ensure_role_at(
+        admin, settings.APP_ROLE, lambda: settings.require_secret("APP_DB_PASSWORD")
+    )
     applied = migrations.apply(admin)
+    checkpointer.setup_database(admin)
     rag_store.check_dimension(admin, load_config().embedding.dimension)
     return {
         "setup_db": "ok",
         "role": settings.APP_ROLE,
+        "role_cree": created,
         "tables": list(checkpointer.CHECKPOINT_TABLES),
         "droits": ["SELECT", "INSERT", "UPDATE"],
         "migrations": applied,
@@ -202,9 +213,10 @@ def _ingest(args: argparse.Namespace) -> dict:
         config.embedding,
         settings.embedding_cache_dir(),
         threads=EMBEDDER_THREADS["threads"],
+        batch_size=EMBEDDER_THREADS["batch_size"],
     )
     rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
-    summary = rag_store.sync(conninfo.admin_conninfo(), rows, embedder.model)
+    summary = rag_store.sync(conninfo.admin_conninfo, rows, embedder.model)
     return {"ingest": "ok", "model": embedder.model, **summary}
 
 
@@ -525,6 +537,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="fils de calcul de l'embedder (ou CDG_FILS_EMBEDDING) : la limite CPU du pod "
         "(mesure dans l'ADR 005) ; par défaut, un par cœur visible (onnxruntime)",
     )
+    parser.add_argument(
+        "--lot-embedding",
+        type=_positive,
+        default=os.environ.get("CDG_LOT_EMBEDDING"),
+        help="textes embarqués à la fois (ou CDG_LOT_EMBEDDING) : borne le pic mémoire de "
+        "l'ingestion (mesure dans l'ADR 005) ; par défaut, celui de fastembed (256)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
         "setup-db",
@@ -713,6 +732,7 @@ def main(argv: list[str] | None = None) -> int:
     handler: Callable[[argparse.Namespace], dict] = args.handler
     POOL["size"] = args.connexions
     EMBEDDER_THREADS["threads"] = args.fils_embedding
+    EMBEDDER_THREADS["batch_size"] = args.lot_embedding
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
         logging.config.dictConfig(journaux.config(args.journaux))

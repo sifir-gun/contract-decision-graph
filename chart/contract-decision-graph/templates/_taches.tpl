@@ -31,8 +31,10 @@ metadata:
     "helm.sh/hook": {{ .crochets }}
     "helm.sh/hook-weight": {{ .poids | quote }}
     # une tâche réussie disparaît ; une tâche en échec reste pour le diagnostic,
-    # puis ttlSecondsAfterFinished la supprime
+    # puis ttlSecondsAfterFinished la supprime (après `helm uninstall` : nettoyage dans
+    # docs/exploitation.md). Ses journaux sont d'abord recopiés sur la sortie de Helm.
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-output-log-policy": hook-succeeded,hook-failed
     # exclusions de kube-linter, justifiées ici et dans l'ADR 005
     ignore-check.kube-linter.io/restart-policy: "chaque tentative dans un nouveau pod (backoffLimit) : le journal d'une tentative ratée reste lisible"
     ignore-check.kube-linter.io/no-liveness-probe: "tâche qui s'exécute jusqu'au bout, bornée par activeDeadlineSeconds : aucune sonde de vie"

@@ -1,0 +1,89 @@
+# Instances PostgreSQL : en entrée, l'application et les autres instances sur 5432,
+# l'opérateur sur 8000 (état de l'instance) ; en sortie, le DNS, les autres instances
+# (réplication), le serveur d'API de Kubernetes et le stockage objet des sauvegardes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.nom }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-postgres.etiquettes" . | nindent 4 }}
+  annotations:
+    # exclusion de kube-linter, justifiée ici et dans l'ADR 005
+    ignore-check.kube-linter.io/dangling-networkpolicy: "les instances sont créées par l'opérateur CloudNativePG à partir du Cluster, hors de ce rendu"
+    ignore-check.kube-linter.io/dangling-networkpolicypeer-podselector: "l'application et les instances sont rendues ailleurs (chart de l'application, opérateur) : leurs pods existent hors de ce rendu"
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ .Values.nom }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.reseau.clients | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ .Values.nom }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.reseau.operateur }}
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.reseau.dns.espaceDeNoms }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.reseau.dns.selecteur | nindent 14 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ .Values.nom }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    # serveur d'API : son adresse (nœud, service kubernetes) dépend du cluster
+    - ports:
+        {{- range .Values.reseau.portsApi }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+    {{- with .Values.reseau.stockageInterne }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .espaceDeNoms }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .selecteur | nindent 14 }}
+      ports:
+        - port: {{ .port }}
+          protocol: TCP
+    {{- else }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}

@@ -1,0 +1,30 @@
+# Configuration de Smokescreen et liste d'accès. Sans certificat client, toute requête
+# prend la règle par défaut (allow_missing_role) : « enforce », seulement les domaines
+# autorisés. Les adresses privées restent refusées, sauf plages du profil de test.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cdg-proxy.nomComplet" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-proxy.etiquettes" . | nindent 4 }}
+data:
+  smokescreen.yaml: |
+    acl_file: /configuration/acl.yaml
+    allow_missing_role: true
+    connect_timeout: {{ .Values.delaiConnexion }}
+    max_concurrent_requests: {{ .Values.limites.requetesSimultanees }}
+    max_concurrent_connect_tunnels: {{ .Values.limites.tunnelsSimultanes }}
+    deny_message_extra: "contract-decision-graph : seule l'API de Mistral est joignable (ADR 005)"
+    {{- with .Values.plagesAutorisees }}
+    allow_ranges:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  acl.yaml: |
+    version: v1
+    services: []
+    default:
+      project: contract-decision-graph
+      action: enforce
+      allowed_domains:
+        {{- toYaml .Values.domainesAutorises | nindent 8 }}

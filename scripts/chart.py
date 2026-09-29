@@ -1,5 +1,5 @@
-"""Validation statique du chart Helm (ADR 005, PR C2) : mêmes commandes en CI (job `chart`)
-et en local (`scripts/check.sh`).
+"""Validation statique des charts Helm (ADR 005, PR C2 et C3) : l'application et le proxy
+de sortie ; mêmes commandes en CI (job `chart`) et en local (`scripts/check.sh`).
 
   uv run --no-sync python scripts/chart.py verifier --dossier DOSSIER
 
@@ -24,6 +24,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CHART = ROOT / "chart" / "contract-decision-graph"
+PROXY_CHART = ROOT / "chart" / "cdg-proxy"
+POSTGRES_CHART = ROOT / "chart" / "cdg-postgres"
+# ressources de CloudNativePG et du greffon : kubeconform n'a pas leurs schémas ; le
+# serveur d'API du cluster de test les valide (PR C3)
+CRD_KINDS = ["Cluster", "ObjectStore", "ScheduledBackup"]
 LINTER_CONFIG = ROOT / "chart"
 HELM_VERSION = "v4.3.0"
 KUBERNETES = "1.36.4"  # canal stable de k3s au 27/09/2026
@@ -41,6 +46,45 @@ VARIANTS: dict[str, list[str]] = {
     "demo": ["--set", "mode=demo", "--set", "replicas=1"],
     "copie": ["--set", "modele.montage=copie"],
 }
+# proxy de sortie (PR C3) : l'empreinte de l'image n'a pas de valeur par défaut avant la
+# première publication ; une empreinte d'exemple pour le rendu, qui ne tire rien
+EXAMPLE_DIGEST = "sha256:" + "1" * 64
+PROXY_VARIANTS: dict[str, list[str]] = {
+    "production": ["--set", f"image.digest={EXAMPLE_DIGEST}"],
+    "test": [
+        "--set",
+        f"image.digest={EXAMPLE_DIGEST}",
+        "--set",
+        "plagesAutorisees[0]=10.43.0.0/16",
+        "--set",
+        "sortiesInternes[0].espaceDeNoms=cdg-tests",
+        "--set",
+        "sortiesInternes[0].selecteur.app=mistral-factice",
+        "--set",
+        "sortiesInternes[0].port=8080",
+    ],
+}
+POSTGRES_VARIANTS: dict[str, list[str]] = {
+    "production": [],
+    "test": [
+        "--set",
+        "instances=1",
+        "--set",
+        "sauvegardes.adresse=http://seaweedfs.cdg-stockage.svc.cluster.local:8333",
+        "--set",
+        "reseau.stockageInterne.espaceDeNoms=cdg-stockage",
+        "--set",
+        "reseau.stockageInterne.selecteur.app=seaweedfs",
+        "--set",
+        "reseau.stockageInterne.port=8333",
+    ],
+}
+# chaque chart, ses variantes, le préfixe de leurs rendus
+CHARTS: list[tuple[Path, dict[str, list[str]], str]] = [
+    (CHART, VARIANTS, ""),
+    (PROXY_CHART, PROXY_VARIANTS, "proxy-"),
+    (POSTGRES_CHART, POSTGRES_VARIANTS, "postgres-"),
+]
 
 Run = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -65,27 +109,34 @@ def verify(folder: Path, *, run: Run = subprocess.run) -> int:
             raise RuntimeError(
                 f"helm {version} : {HELM_VERSION} attendu (celui de la CI, ADR 005)"
             )
-        for name, options in VARIANTS.items():
-            _checked(
-                run,
-                ["helm", "lint", "--strict", str(CHART), *options],
-                f"helm lint ({name})",
-            )
-            rendered = _checked(
-                run,
-                ["helm", "template", "cdg", str(CHART), "--namespace", "cdg", *options],
-                f"helm template ({name})",
-            )
-            (folder / f"{name}.yaml").write_text(rendered.stdout, encoding="utf-8")
+        names = []
+        for chart, variants, prefix in CHARTS:
+            release = "cdg" if chart == CHART else chart.name
+            for variant, options in variants.items():
+                name = f"{prefix}{variant}"
+                names.append(name)
+                _checked(
+                    run,
+                    ["helm", "lint", "--strict", str(chart), *options],
+                    f"helm lint ({name})",
+                )
+                rendered = _checked(
+                    run,
+                    ["helm", "template", release, str(chart), "--namespace", "cdg"]
+                    + options,
+                    f"helm template ({name})",
+                )
+                (folder / f"{name}.yaml").write_text(rendered.stdout, encoding="utf-8")
         _checked(
             run,
             ["docker", "run", "--rm", "-v", f"{folder}:/rendu:ro", KUBECONFORM]
-            + ["-strict", "-summary", "-kubernetes-version", KUBERNETES, "/rendu"],
+            + ["-strict", "-summary", "-kubernetes-version", KUBERNETES]
+            + ["-skip", ",".join(CRD_KINDS), "/rendu"],
             "kubeconform",
         )
         # chaque variante à part : kube-linter relie les objets d'un même lot (budget
-        # d'interruption et Deployment), et les trois rendus portent les mêmes noms
-        for name in VARIANTS:
+        # d'interruption et Deployment), et les rendus d'un chart portent les mêmes noms
+        for name in names:
             _checked(
                 run,
                 ["docker", "run", "--rm", "-v", f"{folder}:/rendu:ro"]
@@ -98,8 +149,8 @@ def verify(folder: Path, *, run: Run = subprocess.run) -> int:
         print(f"chart refusé : {exc}", file=sys.stderr)
         return 1
     print(
-        f"chart vérifié : {len(VARIANTS)} variantes (helm {HELM_VERSION}, "
-        f"Kubernetes {KUBERNETES})"
+        f"charts vérifiés : {len(CHARTS)} charts, {len(names)} variantes "
+        f"(helm {HELM_VERSION}, Kubernetes {KUBERNETES})"
     )
     return 0
 

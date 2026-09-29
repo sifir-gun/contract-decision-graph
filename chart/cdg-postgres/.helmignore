@@ -1,0 +1,6 @@
+# fichiers exclus du paquet du chart
+.DS_Store
+*.swp
+*.bak
+*.tmp
+.git/

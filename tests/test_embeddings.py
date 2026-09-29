@@ -369,6 +369,35 @@ def test_nombre_de_fils_transmis_a_fastembed(monkeypatch, tmp_path, threads, exp
     )  # None : défaut de fastembed, puis d'onnxruntime
 
 
+class Recorded:
+    """Modèle factice : relève les arguments de chaque appel à embed."""
+
+    def __init__(self):
+        self.calls = []
+
+    def embed(self, texts, **kwargs):
+        self.calls.append(kwargs)
+        return [[0.0] * CONFIG.dimension for _ in texts]
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "expected"), [(None, {}), (16, {"batch_size": 16})]
+)
+def test_taille_des_lots_transmise_a_fastembed(batch_size, expected):
+    """fastembed traite 256 textes à la fois par défaut : l'ingestion d'un corpus dépassait
+    la limite mémoire du pod (mesure du 28/09, ADR 005). None : défaut de fastembed."""
+    model = Recorded()
+    embedder = fastembed.FastembedEmbedder(CONFIG, model=model, batch_size=batch_size)
+    embedder.embed_passages(["un", "deux"])
+    embedder.embed_query("trois")
+    assert model.calls == [expected, expected]
+
+
+def test_taille_des_lots_invalide_refusee():
+    with pytest.raises(ValueError, match="lot"):
+        fastembed.FastembedEmbedder(CONFIG, model=Recorded(), batch_size=0)
+
+
 def test_nombre_de_fils_invalide_refuse(tmp_path):
     with pytest.raises(ValueError, match="fils"):
         fastembed.FastembedEmbedder(CONFIG, cache_dir=tmp_path, threads=0)

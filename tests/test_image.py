@@ -16,6 +16,7 @@ import re
 import shlex
 import subprocess
 import time
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -252,6 +253,60 @@ def test_configuration_de_l_image(image):
     )
     names = [e.split("=", 1)[0] for e in config["Config"]["Env"]]
     assert not [n for n in names if re.search("KEY|PASSWORD|SECRET|TOKEN", n)]
+
+
+@pytest.mark.image
+def test_serveur_factice_de_mistral_absent_de_l_image(image):
+    """Le serveur factice des tests du cluster a son image de test à part (ADR 005, PR C3) :
+    ni module importable, ni fichier, dans l'image de l'application."""
+    code = (
+        "import importlib.util, os, sys\n"
+        "module = importlib.util.find_spec('mistral_factice')\n"
+        "files = [os.path.join(d, f) for d, _, fs in os.walk('/') for f in fs\n"
+        "         if f.startswith('mistral_factice') and not d.startswith(('/proc', '/sys'))]\n"
+        "print(module, files)\n"
+        "sys.exit(1 if module or files else 0)\n"
+    )
+    result = python_in(image, code)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.image
+def test_image_de_test_du_serveur_factice_repond(image):
+    """Construite sur l'image de l'application, elle n'y ajoute que le serveur factice."""
+    tag = "cdg-mistral-factice:verification"
+    built = docker(
+        "build",
+        "--file",
+        "docker/mistral-factice/Dockerfile",
+        "--build-arg",
+        f"APPLICATION={image}",
+        "--tag",
+        tag,
+        str(ROOT),
+        timeout=300,
+    )
+    assert built.returncode == 0, built.stderr
+    started = docker("run", "--detach", *HARDENED, "--publish", "127.0.0.1::8080", tag)
+    assert started.returncode == 0, started.stderr
+    container = started.stdout.strip()
+    try:
+        address = published(container, 8080)
+        deadline = time.monotonic() + WAIT
+        body = None
+        while time.monotonic() < deadline and body is None:
+            try:
+                with urllib.request.urlopen(
+                    f"{address}/controle", timeout=2
+                ) as response:
+                    body = json.load(response)
+            except OSError:
+                time.sleep(0.5)
+        assert body == {"delai": 0.0, "recues": 0, "appels": {}, "refus": 0}, docker(
+            "logs", container
+        ).stdout
+    finally:
+        docker("rm", "--force", container)
 
 
 @pytest.mark.image

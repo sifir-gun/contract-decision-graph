@@ -9,10 +9,14 @@ if [[ -z "${APP_DB_PASSWORD:-}" ]]; then
     exit 1
 fi
 
+# le mot de passe d'app_role passe par un paramètre de la session (cdg.app_password) : la
+# 001, que setup-db exécute aussi par psycopg, ne contient aucune variable psql
 for migration in /migrations/*.sql; do
     echo "migration : ${migration}"
     psql -v ON_ERROR_STOP=1 \
          --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" \
-         -v app_password="${APP_DB_PASSWORD}" \
-         -f "${migration}"
+         -v app_password="${APP_DB_PASSWORD}" <<SQL
+SET cdg.app_password = :'app_password';
+\i ${migration}
+SQL
 done

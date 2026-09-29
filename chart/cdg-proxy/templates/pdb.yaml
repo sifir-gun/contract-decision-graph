@@ -1,0 +1,16 @@
+{{- if gt (int .Values.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cdg-proxy.nomComplet" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg-proxy.etiquettes" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.budgetInterruption.minDisponibles }}
+  # un pod qui n'est pas prêt peut être évincé : il ne protège aucune disponibilité
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      {{- include "cdg-proxy.selecteur" . | nindent 6 }}
+{{- end }}
