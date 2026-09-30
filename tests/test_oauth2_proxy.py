@@ -149,7 +149,7 @@ def image(request) -> str:
 
 
 def files(tag: str) -> dict[str, bytes]:
-    """Fichiers réguliers de l'image, par son export."""
+    """Fichiers réguliers de l'image, par son export, sous leur chemin absolu."""
     container = docker("create", tag).stdout.strip()
     try:
         exported = subprocess.run(
@@ -163,7 +163,7 @@ def files(tag: str) -> dict[str, bytes]:
             if member.isfile():
                 extracted = archive.extractfile(member)
                 assert extracted is not None
-                found[member.name] = extracted.read()
+                found["/" + member.name.lstrip("/")] = extracted.read()
     return found
 
 
@@ -186,18 +186,18 @@ def test_version_attendue(image):
 def test_binaire_identique_a_l_empreinte_publiee(image):
     [config] = json.loads(docker("image", "inspect", image).stdout)
     arch = config["Architecture"]
-    binary = files(image)["oauth2-proxy"]
+    binary = files(image)["/oauth2-proxy"]  # chemin de l'ENTRYPOINT
     assert hashlib.sha256(binary).hexdigest() == BINARY_SHA256[arch]
 
 
 @pytest.mark.oauth2proxy
 def test_licence_de_chaque_module_embarque(image):
     content = files(image)
-    licence = content["licences/oauth2-proxy/LICENSE"]
+    licence = content["/licences/oauth2-proxy/LICENSE"]
     assert hashlib.sha256(licence).hexdigest() == LICENSE_SHA256
-    assert "licences/go/LICENSE" in content
-    modules = content["licences/modules.txt"].decode().split()
+    assert "/licences/go/LICENSE" in content
+    modules = content["/licences/modules.txt"].decode().split()
     assert len(modules) > 20
     for module in modules:
-        prefix = f"licences/modules/{module}/"
+        prefix = f"/licences/modules/{module}/"
         assert any(name.startswith(prefix) for name in content), module
