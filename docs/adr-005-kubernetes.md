@@ -1,6 +1,6 @@
 # ADR-005 : déploiement sur Kubernetes (k3s, Helm)
 
-- **Statut** : fait pour les PR A (application prête, #12), B (chaîne d'approvisionnement, #15) et C (C1 : images amd64 et arm64, #18 ; C2 : chart Helm, #20 ; C3 : cluster de test, base, proxy de sortie et scénarios, #21), fusionnées les 28 et 29/09/2026. **Reste la PR D** : l'authentification et l'entrée réseau (Ingress), préalables à toute exposition de l'interface. Chaque PR complète cet ADR.
+- **Statut** : fait pour les PR A (application prête, #12), B (chaîne d'approvisionnement, #15) et C (C1 : images amd64 et arm64, #18 ; C2 : chart Helm, #20 ; C3 : cluster de test, base, proxy de sortie et scénarios, #21), fusionnées les 28 et 29/09/2026. **PR D1** : authentification et entrée réseau (Traefik, oauth2-proxy, jeton vérifié par l'interface), cette PR. **Reste la PR D2** : rôles, principe des quatre yeux, second facteur, journal d'audit v2 et accès d'urgence. Chaque PR complète cet ADR.
 - **Portée** : le déploiement sur k3s (k3d en local et en CI, plusieurs nœuds) par un chart Helm de niveau production, testé par un vrai cluster à chaque pull request. Aucun déploiement public sur Internet dans cette phase.
 
 ## Contexte
@@ -58,6 +58,10 @@ Consultées dans leur version courante ; chaque choix d'outil fondé sur un fait
 | Code de k3s v1.36.4+k3s1 (`pkg/daemons/agent/agent.go`) et de k3d v5.9.0 (`cmd/util/filter.go`) ; Kubernetes, [éviction sous pression du nœud](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/) | vérifiés le 28/09/2026 | k3s : éviction à 5 % libres (`imagefs`, `nodefs`), 10 % récupérés, aucun autre signal. k3d : un seul `@`, filtres séparés par `;`. Kubernetes : un seuil redéfini remet les autres à zéro. |
 | Code de Helm v4.3.0 : `pkg/action/uninstall.go`, `pkg/action/hooks.go`, `pkg/release/v1/util/manifest_sorter.go`, `pkg/cmd/root.go`, `internal/logging/logging.go` | vérifié le 29/09/2026 | La désinstallation ne supprime que les ressources ordinaires de la release. `helm.sh/hook-output-log-policy` (`hook-succeeded`, `hook-failed`, séparés par une virgule) recopie les journaux d'une tâche avant sa suppression, par le journal standard de Go, que Helm fait passer par `slog` : niveau Info, toujours affiché, guillemets échappés. |
 | psycopg-pool 3.3.3, code installé (`abc.py`, `ConninfoParam` ; `pool.py`) | vérifié le 29/09/2026 | La chaîne de connexion d'un pool peut être une fonction, appelée à chaque nouvelle connexion. |
+| [Traefik](https://github.com/traefik/traefik/releases), ses [avis de sécurité](https://github.com/traefik/traefik/security/advisories) et son [chart officiel](https://github.com/traefik/traefik-helm-chart) ; manifeste de k3s v1.36.4 (`manifests/traefik.yaml`) | v3.7.13 ; chart 41.6.0, archive `cd7254ea…` ; relevé le 30/09/2026 | Cinq avis du 07/09/2026 (un critique, trois hauts, un moyen) corrigés en 3.7.13 ; k3s v1.36.4 embarque 3.7.8. CRD `traefik.io/v1alpha1` : `Middleware` (`buffering`, `rateLimit`, `headers`, `redirectScheme`), `TLSOption`. |
+| [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy/releases) (MIT), ses [avis](https://github.com/oauth2-proxy/oauth2-proxy/security/advisories) et son code à l'étiquette v7.15.4 (`pkg/cookies/cookies.go`, `pkg/sessions/cookie/session_store.go`, `pkg/encryption/utils.go`, options) | v7.15.4 ; relevé le 30/09/2026 | Avis d'avril 2026 (deux critiques, un haut) corrigés après 7.15.1. Jeton transmis par `--pass-authorization-header` ; en-têtes du client retirés (`--skip-auth-strip-headers`, vrai par défaut) ; journal d'authentification : courriel de la session ; cookie `Max-Age` égal à `cookie-expire`, horodatage signé vérifié à chaque requête, session tout entière dans le cookie. |
+| [Dex](https://github.com/dexidp/dex/releases) (Apache-2.0), ses [avis](https://github.com/dexidp/dex/security/advisories) et son code à l'étiquette v2.45.1 (`cmd/dex/config.go`, `server/server.go`, `server/oauth2.go`, `storage/storage.go`) | v2.45.1, le 03/03/2026 ; relevé le 30/09/2026 | Aucune session côté Dex, pas de fin de session publiée, ni `amr` ni `acr` ; `name` tiré du nom d'utilisateur, `preferred_username` seulement s'il est renseigné ; `sub` opaque (identifiant et connecteur encodés). |
+| [PyJWT](https://github.com/jpadilla/pyjwt) (MIT), ses [avis](https://github.com/jpadilla/pyjwt/security/advisories) et son code installé (`jwks_client.py`) | 2.15.1, le 28/09/2026 ; vérifié le 30/09/2026 | Sept avis en 2026, tous corrigés en 2.15.0 au plus tard. `PyJWKClient` : clés gardées `lifespan`, relecture sur un `kid` inconnu au plus une fois par `cooldown_duration` (30 s par défaut), y compris après la lecture initiale. |
 | [Helm, crochets des charts](https://github.com/helm/helm-www/blob/main/docs/topics/charts_hooks.md) | consulté le 28/09/2026 | `pre-upgrade` s'exécute avant la mise à jour de toute ressource ; les ressources d'un crochet ne sont pas gérées avec la release (`helm uninstall` ne les supprime pas) ; `before-hook-creation` supprime la précédente avant de la recréer. |
 
 ## Décisions
@@ -272,6 +276,99 @@ Sur le même cluster, dans l'ordre du fichier ; les analyses passent par l'inter
 5. **Blocage réseau** : sortie directe refusée par les règles réseau ; domaine hors liste refusé par le proxy (407) ; **adresse d'API autre que Mistral** (le serveur factice, sous les valeurs de production du proxy) : rapport d'échec explicite, ESCALADE et revue humaine, aucune requête reçue.
 6. **Rotation du mot de passe d'`app_role`** : les mots de passe témoins (celui de l'installation, puis celui de la rotation), en clair et en base64, n'apparaissent dans aucun journal (tous les conteneurs du cluster : opérateur, instances PostgreSQL, application ; tâches recopiées par Helm), avant et après la rotation. L'ancien mot de passe est refusé ; les connexions d'`app_role` sont coupées côté serveur, et chaque réplica en rouvre avec le nouveau pour analyser et sceller un contrat, sans redémarrage ; la tâche de contrôle se connecte avec lui.
 7. **Contrôle de configuration avant une mise à jour** : refusée tant qu'un contrat attend sous l'ancienne configuration, rien déployé ; acceptée avec `passerOutre`.
-8. **Sauvegarde puis restauration** : archivage continu vérifié, sauvegarde, nouveau cluster restauré, application basculée, `verify --expect-head` contre la tête relevée avant. Puis désinstallation : plus aucune ressource de la release, après le nettoyage documenté de la tâche en échec du scénario 7.
+8. **Authentification et entrée** (PR D1) : dix scénarios, section suivante.
+9. **Sauvegarde puis restauration** : archivage continu vérifié, sauvegarde, nouveau cluster restauré, application basculée, `verify --expect-head` contre la tête relevée avant. Puis désinstallation : plus aucune ressource de la release, après le nettoyage documenté de la tâche en échec du scénario 7 et du Secret du certificat de l'entrée (écrit par cert-manager).
 
-Job `cluster` de la CI : après le job `image`, dont il reprend les images amd64 de l'application et du proxy ; diagnostic (pods, événements, journaux) en cas d'échec ; cluster détruit quoi qu'il arrive. La publication attend qu'il passe.
+Job `cluster` de la CI : après le job `image`, dont il reprend les images amd64 de l'application, du proxy et d'oauth2-proxy ; diagnostic (pods, événements, journaux) en cas d'échec ; cluster détruit quoi qu'il arrive. La publication attend qu'il passe.
+
+### Authentification et entrée réseau (PR D1)
+
+L'interface n'était jointe par aucun réseau (ADR 004). La PR D1 lui donne une entrée : Traefik (TLS, HSTS, taille, débit), puis oauth2-proxy, en conteneur annexe du pod, qui authentifie auprès du fournisseur d'identité (OIDC) et transmet le jeton d'identité signé à l'interface, sur la boucle locale ; l'interface vérifie ce jeton à chaque requête, et ne croit rien d'autre. Rôles, principe des quatre yeux, second facteur, journal d'audit v2 et accès d'urgence : PR D2.
+
+| Composant | Version, licence, source | Rôle |
+| --- | --- | --- |
+| Traefik | v3.7.13 (MIT), image `docker.io/traefik` par empreinte ; chart officiel 41.6.0, archive vérifiée par son empreinte | Entrée : TLS, HSTS, redirection, taille, débit. **Prérequis de production : Traefik ≥ 3.7.13.** |
+| oauth2-proxy | v7.15.4 (MIT), binaire de la release GitHub, image construite par notre chaîne (option B, ci-dessous) | Conteneur annexe : session (cookie chiffré), code d'autorisation avec PKCE, jeton transmis. |
+| PyJWT | 2.15.1 (MIT), avec cryptography 50.0.1 (Apache-2.0 ou BSD-3) ; importée par le seul `adapters/oidc.py` | Vérification du jeton dans l'interface, derrière le port `IdentityVerifier`. |
+| Dex | v2.45.1 (Apache-2.0), `ghcr.io/dexidp/dex` par empreinte, signature vérifiée (cosign, workflow `artifacts.yaml` de l'étiquette) | Fournisseur d'identité **des tests seulement** (cluster de test et CI). |
+
+- **Traefik de k3s désactivé** (`--disable=traefik` depuis la PR C3) : k3s v1.36.4 embarque Traefik 3.7.8, touché par les avis du 07/09/2026 corrigés en 3.7.13 (GHSA-qqjf-53cj-pwvv critique ; GHSA-v67p-phpq-fc8x, GHSA-w4v4-9rw7-5326, GHSA-f52w-8j3h-j724 hauts ; GHSA-8fcf-v89g-xpg6 moyen). Le chart officiel, figé, le remplace dans le cluster de test (`cluster/valeurs-traefik.yaml`, espace `traefik` en `restricted`).
+- **PyJWT retenue** (décision du 30/09) : maintenue, publiée le 28/09/2026, postérieure à ses avis de 2026 (le dernier, GHSA-42vr-xj54-vc7v et GHSA-x33g-cr3x-6449, corrigés en 2.15.0). Écartées : joserfc (avis critique GHSA-4pp3-559j-c5c2 du 09/09/2026, contournement de la vérification de signature), python-jose (plus maintenue), jwcrypto (LGPL).
+
+#### oauth2-proxy : image construite depuis le binaire publié (option B)
+
+Relevé du 30/09/2026, version 7.15.4 : les binaires de l'image officielle (`quay.io/oauth2-proxy/oauth2-proxy:v7.15.4`, manifestes `sha256:97038fe4…` pour amd64 et `sha256:0de5b0e5…` pour arm64) **ne correspondent pas aux empreintes SHA-256 publiées dans la release GitHub** (fichiers `*-sha256sum.txt`). Méthode : binaire extrait de chaque image (`docker create` puis `docker cp` de `/bin/oauth2-proxy`), empreinte calculée (`shasum -a 256`), comparée à celle de la release : amd64 `3c48a5a1…` contre `d2cc1a81…` publiée, arm64 `a2da41ed…` contre `dd70759f…`. Rien ne relie donc le binaire de l'image officielle à la release vérifiable. Décision du propriétaire : option B.
+
+- **Construction** (`docker/oauth2-proxy/Dockerfile`) : archive de la release téléchargée et vérifiée par son empreinte (`ADD --checksum`), binaire extrait comparé à l'empreinte publiée pour son architecture (`sha256sum --check --strict`, échec sinon) ; licence d'oauth2-proxy figée au commit de l'étiquette ; licence de chaque module Go lié au binaire (`go version -m`), téléchargées à leur version exacte et vérifiées par la base de sommes de Go, un module sans licence arrêtant la construction ; base distroless `static-debian13` non root, par empreinte ; seuls le binaire et les licences dans l'image finale. Vérifiée (`pytest -m oauth2proxy --oauth2-proxy ÉTIQUETTE` : non root, sans shell, version, binaire identique à l'empreinte publiée, licences), inventoriée, scannée, publiée et signée comme les autres images (jobs `image` et `publication`).
+- **Exceptions de scan** (`securite/exceptions-vulnerabilites.yaml`, décidées le 30/09, expirent le 30/10/2026) : deux avis hauts de `google.golang.org/grpc` v1.83.0 (GHSA-2v4p-qf9q-27wj, GHSA-vp52-pcj8-j9qc) et deux de `golang.org/x/crypto` v0.55.0 (GO-2026-6354, GO-2026-6355), liés au binaire publié. `govulncheck -mode=binary` n'en atteint aucun depuis le code d'oauth2-proxy, qui ne sert pas de gRPC. Reconstruire avec des modules plus récents rendrait le binaire différent de celui dont la release publie l'empreinte : on attend la version suivante.
+
+#### Vérification du jeton, zéro confiance
+
+oauth2-proxy transmet le jeton d'identité signé (`Authorization: Bearer`, `--pass-authorization-header`) et retire les en-têtes d'identité reçus du client (`--skip-auth-strip-headers`, vrai par défaut). L'interface (`web --identite en-tetes`) vérifie ce jeton à chaque requête (`adapters/oidc.py`, règles pures dans `domain/identity.py`) ; sans jeton valide : 401, tracé.
+
+- **Algorithmes** : liste fermée, celle que publie le fournisseur (`id_token_signing_alg_values_supported`), restreinte aux algorithmes asymétriques ; jamais `none`, jamais HMAC. L'algorithme de l'en-tête est contrôlé avant toute recherche de clé.
+- **Revendications exigées** : `exp`, `iat`, `iss`, `aud`, `sub` ; émetteur et audience comparés exactement (l'audience est l'identifiant du client). **Tolérance d'horloge : 30 s**, sur `exp`, `iat` et `nbf`.
+- **Émetteur** : HTTPS exigé (HTTP admis sur la boucle locale, pour les tests) ; le document de découverte doit annoncer le même émetteur ; `jwks_uri` et `end_session_endpoint` en HTTPS ; aucune redirection suivie ; autorité de certification réglable (`--oidc-ca`).
+- **Clés publiques** : récupérées par le proxy de sortie (`HTTPS_PROXY`, lu par la bibliothèque standard), gardées 5 minutes, relues sur un `kid` inconnu au plus une fois par 30 s (`PyJWKClient`) : une rotation chez le fournisseur est prise en compte en 30 s au plus, et un `kid` forgé ne déclenche pas une rafale de requêtes. Fournisseur injoignable : 503 explicite, tracé ; jamais d'accès accordé par défaut.
+- **Démarrage refusé** si l'interface n'écoute pas seulement sur 127.0.0.1 (`--host`, `--ecoute-non-locale`), sans émetteur, sans audience ou sans adresse publique HTTPS.
+- **Tests d'attaque** (`tests/test_identite.py`, fournisseur factice local) : `none`, confusion RS256/HS256 avec la clé publique pour secret, autre émetteur, autre audience, jeton expiré, écart d'horloge au-delà de la tolérance, clé inconnue, `kid` forgé, revendication absente, jeton illisible, émetteur en HTTP, découverte qui annonce un autre émetteur ; rotation des clés, relecture bornée.
+
+#### Sessions et déconnexion
+
+- **Durées** (validées le 30/09) : session d'oauth2-proxy de 8 h (`cookie-expire`), revalidée auprès du fournisseur toutes les 5 minutes (`cookie-refresh`, jeton de rafraîchissement : un compte retiré perd l'accès dans ce délai). Dex, dans les tests : jeton d'identité de 10 minutes, jeton de rafraîchissement abandonné après 1 h d'inactivité, 8 h au plus. Cluster de test : session de 2 minutes, revalidée chaque minute, pour que le scénario d'expiration l'attende.
+- **Cookie de session** : `Secure`, `HttpOnly`, `SameSite=Lax`, chiffré (clé en fichier) ; portées demandées `openid profile groups offline_access`, jamais `email` (minimisation).
+- **Déconnexion** : formulaire de l'interface (`POST /deconnexion`, CSRF), page de transition (la politique `form-action 'self'` bloquerait une redirection vers le fournisseur), fin de session d'oauth2-proxy (`/oauth2/sign_out`, cookie retiré), puis, si le chart le demande (`authentification.deconnexionFournisseur`) et que le fournisseur publie `end_session_endpoint`, fin de session chez lui ; le client y est désigné par son identifiant, jamais par son jeton. Dex 2.45.1 ne publie pas de fin de session : limite du fournisseur de test, donc du test ; réglage à activer en production.
+- **Limite connue** : la session d'oauth2-proxy est tout entière dans le cookie. Après la déconnexion, le navigateur n'a plus de cookie ; un cookie volé avant, lui, reste valable jusqu'à sa prochaine revalidation (5 minutes au plus) si le fournisseur a fermé la session, jusqu'à son expiration sinon. Un stockage des sessions côté serveur (Redis) le supprimerait : hors du périmètre de la D1, noté pour la production.
+
+#### Journal des accès
+
+Distinct du journal des décisions : JSON sur la sortie standard (`journal: cdg.acces`), champs en liste blanche à leur source (`adapters/web/acces.py`) : `motif`, `iss`, `sub`, `methode`, `chemin`, `statut`, `session_fournisseur`. Jamais de courriel, de nom, de jeton ni de cookie.
+
+- **Événements de l'interface** : `acces_refuse` (401, avec le motif : `jeton_absent`, `signature_invalide`, `cle_inconnue`, `jeton_expire`…), `fournisseur_injoignable` (503), `deconnexion` (`iss`, `sub`, état de la session du fournisseur). Refus 403 et quatre yeux : PR D2.
+- **Connexions** : journal d'authentification d'oauth2-proxy, réduit au `sub` : format de ligne imposé (`journal`, `evenement`, `statut`, `sub`), revendication de courriel remplacée par `sub` (`--oidc-email-claim=sub`, oauth2-proxy journalisant le courriel de la session), journal des requêtes coupé.
+- **Traefik** : journal d'accès en JSON, en-têtes écartés (défaut du chart) : ni cookie ni jeton.
+
+#### Entrée (Traefik)
+
+Ressources du chart de l'application, créées seulement avec l'authentification (le chart refuse une entrée sans elle) :
+
+- **TLS 1.2 au moins** (`TLSOption`, `sniStrict`) ; certificat délivré par cert-manager (`ingress.emetteurCertificat` : autorité de test dans le cluster, ACME ou autorité de l'entreprise en production).
+- **HSTS** (un an, sans `includeSubDomains` ni `preload` : le domaine de production n'est pas connu) ; **HTTP redirigé vers HTTPS** (redirection permanente, routeur à part).
+- **Taille maximale d'un envoi** : celle de l'interface, calculée par la même formule depuis `config/decision.yaml` (`input.max_chars` × 4 + 64 Kio) ; refusée par Traefik (413) avant oauth2-proxy.
+- **Débit** : 20 requêtes par seconde en moyenne, rafales de 40, par adresse de la connexion (`ipStrategy.depth: 0`), jamais par un en-tête du client. L'adresse vue par Traefik est vérifiée dans le cluster (scénario ci-dessous : l'adresse de chaque pod client dans son journal d'accès) ; le service de Traefik est en `externalTrafficPolicy: Local`, qui préserve l'adresse du client derrière un équilibreur de charge. En production derrière un équilibreur qui traduit les adresses, activer le protocole PROXY ou des adresses de confiance : choix d'exploitation, documenté.
+- **Règle réseau** : le port d'oauth2-proxy n'admet que les pods de Traefik ; l'interface n'écoute que sur la boucle locale du pod.
+
+#### Dex, fournisseur des tests
+
+Dans le cluster de test seulement, derrière Traefik (`https://dex.cdg.test`, autorité de test), stockage en mémoire, deux utilisateurs de test (`analyste@example.org`, `relecteur@example.org`, avec leurs groupes ; mots de passe hachés en bcrypt dans `cluster/dex.yaml`, en clair dans `scripts/cluster.py` pour ce cluster jetable). Octroi par mot de passe activé pour les scénarios (`passwordConnector`), à ne jamais activer en production. Limites, qui sont celles des tests : aucun `amr` ni `acr` dans les jetons (second facteur non testable, PR D2), pas de fin de session publiée ; clés régénérées à chaque redémarrage (le scénario de rotation s'en sert). Avis GHSA-7qjx-gp9h-65qj (haut, 20/05/2026, échange de jetons), sans correctif publié : l'échange de jetons n'est pas utilisé, et Dex ne sort pas des tests.
+
+#### Modèle de menaces du chemin d'authentification (STRIDE)
+
+Chemin : navigateur → Traefik → oauth2-proxy (pod de l'interface) → interface (boucle locale) ; oauth2-proxy et l'interface → proxy de sortie → fournisseur d'identité.
+
+| | Menace | Protection | Test |
+| --- | --- | --- | --- |
+| S | En-têtes d'identité forgés par le client (`X-Forwarded-User`, `X-Forwarded-Email`…) | L'interface ignore ces en-têtes et ne croit que le jeton vérifié ; oauth2-proxy les retire | `test_web_identite.py` ; scénario « en-têtes et jeton forgés refusés » |
+| S | Jeton forgé : `none`, confusion RS256/HS256, clé inconnue, `kid` forgé | Liste fermée d'algorithmes asymétriques publiés par le fournisseur ; signature vérifiée avec ses clés | `test_identite.py` ; scénario (jeton signé par une clé d'attaquant, `kid` et `sub` réels) |
+| S | Jeton d'un autre émetteur, d'une autre audience, expiré | `iss`, `aud` comparés exactement ; `exp`, `iat` exigés, 30 s de tolérance | `test_identite.py` |
+| S | Accès direct à l'interface, sans oauth2-proxy | Écoute sur 127.0.0.1 seulement, démarrage refusé sinon ; règle réseau : Traefik seul vers oauth2-proxy | `test_web_identite.py`, `test_chart_authentification.py` ; scénario « joignable par Traefik seulement » |
+| S | Faux fournisseur (DNS, homme du milieu) | HTTPS vérifié (autorité réglable), émetteur de la découverte identique, aucune redirection | `test_identite.py` |
+| S | Vol et rejeu du cookie de session | `Secure`, `HttpOnly`, `SameSite=Lax`, chiffré ; HSTS ; durée bornée, revalidation toutes les 5 min | Scénarios « connexion », « HSTS », « session expirée ». Rejeu après déconnexion : limite connue, non testée |
+| T | Jeton modifié | Signature | `test_identite.py` |
+| T | Formulaire soumis depuis un autre site | Jeton CSRF, cookie `SameSite=Strict`, origine comparée à l'adresse publique | `test_web_identite.py` |
+| T | Contrebande de requêtes, en-têtes piégés à l'entrée | Traefik ≥ 3.7.13 (avis du 07/09/2026) ; oauth2-proxy 7.15.4 (avis d'avril 2026 corrigés) | `test_cluster_outillage.py` (versions figées) |
+| R | Action ou connexion non attribuée | Journal des accès (`iss`, `sub`) ; connexions par oauth2-proxy (`sub`) ; journal d'audit scellé : PR D2 | Scénario « journaux » ; `test_web_identite.py` |
+| I | Données personnelles, jeton ou cookie dans un journal | Champs en liste blanche ; courriel remplacé par `sub` dans oauth2-proxy ; en-têtes écartés par Traefik | `test_web_identite.py`, `test_chart_authentification.py` ; scénario « journaux » (courriels, jetons délivrés, cookie cherchés partout) |
+| I | Écoute du réseau | TLS 1.2 au moins, HSTS, HTTP redirigé. Entre Traefik et oauth2-proxy, HTTP sur le réseau des pods : limite connue (pas de maillage de services) | Scénarios « TLS », « HTTPS et HSTS » |
+| I | Secrets d'oauth2-proxy exposés | Fichiers 0440, dans le seul conteneur d'oauth2-proxy, jamais en variable d'environnement | `test_chart_authentification.py` |
+| I | Jeton dans l'adresse de fin de session | Client désigné par son identifiant, jamais `id_token_hint` | `test_web_identite.py` |
+| D | Envois volumineux | Taille maximale à l'entrée (413), la même dans l'interface | Scénario « taille maximale » ; `test_web_identite.py` |
+| D | Rafales de requêtes | Débit limité par adresse du client, adresse préservée | Scénario « limites séparées par client » |
+| D | `kid` forgés pour épuiser le fournisseur | Relecture des clés au plus une fois par 30 s | `test_identite.py` |
+| D | Fournisseur injoignable | 503 explicite et tracé ; clés gardées 5 min ; accès d'urgence : PR D2 | `test_web_identite.py` |
+| E | Groupes forgés | Groupes lus dans le seul jeton vérifié ; rôles : PR D2 | PR D2 |
+| E | Redirection ouverte après la déconnexion | Validation des redirections d'oauth2-proxy ; domaine admis : l'émetteur seul, et seulement si la déconnexion chez le fournisseur est activée | `test_chart_authentification.py` |
+
+#### Scénarios de la D1 (`tests/test_cluster.py`, section 8)
+
+Depuis deux pods clients, par Traefik, comme un navigateur : connexion (Dex, cookie de session et ses attributs, utilisateur affiché) ; en-têtes et jeton forgés refusés ; interface joignable par Traefik seulement ; HTTP redirigé, HSTS, 413 ; TLS 1.1 refusé par le serveur (alerte `protocol_version`), 1.2 et 1.3 acceptés ; limites de débit séparées par client, adresse de chaque pod dans le journal de Traefik ; rotation des clés de Dex (nouveau jeton accepté, ancien refusé et tracé) ; déconnexion, puis Dex de nouveau ; session expirée refusée (ancien cookie rejoué) ; journaux sans courriel, jeton ni cookie, connexions tracées par `sub`. Les scénarios existants passent désormais par un jeton de Dex, vérifié par l'interface.
