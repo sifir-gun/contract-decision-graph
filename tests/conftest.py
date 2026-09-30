@@ -24,6 +24,12 @@ from cdg.domain.config import load_config
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--journal-reel",
+        action="store_true",
+        help="exécute aussi les tests marqués journal_reel : le vrai journal d'audit du "
+        "poste, en lecture seule (jamais en CI, aucune donnée copiée)",
+    )
+    parser.addoption(
         "--llm",
         action="store_true",
         help="exécute aussi les tests marqués llm (vrai modèle, payant)",
@@ -89,6 +95,7 @@ def pytest_collection_modifyitems(config, items):
         ("proxy", "--proxy"),
         ("oauth2proxy", "--oauth2-proxy"),
         ("cluster", "--cluster"),
+        ("journal_reel", "--journal-reel"),
     ):
         if config.getoption(option):
             continue

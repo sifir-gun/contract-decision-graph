@@ -49,6 +49,7 @@ markers = [
     "proxy: vérifie l'image du proxy de sortie ; exclu par défaut, activé par --proxy ÉTIQUETTE (et --image)",
     "oauth2proxy: vérifie l'image d'oauth2-proxy ; exclu par défaut, activé par --oauth2-proxy ÉTIQUETTE",
     "cluster: scénarios sur le cluster k3d (scripts/cluster.py) ; exclu par défaut, activé par --cluster=DOSSIER, en un mot",
+    "journal_reel: lit le vrai journal d'audit du poste, en lecture seule ; exclu par défaut et en CI, activé par --journal-reel",
 ]
 
 [dependency-groups]
