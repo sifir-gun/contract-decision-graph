@@ -312,6 +312,7 @@ def build_service(config: DecisionConfig) -> ContractService:
         config=config,
         today=lambda: today(),
         now=lambda: now(),
+        code_version=code,
     )
 
 
@@ -356,6 +357,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
         config=config,
         today=lambda: expected_on,
         now=lambda: now(),
+        code_version=code,
     )
 
 
@@ -494,8 +496,25 @@ def _journal(args: argparse.Namespace) -> dict:
     return {"enregistrements": build_service(load_config()).journal()}
 
 
+class RejeuAnomalie(Exception):
+    """Rejeu fidèle (même code, même configuration) différent de la décision scellée :
+    anomalie, code 1, avec le rapport du rejeu."""
+
+    def __init__(self, result: dict):
+        super().__init__(
+            "rejeu fidèle différent de la décision scellée : journal altéré ou calcul "
+            "non déterministe"
+        )
+        self.payload = result
+
+
 def _replay(args: argparse.Namespace) -> dict:
-    return build_service(load_config()).replay(args.thread_id)
+    """Rejoue une décision scellée : une différence est une anomalie en rejeu fidèle
+    (code 1), signalée sans erreur en réévaluation."""
+    result = build_service(load_config()).replay(args.thread_id)
+    if result["anomalie"]:
+        raise RejeuAnomalie(result)
+    return result
 
 
 def _list(args: argparse.Namespace) -> dict:

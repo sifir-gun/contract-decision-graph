@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
@@ -48,6 +48,7 @@ from cdg.domain.models import (
 )
 from cdg.domain.numeric import rounded
 from cdg.domain.rules import RULES
+from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
 from cdg.domain.version import CodeVersion
 
 GENESIS = "0" * 64  # prev_hash du premier maillon
@@ -525,16 +526,31 @@ def _after_gate(node: str) -> bool:
     return node.split(":")[0] in AFTER_GATE_NODES
 
 
-def replay(record: Mapping[str, Any], config: DecisionConfig) -> ReplayReport:
-    """Recalcule la partie décision : règles sur les clauses scellées, justification sur les
-    références figées (résumés du CRAG), puis décision du gate avec la consommation et les
-    échecs d'avant le gate. La décision humaine est reprise telle quelle."""
+def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> ReplayReport:
+    """Recalcule la partie décision sur `configuration`, forme validée (JSON) de la
+    configuration de la décision, archivée : règles sur les clauses scellées,
+    justification sur les références figées (résumés du CRAG), puis décision du gate avec
+    la consommation et les échecs d'avant le gate. La décision humaine est reprise telle
+    quelle.
+
+    L'empreinte est contrôlée sur ce JSON, par la forme canonique, puis il est validé par
+    le modèle courant, sans recalculer l'empreinte : un modèle qui a gagné des valeurs par
+    défaut depuis le scellement ne rend pas la décision irrejouable. S'il ne sait plus le
+    lire, le rejeu est impossible, et le dit."""
     sealed = FORMATS[record_version(record)].model_validate(record["decision"])
-    if sealed.config_hash != config_hash(config):
+    given = configuration_hash(configuration)
+    if given != sealed.config_hash:
         raise ReplayError(
             "configuration différente de celle du scellement : rejeu impossible "
-            f"({sealed.config_hash} scellée)"
+            f"({sealed.config_hash} scellée, {given} fournie)"
         )
+    try:
+        config = DecisionConfig.model_validate(configuration)
+    except ValidationError as exc:
+        raise ReplayError(
+            f"configuration {given} illisible par le code courant ({exc.error_count()} "
+            "erreur(s) de validation) : rejeu impossible"
+        ) from None
     failures = [
         NodeFailure.model_validate(f)
         for f in record["failures"]
@@ -577,3 +593,35 @@ def replay(record: Mapping[str, Any], config: DecisionConfig) -> ReplayReport:
         replayed_hash=_sha256(canonical(replayed.model_dump(mode="json"))),
         recomputed=recomputed,
     )
+
+
+FAITHFUL, REEVALUATION = "fidele", "reevaluation"
+
+
+def replay_sense(record: Mapping[str, Any], current: CodeVersion) -> tuple[str, str]:
+    """Sens du rejeu, et pourquoi. Fidèle seulement si le même code est prouvé : version
+    de l'analyse connue, égale à celle du scellement et à celle du processus qui rejoue
+    (commit, et image quand elle est scellée). Une différence y est une anomalie. Sinon,
+    réévaluation avec le code courant : une différence y est signalée, pas une erreur."""
+    if record_version(record) == 1:
+        return REEVALUATION, "enregistrement v1 : aucune version du code scellée"
+    analysed = record.get("code_version")
+    if analysed is None:
+        return REEVALUATION, "analyse antérieure au scellement de la version du code"
+    if analysed != record["sealing_code_version"]:
+        return REEVALUATION, CODE_CHANGED
+    code = CodeVersion.model_validate(analysed)
+    if code.commit == UNKNOWN_COMMIT:
+        return REEVALUATION, "commit inconnu au scellement"
+    if current.commit == UNKNOWN_COMMIT:
+        return REEVALUATION, "commit du processus qui rejoue inconnu"
+    if code.commit != current.commit:
+        return REEVALUATION, (
+            f"autre commit : {code.commit} scellé, {current.commit} courant"
+        )
+    if code.image is not None and code.image != current.image:
+        return REEVALUATION, (
+            f"autre image : {code.image} scellée, {current.image or 'aucune'} courante"
+        )
+    shown = "commit et image" if code.image is not None else "commit"
+    return FAITHFUL, f"même code ({shown}) et configuration de l'empreinte scellée"

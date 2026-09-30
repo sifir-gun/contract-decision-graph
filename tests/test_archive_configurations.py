@@ -14,6 +14,7 @@ configuration (cause du non-rejeu du vrai journal, 30/09).
   par la sérialisation canonique, jamais sur le texte relu en base.
 """
 
+import dataclasses
 import html
 import json
 
@@ -26,10 +27,12 @@ from test_audit_v2 import entry, reviewed, v1_record
 from web_helpers import analyse as web_analyse
 from web_helpers import client, memory_service
 
+from cdg import cli
 from cdg.adapters.postgres import migrations
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.domain import audit
 from cdg.domain.config import load_config
+from cdg.domain.version import UNKNOWN, CodeVersion
 
 CONFIG = load_config()
 OTHER = CONFIG.model_copy(update={"min_margin": 0.06})
@@ -246,3 +249,174 @@ def test_verification_de_l_interface_montre_l_archive():
     refused = html.unescape(web.get("/journal/verification").text)
     assert "Archive des configurations non conforme" in refused
     assert "non archivée" in refused
+
+
+# --- rejeu : sur la configuration archivée, fidèle ou réévaluation ----------------------------
+
+AUTRE_CODE = CodeVersion(commit="0" * 40, image="sha256:" + "1" * 64)
+JSON = CONFIG.model_dump(mode="json")
+
+
+def test_rejeu_sur_la_forme_validee_archivee():
+    assert audit.replay(v2(), JSON).identical
+
+
+def test_rejeu_empreinte_recalculee_par_la_forme_canonique():
+    reordered = {key: JSON[key] for key in sorted(JSON, reverse=True)}
+    assert audit.replay(v2(), reordered).identical
+
+
+def test_rejeu_configuration_d_une_autre_empreinte_refuse():
+    with pytest.raises(audit.ReplayError, match="configuration différente"):
+        audit.replay(v2(), OTHER.model_dump(mode="json"))
+
+
+def test_rejeu_configuration_illisible_par_le_code_courant_erreur_explicite():
+    """Une configuration archivée que le modèle courant ne sait plus lire (champ
+    retiré depuis) : le rejeu est impossible, et le dit, sans recalculer l'empreinte."""
+    old = JSON | {"champ_retire": 1}
+    state = reviewed() | {"config_hash": audit.configuration_hash(old)}
+    del state["analysis_config"]
+    data = record(state).model_dump(mode="json")
+    with pytest.raises(audit.ReplayError, match="illisible par le code courant"):
+        audit.replay(data, old)
+
+
+def sealed_by(code: CodeVersion, *, analysed_by: CodeVersion | None = CODE) -> dict:
+    state = reviewed()
+    if analysed_by is None:
+        del state["code_version"]
+    else:
+        state["code_version"] = analysed_by.model_dump(mode="json")
+    return record(state, code=code).model_dump(mode="json")
+
+
+def test_rejeu_fidele_meme_commit_meme_configuration():
+    assert audit.replay_sense(sealed_by(CODE), CODE)[0] == "fidele"
+
+
+@pytest.mark.parametrize(
+    ("data", "current", "reason"),
+    [
+        (lambda: v1_record(), CODE, "v1"),
+        (lambda: sealed_by(CODE, analysed_by=None), CODE, "antérieure"),
+        (lambda: sealed_by(AUTRE_CODE), CODE, "entre l'analyse et le scellement"),
+        (
+            lambda: sealed_by(
+                CodeVersion(commit=UNKNOWN, image=None),
+                analysed_by=CodeVersion(commit=UNKNOWN, image=None),
+            ),
+            CodeVersion(commit=UNKNOWN, image=None),
+            "inconnu",
+        ),
+        (lambda: sealed_by(CODE), CodeVersion(commit=UNKNOWN, image=None), "inconnu"),
+        (lambda: sealed_by(CODE), AUTRE_CODE, "autre commit"),
+        (
+            lambda: sealed_by(AUTRE_CODE, analysed_by=AUTRE_CODE),
+            AUTRE_CODE.model_copy(update={"image": None}),
+            "autre image",
+        ),
+    ],
+)
+def test_reevaluation_des_que_le_code_n_est_pas_prouve_le_meme(data, current, reason):
+    sense, why = audit.replay_sense(data(), current)
+    assert sense == "reevaluation" and reason in why
+
+
+def test_image_non_scellee_seul_le_commit_compte():
+    """Scellé hors du cluster (aucune image) : rejoué dans le cluster, même commit."""
+    assert (
+        audit.replay_sense(
+            sealed_by(CODE), CODE.model_copy(update={"image": "sha256:" + "2" * 64})
+        )[0]
+        == "fidele"
+    )
+
+
+# --- service, CLI et interface : sens du rejeu, anomalie ou différence signalée -------------
+
+
+def pending_service(code=CODE):
+    service = memory_service(code_version=code)
+    service.analyse(CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE)
+    return service
+
+
+def test_rejeu_fidele_identique_par_la_configuration_archivee():
+    result = pending_service().replay("c-go")
+    assert (result["sens"], result["identique"], result["anomalie"]) == (
+        "fidele",
+        True,
+        False,
+    )
+    assert result["configuration"] == "archivee"
+
+
+def falsify(service) -> None:
+    """Journal altéré en mémoire : la marge scellée ne correspond plus au calcul."""
+    service.audit_store().stored[0].record["decision"]["margin"] = 0.99
+
+
+def test_rejeu_fidele_different_anomalie_code_1(monkeypatch, capsys):
+    service = pending_service()
+    falsify(service)
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    assert cli.main(["replay", "c-go"]) == 1
+    error = json.loads(capsys.readouterr().err)
+    assert (error["erreur"], error["sens"], error["identique"]) == (
+        "RejeuAnomalie",
+        "fidele",
+        False,
+    )
+
+
+def test_reevaluation_differente_signalee_code_0(monkeypatch, capsys):
+    service = pending_service()
+    falsify(service)
+    later = dataclasses.replace(service, code_version=AUTRE_CODE)  # code mis à jour
+    monkeypatch.setattr(cli, "build_service", lambda config: later)
+    assert cli.main(["replay", "c-go"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["sens"], out["identique"], out["anomalie"]) == (
+        "reevaluation",
+        False,
+        False,
+    )
+    assert "autre commit" in out["motif_du_sens"]
+
+
+def test_interface_anomalie_en_erreur_reevaluation_en_avertissement():
+    service = pending_service()
+    falsify(service)
+    anomaly = html.unescape(client(service).get("/contrats/c-go/rejeu").text)
+    assert "Anomalie" in anomaly and "rejeu fidèle" in anomaly
+    later = dataclasses.replace(service, code_version=AUTRE_CODE)
+    page = client(later).get("/contrats/c-go/rejeu").text
+    assert 'class="warning"' in page and "Réévaluation différente" in html.unescape(
+        page
+    )
+
+
+def v1_service():
+    """Journal au format v1 (synthétique), sans configuration archivée."""
+    service = memory_service()
+    data = v1_record()
+    service.audit_store().stored.append(
+        entry(data, audit.GENESIS).model_copy(update={"id": 1})
+    )
+    return service, data["thread_id"]
+
+
+def test_v1_rejoue_par_la_configuration_courante_de_meme_empreinte_en_reevaluation():
+    service, thread = v1_service()
+    result = service.replay(thread)
+    assert result["configuration"] == "courante, même empreinte"
+    assert result["sens"] == "reevaluation" and "v1" in result["motif_du_sens"]
+    assert result["identique"] and not result["anomalie"]
+
+
+def test_sans_configuration_archivee_ni_courante_de_meme_empreinte_non_rejouable():
+    service, thread = v1_service()
+    other = dataclasses.replace(service, config=OTHER)
+    with pytest.raises(audit.ReplayError, match="non archivée"):
+        other.replay(thread)

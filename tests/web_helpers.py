@@ -5,6 +5,7 @@ import re
 
 from doubles import (
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FIXED_NOW,
     TEMPLATE,
@@ -31,15 +32,22 @@ _TOKEN = re.compile(r'name="csrf" value="([0-9]+\.[0-9a-f]{64})"')
 
 
 def memory_service(
-    extractor=None, empty=(), explainer=TEMPLATE, config=CONFIG, run=None
+    extractor=None,
+    empty=(),
+    explainer=TEMPLATE,
+    config=CONFIG,
+    run=None,
+    code_version=CODE,
 ) -> ContractService:
-    """`run` : fabrique des dépendances de l'analyse, pour simuler une clé absente."""
+    """`run` : fabrique des dépendances de l'analyse, pour simuler une clé absente ;
+    `code_version` : version du code du processus (scellement et rejeu)."""
     store = MemoryAuditStore()
     deps = make_deps(
         extractor or FixedExtractor(clauses()),
         FakeCrag(empty),
         audit_store=store,
         explainer=explainer,
+        code_version=code_version,
     )
     engine = LangGraphEngine(
         config,
@@ -59,6 +67,7 @@ def memory_service(
         config=config,
         today=lambda: ANALYSIS_DATE,
         now=lambda: FIXED_NOW,
+        code_version=code_version,
     )
 
 

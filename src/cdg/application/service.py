@@ -40,6 +40,7 @@ from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.identifiers import check_contract_id
 from cdg.domain.models import Clause, Usage
+from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.engine import ContractEngine
 
@@ -117,6 +118,7 @@ class ContractService:
     config: DecisionConfig
     today: Callable[[], date]  # date d'analyse par défaut : jour légal en France
     now: Callable[[], datetime]  # horloge de l'expiration
+    code_version: CodeVersion  # du processus : rejeu fidèle ou réévaluation
     # verrou unique des modifications : analyse, décision humaine, expiration
     _writes: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
@@ -268,17 +270,39 @@ class ContractService:
         )
 
     def replay(self, thread_id: str) -> dict[str, Any]:
-        """Rejoue la décision scellée d'un thread, sans LLM ni corpus (critère 6)."""
-        sealed = [e for e in self.audit_store().entries() if e.thread_id == thread_id]
+        """Rejoue la décision scellée d'un thread, sans LLM ni corpus (critère 6), sur la
+        configuration archivée de sa décision, ou, à défaut, sur la configuration courante
+        si elle a la même empreinte (la sortie le dit). Rejeu fidèle si le même code est
+        prouvé (une différence est alors une anomalie), réévaluation sinon."""
+        store = self.audit_store()
+        sealed = [e for e in store.entries() if e.thread_id == thread_id]
         if not sealed:
             raise audit.ReplayError(
                 f"aucun enregistrement scellé pour le thread {thread_id}"
             )
-        report = audit.replay(sealed[0].record, self.config)
+        record, wanted = sealed[0].record, sealed[0].config_hash
+        configuration = store.configurations().get(wanted)
+        source = "archivee"
+        if configuration is None:
+            current = self.config.model_dump(mode="json")
+            if audit.configuration_hash(current) != wanted:
+                raise audit.ReplayError(
+                    f"configuration {wanted} non archivée (enregistrement antérieur à "
+                    "l'archive), et différente de la configuration courante : non "
+                    "rejouable"
+                )
+            configuration, source = current, "courante, même empreinte"
+        report = audit.replay(record, configuration)
+        sense, why = audit.replay_sense(record, self.code_version)
         return {
             "thread_id": thread_id,
             "empreinte_scellee": report.sealed_hash,
             "empreinte_rejouee": report.replayed_hash,
             "identique": report.identical,
             "recalcule": report.recomputed,
+            "sens": sense,
+            "motif_du_sens": why,
+            "configuration": source,
+            # rejeu fidèle différent : anomalie ; réévaluation différente : signalée
+            "anomalie": sense == audit.FAITHFUL and not report.identical,
         }

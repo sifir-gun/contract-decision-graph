@@ -72,7 +72,9 @@ def test_journal_puis_replay(
     analysis,
     audit_journal,
     capsys,
+    monkeypatch,
 ):
+    monkeypatch.delenv("CDG_COMMIT", raising=False)  # poste sans commit fourni
     analysis()
     _, run = run_cli(
         capsys,
@@ -96,6 +98,11 @@ def test_journal_puis_replay(
         "empreinte_rejouee": run["decision_hash"],
         "identique": True,
         "recalcule": True,
+        # configuration archivée au scellement ; commit inconnu : réévaluation
+        "configuration": "archivee",
+        "sens": "reevaluation",
+        "motif_du_sens": "commit inconnu au scellement",
+        "anomalie": False,
     }
 
 

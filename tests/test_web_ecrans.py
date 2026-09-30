@@ -260,7 +260,7 @@ def test_rejouer_un_contrat_scelle():
     fragment = web.get(f"/contrats/{thread}/rejeu", headers={"hx-request": "true"})
     assert fragment.status_code == 200
     assert "<html" not in fragment.text  # fragment pour HTMX
-    assert "Rejeu identique" in text_of(fragment.text)
+    assert "Rejeu fidèle identique" in text_of(fragment.text)  # même code, archivée
     page = web.get(f"/contrats/{thread}/rejeu")
     assert "<html" in page.text  # sans JavaScript : page complète
 

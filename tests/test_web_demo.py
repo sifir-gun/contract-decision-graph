@@ -4,6 +4,7 @@ rattachement déclaré, explication par le gabarit ; règles, décision, détect
 instructions, revue humaine, scellement et vérification tournent pour de vrai, en mémoire.
 """
 
+import html
 import json
 from datetime import date
 
@@ -35,6 +36,7 @@ def forbidden(*args, **kwargs):
 
 @pytest.fixture
 def demo(monkeypatch):
+    monkeypatch.delenv(cli.COMMIT_VAR, raising=False)  # poste sans commit fourni
     monkeypatch.setattr(cli, "build_provider", forbidden)
     monkeypatch.setattr(cli.conninfo, "app_conninfo", forbidden)
     monkeypatch.setattr(cli.conninfo, "admin_conninfo", forbidden)
@@ -134,7 +136,9 @@ def test_journal_en_memoire_verifie_et_rejoue(demo):
     replay = web.get(
         "/contrats/demo-06-no-go-conseil/rejeu", headers={"hx-request": "true"}
     )
-    assert "Rejeu identique" in replay.text
+    # commit inconnu au scellement : toujours une réévaluation, jamais un rejeu fidèle
+    assert "Réévaluation identique" in html.unescape(replay.text)
+    assert "commit inconnu au scellement" in html.unescape(replay.text)
 
 
 def test_consommation_simulee_et_explication_par_le_gabarit(demo):

@@ -106,6 +106,7 @@ def make_service(extractor=None, opener=None) -> ContractService:
         config=CONFIG,
         today=lambda: ANALYSIS_DATE,
         now=lambda: FIXED_NOW,
+        code_version=CODE,
     )
 
 
