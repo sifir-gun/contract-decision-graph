@@ -18,7 +18,7 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any, TextIO, get_args
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -300,6 +300,9 @@ class AccesRefuse(Exception):
 
 
 URGENCY_MAX_CHARS = 200
+# sortie du processus principal du conteneur : celle que Kubernetes collecte ; celle d'un
+# processus lancé par kubectl exec part vers le terminal de l'opérateur
+CONTAINER_LOG = Path("/proc/1/fd/1")
 
 
 def in_cluster() -> bool:
@@ -336,13 +339,34 @@ def _cli_actor(args: argparse.Namespace, command: str, *, decides: bool) -> Acto
             "jamais un nom ni une adresse"
         ) from None
     if urgency is not None:
-        acces.event(
-            "acces_urgence",
-            operateur=args.operateur,
-            commande=command,
-            motif=urgency.strip(),
-        )
+        _trace_urgency(args.operateur, command, urgency.strip())
     return actor
+
+
+def _trace_urgency(operator: str, command: str, reason: str) -> None:
+    """Accès d'urgence au journal des accès : sur la sortie du processus, et, dans le
+    cluster, sur celle du processus principal du conteneur, collectée ; si elle est
+    inaccessible, l'accès est refusé, jamais laissé sans trace."""
+    log = logging.getLogger("cdg.acces")
+    handler: logging.StreamHandler[TextIO] | None = None
+    if in_cluster():
+        try:
+            stream = CONTAINER_LOG.open("a", encoding="utf-8")
+        except OSError as exc:
+            raise AccesRefuse(
+                "accès d'urgence refusé : trace impossible dans le journal du conteneur "
+                f"({CONTAINER_LOG}, {type(exc).__name__})"
+            ) from None
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(journaux.JsonFormatter())
+        log.addHandler(handler)
+    try:
+        acces.event("acces_urgence", operateur=operator, commande=command, motif=reason)
+    finally:
+        if handler is not None:
+            log.removeHandler(handler)
+            handler.close()
+            handler.stream.close()
 
 
 def _run(args: argparse.Namespace) -> dict:

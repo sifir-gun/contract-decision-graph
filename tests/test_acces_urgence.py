@@ -41,8 +41,14 @@ def pending(monkeypatch):
 
 
 @pytest.fixture
-def cluster(monkeypatch):
+def cluster(monkeypatch, tmp_path):
+    """Dans un pod : la variable du kubelet, et la sortie du processus principal du
+    conteneur (collectée par Kubernetes), ici un fichier."""
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    log = tmp_path / "journal-du-conteneur"
+    log.touch()
+    monkeypatch.setattr(cli, "CONTAINER_LOG", log)
+    return log
 
 
 def test_contournement_par_la_cli_refuse_dans_le_cluster(pending, cluster, capsys):
@@ -118,3 +124,30 @@ def test_motif_d_urgence_vide_ou_trop_long_refuse(pending, cluster, capsys, moti
 def test_interface_locale_refusee_dans_le_cluster(cluster, capsys):
     code, error = run_cli(capsys, "web")
     assert code == 1 and "--identite en-tetes" in error["detail"]
+
+
+def test_urgence_tracee_dans_le_journal_collecte_du_conteneur(pending, cluster, capsys):
+    """La sortie d'un processus lancé par kubectl exec part vers le terminal de
+    l'opérateur, pas dans les journaux du pod : l'événement est aussi écrit sur la sortie
+    du processus principal du conteneur, que Kubernetes collecte."""
+    argv = [*RESUME, "--operateur", "astreinte-1", "--urgence", "incident 44"]
+    assert cli.main(argv) == 0
+    [line] = cluster.read_text(encoding="utf-8").splitlines()
+    event = json.loads(line)
+    assert (event["journal"], event["message"]) == ("cdg.acces", "acces_urgence")
+    assert (event["operateur"], event["commande"], event["motif"]) == (
+        "astreinte-1",
+        "resume",
+        "incident 44",
+    )
+
+
+def test_urgence_refusee_si_le_journal_du_conteneur_est_inaccessible(
+    pending, cluster, capsys, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(cli, "CONTAINER_LOG", tmp_path / "absent" / "sortie")
+    code, error = run_cli(
+        capsys, *RESUME, "--operateur", "astreinte-1", "--urgence", "incident 45"
+    )
+    assert code == 1 and "journal du conteneur" in error["detail"]
+    assert pending.dossier("c-attente")["etat"] == "en_attente"  # rien tranché
