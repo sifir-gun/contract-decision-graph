@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -1218,6 +1219,72 @@ def web_logs(pod: str, container: str) -> list[dict]:
 def claims(token: str) -> dict:
     """Revendications d'un jeton, lues sans vérification (le test ne fait que les lire)."""
     return jwt.decode(token, options={"verify_signature": False})
+
+
+def stopped_at(pod: str) -> dict[str, datetime]:
+    """Heure à laquelle le kubelet a arrêté chaque conteneur d'un pod (événements)."""
+    events = json.loads(
+        kubectl(
+            "get",
+            "events",
+            "-n",
+            "cdg",
+            "--field-selector",
+            f"involvedObject.name={pod},reason=Killing",
+            "-o",
+            "json",
+        )
+    )["items"]
+    return {
+        e["message"].removeprefix("Stopping container "): datetime.fromisoformat(
+            e.get("firstTimestamp") or e["eventTime"]
+        )
+        for e in events
+    }
+
+
+def test_oauth2_proxy_demarre_avant_l_interface_et_s_arrete_apres():
+    """Conteneur annexe natif : dans chaque pod, oauth2-proxy démarre avant l'interface ;
+    à l'arrêt d'un pod, le kubelet n'arrête oauth2-proxy qu'après l'interface, au moins
+    la pause avant l'arrêt plus tard, sans délai choisi à la main pour l'ordonner."""
+    pods = wait_for(lambda: len(web_pods()) == 2 and web_pods(), "deux pods prêts")
+    for found in pods:
+        status = found["status"]
+        [proxy] = [
+            s for s in status["initContainerStatuses"] if s["name"] == "oauth2-proxy"
+        ]
+        [web] = [s for s in status["containerStatuses"] if s["name"] == "web"]
+        assert proxy["started"] and proxy["ready"]
+        started = (proxy["state"]["running"]["startedAt"], web["state"]["running"])
+        assert started[0] <= started[1]["startedAt"], started
+    deployment = json.loads(
+        kubectl(
+            "get",
+            "deployment",
+            "-n",
+            "cdg",
+            "cdg-contract-decision-graph",
+            "-o",
+            "json",
+        )
+    )
+    [web_spec] = deployment["spec"]["template"]["spec"]["containers"]
+    pause = web_spec["lifecycle"]["preStop"]["sleep"]["seconds"]
+    victim = pods[0]["metadata"]["name"]
+    kubectl("delete", "pod", "-n", "cdg", victim, "--wait=false")
+    wait_for(
+        lambda: (
+            not kubectl(
+                "get", "pod", "-n", "cdg", victim, "--ignore-not-found", "-o", "name"
+            ).strip()
+        ),
+        "pod arrêté",
+        300,
+        2,
+    )
+    stops = stopped_at(victim)
+    assert stops["oauth2-proxy"] - stops["web"] >= timedelta(seconds=pause), stops
+    wait_for(lambda: len(web_pods()) == 2, "deux pods prêts de nouveau")
 
 
 def test_connexion_par_le_navigateur_cookie_de_session_securise(clients):
