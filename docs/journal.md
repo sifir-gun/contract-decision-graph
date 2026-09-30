@@ -2561,3 +2561,19 @@ Les quatre exceptions au scan de l'image d'oauth2-proxy v7.15.4 (`securite/excep
 - **Sinon, prolongation justifiée** : relancer `govulncheck -mode=binary` sur le binaire, vérifier que chaque symbole vulnérable reste hors d'atteinte, relire les avis de sécurité d'oauth2-proxy et de ses modules ; nouvelle date de décision, nouvelle échéance (90 jours au plus), motif mis à jour.
 
 Aussi, avant le **28/10/2026** : l'exception CVE-2026-82049 (CPython 3.12.14, `tarfile`) de l'image de l'application, à revoir à la sortie de CPython 3.12.15.
+
+## 2026-09-30 · Kubernetes, PR D2 : autorisation et traçabilité (branche `autorisation`)
+
+Conception validée par le propriétaire le 30/09, avec ses décisions : interface locale sans quatre yeux mais jamais dans le cluster (rendu et démarrage), et scellée comme non authentifiée ; revue par un autre canal que celui de l'analyse refusée (contournement des quatre yeux), sauf en accès d'urgence, seul moyen de décider par la CLI dans le cluster ; `--reviewer` supprimé ; limite du journal chaîné face à la conservation documentée, avec sa solution pour la phase 3 ; second facteur non exigé annoncé au démarrage et dans les notes d'installation. Détail : ADR 005.
+
+### Faits et pièges
+
+- **Anciens états du checkpointer** : le sérialiseur de LangGraph reconstruit un modèle par son module et le nom de sa classe (`jsonplus.py`, code installé) ; changer `HumanDecision` en place aurait rendu illisibles les états d'avant la D2. Il reste le modèle v1, figé ; `HumanReview` porte le v2.
+- **Rejeu du v1** : le rejeu hache le modèle relu ; un champ ajouté au modèle v1 (même vide) aurait changé l'empreinte des anciens enregistrements. Modèles v1 figés, choisis par la version de l'enregistrement.
+- **Vrai journal du poste** (test local, lecture seule) : 5 enregistrements v1, chaîne intacte, relus à l'identique ; aucun rejouable, leur configuration ne se retrouvant pas dans l'historique rechargé par le modèle courant. L'enregistrement n° 3 porte le prénom du propriétaire en relecteur : gardé tel quel (journal local, jamais publié), cité dans l'ADR comme illustration de la règle « jamais de nom scellé ».
+- **Premier contrôle des quatre yeux dans le service**, et non dans l'interface seule : il couvre les deux portes, garde la parité (une seule méthode du service par action) et laisse le graphe faire le second.
+- **Accès d'urgence** : la sortie d'un processus lancé par `kubectl exec` part vers le terminal, pas dans les journaux du pod. L'événement est aussi écrit sur la sortie du processus principal du conteneur (`/proc/1/fd/1`), et l'accès est refusé si ce n'est pas possible ; un scénario le vérifie dans `kubectl logs`.
+- **Les journaux vont sur la sortie standard, résultat compris** : en mode JSON, l'événement `acces_urgence` précède le résultat de la commande ; les tests lisent le résultat après lui.
+- **Tests écrits après leur code** : ceux de l'accès d'urgence de la CLI (commit à part), signalé.
+- **Sources vérifiées pour les propositions de conservation** : délibération CNIL n° 2021-122 (journalisation : six mois à un an, trois ans au plus si justifié) ; Code de commerce, art. L110-4 (prescription de cinq ans).
+

@@ -16,9 +16,9 @@ Série 8, sur le modèle réel (Mistral), 13 contrats synthétiques × 5 essais 
 
 *Analyse réelle d'un contrat du jeu (`scripts/demo_terminal.sh`) : la responsabilité illimitée de l'acheteur bloque, `NO_GO` automatique ; `verify` retrouve l'empreinte scellée en tête du journal. Attentes de plus de 2 s raccourcies, durée réelle affichée.*
 
-> **In English.** A LangGraph pipeline that returns an auditable GO / GO_RESERVES / NO_GO / ESCALADE verdict on supplier contracts. LLMs only extract clauses, judge retrieved legal passages and explain; the verdict comes from deterministic Python rules, and every LLM output is checked by code before use. Doubt goes to a human reviewer (LangGraph `interrupt`), and every decision is sealed in a hash-chained, replayable audit log. Measured on 13 synthetic contracts × 5 real runs (Mistral): no automatic decision was ever more favourable than expected, at about $0.0016 and 6 s per contract. It runs as a local web interface and deploys on Kubernetes: three Helm charts (the application, PostgreSQL managed by CloudNativePG with backups whose restore is verified, an egress proxy that only reaches the Mistral API), installed on every pull request on a three-node k3s cluster and exercised by twenty-four operational scenarios. The interface sits behind a TLS ingress (Traefik, size and per-client rate limits) and OIDC authentication (oauth2-proxy), and the application verifies the signed ID token on every request. Container images are built for amd64 and arm64, scanned, signed, with provenance and SBOM attestations. Roles, four-eyes review and an identity-sealed audit log come next. Documentation is in French; code identifiers are in English.
+> **In English.** A LangGraph pipeline that returns an auditable GO / GO_RESERVES / NO_GO / ESCALADE verdict on supplier contracts. LLMs only extract clauses, judge retrieved legal passages and explain; the verdict comes from deterministic Python rules, and every LLM output is checked by code before use. Doubt goes to a human reviewer (LangGraph `interrupt`), and every decision is sealed in a hash-chained, replayable audit log. Measured on 13 synthetic contracts × 5 real runs (Mistral): no automatic decision was ever more favourable than expected, at about $0.0016 and 6 s per contract. It runs as a local web interface and deploys on Kubernetes: three Helm charts (the application, PostgreSQL managed by CloudNativePG with backups whose restore is verified, an egress proxy that only reaches the Mistral API), installed on every pull request on a three-node k3s cluster and exercised by twenty-seven operational scenarios. The interface sits behind a TLS ingress (Traefik, size and per-client rate limits) and OIDC authentication (oauth2-proxy), and the application verifies the signed ID token on every request. Container images are built for amd64 and arm64, scanned, signed, with provenance and SBOM attestations. Analyst and reviewer roles come from the token's groups; a reviewer can never approve an analysis they launched (four-eyes, checked twice), and the audit log seals who acted by their identity provider's stable identifier, never a name. Documentation is in French; code identifiers are in English.
 
-Projet de R&D personnel. Fait et testé : le graphe de décision (phase 1), une interface web, et le déploiement sur Kubernetes avec son authentification et son entrée réseau, éprouvé à chaque pull request sur un cluster k3s de trois nœuds. À venir : les rôles (analyste, relecteur), le principe des quatre yeux et le journal d'audit scellé par identité. Données uniquement synthétiques ou publiques.
+Projet de R&D personnel. Fait et testé : le graphe de décision (phase 1), une interface web, et le déploiement sur Kubernetes avec son authentification et son entrée réseau, éprouvé à chaque pull request sur un cluster k3s de trois nœuds. Avec les rôles analyste et relecteur, le principe des quatre yeux et un journal d'audit qui scelle l'identité de qui agit, jamais son nom. Données uniquement synthétiques ou publiques.
 
 ## Ce que fait le système
 
@@ -112,9 +112,9 @@ uv run python -m cdg.cli fetch-embedding-model    # une fois : 2,2 Go
 uv run python -m cdg.cli ingest                   # indexe le corpus
 uv run python -m cdg.cli run data/contracts/demo-13-realiste-infogerance.txt \
   --party "Antarès Infogérance Synthétique" --party "Céphée Négoce Synthétique" \
-  --analysis-date 2026-09-25                      # suspendu en revue humaine
+  --analysis-date 2026-09-25 --operateur poste-local   # suspendu en revue humaine
 uv run python -m cdg.cli resume <thread_id> --decision GO_RESERVES \
-  --reviewer moi --reason "durée et préavis à chiffrer par avenant"
+  --operateur poste-local --reason "durée et préavis à chiffrer par avenant"
 uv run python -m cdg.cli verify                   # recalcule toute la chaîne d'audit
 ```
 
@@ -141,15 +141,16 @@ Puis ouvrir http://127.0.0.1:8000. En démonstration, l'extraction est simulée 
 
 ## Déploiement Kubernetes
 
-Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue vingt-quatre scénarios d'exploitation. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
+Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue vingt-sept scénarios d'exploitation. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
 
 - **Application** : deux réplicas sur des nœuds différents ; pods non root, système de fichiers en lecture seule ; mise à jour progressive et arrêt propre ; migrations, indexation du corpus et contrôle de la configuration en tâches Helm. L'interface n'écoute que dans son pod : seul oauth2-proxy, à côté d'elle, la joint.
 - **PostgreSQL géré par CloudNativePG** : WAL archivés en continu, sauvegarde chaque nuit vers un stockage compatible S3 ; une restauration dans un nouveau cluster est vérifiée contre la tête du journal d'audit relevée avant la sauvegarde. Le greffon de sauvegarde exige cert-manager, en production aussi.
 - **Entrée et authentification** : Traefik (TLS 1.2 au moins, HSTS, HTTP redirigé vers HTTPS, taille des envois et débit par client bornés), puis oauth2-proxy (OIDC, session de 8 h revalidée toutes les 5 minutes), puis l'application, qui vérifie le jeton d'identité signé de chaque requête : algorithmes du fournisseur, émetteur, audience, expiration. Un en-tête seul ne vaut rien. Journal des accès sans courriel ni nom ; modèle de menaces dans l'ADR 005. Dex tient lieu de fournisseur d'identité dans les tests.
+- **Autorisation et traçabilité** : rôles analyste et relecteur tirés des groupes du jeton ; quatre yeux, contrôlés deux fois (le service, puis le graphe) : le relecteur ne tranche jamais une analyse qu'il a lancée, ni par une autre porte ; second facteur réglable pour le relecteur. Le journal d'audit (format v2) scelle qui a analysé et qui a tranché, par l'identifiant stable du fournisseur, jamais par un nom ; les anciens enregistrements restent vérifiables et rejouables. En cas de panne du fournisseur, un accès d'urgence par la CLI, tracé et scellé.
 - **Proxy de sortie** (Smokescreen, construit par le projet) : seules l'API de Mistral et le fournisseur d'identité sont joignables, et les règles réseau refusent toute sortie directe.
 - **Secrets en fichiers**, montés en lecture seule, jamais en variables d'environnement. Le mot de passe d'`app_role`, le rôle de l'application dans la base, tourne sans redémarrage : l'application relit le fichier à chaque nouvelle connexion.
 
-Les vingt-quatre scénarios :
+Les vingt-sept scénarios :
 
 1. deux réplicas, sur deux nœuds différents ;
 2. création simultanée d'un même contrat par les deux réplicas : un seul contrat, un seul scellement ;
@@ -174,7 +175,10 @@ Les vingt-quatre scénarios :
 21. déconnexion : une nouvelle connexion est exigée ;
 22. session expirée : l'ancien cookie, rejoué, ne donne plus accès ;
 23. journaux sans courriel, jeton ni cookie ; connexions tracées par le seul identifiant du fournisseur (`sub`) ;
-24. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
+24. rôles et quatre yeux : qui a lancé l'analyse ne la tranche pas, ni l'analyste, et le relecteur n'analyse pas (403, tracés) ; enregistrement scellé avec les deux identités, sans aucun courriel ;
+25. décision par la CLI dans le cluster : refusée sans accès d'urgence, admise avec, scellée comme telle et tracée dans les journaux du pod ;
+26. second facteur non exigé : annoncé au démarrage (Dex n'en prouve aucun) ;
+27. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
 
 Profil local réduit : deux nœuds, une instance PostgreSQL ; Docker, kubectl, k3d 5.9.0 et helm 4.3.0 (versions de la CI, contrôlées par les scripts). Il demande près de 7 Go de mémoire à Docker (deux réplicas de 1,6 Go chacun et l'indexation du corpus, 2,9 Go au pic), et l'installation prend une vingtaine de minutes, surtout pour indexer le corpus. `./scripts/check.sh --sans-cluster` laisse le cluster à la CI.
 
@@ -239,18 +243,18 @@ Les critères testés avec le vrai modèle passent aussi, 5 fois sur 5 : un cons
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web), `cli.py` pour l'assemblage. La CLI et l'interface web passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 1 824 tests automatisés, joués par la CI : à chaque pull request, 1 681 dans la suite principale (PostgreSQL comprise), 87 sur le rendu des charts, 18 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 24 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web), `cli.py` pour l'assemblage. La CLI et l'interface web passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 1 905 tests automatisés, joués par la CI : à chaque pull request, 1 751 dans la suite principale (PostgreSQL comprise), 96 sur le rendu des charts, 18 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
 - [ADR 003 : LangGraph Studio écarté](docs/adr-003-studio-ecarte.md). En usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot : ce qui a été observé le 27/09/2026, avec les versions, et ce qui n'a pas été mesuré.
 - [ADR 004 : interface web](docs/adr-004-interface-web.md). Rendu côté serveur avec HTMX plutôt qu'une application séparée ; aucune ressource externe ; sécurité ; pas d'authentification avant l'étape Kubernetes ; mode démonstration et ses limites.
-- [ADR 005 : déploiement Kubernetes](docs/adr-005-kubernetes.md). k3s et Helm, plusieurs réplicas, chaîne d'approvisionnement, cluster de test et scénarios, authentification et entrée réseau, avec leur modèle de menaces (STRIDE) ; sources vérifiées et datées de chaque choix, bonnes pratiques écartées justifiées. Restent les rôles et la traçabilité par identité.
+- [ADR 005 : déploiement Kubernetes](docs/adr-005-kubernetes.md). k3s et Helm, plusieurs réplicas, chaîne d'approvisionnement, cluster de test et scénarios, authentification et entrée réseau, avec leur modèle de menaces (STRIDE), autorisation et traçabilité, base légale et conservation proposées ; sources vérifiées et datées de chaque choix, bonnes pratiques écartées justifiées ; ce qui reste hors du projet pour une vraie production.
 - [Spécification de la phase 1](docs/spec-phase1.md), source de vérité ; [journal](docs/journal.md) des décisions, des séries réelles et des pièges ; [exploitation](docs/exploitation.md).
 
 ## Feuille de route
 
-- **Phase 2** : le déploiement sur Kubernetes est fait (k3s, Helm, testé à chaque pull request), avec l'authentification (OIDC, jeton vérifié par l'application) et l'entrée réseau (Traefik, TLS). Prochaine étape : les rôles analyste et relecteur, le principe des quatre yeux, le second facteur du relecteur quand le fournisseur le prouve, et le journal d'audit scellé par identité. Ensuite un rapport HTML par contrat ; puis l'API (FastAPI). L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
+- **Phase 2** : le déploiement sur Kubernetes est fait (k3s, Helm, testé à chaque pull request), avec l'authentification (OIDC, jeton vérifié par l'application), l'entrée réseau (Traefik, TLS), les rôles, le principe des quatre yeux et le journal d'audit scellé par identité. Prochaine étape : un rapport HTML par contrat ; puis l'API (FastAPI). L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
 - **Phase 3** : observabilité (Langfuse auto-hébergé ; les journaux sont déjà structurés, en JSON) ; serveur MCP ; évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 
