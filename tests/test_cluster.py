@@ -968,6 +968,7 @@ FORM = re.compile(r'<form[^>]*action="([^"]+)"')
 CSRF = re.compile(r'name="csrf" value="([0-9a-f]{64})"')
 NEXT = re.compile(r'<a id="suite" href="([^"]+)"')
 USER = re.compile(r'class="utilisateur">([^<]*)<')
+REQUEST = re.compile(r'name="req" value="([^"]+)"')
 SESSION = re.compile(r"^_cdg_session(_\d+)?$")
 
 
@@ -991,7 +992,18 @@ def login(client, user, password):
         raise SystemExit(f"formulaire de Dex absent : {page.status_code} {page.url.host}")
     target = urllib.parse.urljoin(str(page.url), html.unescape(form[1]))
     data = {"login": f"{user}@example.org", "password": password}
-    return client.post(target, data=data)
+    done = client.post(target, data=data)
+    # oauth2-proxy demande approval_prompt=force (sa valeur par défaut), que Dex honore
+    # même avec skipApprovalScreen : l'utilisateur accorde l'accès, comme au navigateur
+    if done.url.host == DEX and done.url.path == "/approval":
+        request = REQUEST.search(done.text)
+        if not request:
+            raise SystemExit("écran d'accord de Dex sans demande")
+        grant = {"req": html.unescape(request[1]), "approval": "approve"}
+        done = client.post(str(done.url), data=grant)
+    if done.url.host == DEX:
+        raise SystemExit(f"connexion restée chez Dex : {done.status_code} {done.url.path}")
+    return done
 
 
 def session_attributes(response):
