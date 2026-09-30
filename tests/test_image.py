@@ -8,7 +8,8 @@ Deux familles de tests :
 - sur l'image construite (marqueur `image`, `--image ÉTIQUETTE`) : lancée en lecture seule,
   sans privilège, elle répond à ses sondes, écrit ses journaux en JSON, s'arrête proprement,
   et n'offre ni shell, ni gestionnaire de paquets, ni pip. Lancés par le job `image` de la CI
-  et par `scripts/check.sh`, après `docker build --tag cdg:verification .`.
+  et par `scripts/check.sh`, après `docker build --build-arg CDG_COMMIT=… --tag
+  cdg:verification .` (commit donné par `scripts/chaine.py revision`).
 """
 
 import json

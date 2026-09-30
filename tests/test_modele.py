@@ -155,7 +155,10 @@ BUILD_MODEL = (
     "docker build --file docker/modele/Dockerfile --build-context notice=docker/modele "
     '--tag cdg-modele:verification "$RUNNER_TEMP/modele"'
 )
-BUILD_APP = "docker build --tag cdg:verification ."
+BUILD_APP = (
+    'docker build --build-arg CDG_COMMIT="$(uv run --no-sync python '
+    'scripts/chaine.py revision)" --tag cdg:verification .'
+)
 TESTS = (
     "uv run --no-sync pytest -m modele --image cdg:verification "
     "--modele cdg-modele:verification"
