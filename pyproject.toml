@@ -106,4 +106,7 @@ branch = true
 # compris ; 96 % depuis le 26/09) ; le badge du README affiche cette valeur
 # (tests/test_couverture.py)
 fail_under = 98
+# le seuil s'applique au centième : pytest-cov compare le total arrondi à cette précision
+# (coverage.results.should_fail_under) ; à 0, la valeur par défaut, 97,80 % passait
+precision = 2
 show_missing = true
