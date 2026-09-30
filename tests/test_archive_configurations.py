@@ -14,6 +14,7 @@ configuration (cause du non-rejeu du vrai journal, 30/09).
   par la sérialisation canonique, jamais sur le texte relu en base.
 """
 
+import html
 import json
 
 import psycopg
@@ -21,7 +22,9 @@ import pytest
 from doubles import ACTEUR_ANALYSTE, CODE, CONTRACT_TEXT, context
 from psycopg import sql
 from test_audit import analysed, record
-from web_helpers import memory_service
+from test_audit_v2 import entry, reviewed, v1_record
+from web_helpers import analyse as web_analyse
+from web_helpers import client, memory_service
 
 from cdg.adapters.postgres import migrations
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
@@ -179,3 +182,67 @@ def test_empreinte_recalculee_par_la_forme_canonique_jamais_sur_le_texte_relu(
 @pytest.mark.pg
 def test_journal_jetable_avec_son_archive_jetable(pg, journal):
     assert grants(pg, f"{journal}_configurations") == {"SELECT", "INSERT"}
+
+
+# --- verify : chaque enregistrement v2 a la configuration de sa décision --------------------
+
+ARCHIVED = {audit.config_hash(CONFIG): CONFIG.model_dump(mode="json")}
+
+
+def chain_of(*records: dict) -> list[audit.StoredAuditEntry]:
+    entries, head = [], audit.GENESIS
+    for number, data in enumerate(records, start=1):
+        stored = entry(data, head).model_copy(update={"id": number})
+        entries.append(stored)
+        head = stored.chain_hash
+    return entries
+
+
+def v2() -> dict:
+    return record(reviewed()).model_dump(mode="json")
+
+
+def test_journal_conforme_configurations_archivees_v1_exemptes():
+    report = audit.verify_journal(chain_of(v1_record(), v2()), ARCHIVED)
+    assert report.ok and not report.archive_fault
+    assert (report.count, report.archived, report.v1_exempted) == (2, 1, 1)
+
+
+def test_v2_sans_sa_configuration_archivee_journal_non_conforme():
+    entries = chain_of(v1_record(), v2())
+    report = audit.verify_journal(entries, {})
+    assert (report.ok, report.archive_fault, report.broken_id) == (False, True, 2)
+    assert "non archivée" in report.reason and entries[1].config_hash in report.reason
+
+
+def test_configuration_archivee_alteree_journal_non_conforme():
+    altered = {key: data | {"min_margin": 0.5} for key, data in ARCHIVED.items()}
+    report = audit.verify_journal(chain_of(v2()), altered)
+    assert (report.ok, report.archive_fault) == (False, True)
+    assert "altérée" in report.reason
+
+
+def test_configuration_archivee_relue_dans_un_autre_ordre_reste_conforme():
+    [(key, data)] = ARCHIVED.items()
+    reordered = {key: {k: data[k] for k in sorted(data, reverse=True)}}
+    assert audit.verify_journal(chain_of(v2()), reordered).ok
+
+
+def test_chaine_rompue_signalee_avant_l_archive():
+    entries = chain_of(v2(), v2() | {"thread_id": "c-2", "contract_id": "c-2"})
+    tampered = entries[0].model_copy(update={"prev_hash": "0" * 63 + "1"})
+    report = audit.verify_journal([tampered, entries[1]], {})
+    assert (report.ok, report.archive_fault, report.broken_id) == (False, False, 1)
+
+
+def test_verification_de_l_interface_montre_l_archive():
+    service = memory_service()
+    web = client(service)
+    web_analyse(web, CONTRACT_TEXT, identifiant="c-1")
+    ok = html.unescape(web.get("/journal/verification").text)
+    assert "Configurations archivées : 1" in ok
+    assert "enregistrements v1, antérieurs à l'archive : 0" in ok
+    service.audit_store().archive.clear()
+    refused = html.unescape(web.get("/journal/verification").text)
+    assert "Archive des configurations non conforme" in refused
+    assert "non archivée" in refused

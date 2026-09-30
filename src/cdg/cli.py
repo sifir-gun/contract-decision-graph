@@ -470,12 +470,24 @@ class ChaineRompue(Exception):
         }
 
 
+class ArchiveNonConforme(ChaineRompue):
+    """Archive des configurations non conforme (configuration d'un enregistrement v2
+    absente, ou configuration archivée altérée) : code 1, avec le rapport."""
+
+
 def _verify(args: argparse.Namespace) -> dict:
-    """Vérifie la chaîne du journal d'audit (rôle applicatif, lecture seule)."""
+    """Vérifie la chaîne du journal d'audit, puis l'archive des configurations (rôle
+    applicatif, lecture seule)."""
     report = build_service(load_config()).verify(args.expect_head)
     if not report.ok:
-        raise ChaineRompue(report)
-    return {"verify": "ok", "enregistrements": report.count, "tete": report.head}
+        raise (ArchiveNonConforme if report.archive_fault else ChaineRompue)(report)
+    return {
+        "verify": "ok",
+        "enregistrements": report.count,
+        "tete": report.head,
+        "configurations_archivees": report.archived,
+        "v1_sans_archive": report.v1_exempted,
+    }
 
 
 def _journal(args: argparse.Namespace) -> dict:

@@ -25,7 +25,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any, Literal
 
@@ -394,6 +394,11 @@ class ChainReport:
     head: str  # chain_hash du dernier maillon ; GENESIS pour un journal vide
     broken_id: int | None = None  # premier enregistrement fautif
     reason: str | None = None
+    archived: int = 0  # configurations archivées, chacune redonnant son empreinte
+    v1_exempted: int = 0  # enregistrements v1, antérieurs à l'archive : exemptés
+    archive_fault: bool = (
+        False  # défaut de l'archive des configurations, pas de la chaîne
+    )
 
 
 def _fault(entry: StoredAuditEntry, expected_prev: str) -> str | None:
@@ -445,6 +450,48 @@ def verify_chain(
         )
         return ChainReport(False, len(entries), head, None, reason)
     return ChainReport(True, len(entries), head)
+
+
+def verify_journal(
+    entries: Sequence[StoredAuditEntry],
+    configurations: Mapping[str, Mapping[str, Any]],
+    expect_head: str | None = None,
+) -> ChainReport:
+    """La chaîne (`verify_chain`), puis l'archive des configurations : chaque
+    configuration archivée redonne son empreinte, recalculée par la forme canonique,
+    jamais sur le texte relu ; chaque enregistrement v2 a la configuration de sa décision.
+    Les v1, antérieurs à l'archive, en sont exemptés, et comptés : non rejouables par
+    elle."""
+    chain = verify_chain(entries, expect_head)
+    if not chain.ok:
+        return chain
+    for key, data in sorted(configurations.items()):
+        recomputed = configuration_hash(data)
+        if recomputed != key:
+            return replace(
+                chain,
+                ok=False,
+                archive_fault=True,
+                reason=f"configuration archivée altérée : clé {key}, empreinte "
+                f"recalculée {recomputed}",
+            )
+    exempted = 0
+    for entry in entries:
+        try:
+            version = record_version(entry.record)
+        except ReplayError as exc:
+            return replace(chain, ok=False, broken_id=entry.id, reason=str(exc))
+        if version == 1:
+            exempted += 1
+        elif entry.config_hash not in configurations:
+            return replace(
+                chain,
+                ok=False,
+                archive_fault=True,
+                broken_id=entry.id,
+                reason=f"configuration {entry.config_hash} de la décision non archivée",
+            )
+    return replace(chain, archived=len(configurations), v1_exempted=exempted)
 
 
 # --- Rejeu --------------------------------------------------------------------------------

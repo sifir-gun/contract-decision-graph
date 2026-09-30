@@ -3,6 +3,10 @@
 {% elif report.ok %}
 <p class="ok" role="status"><strong>Chaîne intègre</strong> : {{ report.count }} enregistrement{{ "s" if report.count != 1 else "" }}{% if expected %}, tête égale à la tête attendue{% endif %}.</p>
 <p>Tête de chaîne : <code>{{ report.head }}</code></p>
+<p>Configurations archivées : {{ report.archived }} ; enregistrements v1, antérieurs à l'archive : {{ report.v1_exempted }} (exemptés, non rejouables par elle).</p>
+{% elif report.archive_fault %}
+<p class="error" role="alert"><strong>Archive des configurations non conforme</strong> : {{ report.reason }}{% if report.broken_id %} (enregistrement n° {{ report.broken_id }}){% endif %}.</p>
+<p>Tête de chaîne : <code>{{ report.head }}</code></p>
 {% else %}
 <p class="error" role="alert"><strong>Chaîne non conforme</strong> : {{ report.reason }}{% if report.broken_id %} (premier enregistrement fautif : n° {{ report.broken_id }}){% endif %}.</p>
 <p>Tête de chaîne : <code>{{ report.head }}</code></p>

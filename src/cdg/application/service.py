@@ -261,7 +261,11 @@ class ContractService:
         ]
 
     def verify(self, expect_head: str | None = None) -> audit.ChainReport:
-        return audit.verify_chain(self.audit_store().entries(), expect_head)
+        """Chaîne du journal, puis archive des configurations (une lecture de chacun)."""
+        store = self.audit_store()
+        return audit.verify_journal(
+            store.entries(), store.configurations(), expect_head
+        )
 
     def replay(self, thread_id: str) -> dict[str, Any]:
         """Rejoue la décision scellée d'un thread, sans LLM ni corpus (critère 6)."""
