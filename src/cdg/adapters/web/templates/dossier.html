@@ -20,6 +20,9 @@
   {% if s.human %}
   <p class="meta">Décision humaine : {{ decisions[s.human.decision] }}, par {{ human_label(s.human) }} ({{ s.human.source }}) : {{ s.human.reason }}{% if s.human.overrides_block %} ; blocage dur levé{% endif %}.</p>
   {% endif %}
+  {% if s.sealing_findings %}
+  <p class="error" role="alert">Constats du scellement : {% for f in s.sealing_findings %}{{ f }}{% if not loop.last %} ; {% endif %}{% endfor %}.</p>
+  {% endif %}
 </header>
 
 {% if s.demande and can_decide %}

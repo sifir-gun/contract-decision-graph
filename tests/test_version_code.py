@@ -9,6 +9,7 @@
   configuration) et celle du processus qui scelle ; un constat si elles diffèrent.
 """
 
+import html
 import json
 import subprocess
 import uuid
@@ -16,7 +17,8 @@ import uuid
 import pytest
 from doubles import ACTEUR_ANALYSTE, CODE, CONTRACT_TEXT, answer, make_deps
 from pydantic import ValidationError
-from web_helpers import PENDING_TEXT, memory_service
+from web_helpers import PENDING_TEXT, client, csrf, memory_service
+from web_helpers import analyse as web_analyse
 
 from cdg import cli
 from cdg.application import demo_set
@@ -207,3 +209,46 @@ def test_run_par_la_cli_scelle_la_version_lue_au_lancement(
     expected = {"commit": COMMIT, "image": None}
     assert entry.record["code_version"] == expected
     assert entry.record["sealing_code_version"] == expected
+
+
+# --- constat affiché au réviseur, au moment de la revue ----------------------------------------
+
+
+def test_constat_de_code_modifie_dans_la_sortie_de_resume(
+    hors_cluster, monkeypatch, capsys
+):
+    """Analysé par une version, tranché par la CLI sous une autre : la sortie de la
+    commande montre le constat au réviseur, pas seulement l'enregistrement."""
+    service = memory_service(run=lambda: make_deps(code_version=AUTRE_CODE))
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    argv = ["resume", "c-attente", "--decision", "NO_GO", "--reason", "revu"]
+    assert cli.main([*argv, "--operateur", "relecteur-poste"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["statut"], out["sealing_findings"]) == ("termine", [audit.CODE_CHANGED])
+
+
+def test_meme_code_aucun_constat_dans_la_sortie_de_resume(
+    hors_cluster, monkeypatch, capsys
+):
+    service = memory_service()
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    argv = ["resume", "c-attente", "--decision", "NO_GO", "--reason", "revu"]
+    assert cli.main([*argv, "--operateur", "relecteur-poste"]) == 0
+    assert json.loads(capsys.readouterr().out)["sealing_findings"] == []
+
+
+def test_constat_de_code_modifie_affiche_dans_le_dossier_de_l_interface():
+    """Même constat, même moment, par l'autre porte : le dossier tranché l'affiche."""
+    service = memory_service(run=lambda: make_deps(code_version=AUTRE_CODE))
+    web = client(service)
+    thread = web_analyse(web, PENDING_TEXT, identifiant="c-attente")
+    token = csrf(web, f"/contrats/{thread}")
+    decided = web.post(
+        f"/contrats/{thread}/decision",
+        data={"csrf": token, "decision": "NO_GO", "motif": "revu"},
+    )
+    assert decided.status_code == 303
+    page = html.unescape(web.get(f"/contrats/{thread}").text)  # texte échappé
+    assert f"Constats du scellement : {audit.CODE_CHANGED}." in page

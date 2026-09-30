@@ -6,6 +6,8 @@ Le calcul reste dans le domaine (`domain/audit.py`) ; le journal passe par le po
 l'enregistrement déjà scellé (même thread, même décision) : un seul enregistrement par
 contrat. L'empreinte scellée est celle de l'analyse (état initial, `run_contract`) ; celle
 de la configuration du processus qui scelle l'accompagne, comme la version de son code.
+Les constats du scellement (code modifié depuis l'analyse…) vont aussi dans l'état : la
+sortie de la revue les montre au réviseur.
 """
 
 from typing import Any
@@ -38,4 +40,5 @@ def audit_seal(
         "config_hash": stored.config_hash,
         "decision_hash": stored.decision_hash,
         "chain_hash": stored.chain_hash,
+        "sealing_findings": stored.record["sealing_findings"],
     }

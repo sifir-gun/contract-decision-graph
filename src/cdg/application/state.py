@@ -55,6 +55,7 @@ class ContractState(TypedDict, total=False):
     code_version: dict[str, str | None]
     decision_hash: str
     chain_hash: str
+    sealing_findings: list[str]  # constats du scellement, écrits par audit_seal
 
 
 class AnalystInput(TypedDict):  # état privé reçu via Send

@@ -437,6 +437,8 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "config_hash": values.get("config_hash"),
         "decision_hash": values.get("decision_hash"),
         "chain_hash": values.get("chain_hash"),
+        # constats du scellement (code modifié depuis l'analyse…), montrés au réviseur
+        "sealing_findings": values.get("sealing_findings", []),
         "human": human.model_dump(mode="json") if human else None,
         "analyse_par": values["analyse_par"].model_dump(mode="json")
         if values.get("analyse_par")
