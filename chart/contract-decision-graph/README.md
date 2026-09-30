@@ -47,6 +47,7 @@ Avant chaque mise à jour, la tâche de contrôle de configuration refuse de dé
 | `configuration.decision` | vide | Autre configuration de décision, en texte ; vide, `files/decision.yaml`. |
 | `authentification.active` | `false` | oauth2-proxy en conteneur annexe ; l'interface vérifie le jeton de chaque requête (`web --identite en-tetes`). Exige `emetteur` (HTTPS), `clientId` (audience) et `image.digest`. |
 | `authentification.session` | `8h`, revalidée toutes les `5m` | Durée de la session d'oauth2-proxy et revalidation auprès du fournisseur. |
+| `authentification.accord` | `auto` | Écran d'accord du fournisseur (`approval_prompt` d'oauth2-proxy) : `auto` ne le force pas, `force` le demande à chaque connexion. |
 | `authentification.deconnexionFournisseur` | `false` | Fermer aussi la session chez le fournisseur, s'il publie une fin de session. |
 | `authentification.autorites` | vide | ConfigMap (clé `ca.crt`) des autorités du fournisseur ; vide, celles du système. |
 | `ingress.active` | `false` | Ingress Traefik en TLS ; exige l'authentification et `ingress.hote`. |

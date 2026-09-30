@@ -590,6 +590,7 @@
         "secret",
         "autorites",
         "deconnexionFournisseur",
+        "accord",
         "session",
         "image",
         "port",
@@ -616,6 +617,12 @@
         },
         "deconnexionFournisseur": {
           "type": "boolean"
+        },
+        "accord": {
+          "enum": [
+            "auto",
+            "force"
+          ]
         },
         "session": {
           "type": "object",

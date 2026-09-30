@@ -116,6 +116,30 @@ def test_session_cookie_securise_et_durees_validees(auth):
     assert "email" not in args["scope"].split()  # minimisation : ni e-mail
 
 
+def test_ecran_d_accord_non_force_par_defaut(auth):
+    """oauth2-proxy 7.15.4 envoie approval_prompt=force si rien n'est réglé
+    (legacy_options.go) : le chart fixe « auto », qui ne force pas l'écran d'accord à
+    chaque connexion ; pas de paramètre OIDC prompt, dont aucune valeur n'est neutre."""
+    args = flags(container(auth, "oauth2-proxy"))
+    assert args["approval-prompt"] == "auto"
+    assert "prompt" not in args
+
+
+def test_ecran_d_accord_reglable():
+    docs = render(
+        *chart_script().VARIANTS["authentifie"],
+        "--set",
+        "authentification.accord=force",
+    )
+    assert flags(container(docs, "oauth2-proxy"))["approval-prompt"] == "force"
+
+
+def test_ecran_d_accord_valeur_inconnue_refusee():
+    options = [*chart_script().VARIANTS["authentifie"]]
+    message = refused(*options, "--set", "authentification.accord=toujours")
+    assert "accord" in message
+
+
 def test_journal_de_connexion_reduit_au_sub(auth):
     args = flags(container(auth, "oauth2-proxy"))
     assert args["oidc-email-claim"] == "sub"

@@ -130,6 +130,10 @@ authentification:
   # déconnexion : fermer aussi la session chez le fournisseur, s'il publie une fin de
   # session (non avec Dex 2.45.1, fournisseur des tests)
   deconnexionFournisseur: false
+  # écran d'accord chez le fournisseur (approval_prompt d'oauth2-proxy, qui envoie
+  # « force » si rien n'est réglé) : « auto » ne le force pas, et les fournisseurs qui ne
+  # connaissent pas ce paramètre l'ignorent ; « force » le demande à chaque connexion
+  accord: auto
   session:
     duree: 8h  # cookie-expire
     revalidation: 5m  # cookie-refresh : un compte retiré perd l'accès dans ce délai

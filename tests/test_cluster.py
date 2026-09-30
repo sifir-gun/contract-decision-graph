@@ -969,6 +969,7 @@ CSRF = re.compile(r'name="csrf" value="([0-9a-f]{64})"')
 NEXT = re.compile(r'<a id="suite" href="([^"]+)"')
 USER = re.compile(r'class="utilisateur">([^<]*)<')
 REQUEST = re.compile(r'name="req" value="([^"]+)"')
+SHOWN = {"accord": False}  # écran d'accord de Dex affiché pendant la connexion
 SESSION = re.compile(r"^_cdg_session(_\d+)?$")
 
 
@@ -993,9 +994,11 @@ def login(client, user, password):
     target = urllib.parse.urljoin(str(page.url), html.unescape(form[1]))
     data = {"login": f"{user}@example.org", "password": password}
     done = client.post(target, data=data)
-    # oauth2-proxy demande approval_prompt=force (sa valeur par défaut), que Dex honore
-    # même avec skipApprovalScreen : l'utilisateur accorde l'accès, comme au navigateur
+    # filet de sécurité : le chart règle approval_prompt=auto, mais un écran d'accord
+    # affiché quand même (Dex honore « force ») est accordé, comme par un utilisateur,
+    # et signalé au scénario de connexion
     if done.url.host == DEX and done.url.path == "/approval":
+        SHOWN["accord"] = True
         request = REQUEST.search(done.text)
         if not request:
             raise SystemExit("écran d'accord de Dex sans demande")
@@ -1024,7 +1027,8 @@ action = sys.argv[1]
 if action == "connexion":
     client = browser()
     done = login(client, sys.argv[2], sys.stdin.read().strip())
-    print(json.dumps({**state(done), "cookie": session_attributes(done)}))
+    cookie = session_attributes(done)
+    print(json.dumps({**state(done), "cookie": cookie, **SHOWN}))
 elif action == "forge":
     import jwt
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -1214,10 +1218,12 @@ def claims(token: str) -> dict:
 
 
 def test_connexion_par_le_navigateur_cookie_de_session_securise(clients):
-    """Par Traefik : redirection vers Dex, formulaire, retour ; l'interface affiche
-    l'utilisateur dont elle a vérifié le jeton. Cookie de session Secure, HttpOnly,
-    SameSite=Lax, pour la durée de session réglée."""
+    """Par Traefik : redirection vers Dex, formulaire, retour, sans écran d'accord
+    (approval_prompt=auto, réglé par le chart) ; l'interface affiche l'utilisateur dont
+    elle a vérifié le jeton. Cookie de session Secure, HttpOnly, SameSite=Lax, pour la
+    durée de session réglée."""
     done = browse("client-a", "connexion", "analyste")
+    assert done["accord"] is False, "écran d'accord affiché malgré approval_prompt=auto"
     assert (done["hote"], done["statut"], done["utilisateur"]) == (
         "cdg.test",
         200,

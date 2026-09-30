@@ -52,6 +52,7 @@ ni adresse du client) ; ni e-mail demandé au fournisseur. */}}
 - --scope=openid profile groups offline_access
 - --code-challenge-method=S256
 - --skip-provider-button=true
+- --approval-prompt={{ $auth.accord }}
 - --pass-authorization-header=true
 - --skip-auth-strip-headers=true
 - --pass-host-header=false
