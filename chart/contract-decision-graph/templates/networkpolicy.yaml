@@ -47,8 +47,10 @@ spec:
           podSelector:
             matchLabels:
               {{- toYaml .Values.ingress.traefik.selecteur | nindent 14 }}
+      # par son numéro : kube-router (règles réseau de k3s) ne lit les ports nommés que
+      # dans les conteneurs ordinaires, et oauth2-proxy est un conteneur annexe natif
       ports:
-        - port: http
+        - port: {{ .Values.authentification.port }}
           protocol: TCP
     {{- end }}
   egress:

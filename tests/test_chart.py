@@ -685,8 +685,12 @@ def quantity(value: str | float) -> float:
 
 
 def pod_resources(spec: dict, kind: str) -> tuple[float, float]:
-    """Limites ou requêtes d'un pod (CPU, mémoire), conteneurs annexes compris."""
-    found = [c["resources"][kind] for c in spec["containers"]]
+    """Limites ou requêtes d'un pod (CPU, mémoire), conteneurs annexes natifs compris
+    (conteneurs d'initialisation redémarrés, qui tournent avec l'application)."""
+    sidecars = [
+        c for c in spec.get("initContainers", []) if c.get("restartPolicy") == "Always"
+    ]
+    found = [c["resources"][kind] for c in [*spec["containers"], *sidecars]]
     return (
         sum(quantity(r["cpu"]) for r in found),
         sum(quantity(r["memory"]) for r in found),

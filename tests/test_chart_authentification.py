@@ -94,6 +94,29 @@ def test_oauth2_proxy_annexe_image_par_empreinte(auth):
     assert proxy["readinessProbe"]["httpGet"]["path"] == "/ping"
 
 
+def test_oauth2_proxy_conteneur_annexe_natif(auth):
+    """Conteneur d'initialisation redémarré (restartPolicy: Always, stable depuis
+    Kubernetes 1.33) : l'interface ne démarre qu'une fois oauth2-proxy prêt (sonde de
+    démarrage), et le kubelet ne l'arrête qu'après elle ; aucune pause choisie à la
+    main pour ordonner l'arrêt."""
+    spec = pod(auth)
+    assert [c["name"] for c in spec["containers"]] == ["web"]
+    [proxy] = [c for c in spec["initContainers"] if c["name"] == "oauth2-proxy"]
+    assert proxy["restartPolicy"] == "Always"
+    assert proxy["startupProbe"]["httpGet"] == {"path": "/ping", "port": "http"}
+    assert "lifecycle" not in proxy
+
+
+def test_oauth2_proxy_demarre_juste_avant_l_interface():
+    """Après les conteneurs d'initialisation ordinaires (copie du modèle) : il démarre
+    au plus près de l'interface."""
+    docs = render(
+        *chart_script().VARIANTS["authentifie"], "--set", "modele.montage=copie"
+    )
+    names = [c["name"] for c in pod(docs)["initContainers"]]
+    assert names[-1] == "oauth2-proxy" and len(names) > 1
+
+
 def test_oauth2_proxy_seul_chemin_jeton_transmis_en_tetes_du_client_retires(auth):
     args = flags(container(auth, "oauth2-proxy"))
     assert args["upstream"] == "http://127.0.0.1:8000/"
@@ -312,9 +335,9 @@ def test_debit_limite_par_adresse_du_client(auth):
 def test_entree_de_l_interface_depuis_traefik_seulement(auth):
     policy = named(auth, "NetworkPolicy", "-web")
     rules = policy["spec"]["ingress"]
-    [traefik] = [
-        r for r in rules if r["ports"] == [{"port": "http", "protocol": "TCP"}]
-    ]
+    # port par son numéro : kube-router (règles réseau de k3s) ne lit les ports
+    # nommés que dans les conteneurs ordinaires, pas dans un conteneur annexe natif
+    [traefik] = [r for r in rules if r["ports"] == [{"port": 4180, "protocol": "TCP"}]]
     [source] = traefik["from"]
     assert source["namespaceSelector"]["matchLabels"] == {
         "kubernetes.io/metadata.name": "traefik"
