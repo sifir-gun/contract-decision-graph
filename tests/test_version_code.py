@@ -125,15 +125,35 @@ def test_dans_le_cluster_l_empreinte_de_l_image_est_exigee(hors_cluster, monkeyp
     assert cli.code_version() == CodeVersion(commit=COMMIT, image=IMAGE)
 
 
-def test_dans_le_cluster_commande_refusee_sans_empreinte(
+@pytest.mark.parametrize("commit", [None, UNKNOWN])
+def test_dans_le_cluster_un_commit_inconnu_empeche_le_demarrage(
+    hors_cluster, monkeypatch, commit
+):
+    """Absent de l'image ou « inconnu » (contexte de construction différent du commit) :
+    dans le cluster, aucune décision ne se scelle sans le commit qui l'a prise."""
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+    monkeypatch.setenv(cli.IMAGE_VAR, IMAGE)
+    if commit is not None:
+        monkeypatch.setenv(cli.COMMIT_VAR, commit)
+    with pytest.raises(cli.VersionError, match="CDG_COMMIT.*inconnu.*construction"):
+        cli.code_version()
+
+
+def test_hors_du_cluster_un_commit_inconnu_reste_accepte(hors_cluster, monkeypatch):
+    monkeypatch.setenv(cli.COMMIT_VAR, UNKNOWN)
+    assert cli.code_version() == CodeVersion(commit=UNKNOWN, image=None)
+
+
+def test_dans_le_cluster_commande_refusee_sans_version(
     hors_cluster, monkeypatch, capsys
 ):
-    """Contrôlée au démarrage du service, avant toute connexion à la base."""
+    """Contrôlée au démarrage du service, avant toute connexion à la base ; l'erreur
+    nomme tout ce qui manque."""
     monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
     assert cli.main(["list"]) == 1
     error = json.loads(capsys.readouterr().err)
     assert error["erreur"] == "VersionError"
-    assert "CDG_EMPREINTE_IMAGE" in error["detail"]
+    assert "CDG_EMPREINTE_IMAGE" in error["detail"] and "CDG_COMMIT" in error["detail"]
 
 
 def test_demonstration_scelle_la_version_lue_au_lancement(hors_cluster, monkeypatch):

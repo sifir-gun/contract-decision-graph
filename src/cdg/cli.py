@@ -128,18 +128,14 @@ class VersionError(Exception):
 def code_version() -> CodeVersion:
     """Version du code qui décide, scellée avec chaque enregistrement : le commit, fourni
     à la construction de l'image, et l'empreinte de l'image, fournie au lancement par le
-    chart. Jamais devinée : ni git, ni registre. Sans commit (poste de développement) :
-    « inconnu », scellé tel quel ; une valeur fournie mais mal formée arrête le
-    programme. Dans le cluster, l'empreinte de l'image est exigée."""
-    commit = os.environ.get(COMMIT_VAR, UNKNOWN_COMMIT)
-    image = os.environ.get(IMAGE_VAR)
-    if image is None and in_cluster():
-        raise VersionError(
-            f"{IMAGE_VAR} absente : dans le cluster, l'empreinte de l'image est exigée, "
-            "scellée avec chaque décision ; le chart la fournit"
-        )
+    chart. Jamais devinée : ni git, ni registre. Une valeur fournie mais mal formée
+    arrête le programme. Sans commit (poste de développement) : « inconnu », scellé tel
+    quel ; dans le cluster, commit connu et empreinte de l'image sont exigés."""
     try:
-        return CodeVersion(commit=commit, image=image)
+        version = CodeVersion(
+            commit=os.environ.get(COMMIT_VAR, UNKNOWN_COMMIT),
+            image=os.environ.get(IMAGE_VAR),
+        )
     except ValidationError as exc:
         fields = {str(error["loc"][0]) for error in exc.errors()}
         names = [
@@ -151,6 +147,24 @@ def code_version() -> CodeVersion:
             f"{', '.join(names)} mal formée : commit complet (40 caractères "
             f"hexadécimaux) ou « {UNKNOWN_COMMIT} » ; empreinte sha256:… de l'image"
         ) from None
+    if in_cluster():
+        missing = []
+        if version.commit == UNKNOWN_COMMIT:
+            missing.append(
+                f"{COMMIT_VAR} « {UNKNOWN_COMMIT} » ou absente : image construite sans "
+                f"le commit de sa construction (--build-arg {COMMIT_VAR}, depuis un "
+                "contexte identique au commit)"
+            )
+        if version.image is None:
+            missing.append(
+                f"{IMAGE_VAR} absente : empreinte de l'image, que le chart fournit"
+            )
+        if missing:
+            raise VersionError(
+                "dans le cluster, la version du code est exigée, scellée avec chaque "
+                "décision : " + " ; ".join(missing)
+            )
+    return version
 
 
 def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
