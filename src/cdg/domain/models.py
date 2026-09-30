@@ -6,7 +6,9 @@ La forme de l'état du graphe (réducteurs, route, entrée des analystes) est da
 
 from typing import Literal, get_args
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from cdg.domain.authorization import Actor
 
 Domain = Literal["juridique", "financier", "conformite", "operationnel"]
 Decision = Literal["GO", "GO_RESERVES", "NO_GO", "ESCALADE"]
@@ -144,6 +146,9 @@ SYSTEM_REVIEWER_PREFIX = "systeme:"
 
 
 class HumanDecision(BaseModel):
+    """Décision humaine au format v1 (avant la PR D2), figé : relecteur nommé. Relue dans
+    les anciens états du checkpointer et les enregistrements v1 ; jamais créée."""
+
     decision: Decision
     reviewer: str
     reason: str
@@ -165,6 +170,26 @@ class HumanDecision(BaseModel):
             raise ValueError(
                 f"le préfixe {SYSTEM_REVIEWER_PREFIX} est réservé aux décisions système"
             )
+        return self
+
+
+class HumanReview(BaseModel):
+    """Décision humaine, format v2 (PR D2) : l'acteur qui tranche (canal, iss et sub, ou
+    opérateur non nominatif) remplace le relecteur nommé ; jamais de nom ni d'e-mail."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Decision
+    acteur: Actor
+    reason: str
+    overrides_block: bool = False  # vrai si l'humain lève un blocage dur
+    source: Literal["humain", "systeme"] = "humain"  # systeme : expiration (timeout)
+
+    @model_validator(mode="after")
+    def _decision_systeme(self) -> "HumanReview":
+        # échec fermé : jamais d'approbation automatique
+        if self.source == "systeme" and self.decision != "NO_GO":
+            raise ValueError("une décision système ne peut être que NO_GO")
         return self
 
 

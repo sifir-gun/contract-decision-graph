@@ -67,7 +67,15 @@ def test_aide_de_run(capsys):
 @pytest.mark.pg
 def test_run_insuffisant_suspend_en_escalade(pg, thread_id, contract, analysis, capsys):
     analysis(*INSUFFICIENT)
-    code, out = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    code, out = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     assert code == 0 and "mode" not in out
     assert (out["thread_id"], out["statut"], out["proposed_decision"]) == (
         thread_id,
@@ -83,7 +91,15 @@ def test_run_favorable_termine_en_go(
     pg, thread_id, contract, analysis, audit_journal, capsys
 ):
     extractor, crag = analysis()
-    code, out = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    code, out = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     assert (code, out["statut"], out["final_decision"]) == (0, "termine", "GO")
     # scellé dans le journal (jetable), empreintes exposées par la sortie
     [entry] = audit_journal.entries()
@@ -103,7 +119,15 @@ def test_run_favorable_termine_en_go(
 @pytest.mark.pg
 def test_run_blocage_dur_termine_en_no_go(pg, thread_id, contract, analysis, capsys):
     analysis(FixedExtractor(clauses(responsabilite_acheteur=None)))
-    code, out = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    code, out = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     assert (code, out["statut"], out["final_decision"], out["demande"]) == (
         0,
         "termine",
@@ -120,6 +144,8 @@ def test_run_masque_les_parties_declarees(pg, thread_id, tmp_path, analysis, cap
     code, out = run_cli(
         capsys,
         "run",
+        "--operateur",
+        "analyste-synth",
         str(path),
         "--contract-id",
         thread_id,
@@ -136,6 +162,8 @@ def test_run_date_d_analyse(pg, thread_id, contract, analysis, capsys):
     code, out = run_cli(
         capsys,
         "run",
+        "--operateur",
+        "analyste-synth",
         contract,
         "--contract-id",
         thread_id,
@@ -151,7 +179,15 @@ def test_run_date_d_analyse_par_defaut_aujourd_hui_a_paris(
 ):
     analysis()
     monkeypatch.setattr(cli, "today", lambda: date(2026, 12, 31))
-    code, out = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    code, out = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     assert code == 0 and out["analysis_date"] == "2026-12-31"
     assert cli.LEGAL_TIMEZONE.key == "Europe/Paris"
 
@@ -167,14 +203,25 @@ def test_run_refuse_un_identifiant_invalide_avant_toute_analyse(
     que l'interface, vérifiée avant toute connexion à la base ou au LLM."""
     path = tmp_path / name
     path.write_text(CONTRACT_TEXT, encoding="utf-8")
-    code, out = run_cli(capsys, "run", str(path), *options)
+    code, out = run_cli(
+        capsys, "run", "--operateur", "analyste-synth", str(path), *options
+    )
     assert code == 1 and out["erreur"] == "ContractIdError"
     assert out["detail"].startswith("identifiant de contrat invalide")
 
 
 def test_run_date_d_analyse_invalide(contract, capsys):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["run", contract, "--analysis-date", "31/12/2026"])
+        cli.main(
+            [
+                "run",
+                contract,
+                "--operateur",
+                "analyste-synth",
+                "--analysis-date",
+                "31/12/2026",
+            ]
+        )
     assert exc.value.code == 2
 
 
@@ -183,23 +230,31 @@ def test_resume_finalise_puis_history(
     pg, thread_id, contract, analysis, audit_journal, capsys
 ):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     code, out = run_cli(
         capsys,
         "resume",
         thread_id,
         "--decision",
         "NO_GO",
-        "--reviewer",
+        "--operateur",
         "relecteur-synth",
         "--reason",
         "référentiel insuffisant",
     )
     assert (code, out["statut"], out["final_decision"]) == (0, "termine", "NO_GO")
-    assert out["human"]["reviewer"] == "relecteur-synth"
+    assert out["human"]["acteur"]["operateur"] == "relecteur-synth"
     # rien de scellé pendant la suspension, un enregistrement après la reprise
     [entry] = audit_journal.entries()
-    assert entry.record["decision"]["human"]["reviewer"] == "relecteur-synth"
+    assert entry.record["decision"]["human"]["acteur"]["operateur"] == "relecteur-synth"
 
     code, out = run_cli(capsys, "history", thread_id)
     steps = out["checkpoints"]
@@ -216,7 +271,15 @@ def test_resume_sans_cle_n_appelle_ni_llm_ni_corpus(
     pg, thread_id, contract, analysis, capsys, monkeypatch
 ):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
 
     def forbidden(config):
         raise AssertionError("resume ne doit pas construire les dépendances d'analyse")
@@ -228,8 +291,8 @@ def test_resume_sans_cle_n_appelle_ni_llm_ni_corpus(
         thread_id,
         "--decision",
         "NO_GO",
-        "--reviewer",
-        "r",
+        "--operateur",
+        "relecteur-synth",
         "--reason",
         "m",
     )
@@ -241,14 +304,22 @@ def test_resume_refuse_reste_suspendu_avec_le_motif(
     pg, thread_id, contract, analysis, capsys
 ):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     code, out = run_cli(
         capsys,
         "resume",
         thread_id,
         "--decision",
         "ESCALADE",
-        "--reviewer",
+        "--operateur",
         "relecteur-synth",
         "--reason",
         "je ne sais pas",
@@ -262,7 +333,7 @@ def test_resume_refuse_reste_suspendu_avec_le_motif(
         thread_id,
         "--decision",
         "NO_GO",
-        "--reviewer",
+        "--operateur",
         "relecteur-synth",
         "--reason",
         "référentiel insuffisant",
@@ -278,8 +349,8 @@ def test_resume_thread_inconnu(pg, thread_id, capsys):
         thread_id,
         "--decision",
         "NO_GO",
-        "--reviewer",
-        "r",
+        "--operateur",
+        "relecteur-synth",
         "--reason",
         "m",
     )
@@ -289,15 +360,23 @@ def test_resume_thread_inconnu(pg, thread_id, capsys):
 @pytest.mark.pg
 def test_resume_thread_termine_refuse(pg, thread_id, contract, analysis, capsys):
     analysis(FixedExtractor(clauses(responsabilite_acheteur=None)))
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     code, err = run_cli(
         capsys,
         "resume",
         thread_id,
         "--decision",
         "GO",
-        "--reviewer",
-        "r",
+        "--operateur",
+        "relecteur-synth",
         "--reason",
         "m",
     )
@@ -307,14 +386,32 @@ def test_resume_thread_termine_refuse(pg, thread_id, contract, analysis, capsys)
 @pytest.mark.pg
 def test_run_refuse_un_thread_existant(pg, thread_id, contract, analysis, capsys):
     analysis()
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
-    code, err = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
+    code, err = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     assert code == 1 and "existe déjà" in err["detail"]
 
 
 def test_run_contrat_absent(tmp_path, analysis, capsys):
     analysis()
-    code, err = run_cli(capsys, "run", str(tmp_path / "absent.txt"))
+    code, err = run_cli(
+        capsys, "run", "--operateur", "analyste-synth", str(tmp_path / "absent.txt")
+    )
     assert code == 1 and err["erreur"] == "FileNotFoundError"
 
 
@@ -324,7 +421,15 @@ def test_run_sans_cle_d_api_erreur_avant_tout_thread(
 ):
     # variable exportée vide : .env ne la remplace pas (override=False)
     monkeypatch.setenv("MISTRAL_API_KEY", "")
-    code, err = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    code, err = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     assert (
         code == 1
         and err["erreur"] == "SettingsError"
@@ -351,7 +456,15 @@ def test_echec_de_noeud_escalade_avec_rapport_puis_resume(
     pg, thread_id, contract, analysis, capsys
 ):
     analysis(InvalidExtractor([]))
-    code, out = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    code, out = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     assert code == 0 and out["statut"] == "suspendu"
     assert (out["proposed_decision"], out["route"]) == ("ESCALADE", "human_review")
     [failure] = out["failures"]
@@ -368,8 +481,8 @@ def test_echec_de_noeud_escalade_avec_rapport_puis_resume(
         thread_id,
         "--decision",
         "NO_GO",
-        "--reviewer",
-        "r",
+        "--operateur",
+        "relecteur-synth",
         "--reason",
         "m",
     )
@@ -415,7 +528,15 @@ def test_resume_refuse_si_la_configuration_a_change(
     pg, thread_id, contract, analysis, audit_journal, capsys, monkeypatch
 ):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     changed = load_config().model_copy(update={"min_margin": 0.06})
     monkeypatch.setattr(cli, "load_config", lambda: changed)
     code, err = run_cli(
@@ -424,8 +545,8 @@ def test_resume_refuse_si_la_configuration_a_change(
         thread_id,
         "--decision",
         "NO_GO",
-        "--reviewer",
-        "r",
+        "--operateur",
+        "relecteur-synth",
         "--reason",
         "m",
     )
@@ -438,7 +559,7 @@ def test_resume_refuse_si_la_configuration_a_change(
 # --- Explication (J4) : LLM pour run, et pour resume si la clé est présente ; gabarit sinon,
 # et toujours pour expire ----------------------------------------------------------------------
 
-RESUME = ["--decision", "NO_GO", "--reviewer", "relecteur-synth", "--reason", "m"]
+RESUME = ["--decision", "NO_GO", "--operateur", "relecteur-synth", "--reason", "m"]
 
 
 @pytest.mark.pg
@@ -446,7 +567,15 @@ def test_resume_sans_cle_explication_par_le_gabarit_scellee(
     pg, thread_id, contract, analysis, audit_journal, capsys
 ):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     code, out = run_cli(capsys, "resume", thread_id, *RESUME)
     assert code == 0
     explanation = out["explanation"]
@@ -463,7 +592,15 @@ def test_resume_avec_cle_explication_par_le_llm(
     pg, thread_id, contract, analysis, audit_journal, capsys, monkeypatch
 ):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     monkeypatch.setenv("MISTRAL_API_KEY", "cle-de-test")
     llm = FakeLLM({"explain": faithful_explanation})
     monkeypatch.setattr(cli, "build_provider", lambda config: llm)
@@ -489,9 +626,14 @@ def test_expire_explication_toujours_par_le_gabarit(capsys, monkeypatch):
 
     monkeypatch.setattr(cli, "_graph", graph)
     monkeypatch.setattr(
-        cli.orchestrator, "expire_threads", lambda graph, older_than, now, *, hold: []
+        cli.orchestrator,
+        "expire_threads",
+        lambda graph, older_than, now, *, hold, actor: [],
     )
-    assert cli.main(["expire", "--older-than", "1d"]) == 0
+    assert (
+        cli.main(["expire", "--older-than", "1d", "--operateur", "relecteur-synth"])
+        == 0
+    )
     [deps] = seen
     assert deps.explainer == cli.EXPIRE_EXPLAINER
     assert "expire" in deps.explainer.reason

@@ -41,6 +41,7 @@ from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.state import AnalystInput, ContractState
 from cdg.domain import audit, expiry, masking, policy, resumption
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
 from cdg.ports.engine import ThreadError
@@ -97,7 +98,10 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
     request = policy.build_request(state, decision_config)
     while True:
         human, error = policy.review(
-            interrupt(request), state.get("verdicts", []), decision_config
+            interrupt(request),
+            state.get("verdicts", []),
+            decision_config,
+            state.get("analyse_par"),
         )
         # acceptée : policy.review ne rend alors aucun motif de refus
         if human is not None:
@@ -431,7 +435,10 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "config_hash": values.get("config_hash"),
         "decision_hash": values.get("decision_hash"),
         "chain_hash": values.get("chain_hash"),
-        "human": human.model_dump() if human else None,
+        "human": human.model_dump(mode="json") if human else None,
+        "analyse_par": values["analyse_par"].model_dump(mode="json")
+        if values.get("analyse_par")
+        else None,
         "explanation": explanation.model_dump(mode="json") if explanation else None,
         "verdicts": [
             v.model_dump(exclude={"evidence_ids"}) for v in values.get("verdicts", [])
@@ -448,6 +455,7 @@ def run_contract(
     *,
     analysis_date: date,
     config: DecisionConfig,
+    actor: Actor,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
 
@@ -456,7 +464,7 @@ def run_contract(
     `analysis_date` fixe la date à laquelle les versions des textes sont jugées ; elle est
     écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
     produit la décision, et modèles) est posé dans l'état initial, avant tout nœud :
-    c'est lui qui est scellé.
+    c'est lui qui est scellé, comme l'acteur qui lance l'analyse (quatre yeux).
     """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
@@ -470,6 +478,7 @@ def run_contract(
             "raw_text": masked.text,
             "analysis_date": analysis_date,
             **audit.analysis_context(config),
+            "analyse_par": actor,
         },
         _thread(contract_id),
         durability=DURABILITY,
@@ -575,8 +584,10 @@ def expire_threads(
     thread_ids: set[str] | None = None,
     *,
     hold: Callable[[str], AbstractContextManager[None]],
+    actor: Actor,
 ) -> list[dict]:
-    """Reprend en NO_GO système les threads en attente depuis plus de `older_than`.
+    """Reprend en NO_GO système les threads en attente depuis plus de `older_than` ;
+    `actor` : qui lance l'expiration, scellé avec la décision système.
 
     Chaque thread est expiré sous son verrou (`hold`), puis relu : un thread tranché ou
     suspendu de nouveau entre-temps n'est pas expiré ; un thread verrouillé ailleurs (une
@@ -601,7 +612,7 @@ def expire_threads(
                     continue
                 # expire continue même si la configuration a changé : NO_GO système,
                 # scellé avec les deux empreintes et le constat de configuration modifiée
-                answer = expiry.system_decision(now - since, older_than)
+                answer = expiry.system_decision(now - since, older_than, actor)
                 expired.append(_resume(graph, thread_id, answer))
         except ContractBusy as exc:
             log.warning("expiration : contrat %s laissé (%s)", thread_id, exc)

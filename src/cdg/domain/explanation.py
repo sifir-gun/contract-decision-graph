@@ -21,7 +21,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from cdg.domain.models import DOMAINS, AgentVerdict, Decision, Domain, HumanDecision
+from cdg.domain.models import (
+    DOMAINS,
+    AgentVerdict,
+    Decision,
+    Domain,
+    HumanDecision,
+    HumanReview,
+)
 
 Source = Literal["llm", "gabarit"]
 
@@ -44,7 +51,7 @@ class ExplanationRequest(BaseModel):
     decision: Decision  # décision finale
     proposed_decision: Decision | None
     margin: float | None
-    human: HumanDecision | None
+    human: HumanReview | HumanDecision | None
     failure_stage: str | None
     input_findings: list[str] = []  # tentative d'instruction détectée dans le contrat
     findings: list[FindingToExplain]

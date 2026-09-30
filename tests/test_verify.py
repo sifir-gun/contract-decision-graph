@@ -41,7 +41,19 @@ def sealed(pg, audit_journal, tmp_path, monkeypatch, capsys):
     contract.write_text(CONTRACT_TEXT, encoding="utf-8")
     threads = [f"test-{uuid.uuid4()}" for _ in range(2)]
     for tid in threads:
-        assert cli.main(["run", str(contract), "--contract-id", tid]) == 0
+        assert (
+            cli.main(
+                [
+                    "run",
+                    str(contract),
+                    "--operateur",
+                    "analyste-synth",
+                    "--contract-id",
+                    tid,
+                ]
+            )
+            == 0
+        )
     capsys.readouterr()
     yield audit_journal.entries()
     for tid in threads:

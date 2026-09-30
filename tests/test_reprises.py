@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 import psycopg
 import pytest
 import yaml
-from doubles import CONTRACT_TEXT, FakeCrag
+from doubles import ACTEUR_ANALYSTE, CONTRACT_TEXT, FakeCrag
 from pydantic import ValidationError
 from test_arret import Death, DyingOnce
 from test_service import answer, make_service
@@ -117,7 +117,9 @@ def test_contrat_qui_plante_a_chaque_reprise_part_en_escalade(caplog):
     extractor = AlwaysDying()
     replicas = Restarts(extractor)
     with pytest.raises(Death):
-        replicas.service().analyse(CONTRACT_TEXT, contract_id="c-boucle")
+        replicas.service().analyse(
+            CONTRACT_TEXT, contract_id="c-boucle", actor=ACTEUR_ANALYSTE
+        )
     for _ in range(LIMIT):  # chaque redémarrage reprend, et meurt de nouveau
         with pytest.raises(Death):
             replicas.service().resume_interrupted()
@@ -163,7 +165,9 @@ def test_plantage_pendant_les_analystes_verdicts_rendus_gardes():
         return make_service(opener=opener, resumes=counter, crag=crag)
 
     with pytest.raises(Death):
-        service().analyse(CONTRACT_TEXT, contract_id="c-analystes")
+        service().analyse(
+            CONTRACT_TEXT, contract_id="c-analystes", actor=ACTEUR_ANALYSTE
+        )
     for _ in range(LIMIT):
         with pytest.raises(Death):
             service().resume_interrupted()
@@ -181,7 +185,7 @@ def test_une_reprise_qui_aboutit_est_comptee_une_fois():
     counter = LocalResumeCounter()
     service = make_service(DyingOnce(), resumes=counter)
     with pytest.raises(Death):
-        service.analyse(CONTRACT_TEXT, contract_id="c-une")
+        service.analyse(CONTRACT_TEXT, contract_id="c-une", actor=ACTEUR_ANALYSTE)
     [resumed] = service.resume_interrupted()
     assert resumed["statut"] == "termine"
     assert counter.record("c-une") == 2  # une seule reprise comptée avant celle-ci
@@ -203,10 +207,10 @@ def test_rien_n_est_compte_sans_reprise():
     spy, locks = Spy(), LocalContractLocks()
     service = make_service(DyingOnce(), resumes=spy, locks=locks)
     with pytest.raises(Death):
-        service.analyse(CONTRACT_TEXT, contract_id="c-ailleurs")
+        service.analyse(CONTRACT_TEXT, contract_id="c-ailleurs", actor=ACTEUR_ANALYSTE)
     other = make_service(resumes=spy)
-    other.analyse(CONTRACT_TEXT, contract_id="c-fini")
-    other.analyse(PENDING_TEXT, contract_id="c-attente")
+    other.analyse(CONTRACT_TEXT, contract_id="c-fini", actor=ACTEUR_ANALYSTE)
+    other.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
     assert other.resume_interrupted() == [] and spy.seen == []
     with locks.hold(
         "c-ailleurs"

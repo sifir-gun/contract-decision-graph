@@ -19,6 +19,7 @@ import pytest
 from demo_set import DEMO, files, load
 from doubles import (
     ABSENT,
+    ACTEUR_ANALYSTE,
     FakeCrag,
     FixedExtractor,
     MemoryAuditStore,
@@ -127,6 +128,7 @@ def run(contract, store):
         contract.parties,
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     if contract.human:
         # suspendu : rien de scellé pour ce contrat (le journal peut être partagé)

@@ -14,13 +14,14 @@ from doubles import ABSENT, ANALYSIS_DATE, clauses, usage
 from pydantic import BaseModel, ValidationError
 
 from cdg.domain import audit, explanation
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.decision import decide
 from cdg.domain.justification import justify
 from cdg.domain.models import (
     DOMAINS,
     ClauseRetrieval,
-    HumanDecision,
+    HumanReview,
     NodeFailure,
     RetrievalTrace,
 )
@@ -423,7 +424,8 @@ def test_rejeu_avec_une_autre_configuration_refuse():
 def test_rejeu_decision_humaine_reprise_telle_quelle():
     state = analysed(responsabilite_fournisseur=50, duree_engagement=48)  # marge faible
     assert state["final_decision"] is None
-    human = HumanDecision(decision="GO_RESERVES", reviewer="r", reason="m")
+    relecteur = Actor(canal="interface", authentifie=True, iss="https://i", sub="r")
+    human = HumanReview(decision="GO_RESERVES", acteur=relecteur, reason="m")
     state = {**state, "human": human, "final_decision": "GO_RESERVES"}
     assert replay(state).identical
 

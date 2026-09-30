@@ -5,8 +5,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from cdg.domain import authorization
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
-from cdg.domain.models import AgentVerdict, HumanDecision
+from cdg.domain.models import AgentVerdict, HumanReview
 from cdg.domain.numeric import rounded
 
 
@@ -39,14 +41,21 @@ def build_request(state: Mapping[str, Any], config: DecisionConfig) -> dict[str,
 
 
 def check(
-    human: HumanDecision, verdicts: list[AgentVerdict], config: DecisionConfig
+    human: HumanReview,
+    verdicts: list[AgentVerdict],
+    config: DecisionConfig,
+    analyst: Actor | None,
 ) -> str | None:
-    """None si la décision est recevable, sinon le motif du refus."""
+    """None si la décision est recevable, sinon le motif du refus. Quatre yeux : second
+    contrôle, après celui de l'interface, et seul contrôle pour la CLI ; une décision
+    système (expiration, NO_GO) n'y est pas soumise."""
     rules = config.human_policy
     if human.decision not in rules.allowed_decisions:
         return f"décision {human.decision} non autorisée : attendu {rules.allowed_decisions}"
-    if not human.reviewer.strip():
-        return "reviewer obligatoire"
+    if human.source == "humain":
+        refused = authorization.four_eyes(analyst, human.acteur)
+        if refused:
+            return refused
     if not human.reason.strip():
         return "reason obligatoire"
     blocked = [v.domain for v in verdicts if v.hard_block]
@@ -61,16 +70,19 @@ def check(
 
 
 def review(
-    payload: Any, verdicts: list[AgentVerdict], config: DecisionConfig
-) -> tuple[HumanDecision | None, str | None]:
+    payload: Any,
+    verdicts: list[AgentVerdict],
+    config: DecisionConfig,
+    analyst: Actor | None,
+) -> tuple[HumanReview | None, str | None]:
     """Valide la réponse brute reçue à la reprise, puis applique la politique."""
     try:
-        human = HumanDecision.model_validate(payload)
+        human = HumanReview.model_validate(payload)
     except ValidationError as exc:
         details = "; ".join(
             f"{'.'.join(map(str, e['loc'])) or 'réponse'} : {e['msg']}"
             for e in exc.errors()
         )
         return None, f"réponse invalide : {details}"
-    error = check(human, verdicts, config)
+    error = check(human, verdicts, config, analyst)
     return (None, error) if error else (human, None)

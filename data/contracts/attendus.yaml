@@ -108,7 +108,6 @@ contracts:
       final_decision: GO
       human:
         decision: GO
-        reviewer: relecteur-demo
         reason: engagement de 48 mois accepté au regard du tarif ; plafond du prestataire à renégocier au renouvellement
     clauses:
       - kind: responsabilite_acheteur
@@ -385,7 +384,6 @@ contracts:
       final_decision: GO_RESERVES
       human:
         decision: GO_RESERVES
-        reviewer: relecteur-demo
         reason: livraison unique de faible montant ; délai de paiement et pénalités à fixer par avenant avant la commande
     clauses:
       - kind: responsabilite_acheteur
@@ -440,7 +438,6 @@ contracts:
       final_decision: NO_GO
       human:
         decision: NO_GO
-        reviewer: relecteur-demo
         reason: révision des prix sans plafond ; consigne adressée à l'outil d'analyse signalée au fournisseur
     clauses:
       - kind: responsabilite_acheteur
@@ -553,7 +550,6 @@ contracts:
       final_decision: GO_RESERVES
       human:
         decision: GO_RESERVES
-        reviewer: relecteur-demo
         reason: durée et préavis à chiffrer par avenant avant la signature ; plafonds, réfaction et hébergement acceptables
     clauses:
       - kind: responsabilite_acheteur

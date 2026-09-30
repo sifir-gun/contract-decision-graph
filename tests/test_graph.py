@@ -4,6 +4,8 @@ import pytest
 import yaml
 from doubles import (
     ABSENT,
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
     CONTRACT_TEXT,
     PENALIZED,
@@ -21,7 +23,7 @@ from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.adapters.langgraph.orchestrator import build_graph, route_after_verify
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
-from cdg.domain.models import DOMAINS, HumanDecision
+from cdg.domain.models import DOMAINS, HumanReview
 
 CONFIG = load_config()
 BUDGET = CONFIG.budget.max_tokens_per_contract
@@ -134,7 +136,7 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 THREAD = {"configurable": {"thread_id": "c-synth-001"}}
 VALID = {
     "decision": "NO_GO",
-    "reviewer": "relecteur-synth",
+    "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
     "reason": "marge trop faible",
 }
 
@@ -196,7 +198,7 @@ def test_reprise_avec_decision_valide_finalise():
     state = graph.get_state(THREAD)
     assert state.next == ()
     assert state.values["final_decision"] == "NO_GO"
-    assert state.values["human"] == HumanDecision(**VALID)
+    assert state.values["human"] == HumanReview(**VALID)
 
 
 def test_reponse_refusee_redemandee_avec_erreur_puis_acceptee():
@@ -269,7 +271,7 @@ def test_12_levee_sans_overrides_block_refusee_puis_acceptee_avec_motif():
     graph, _ = start(clause_overrides=BLOCKED, config=hard_block_review_config())
     lift = {
         "decision": "GO",
-        "reviewer": "relecteur-synth",
+        "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
         "reason": "responsabilité plafonnée par avenant synthétique n° 2",
     }
     out = graph.invoke(Command(resume=lift), THREAD)  # sans overrides_block
@@ -278,7 +280,7 @@ def test_12_levee_sans_overrides_block_refusee_puis_acceptee_avec_motif():
     assert "__interrupt__" not in out
     assert out["final_decision"] == "GO" and out["proposed_decision"] == "NO_GO"
     # la levée est tracée comme telle dans l'état, que audit_seal scellera (J4)
-    assert out["human"] == HumanDecision(**lift, overrides_block=True)
+    assert out["human"] == HumanReview(**lift, overrides_block=True)
 
 
 def test_12_humain_confirme_le_no_go_sans_levee():
@@ -345,6 +347,7 @@ def test_run_contract_masque_avant_le_graphe():
         parties=["Acme Industrie"],
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
     raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
@@ -370,6 +373,7 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
         parties=["Acme Industrie"],
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     [call] = llm.calls
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
@@ -402,7 +406,12 @@ def with_invented_quote():
 def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
     graph, llm = extraction_graph([with_invented_quote(), with_invented_quote()])
     status = orchestrator.run_contract(
-        graph, "c-10", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+        graph,
+        "c-10",
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
     assert status["failure_report"] == {
@@ -420,6 +429,11 @@ def test_10_citation_corrigee_au_second_essai():
     good = {"clauses": [c.model_dump() for c in clauses()]}
     graph, llm = extraction_graph([with_invented_quote(), good])
     status = orchestrator.run_contract(
-        graph, "c-10b", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+        graph,
+        "c-10b",
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     assert len(llm.calls) == 2 and len(status["verdicts"]) == 4

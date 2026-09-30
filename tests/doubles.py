@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, TemplateOnly
 from cdg.domain import audit
+from cdg.domain.authorization import Actor, interface_actor
 from cdg.domain.config import load_config
 from cdg.domain.identity import Identity
 from cdg.domain.models import (
@@ -306,6 +307,20 @@ RELECTEUR = Identity(
     groups=("cdg-relecteurs",),
     display_name="relecteur.affiche",
 )
+# acteurs scellés (PR D2) : l'analyste et le relecteur sont deux personnes (quatre yeux)
+ACTEUR_ANALYSTE = interface_actor(ANALYSTE)
+ACTEUR_RELECTEUR = interface_actor(RELECTEUR)
+OPERATEUR = Actor(canal="cli", authentifie=False, operateur="relecteur-synth")
+
+
+def answer(decision="NO_GO", reason="motif", acteur=ACTEUR_RELECTEUR, **extra) -> dict:
+    """Réponse humaine brute à la reprise, au format v2 (acteur, jamais de nom)."""
+    return {
+        "decision": decision,
+        "acteur": acteur.model_dump(mode="json"),
+        "reason": reason,
+        **extra,
+    }
 
 
 class FakeVerifier:
@@ -377,6 +392,10 @@ def faithful_explanation(user: str) -> dict:
 
 
 def context(config=None) -> dict:
-    """Contexte d'analyse (config_hash, modèles), tel que run_contract le pose dans l'état
-    initial : à joindre à toute entrée passée directement au graphe."""
-    return audit.analysis_context(config if config is not None else load_config())
+    """Contexte d'analyse (config_hash, modèles) et acteur de l'analyse, tels que
+    run_contract les pose dans l'état initial : à joindre à toute entrée passée
+    directement au graphe."""
+    return {
+        **audit.analysis_context(config if config is not None else load_config()),
+        "analyse_par": ACTEUR_ANALYSTE,
+    }

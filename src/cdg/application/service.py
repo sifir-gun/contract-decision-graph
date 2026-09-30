@@ -34,6 +34,7 @@ from typing import Any
 
 from cdg.application import ingestion
 from cdg.domain import audit
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.identifiers import check_contract_id
 from cdg.domain.models import Clause, Usage
@@ -119,6 +120,7 @@ class ContractService:
         raw_text: str,
         *,
         contract_id: str,
+        actor: Actor,
         parties: Sequence[str] = (),
         analysis_date: date | None = None,
     ) -> dict[str, Any]:
@@ -127,7 +129,7 @@ class ContractService:
         )  # à la création seulement : l'existant reste lisible
         on = analysis_date if analysis_date is not None else self.today()
         with self._writes:
-            return self.engine.run(contract_id, raw_text, parties, on)
+            return self.engine.run(contract_id, raw_text, parties, on, actor)
 
     def decide(self, thread_id: str, answer: Mapping[str, Any]) -> dict[str, Any]:
         """Réponse humaine brute : validée par la politique dans le graphe, redemandée
@@ -187,10 +189,12 @@ class ContractService:
     def history(self, thread_id: str) -> list[dict[str, Any]]:
         return self.engine.history(thread_id)
 
-    def expire(self, older_than: timedelta) -> tuple[datetime, list[dict[str, Any]]]:
+    def expire(
+        self, older_than: timedelta, actor: Actor
+    ) -> tuple[datetime, list[dict[str, Any]]]:
         with self._writes:
             now = self.now()  # après l'attente du verrou : l'heure de l'expiration
-            return now, self.engine.expire(older_than, now)
+            return now, self.engine.expire(older_than, now, actor)
 
     def config_check(self) -> dict[str, Any]:
         """Contrats en attente d'une revue analysés sous une autre configuration que la

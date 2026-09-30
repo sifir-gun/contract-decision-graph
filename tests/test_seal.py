@@ -8,6 +8,8 @@ import pytest
 import yaml
 from doubles import (
     ABSENT,
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
     CONTRACT_TEXT,
     FIXED_NOW,
@@ -28,7 +30,11 @@ from cdg.domain import audit
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 
 CONFIG = load_config()
-HUMAN = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "motif"}
+HUMAN = {
+    "decision": "NO_GO",
+    "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
+    "reason": "motif",
+}
 
 
 def thread(cid):
@@ -122,7 +128,7 @@ def test_escalade_rien_scelle_pendant_la_suspension_puis_decision_humaine():
         "ESCALADE",
         "NO_GO",
     )
-    assert decision["human"]["reviewer"] == "relecteur-synth"
+    assert decision["human"]["acteur"] == ACTEUR_RELECTEUR.model_dump(mode="json")
 
 
 def test_extraction_en_echec_puis_humain_scelle():
@@ -215,12 +221,13 @@ def test_11_expiration_no_go_systeme_scellee():
         now=since + timedelta(hours=25),
         thread_ids={"c-exp"},
         hold=LocalContractLocks().hold,
+        actor=ACTEUR_RELECTEUR,
     )
     [entry] = store.entries()
     human = decision_of(entry)["human"]
-    assert (human["source"], human["reviewer"], human["decision"]) == (
+    assert (human["source"], human["acteur"], human["decision"]) == (
         "systeme",
-        "systeme:expire",
+        ACTEUR_RELECTEUR.model_dump(mode="json"),
         "NO_GO",
     )
     assert human["reason"].startswith("timeout")
@@ -241,7 +248,7 @@ def test_12_levee_de_blocage_scellee_avec_son_motif():
     assert invoke(graph, "c-levee", config=config)["proposed_decision"] == "NO_GO"
     override = {
         "decision": "GO",
-        "reviewer": "direction-achats",
+        "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
         "reason": "plafond négocié hors contrat",
         "overrides_block": True,
     }
@@ -279,7 +286,12 @@ def test_run_contract_pose_l_empreinte_d_analyse_scellee():
     store = MemoryAuditStore()
     graph = compiled(store)
     status = orchestrator.run_contract(
-        graph, "c-run", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+        graph,
+        "c-run",
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     [entry] = store.entries()
     assert status["config_hash"] == entry.config_hash == audit.config_hash(CONFIG)
@@ -292,7 +304,12 @@ def test_resume_refuse_si_la_configuration_a_change_avant_toute_reprise():
     store = MemoryAuditStore()
     graph = compiled(store, FixedExtractor(clauses(**LOW_MARGIN)))
     orchestrator.run_contract(
-        graph, "c-conf", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+        graph,
+        "c-conf",
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     with pytest.raises(orchestrator.ThreadError) as refused:
         orchestrator.resume_thread(graph, "c-conf", HUMAN, config=changed_config())
@@ -311,7 +328,12 @@ def test_expire_continue_et_scelle_les_deux_empreintes_avec_le_constat():
     store, saver = MemoryAuditStore(), InMemorySaver(serde=strict_serializer())
     analysed_by = compiled(store, FixedExtractor(clauses(**LOW_MARGIN)), saver=saver)
     orchestrator.run_contract(
-        analysed_by, "c-exp2", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+        analysed_by,
+        "c-exp2",
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
     )
     # expire lancé par un processus dont la configuration a changé depuis l'analyse
     other = changed_config()
@@ -323,6 +345,7 @@ def test_expire_continue_et_scelle_les_deux_empreintes_avec_le_constat():
         now=since + timedelta(hours=25),
         thread_ids={"c-exp2"},
         hold=LocalContractLocks().hold,
+        actor=ACTEUR_RELECTEUR,
     )
     assert status["final_decision"] == "NO_GO"
     [entry] = store.entries()

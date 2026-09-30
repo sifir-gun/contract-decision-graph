@@ -105,7 +105,6 @@ def test_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
         data={
             "csrf": token,
             "decision": contract.human["decision"],
-            "relecteur": contract.human["reviewer"],
             "motif": contract.human["reason"],
         },
     )

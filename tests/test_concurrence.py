@@ -14,6 +14,8 @@ from typing import Any
 
 import pytest
 from doubles import (
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
     CONTRACT_TEXT,
     FIXED_NOW,
@@ -43,7 +45,7 @@ MARK = "Annexe 9 - Sans objet."  # texte dont l'extraction reste bloquée
 SLOW_TEXT = f"{CONTRACT_TEXT}\n{MARK}\n"
 ANSWER = {
     "decision": "NO_GO",
-    "reviewer": "Camille Relectrice",
+    "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
     "reason": "tentative d'instruction dans le contrat",
     "overrides_block": False,
 }
@@ -109,7 +111,9 @@ def make_service(extractor=None, opener=None) -> ContractService:
 @contextmanager
 def analysis_in_progress(service, extractor) -> Iterator[Future]:
     """Analyse du contrat `c-lent`, arrêtée dans l'extraction ; libérée à la sortie."""
-    analysis = background(lambda: service.analyse(SLOW_TEXT, contract_id="c-lent"))
+    analysis = background(
+        lambda: service.analyse(SLOW_TEXT, contract_id="c-lent", actor=ACTEUR_ANALYSTE)
+    )
     try:
         assert extractor.started.wait(WAIT), "l'analyse n'a pas atteint l'extraction"
         yield analysis
@@ -168,7 +172,11 @@ def pausing_opener(barrier: threading.Barrier):
 def test_deux_analyses_simultanees_du_meme_contrat_une_seule_creee():
     service = make_service(opener=pausing_opener(threading.Barrier(2)))
     calls = [
-        background(lambda: service.analyse(CONTRACT_TEXT, contract_id="c-double"))
+        background(
+            lambda: service.analyse(
+                CONTRACT_TEXT, contract_id="c-double", actor=ACTEUR_ANALYSTE
+            )
+        )
         for _ in range(2)
     ]
     errors = [call.exception(timeout=WAIT) for call in calls]
@@ -184,11 +192,15 @@ def test_deux_analyses_simultanees_du_meme_contrat_une_seule_creee():
 def test_une_modification_attend_la_fin_de_l_analyse_en_cours(action):
     extractor = BlockingExtractor()
     service = make_service(extractor)
-    service.analyse(PENDING_TEXT, contract_id="c-attente")  # en attente de revue
+    service.analyse(
+        PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE
+    )  # en attente de revue
     calls = {
-        "analyse": lambda: service.analyse(CONTRACT_TEXT, contract_id="c-autre"),
+        "analyse": lambda: service.analyse(
+            CONTRACT_TEXT, contract_id="c-autre", actor=ACTEUR_ANALYSTE
+        ),
         "decide": lambda: service.decide("c-attente", ANSWER),
-        "expire": lambda: service.expire(timedelta(hours=1)),
+        "expire": lambda: service.expire(timedelta(hours=1), ACTEUR_RELECTEUR),
     }
     with analysis_in_progress(service, extractor) as analysis:
         waiting = background(calls[action])
@@ -200,7 +212,7 @@ def test_une_modification_attend_la_fin_de_l_analyse_en_cours(action):
 def test_lectures_pendant_une_analyse_en_cours():
     extractor = BlockingExtractor()
     service = make_service(extractor)
-    service.analyse(CONTRACT_TEXT, contract_id="c-fini")
+    service.analyse(CONTRACT_TEXT, contract_id="c-fini", actor=ACTEUR_ANALYSTE)
     with analysis_in_progress(service, extractor) as analysis:
         reads = background(
             lambda: (
@@ -330,7 +342,7 @@ def web_client(service) -> TestClient:
 def test_interface_sert_les_lectures_pendant_une_analyse_en_cours():
     extractor = BlockingExtractor()
     service = make_service(extractor)
-    service.analyse(CONTRACT_TEXT, contract_id="c-fini")
+    service.analyse(CONTRACT_TEXT, contract_id="c-fini", actor=ACTEUR_ANALYSTE)
     pages = [
         "/",
         "/contrats/c-fini",

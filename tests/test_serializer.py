@@ -3,7 +3,14 @@
 import threading
 
 import pytest
-from doubles import clauses, usage, verdict
+from doubles import (
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
+    OPERATEUR,
+    clauses,
+    usage,
+    verdict,
+)
 from langgraph.types import Interrupt, Send
 from pydantic import BaseModel
 
@@ -11,7 +18,7 @@ from cdg.adapters.langgraph.checkpointer import (
     BlockedDeserialization,
     strict_serializer,
 )
-from cdg.domain.models import HumanDecision
+from cdg.domain.models import HumanDecision, HumanReview
 
 
 class Intrus(BaseModel):
@@ -34,6 +41,9 @@ def roundtrip(serde, obj):
         verdict("juridique", score=0.5),
         usage(10, 5),
         HumanDecision(decision="NO_GO", reviewer="relecteur-synth", reason="motif"),
+        HumanReview(decision="NO_GO", acteur=ACTEUR_RELECTEUR, reason="motif"),
+        ACTEUR_ANALYSTE,
+        OPERATEUR.model_copy(update={"urgence": True}),
         {"verdicts": [verdict("financier")], "failure_report": {"stage": "budget"}},
     ],
 )

@@ -22,6 +22,8 @@ from typing import Any, get_args
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from pydantic import ValidationError
+
 from cdg import settings
 from cdg.adapters import fastembed, journaux, oidc
 from cdg.adapters.demo.audit_store import MemoryAuditStore
@@ -36,8 +38,8 @@ from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.postgres.resumes import PostgresResumeCounter
+from cdg.adapters.web import acces, sante
 from cdg.adapters.web import app as web_app
-from cdg.adapters.web import sante
 from cdg.adapters.web import security as web_security
 from cdg.adapters.web import server as web_server
 from cdg.application import demo_set, ingestion
@@ -46,6 +48,7 @@ from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
 from cdg.application.service import ContractService
 from cdg.domain import audit, expiry
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
 from cdg.ports.audit_store import AuditStore
@@ -292,21 +295,74 @@ def demo_service(config: DecisionConfig) -> ContractService:
     )
 
 
+class AccesRefuse(Exception):
+    """Décision par la CLI refusée : dans le cluster, en accès d'urgence seulement."""
+
+
+URGENCY_MAX_CHARS = 200
+
+
+def in_cluster() -> bool:
+    """Dans un pod : le kubelet pose toujours cette variable, quel que soit le chart."""
+    return "KUBERNETES_SERVICE_HOST" in os.environ
+
+
+def _cli_actor(args: argparse.Namespace, command: str, *, decides: bool) -> Actor:
+    """Acteur de la CLI : un opérateur non nominatif. Dans le cluster, une décision
+    (resume, expire) n'est admise qu'en accès d'urgence (--urgence MOTIF) : tracé au
+    journal des accès, et scellé avec la décision."""
+    urgency = getattr(args, "urgence", None)
+    if urgency is not None and not (0 < len(urgency.strip()) <= URGENCY_MAX_CHARS):
+        raise AccesRefuse(
+            f"--urgence : un motif, {URGENCY_MAX_CHARS} caractères au plus, sans donnée "
+            "personnelle"
+        )
+    if decides and in_cluster() and urgency is None:
+        raise AccesRefuse(
+            f"{command} : dans le cluster, une décision par la CLI n'est admise qu'en "
+            "accès d'urgence (--urgence MOTIF, tracé au journal des accès et scellé) ; "
+            "la voie normale est l'interface authentifiée"
+        )
+    try:
+        actor = Actor(
+            canal="cli",
+            authentifie=False,
+            operateur=args.operateur,
+            urgence=urgency is not None,
+        )
+    except ValidationError:
+        raise AccesRefuse(
+            "--operateur : identifiant non nominatif (minuscules, chiffres, tirets), "
+            "jamais un nom ni une adresse"
+        ) from None
+    if urgency is not None:
+        acces.event(
+            "acces_urgence",
+            operateur=args.operateur,
+            commande=command,
+            motif=urgency.strip(),
+        )
+    return actor
+
+
 def _run(args: argparse.Namespace) -> dict:
     contract = Path(args.contract)
+    actor = _cli_actor(args, "run", decides=False)
     raw_text = contract.read_text(encoding="utf-8")
     return build_service(load_config()).analyse(
         raw_text,
         contract_id=args.contract_id or contract.stem,
+        actor=actor,
         parties=args.party,
         analysis_date=args.analysis_date,
     )
 
 
 def _resume(args: argparse.Namespace) -> dict:
+    actor = _cli_actor(args, "resume", decides=True)
     answer = {
         "decision": args.decision,
-        "reviewer": args.reviewer,
+        "acteur": actor.model_dump(mode="json"),
         "reason": args.reason,
         "overrides_block": args.overrides_block,
     }
@@ -366,7 +422,8 @@ def _history(args: argparse.Namespace) -> dict:
 
 def _expire(args: argparse.Namespace) -> dict:
     older_than = expiry.parse_duration(args.older_than)
-    at, expired = build_service(load_config()).expire(older_than)
+    actor = _cli_actor(args, "expire", decides=True)
+    at, expired = build_service(load_config()).expire(older_than, actor)
     return {
         "older_than": args.older_than,
         "now": at.isoformat(),
@@ -388,6 +445,11 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
     l'interface ; elle n'écoute donc que sur 127.0.0.1, et vérifie le jeton d'identité
     de chaque requête. Toute option manquante ou contradictoire arrête le lancement."""
     if args.identite == "aucune":
+        if in_cluster():
+            raise web_security.WebConfigError(
+                "dans le cluster, l'interface exige --identite en-tetes : jamais "
+                "d'interface locale, non authentifiée, derrière un réseau"
+            )
         return None
     if args.host != "127.0.0.1":
         raise web_security.WebConfigError(
@@ -622,6 +684,14 @@ def build_parser() -> argparse.ArgumentParser:
         "identifiants administrateur ; rejouable, supprime les extraits disparus",
     ).set_defaults(handler=_ingest)
 
+    OPERATOR_HELP = (
+        "qui agit : identifiant d'opérateur non nominatif (minuscules, chiffres, "
+        "tirets), scellé ; jamais un nom ni une adresse"
+    )
+    URGENCY_HELP = (
+        "accès d'urgence, avec son motif (sans donnée personnelle) : seul moyen de "
+        "décider par la CLI dans le cluster ; tracé au journal des accès et scellé"
+    )
     run_notice = (
         "Masque le contrat, puis extrait ses clauses, interroge le juge du CRAG et rédige "
         "l'explication par le fournisseur LLM de la configuration (appels payants, clé "
@@ -649,6 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="date à laquelle les versions des textes sont jugées, AAAA-MM-JJ "
         "(défaut : aujourd'hui, heure de Paris)",
     )
+    run.add_argument("--operateur", required=True, help=OPERATOR_HELP)
     run.set_defaults(handler=_run)
 
     resume = sub.add_parser(
@@ -658,8 +729,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resume.add_argument("thread_id")
     resume.add_argument("--decision", required=True, choices=get_args(Decision))
-    resume.add_argument("--reviewer", required=True)
+    resume.add_argument("--operateur", required=True, help=OPERATOR_HELP)
     resume.add_argument("--reason", required=True)
+    resume.add_argument("--urgence", metavar="MOTIF", help=URGENCY_HELP)
     resume.add_argument(
         "--overrides-block",
         action="store_true",
@@ -680,6 +752,8 @@ def build_parser() -> argparse.ArgumentParser:
         "par le gabarit, sans LLM",
     )
     expire.add_argument("--older-than", required=True, help="délai : 24h, 30m, 2d…")
+    expire.add_argument("--operateur", required=True, help=OPERATOR_HELP)
+    expire.add_argument("--urgence", metavar="MOTIF", help=URGENCY_HELP)
     expire.set_defaults(handler=_expire)
 
     verify = sub.add_parser(

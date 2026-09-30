@@ -40,7 +40,8 @@ from starlette.exceptions import HTTPException
 from cdg.adapters.web import acces, presentation, security
 from cdg.application import demo_set
 from cdg.application.service import ContractService
-from cdg.domain import audit
+from cdg.domain import audit, authorization
+from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import ContractIdError, check_contract_id
 from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
@@ -142,6 +143,8 @@ def create_app(
         quotes_of=presentation.quotes_of,
         reference_rows=presentation.reference_rows,
         short_hash=presentation.short_hash,
+        actor_label=presentation.actor_label,
+        human_label=presentation.human_label,
         contract_path=presentation.contract_path,
     )
     templates = Jinja2Templates(env=env)
@@ -250,6 +253,14 @@ def create_app(
             response = await call_next(request)
         response.headers.update(security.HEADERS)
         return response
+
+    def actor(request: Request) -> Actor:
+        """Qui agit : l'identité vérifiée derrière oauth2-proxy ; sinon l'interface
+        locale, non authentifiée (poste seulement : refusée au démarrage dans le
+        cluster)."""
+        if authentication is None:
+            return Actor(canal="locale", authentifie=False)
+        return authorization.interface_actor(request.state.identity)
 
     def authenticate(request: Request) -> Response | None:
         """Jeton d'identité vérifié, ou la réponse de refus (401, 503), tracée."""
@@ -397,7 +408,11 @@ def create_app(
             return analysis_page(request, str(exc), 400)
         try:
             service.analyse(
-                text, contract_id=contract_id, parties=parties, analysis_date=on
+                text,
+                contract_id=contract_id,
+                actor=actor(request),
+                parties=parties,
+                analysis_date=on,
             )
         except (ThreadError, ContractBusy) as exc:
             return analysis_page(request, str(exc), 409)
@@ -442,7 +457,7 @@ def create_app(
     def decision(request: Request, thread_id: str, form: CheckedForm) -> Response:
         answer = {
             "decision": _text(form, "decision"),
-            "reviewer": _text(form, "relecteur"),
+            "acteur": actor(request).model_dump(mode="json"),
             "reason": _text(form, "motif"),
             "overrides_block": form.get("levee") == "oui",
         }
@@ -519,7 +534,7 @@ def create_app(
         hours = int(raw)
         if form.get("confirme") != "oui":
             return page(request, "expiration_confirmation.html", {"hours": hours})
-        at, expired = service.expire(timedelta(hours=hours))
+        at, expired = service.expire(timedelta(hours=hours), actor(request))
         return page(
             request,
             "expiration_resultat.html",

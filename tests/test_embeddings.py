@@ -255,9 +255,9 @@ if sys.argv[1] == "garde":
     socket.getaddrinfo = refuse
     socket.socket.connect = refuse
     socket.socket.connect_ex = refuse
-from doubles import CONTRACT_TEXT
+from doubles import ACTEUR_ANALYSTE, CONTRACT_TEXT
 from test_service import make_service
-make_service().analyse(CONTRACT_TEXT, contract_id="c-reseau")
+make_service().analyse(CONTRACT_TEXT, contract_id="c-reseau", actor=ACTEUR_ANALYSTE)
 from langchain_core.tracers.langchain import wait_for_all_tracers
 wait_for_all_tracers()  # envoie ce qui attendrait encore, si un client existait
 print(json.dumps({"tentatives": attempts}))

@@ -18,7 +18,7 @@
   <p class="error">Rejeté à l'entrée : {{ s.reject_reason }}</p>
   {% endif %}
   {% if s.human %}
-  <p class="meta">Décision humaine : {{ decisions[s.human.decision] }}, par {{ s.human.reviewer }} ({{ s.human.source }}) : {{ s.human.reason }}{% if s.human.overrides_block %} ; blocage dur levé{% endif %}.</p>
+  <p class="meta">Décision humaine : {{ decisions[s.human.decision] }}, par {{ human_label(s.human) }} ({{ s.human.source }}) : {{ s.human.reason }}{% if s.human.overrides_block %} ; blocage dur levé{% endif %}.</p>
   {% endif %}
 </header>
 
@@ -54,8 +54,6 @@
     </select>
     <label for="motif">Motif (obligatoire)</label>
     <textarea id="motif" name="motif" rows="3" required></textarea>
-    <label for="relecteur">Relecteur (nom)</label>
-    <input type="text" id="relecteur" name="relecteur" required autocomplete="name">
     {% if d.levee_possible %}
     <div class="warning">
       <input type="checkbox" id="levee" name="levee" value="oui" aria-describedby="levee-aide">

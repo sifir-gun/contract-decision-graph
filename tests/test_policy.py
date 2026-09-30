@@ -3,11 +3,12 @@
 import json
 
 import pytest
-from doubles import verdicts
+from doubles import ACTEUR_ANALYSTE, ACTEUR_RELECTEUR, OPERATEUR, answer, verdicts
 
 from cdg.domain import policy
+from cdg.domain.authorization import Actor
 from cdg.domain.config import load_config
-from cdg.domain.models import HumanDecision
+from cdg.domain.models import HumanReview
 
 CONFIG = load_config()
 BLOCKED = verdicts(juridique={"score": 0.5, "hard_block": True})
@@ -16,13 +17,13 @@ CLEAN = verdicts()
 
 def human(
     decision="GO",
-    reviewer="relecteur-synth",
     reason="marge jugée acceptable",
     overrides_block=False,
-) -> HumanDecision:
-    return HumanDecision(
+    acteur=ACTEUR_RELECTEUR,
+) -> HumanReview:
+    return HumanReview(
         decision=decision,
-        reviewer=reviewer,
+        acteur=acteur,
         reason=reason,
         overrides_block=overrides_block,
     )
@@ -75,39 +76,40 @@ def test_demande_arrondit_les_scores():
 
 @pytest.mark.parametrize("decision", ["GO", "GO_RESERVES", "NO_GO"])
 def test_decision_autorisee_acceptee_sans_blocage(decision):
-    assert policy.check(human(decision), CLEAN, CONFIG) is None
+    assert policy.check(human(decision), CLEAN, CONFIG, ACTEUR_ANALYSTE) is None
 
 
 def test_escalade_refusee_l_humain_doit_trancher():
-    assert "ESCALADE" in policy.check(human("ESCALADE"), CLEAN, CONFIG)
+    assert "ESCALADE" in policy.check(human("ESCALADE"), CLEAN, CONFIG, ACTEUR_ANALYSTE)
 
 
-@pytest.mark.parametrize("field", ["reviewer", "reason"])
-def test_relecteur_et_motif_obligatoires(field):
-    assert field in policy.check(human(**{field: "   "}), CLEAN, CONFIG)
+def test_motif_obligatoire():
+    assert "reason" in policy.check(human(reason="   "), CLEAN, CONFIG, ACTEUR_ANALYSTE)
 
 
 # critère n° 12 : levée de blocage dur
 @pytest.mark.parametrize("decision", ["GO", "GO_RESERVES"])
 def test_12_levee_de_blocage_sans_overrides_block_refusee(decision):
-    assert "overrides_block" in policy.check(human(decision), BLOCKED, CONFIG)
+    assert "overrides_block" in policy.check(
+        human(decision), BLOCKED, CONFIG, ACTEUR_ANALYSTE
+    )
 
 
 def test_12_levee_de_blocage_avec_overrides_block_et_motif_acceptee():
     h = human("GO", reason="plafond négocié par avenant", overrides_block=True)
-    assert policy.check(h, BLOCKED, CONFIG) is None
+    assert policy.check(h, BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
 
 
 def test_no_go_sur_blocage_accepte_sans_levee():
-    assert policy.check(human("NO_GO"), BLOCKED, CONFIG) is None
+    assert policy.check(human("NO_GO"), BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
 
 
 def test_overrides_block_sans_blocage_a_lever_refuse():
     assert "overrides_block" in policy.check(
-        human("GO", overrides_block=True), CLEAN, CONFIG
+        human("GO", overrides_block=True), CLEAN, CONFIG, ACTEUR_ANALYSTE
     )
     assert "overrides_block" in policy.check(
-        human("NO_GO", overrides_block=True), BLOCKED, CONFIG
+        human("NO_GO", overrides_block=True), BLOCKED, CONFIG, ACTEUR_ANALYSTE
     )
 
 
@@ -120,45 +122,72 @@ def test_levee_interdite_par_la_configuration():
         }
     )
     h = human("GO", overrides_block=True)
-    assert "interdite" in policy.check(h, BLOCKED, cfg)
-    assert policy.check(human("NO_GO"), BLOCKED, cfg) is None
+    assert "interdite" in policy.check(h, BLOCKED, cfg, ACTEUR_ANALYSTE)
+    assert policy.check(human("NO_GO"), BLOCKED, cfg, ACTEUR_ANALYSTE) is None
 
 
 # --- Réponse brute reçue à la reprise ---------------------------------------------------
 
 
 def test_review_accepte_une_reponse_valide():
-    payload = {
-        "decision": "NO_GO",
-        "reviewer": "relecteur-synth",
-        "reason": "risque trop élevé",
-    }
-    decision, error = policy.review(payload, CLEAN, CONFIG)
-    assert error is None and decision == HumanDecision(**payload)
+    payload = answer("NO_GO", "risque trop élevé")
+    decision, error = policy.review(payload, CLEAN, CONFIG, ACTEUR_ANALYSTE)
+    assert error is None and decision == HumanReview(**payload)
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"decision": "PEUT_ETRE", "reviewer": "r", "reason": "m"},  # décision inconnue
-        {"decision": "GO", "reason": "m"},  # relecteur manquant
+        answer("PEUT_ETRE", "m"),  # décision inconnue
+        {"decision": "GO", "reason": "m"},  # acteur manquant
+        {**answer("GO", "m"), "reviewer": "Camille"},  # relecteur nommé : refusé
         "GO",  # pas un objet
         None,
     ],
 )
 def test_review_signale_une_reponse_mal_formee_sans_lever(payload):
-    decision, error = policy.review(payload, CLEAN, CONFIG)
+    decision, error = policy.review(payload, CLEAN, CONFIG, ACTEUR_ANALYSTE)
     assert decision is None and error.startswith("réponse invalide")
 
 
 def test_review_applique_la_politique():
-    payload = {"decision": "GO", "reviewer": "r", "reason": "m"}
-    decision, error = policy.review(payload, BLOCKED, CONFIG)
+    payload = answer("GO", "m")
+    decision, error = policy.review(payload, BLOCKED, CONFIG, ACTEUR_ANALYSTE)
     assert decision is None and "overrides_block" in error
 
 
 def test_decision_systeme_d_expiration_acceptee_meme_sur_blocage():
-    h = HumanDecision(
-        decision="NO_GO", reviewer="systeme:expire", reason="timeout", source="systeme"
+    h = HumanReview(
+        decision="NO_GO", acteur=ACTEUR_ANALYSTE, reason="timeout", source="systeme"
     )
-    assert policy.check(h, BLOCKED, CONFIG) is None
+    assert policy.check(h, BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
+
+
+# --- quatre yeux, second contrôle (le premier est dans l'interface) ------------------------
+
+
+def test_quatre_yeux_le_relecteur_qui_a_lance_l_analyse_est_redemande():
+    h = human("NO_GO", acteur=ACTEUR_ANALYSTE)
+    assert "a lancé l'analyse" in policy.check(h, CLEAN, CONFIG, ACTEUR_ANALYSTE)
+
+
+def test_quatre_yeux_contournement_par_la_cli_refuse_sauf_en_urgence():
+    assert "autre canal" not in (
+        policy.check(human("NO_GO", acteur=OPERATEUR), CLEAN, CONFIG, ACTEUR_ANALYSTE)
+        or ""
+    )  # CLI hors du cluster : non authentifiée, aucune identité à comparer
+    analyse_cli = Actor(canal="cli", authentifie=False, operateur="lot-nocturne")
+    refused = policy.check(human("NO_GO"), CLEAN, CONFIG, analyse_cli)
+    assert "autre canal" in refused
+    urgence = Actor(
+        canal="cli", authentifie=False, operateur="astreinte-1", urgence=True
+    )
+    assert policy.check(human("NO_GO", acteur=urgence), CLEAN, CONFIG, None) is None
+
+
+def test_decision_systeme_hors_quatre_yeux():
+    """L'expiration (NO_GO système) n'est pas une revue : pas de quatre yeux."""
+    h = HumanReview(
+        decision="NO_GO", acteur=ACTEUR_ANALYSTE, reason="timeout", source="systeme"
+    )
+    assert policy.check(h, CLEAN, CONFIG, ACTEUR_ANALYSTE) is None

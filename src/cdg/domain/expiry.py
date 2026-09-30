@@ -7,7 +7,8 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
-EXPIRE_REVIEWER = "systeme:expire"
+from cdg.domain.authorization import Actor
+
 _UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 
 
@@ -37,11 +38,14 @@ def expired(
     ]
 
 
-def system_decision(waited: timedelta, older_than: timedelta) -> dict[str, Any]:
-    """Réponse de reprise : NO_GO système, motif timeout, tracée comme telle."""
+def system_decision(
+    waited: timedelta, older_than: timedelta, actor: Actor
+) -> dict[str, Any]:
+    """Réponse de reprise : NO_GO système, motif timeout, tracée comme telle, avec
+    l'acteur qui a lancé l'expiration."""
     return {
         "decision": "NO_GO",
-        "reviewer": EXPIRE_REVIEWER,
+        "acteur": actor.model_dump(mode="json"),
         "source": "systeme",
         "overrides_block": False,
         "reason": f"timeout : en attente depuis {format_duration(waited)}, "

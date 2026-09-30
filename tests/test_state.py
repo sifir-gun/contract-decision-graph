@@ -5,6 +5,7 @@ from datetime import date
 from typing import get_args, get_type_hints
 
 import pytest
+from doubles import ACTEUR_RELECTEUR
 from pydantic import ValidationError
 
 from cdg.application.state import AnalystInput, ContractState, Route
@@ -22,6 +23,7 @@ from cdg.domain.models import (
     Decision,
     Domain,
     HumanDecision,
+    HumanReview,
     NodeFailure,
     RetrievalTrace,
     Usage,
@@ -171,7 +173,7 @@ def test_etat_prive_des_analystes():
     assert get_type_hints(ContractState)["analysis_date"] is date
 
 
-# --- HumanDecision.source : décision humaine ou système ---------------------------
+# --- HumanDecision (format v1, figé : anciens états) ; source humaine ou système --------
 
 
 def test_source_humaine_par_defaut():
@@ -212,6 +214,26 @@ def test_decision_systeme_exige_un_relecteur_systeme():
 def test_un_humain_ne_peut_pas_se_dire_systeme():
     with pytest.raises(ValidationError, match="réservé"):
         HumanDecision(decision="NO_GO", reviewer="systeme:expire", reason="m")
+
+
+# --- HumanReview (format v2, PR D2) : l'acteur, jamais de nom ----------------------------
+
+
+def test_revue_v2_acteur_sans_relecteur_nomme():
+    h = HumanReview(decision="NO_GO", acteur=ACTEUR_RELECTEUR, reason="motif")
+    assert (h.source, h.overrides_block) == ("humain", False)
+    with pytest.raises(ValidationError):
+        HumanReview(
+            decision="NO_GO", acteur=ACTEUR_RELECTEUR, reason="m", reviewer="Camille"
+        )
+
+
+@pytest.mark.parametrize("decision", ["GO", "GO_RESERVES", "ESCALADE"])
+def test_revue_v2_systeme_ne_peut_etre_que_no_go(decision):
+    with pytest.raises(ValidationError, match="NO_GO"):
+        HumanReview(
+            decision=decision, acteur=ACTEUR_RELECTEUR, reason="t", source="systeme"
+        )
 
 
 # --- Clauses par domaine, résumé du CRAG ----------------------------------------------
