@@ -34,7 +34,7 @@ import yaml
 pytestmark = pytest.mark.cluster
 
 ROOT = Path(__file__).resolve().parents[1]
-TOKEN = re.compile(r'name="csrf" value="([0-9a-f]{64})"')
+TOKEN = re.compile(r'name="csrf" value="([0-9]+\.[0-9a-f]{64})"')
 GO = "demo-01-go-maintenance"  # sans tentative d'instruction : scellé sans revue
 PIEGE = "demo-11-piege-injection"  # tentative d'instruction : revue humaine imposée
 WEB = "app.kubernetes.io/instance=cdg,app.kubernetes.io/component=web"
@@ -965,7 +965,7 @@ import httpx
 
 CA, PUBLIC, DEX = "/run/autorites/ca.crt", "https://cdg.test", "dex.cdg.test"
 FORM = re.compile(r'<form[^>]*action="([^"]+)"')
-CSRF = re.compile(r'name="csrf" value="([0-9a-f]{64})"')
+CSRF = re.compile(r'name="csrf" value="([0-9]+\.[0-9a-f]{64})"')
 NEXT = re.compile(r'<a id="suite" href="([^"]+)"')
 USER = re.compile(r'class="utilisateur">([^<]*)<')
 REQUEST = re.compile(r'name="req" value="([^"]+)"')
@@ -1234,6 +1234,25 @@ def test_connexion_par_le_navigateur_cookie_de_session_securise(clients):
         parts = {part.strip().lower() for part in attributes.split(";")}
         assert {"secure", "httponly", "samesite=lax"} <= parts, attributes
         assert "max-age=120" in parts, attributes  # session de test : 2 minutes
+
+
+def test_formulaire_d_un_replica_accepte_par_l_autre():
+    """Clés CSRF partagées (Secret monté) : le formulaire de déconnexion, servi par un
+    réplica, est accepté par l'autre ; le même jeton altéré est refusé (403)."""
+    pods = wait_for(lambda: len(web_pods()) == 2 and web_pods(), "deux pods prêts")
+    first, second = (p["metadata"]["name"] for p in pods)
+    with interface(first) as source:
+        page = source.get("/")
+        assert page.status_code == 200, page.text
+        token = TOKEN.search(page.text)[1]
+        cookie = source.headers["cookie"]  # cdg_csrf, posé par le premier réplica
+    forged = token[:-1] + ("1" if token[-1] == "0" else "0")
+    with interface(second) as target:
+        target.headers["cookie"] = cookie
+        accepted = target.post("/deconnexion", data={"csrf": token})
+        refused = target.post("/deconnexion", data={"csrf": forged})
+    assert accepted.status_code == 200 and 'id="suite"' in accepted.text
+    assert refused.status_code == 403
 
 
 def test_en_tetes_et_jeton_forges_refuses(clients):

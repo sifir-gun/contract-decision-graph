@@ -797,6 +797,11 @@ def install(profile: Profile, folder: Path) -> None:
         },
     )
     _secret(NAMESPACE, "cdg-oidc", oidc)
+    # clé CSRF partagée par les réplicas de l'interface (rotation : docs/exploitation.md)
+    csrf = generated(
+        NAMESPACE, "cdg-csrf", {"courante": lambda: secrets.token_urlsafe(32)}
+    )
+    _secret(NAMESPACE, "cdg-csrf", csrf)
     helm(
         "upgrade",
         "--install",
