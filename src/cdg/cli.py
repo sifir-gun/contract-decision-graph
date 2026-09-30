@@ -249,6 +249,10 @@ def _setup_db(args: argparse.Namespace) -> dict:
         "migrations": applied,
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
         "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
+        "archive": {
+            "table": "audit_decisions_configurations",
+            "droits": ["SELECT", "INSERT"],
+        },
         "reprises": {
             "table": "contract_resumes",
             "droits": ["SELECT", "INSERT", "UPDATE"],
