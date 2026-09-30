@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Déconnexion{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="0; url={{ target }}">{% endblock %}
+{% block content %}
+<h1>Déconnexion</h1>
+<p>Session de l'interface fermée. <a id="suite" href="{{ target }}">Continuer</a> si la page ne change pas d'elle-même.</p>
+{% endblock %}

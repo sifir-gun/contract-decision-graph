@@ -38,7 +38,7 @@ Aucune ressource externe : ni CDN, ni police web, ni outil de mesure d'audience.
 - **En-têtes** : CSP stricte sans script ni style en ligne ; `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy: same-origin`, `Cache-Control: no-store`. HTMX est réglé pour tenir cette CSP : pas d'`eval`, pas de styles injectés, pas de scripts dans les réponses. Il ne garde pas non plus de copie des pages dans le stockage local du navigateur.
 - **CSRF** sur tout formulaire qui modifie (analyse, décision humaine, expiration) :
   - un cookie aléatoire (`HttpOnly`, `SameSite=Strict`) ;
-  - dans le formulaire, son HMAC par un secret propre au processus ;
+  - dans le formulaire, son HMAC par un secret propre au processus ; depuis la PR D1 (ADR 005), un jeton horodaté (8 heures), signé par des clés partagées entre réplicas quand l'interface en a plusieurs, relues à chaque formulaire pour une rotation sans coupure ;
   - l'en-tête `Origin`, s'il est présent, doit être celui de l'interface.
 - **Échappement** : tout texte issu d'un contrat ou d'un LLM est échappé par Jinja2 ; les gabarits n'emploient jamais le filtre `safe`, et un test le vérifie. Le surlignage des citations est le seul HTML construit en Python : texte et citations sont échappés d'abord, puis entourés de balises fixes. Des tests avec un contrat, une citation, une explication et un nom de relecteur qui contiennent du HTML et du JavaScript le vérifient.
 - **Texte original jamais conservé** :

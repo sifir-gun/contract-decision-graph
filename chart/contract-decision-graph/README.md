@@ -1,6 +1,6 @@
 # Chart Helm contract-decision-graph
 
-Déploiement de contract-decision-graph sur Kubernetes (k3s), selon l'ADR 005 : interface web, sondes de santé, tâches de migration, d'ingestion et de contrôle de configuration, règles réseau. Aucune entrée réseau : l'interface n'écoute que sur 127.0.0.1 dans le pod, jusqu'à l'authentification (PR D).
+Déploiement de contract-decision-graph sur Kubernetes (k3s), selon l'ADR 005 : interface web, sondes de santé, tâches de migration, d'ingestion et de contrôle de configuration, règles réseau. L'interface n'écoute que sur 127.0.0.1 dans le pod ; avec l'authentification (PR D1), oauth2-proxy, en conteneur annexe, en est le seul chemin, derrière un Ingress Traefik en TLS. Sans elle, aucune entrée réseau.
 
 ## Prérequis
 
@@ -17,6 +17,8 @@ Déploiement de contract-decision-graph sur Kubernetes (k3s), selon l'ADR 005 : 
 
 - **Secrets**, créés à part (jamais dans les valeurs), montés en fichiers en lecture seule dans `/run/secrets/cdg`, jamais en variables d'environnement : clé de Mistral (`cdg-mistral`, clé `MISTRAL_API_KEY`), mot de passe d'`app_role` (`cdg-base-application`, clé `password` ; avec CloudNativePG, un Secret `kubernetes.io/basic-auth` dont `username` vaut `app_role`, étiqueté `cnpg.io/reload: "true"`, que l'opérateur lit aussi : chart `cdg-postgres`), administrateur de PostgreSQL (`cdg-base-administrateur`, clés `username` et `password` ; avec CloudNativePG, le Secret `cdg-postgres-superuser` qu'il crée, par `base.administrateur.secret`).
 - **PostgreSQL** avec pgvector et le **proxy de sortie**, joignables aux adresses des valeurs `base` et `proxy` : charts `chart/cdg-postgres` (CloudNativePG, sauvegardes) et `chart/cdg-proxy` (Smokescreen), installés avant l'application. Le chart de la base exige CloudNativePG, son greffon Barman Cloud et **cert-manager**, que le greffon exige : prérequis de production (`chart/cdg-postgres/README.md`).
+
+- **Avec l'authentification et l'entrée** (`authentification.active`, `ingress.active`) : Traefik 3.7.13 au moins (CRD `Middleware` et `TLSOption`, IngressClass `traefik`), un émetteur de cert-manager ou un Secret TLS, un fournisseur d'identité OIDC joignable par le proxy de sortie, le Secret `cdg-oidc` (`client-secret`, `cookie-secret`) et le Secret `cdg-csrf` (`courante`, clé des formulaires partagée par les réplicas) : `docs/exploitation.md`, « Authentification et entrée ».
 
 ## Installation et mise à jour
 
@@ -43,6 +45,15 @@ Avant chaque mise à jour, la tâche de contrôle de configuration refuse de dé
 | `embedding.lot` | `16` | Taille des lots d'embeddings : 2,9 Gio au pic de l'ingestion (fastembed en prend 256 par défaut). |
 | `llm.adresseApi` | vide | Adresse de l'API de Mistral ; vide, celle du SDK. Le proxy ne laisse passer que Mistral. |
 | `configuration.decision` | vide | Autre configuration de décision, en texte ; vide, `files/decision.yaml`. |
+| `authentification.active` | `false` | oauth2-proxy en conteneur annexe natif, démarré avant l'interface, arrêté après elle ; l'interface vérifie le jeton de chaque requête (`web --identite en-tetes`). Exige `emetteur` (HTTPS), `clientId` (audience) et `image.digest`. |
+| `authentification.session` | `8h`, revalidée toutes les `5m` | Durée de la session d'oauth2-proxy et revalidation auprès du fournisseur. |
+| `authentification.secretCsrf` | `cdg-csrf` | Clés des formulaires, partagées par les réplicas : `courante`, et `precedente` pendant une rotation ; relues sans redémarrage. |
+| `authentification.accord` | `auto` | Écran d'accord du fournisseur (`approval_prompt` d'oauth2-proxy) : `auto` ne le force pas, `force` le demande à chaque connexion. |
+| `authentification.deconnexionFournisseur` | `false` | Fermer aussi la session chez le fournisseur, s'il publie une fin de session. |
+| `authentification.autorites` | vide | ConfigMap (clé `ca.crt`) des autorités du fournisseur ; vide, celles du système. |
+| `ingress.active` | `false` | Ingress Traefik en TLS ; exige l'authentification et `ingress.hote`. |
+| `ingress.emetteurCertificat` | vide | ClusterIssuer de cert-manager pour `ingress.secretTls` ; vide, Secret fourni. |
+| `ingress.debit` | 20 par seconde, rafales de 40 | Limite par adresse du client. |
 | `taches.*` | actives | Migrations (avant), ingestion (après : plus de 10 minutes ; `taches.ingestion.active=false` pour une mise à jour qui ne touche pas au corpus), contrôle de configuration (avant une mise à jour). |
 
 Le schéma complet est `values.schema.json` : toute valeur inconnue ou mal formée fait échouer l'installation.
@@ -56,4 +67,5 @@ Par `scripts/chart.py` (helm lint, kubeconform, kube-linter) et `tests/test_char
 - interface : mise à jour progressive sans interruption, budget d'interruption, répartition sur des nœuds différents (contraintes de topologie, anti-affinité préférée), trois sondes, pause avant l'arrêt et délai de grâce calculé ;
 - configuration en ConfigMap, dont l'empreinte relance les pods ;
 - tâches et autres ressources de crochet supprimées après leur crochet, journaux des tâches recopiés sur la sortie de Helm : `helm uninstall` ne laisse rien, hormis une tâche en échec gardée pour le diagnostic (nettoyage dans `docs/exploitation.md`) ;
-- réseau : tout refusé par défaut ; en sortie, DNS, PostgreSQL et proxy seulement ; jamais le port 443 ouvert largement.
+- réseau : tout refusé par défaut ; en sortie, DNS, PostgreSQL et proxy seulement ; jamais le port 443 ouvert largement ;
+- authentification (`tests/test_chart_authentification.py`) : oauth2-proxy par empreinte, conteneur annexe natif (conteneur d'initialisation redémarré, sonde de démarrage), seul chemin vers l'interface, jeton transmis et en-têtes du client retirés, cookie `Secure`, `HttpOnly`, `SameSite=Lax`, journal de connexion réduit au `sub`, secrets en fichiers dans son seul conteneur ; clés CSRF partagées dans l'interface seule, montées sans `subPath` (mises à jour sans redémarrage) ; entrée refusée sans authentification ; TLS 1.2 au moins, HSTS, HTTP redirigé, taille maximale alignée sur l'interface, débit par adresse du client ; port d'oauth2-proxy ouvert aux seuls pods de Traefik.

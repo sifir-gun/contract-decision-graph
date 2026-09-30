@@ -1,0 +1,141 @@
+# Fournisseur d'identité de test (PR D1, ADR 005) : Dex v2.45.1, image signée et vérifiée
+# (scripts/cluster.py), dans l'espace de test seulement ; en production, le fournisseur
+# OIDC de l'organisation. Stockage en mémoire ; octroi par mot de passe pour les scénarios.
+# Utilisateurs de test : adresses réservées (RFC 2606), mots de passe de test tirés pour
+# ce cluster jetable (scripts/cluster.py, TEST_USERS), hachés en bcrypt.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dex-configuration
+  namespace: cdg-tests
+stringData:
+  config.yaml: |
+    issuer: https://dex.cdg.test
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+      passwordConnector: local
+      responseTypes: [code]
+    expiry:
+      idTokens: "10m"
+      refreshTokens:
+        validIfNotUsedFor: "1h"
+        absoluteLifetime: "8h"
+    enablePasswordDB: true
+    staticClients:
+      - id: cdg-interface
+        name: contract-decision-graph
+        secret: ${CLIENT_SECRET}
+        redirectURIs:
+          - https://cdg.test/oauth2/callback
+    staticPasswords:
+      - email: analyste@example.org
+        hash: "$2a$10$wxDVCJcmJ/Xzf7jwmD6SJuaVTIDBDTMIz/kapQZI9Wn8xqF.8tUPa"
+        username: analyste
+        userID: 7f3c2a10-0b1e-4c6d-9a51-3e2f8d4b6a01
+        groups: [cdg-analystes]
+      - email: relecteur@example.org
+        hash: "$2a$10$EBIpgSV0enTyp10x1g/XVe1ARUwV7kYaAo9PVt1Rkyf3Js2.iLPVO"
+        username: relecteur
+        userID: 2b9d7e44-5c0a-4f18-8e37-9d1c6a2f4b02
+        groups: [cdg-relecteurs]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: cdg-tests
+  labels:
+    app: dex
+spec:
+  replicas: 1
+  # clés en mémoire, propres à chaque pod : jamais deux Dex à la fois, dont les clés
+  # différeraient derrière le même nom (redémarrage du scénario de rotation)
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dex
+          image: ${DEX}
+          command: ["/usr/local/bin/dex", "serve", "/etc/dex/config.yaml"]
+          ports:
+            - name: http
+              containerPort: 5556
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 3
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/dex
+              readOnly: true
+      volumes:
+        - name: configuration
+          secret:
+            secretName: dex-configuration
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: cdg-tests
+spec:
+  selector:
+    app: dex
+  ports:
+    - name: http
+      port: 5556
+      targetPort: http
+---
+# derrière Traefik, en TLS (autorité de test) : même adresse d'émetteur pour le navigateur,
+# oauth2-proxy et l'application
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dex
+  namespace: cdg-tests
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: cdg-ca
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [dex.cdg.test]
+      secretName: dex-tls
+  rules:
+    - host: dex.cdg.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dex
+                port:
+                  number: 5556

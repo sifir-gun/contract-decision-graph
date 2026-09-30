@@ -1,6 +1,8 @@
 {{- $reel := eq .Values.mode "reel" -}}
 {{- $ressources := ternary .Values.ressources.reel .Values.ressources.demo $reel -}}
 {{- $web := dict "racine" . "composant" "web" -}}
+{{- $auth := .Values.authentification.active -}}
+{{- include "cdg.authentification.valider" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,11 +63,61 @@ spec:
           labelSelector:
             matchLabels:
               {{- include "cdg.selecteur" $web | nindent 14 }}
-      {{- if $reel }}
-      {{- with (include "cdg.initCopieModele" .) }}
+      {{- $copie := ternary (include "cdg.initCopieModele" .) "" $reel }}
+      {{- if or $copie $auth }}
       initContainers:
+        {{- with $copie }}
         {{- . | nindent 8 }}
-      {{- end }}
+        {{- end }}
+        {{- if $auth }}
+        # seul chemin vers l'interface (PR D1) : authentifie, puis transmet le jeton
+        # d'identité signé à l'interface, sur la boucle locale du pod. Conteneur annexe
+        # natif (conteneur d'initialisation redémarré) : l'interface ne démarre qu'une
+        # fois lui prêt, et le kubelet ne l'arrête qu'après elle (ADR 005)
+        - name: oauth2-proxy
+          restartPolicy: Always
+          image: {{ include "cdg.imageOauth2Proxy" . }}
+          imagePullPolicy: {{ .Values.authentification.image.pullPolicy }}
+          args:
+            {{- include "cdg.argsOauth2Proxy" . | nindent 12 }}
+          env:
+            # fournisseur d'identité par le proxy de sortie ; l'interface, en direct
+            - name: HTTPS_PROXY
+              value: {{ .Values.proxy.url | quote }}
+            - name: NO_PROXY
+              value: "127.0.0.1,localhost"
+          ports:
+            - name: http
+              containerPort: {{ .Values.authentification.port }}
+              protocol: TCP
+          startupProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 1
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.authentification.ressources | nindent 12 }}
+          securityContext:
+            {{- include "cdg.securiteConteneur" . | nindent 12 }}
+          volumeMounts:
+            - name: secrets-oauth2-proxy
+              mountPath: /run/secrets/oauth2-proxy
+              readOnly: true
+            {{- if .Values.authentification.autorites }}
+            - name: autorites
+              mountPath: /run/autorites
+              readOnly: true
+            {{- end }}
+        {{- end }}
       {{- end }}
       containers:
         - name: web
@@ -86,8 +138,8 @@ spec:
             {{- if not $reel }}
             - --demo
             {{- end }}
-            # l'interface écoute sur 127.0.0.1 (ADR 004) : jointe par le mandataire
-            # d'authentification du même pod (PR D), jamais par le réseau
+            # l'interface écoute sur 127.0.0.1 (ADR 004) : jointe par oauth2-proxy, dans
+            # le même pod (PR D1), jamais par le réseau
             - --port-sante
             - {{ .Values.web.portSante | quote }}
             - --hote-sante
@@ -96,8 +148,30 @@ spec:
             - {{ .Values.web.delaiArret | quote }}
             - --reprise-intervalle
             - {{ .Values.web.repriseIntervalle | quote }}
-          {{- if $reel }}
+            {{- if $auth }}
+            # derrière oauth2-proxy : jeton d'identité vérifié à chaque requête (PR D1)
+            - --identite
+            - en-tetes
+            - --oidc-emetteur
+            - {{ .Values.authentification.emetteur | quote }}
+            - --oidc-audience
+            - {{ .Values.authentification.clientId | quote }}
+            - --adresse-publique
+            - {{ include "cdg.adressePublique" . | quote }}
+            # clés CSRF partagées entre réplicas, relues à chaque usage (rotation)
+            - --cles-csrf
+            - /run/secrets/csrf
+            {{- if .Values.authentification.autorites }}
+            - --oidc-ca
+            - /run/autorites/ca.crt
+            {{- end }}
+            {{- if .Values.authentification.deconnexionFournisseur }}
+            - --deconnexion-fournisseur
+            {{- end }}
+            {{- end }}
+          {{- if or $reel $auth }}
           env:
+            {{- if $reel }}
             {{- include "cdg.envBase" . | nindent 12 }}
             - name: EMBEDDING_CACHE_DIR
               value: /modele
@@ -105,13 +179,15 @@ spec:
             - name: MISTRAL_SERVER_URL
               value: {{ . | quote }}
             {{- end }}
-            # seule sortie vers Internet : le proxy, qui ne laisse passer que Mistral
+            {{- end }}
+            # seule sortie vers Internet : le proxy, qui ne laisse passer que Mistral et,
+            # avec l'authentification, le fournisseur d'identité (clés publiques)
             - name: HTTPS_PROXY
               value: {{ .Values.proxy.url | quote }}
             - name: HTTP_PROXY
               value: {{ .Values.proxy.url | quote }}
             - name: NO_PROXY
-              value: {{ .Values.base.hote | quote }}
+              value: {{ ternary (printf "%s,127.0.0.1,localhost" .Values.base.hote) "127.0.0.1,localhost" $reel | quote }}
           {{- end }}
           ports:
             - name: sante
@@ -153,6 +229,17 @@ spec:
               readOnly: true
             {{- include "cdg.montageSecrets" . | nindent 12 }}
             {{- end }}
+            {{- if and $auth .Values.authentification.autorites }}
+            - name: autorites
+              mountPath: /run/autorites
+              readOnly: true
+            {{- end }}
+            {{- if $auth }}
+            # sans subPath : le kubelet met le fichier à jour quand le Secret change
+            - name: cles-csrf
+              mountPath: /run/secrets/csrf
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
@@ -163,4 +250,33 @@ spec:
         {{- if $reel }}
         {{- include "cdg.volumeModele" . | nindent 8 }}
         {{- include "cdg.volumeSecrets" (dict "racine" . "llm" true "administrateur" false) | nindent 8 }}
+        {{- end }}
+        {{- if $auth }}
+        # secrets d'oauth2-proxy, pour lui seul, en fichiers (0440, groupe du pod)
+        - name: secrets-oauth2-proxy
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ .Values.authentification.secret }}
+                  items:
+                    - key: client-secret
+                      path: client-secret
+                    - key: cookie-secret
+                      path: cookie-secret
+        # clés CSRF, pour l'interface seule : tout le Secret (courante, precedente)
+        - name: cles-csrf
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ .Values.authentification.secretCsrf }}
+        {{- with .Values.authentification.autorites }}
+        - name: autorites
+          configMap:
+            name: {{ . }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
         {{- end }}

@@ -1,0 +1,21 @@
+{{- if .Values.authentification.active }}
+{{- $web := dict "racine" . "composant" "web" -}}
+# Interface, par oauth2-proxy seulement (PR D1) : aucune autre porte d'entrée.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cdg.nomComplet" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "cdg.selecteur" $web | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+{{- end }}

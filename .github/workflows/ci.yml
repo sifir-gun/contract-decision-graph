@@ -251,12 +251,37 @@ jobs:
             ${{ runner.temp }}/chaine-proxy/sbom.spdx.json
           if-no-files-found: error
           retention-days: 1
+      # oauth2-proxy (PR D1) : binaire de la release, vérifié par son empreinte publiée
+      - name: oauth2-proxy, signatures des images de base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/chaine.py bases --dockerfile docker/oauth2-proxy/Dockerfile
+      - name: oauth2-proxy, construction (binaire publié, empreinte vérifiée, licences des modules)
+        run: docker build --file docker/oauth2-proxy/Dockerfile --tag cdg-oauth2-proxy:verification docker/oauth2-proxy
+      - name: oauth2-proxy, vérifications (non root, version, binaire, licences)
+        run: uv run --no-sync pytest -m oauth2proxy --oauth2-proxy cdg-oauth2-proxy:verification
+      - name: oauth2-proxy, inventaire des composants (Syft)
+        run: >-
+          uv run --no-sync python scripts/chaine.py inventaire cdg-oauth2-proxy:verification
+          --dossier "$RUNNER_TEMP/chaine-oauth2-proxy"
+      - name: oauth2-proxy, scan (Grype)
+        run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-oauth2-proxy"
+      - name: oauth2-proxy, image et inventaire, pour le cluster et la publication
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oauth2-proxy-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/chaine-oauth2-proxy/image.tar
+            ${{ runner.temp }}/chaine-oauth2-proxy/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 1
 
   cluster:
     name: cluster (k3d, scénarios)
     # un vrai cluster de plusieurs nœuds à chaque pull request (ADR 005, PR C3) : les
     # images testées par le job image, CloudNativePG et ses sauvegardes, le proxy de sortie,
-    # le serveur factice de Mistral ; profil ci (CI=true, scripts/cluster.py)
+    # le serveur factice de Mistral ; Traefik, Dex et oauth2-proxy (PR D1) ; profil ci
+    # (CI=true, scripts/cluster.py)
     if: github.event_name != 'schedule'
     needs: [image]
     runs-on: ubuntu-24.04
@@ -304,16 +329,21 @@ jobs:
         with:
           name: proxy-amd64
           path: ${{ runner.temp }}/chaine-proxy
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oauth2-proxy-amd64
+          path: ${{ runner.temp }}/chaine-oauth2-proxy
       - name: Images testées par le job image, jamais reconstruites
         run: |
           docker load --input "$RUNNER_TEMP/chaine/image.tar"
           docker load --input "$RUNNER_TEMP/chaine-proxy/image.tar"
+          docker load --input "$RUNNER_TEMP/chaine-oauth2-proxy/image.tar"
       - name: Image de test du serveur factice, sur l'image de l'application
         run: docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
       - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 30 Go libres
         id: installation-espace-disque
         env:
-          # besoin du cluster au pire, 28,4 Go, calculé sur la taille des images
+          # besoin du cluster au pire, 29,9 Go, calculé sur la taille des images
           # (scripts/cluster.py, disk_need_gb ; ADR 005)
           ESPACE_MIN_GO: "30"
         run: |
@@ -337,7 +367,7 @@ jobs:
         run: uv run --no-sync python scripts/cluster.py creer
       - name: Images poussées dans le registre local, tirées par empreinte
         run: uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
-      - name: Composants, base, proxy, serveur factice, application
+      - name: Composants, entrée, Dex, base, proxy, serveur factice, application
         run: uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
       - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, restauration)
         run: uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
@@ -349,6 +379,8 @@ jobs:
           df -h /
           kubectl --kubeconfig "$KC" --context k3d-cdg get pods,jobs,events -A || true
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg -l app.kubernetes.io/instance=cdg --all-containers --tail=200 || true
+          kubectl --kubeconfig "$KC" --context k3d-cdg logs -n traefik -l app.kubernetes.io/name=traefik --tail=200 || true
+          kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg-tests -l app=dex --tail=200 || true
       - name: Espace disque restant, à comparer au besoin calculé
         id: diagnostic-espace-disque
         if: always()
@@ -362,7 +394,7 @@ jobs:
     # après une fusion dans main seulement : ni pull request, ni lundi. Les images publiées
     # sont celles que le job image a construites, testées, inventoriées et scannées sur
     # chaque architecture, jamais reconstruites ; un index les réunit. Mêmes étapes pour
-    # l'application et le proxy de sortie (PR C3)
+    # l'application, le proxy de sortie (PR C3) et oauth2-proxy (PR D1)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint, types, audit, tests, chart, image, cluster]
     strategy:
@@ -377,6 +409,10 @@ jobs:
             artefact: proxy
             locale: cdg-proxy:verification
             depot: /proxy-sortie
+          - image: oauth2-proxy
+            artefact: oauth2-proxy
+            locale: cdg-oauth2-proxy:verification
+            depot: /oauth2-proxy
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

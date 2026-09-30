@@ -1,0 +1,26 @@
+# Traefik du cluster de test (PR D1, ADR 005) : chart officiel 41.6.0, figé par son empreinte
+# (scripts/cluster.py) ; Traefik v3.7.13, au-delà des avis du 07/09/2026 (celui de k3s,
+# 3.7.8, reste désactivé). En production : Traefik ≥ 3.7.13, mêmes réglages.
+image:
+  registry: docker.io
+  repository: traefik
+  tag: v3.7.13
+  digest: sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+service:
+  spec:
+    type: LoadBalancer
+    # l'adresse du client, préservée : c'est sur elle que porte la limite de débit
+    externalTrafficPolicy: Local
+ingressClass:
+  enabled: true
+  isDefaultClass: false
+  name: traefik
+# journal d'accès en JSON : adresse vue par Traefik, sans en-tête (défaut : drop)
+accessLog:
+  enabled: true
+  format: json
+log:
+  format: json
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits: {cpu: "1", memory: 256Mi}

@@ -175,6 +175,107 @@ def test_noeuds_evinces_sur_un_seuil_absolu_de_disque(monkeypatch, tmp_path):
     ) in k3s_args
 
 
+def test_traefik_du_chart_officiel_fige_celui_de_k3s_desactive():
+    """k3s v1.36.4 embarque Traefik 3.7.8, touché par les avis du 07/09/2026 : il reste
+    désactivé ; le chart officiel 41.6.0 (Traefik v3.7.13) est figé par son empreinte, et
+    son image par la sienne (PR D1)."""
+    module = cluster()
+    assert module.TRAEFIK_CHART.url == (
+        "https://traefik.github.io/charts/traefik/traefik-41.6.0.tgz"
+    )
+    assert module.TRAEFIK_CHART.sha256 == (
+        "cd7254ea853da73bdb88edc896f079b88d43ffa0bfe699fdbf21081361eac365"
+    )
+    import yaml
+
+    values = yaml.safe_load((ROOT / "cluster" / "valeurs-traefik.yaml").read_text())
+    assert values["image"]["tag"] == "v3.7.13"
+    assert values["image"]["digest"] == (
+        "sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0"
+    )
+    # adresse du client préservée : c'est sur elle que porte la limite de débit
+    assert values["service"]["spec"]["externalTrafficPolicy"] == "Local"
+    assert values["accessLog"] == {"enabled": True, "format": "json"}
+    assert values["ingressClass"] == {
+        "enabled": True,
+        "isDefaultClass": False,
+        "name": "traefik",
+    }
+
+
+def test_chart_telecharge_refuse_s_il_differe_de_son_empreinte(tmp_path, monkeypatch):
+    module = cluster()
+    chart = module.Chart(url="https://exemple.invalid/c.tgz", sha256="0" * 64)
+    monkeypatch.setattr(module, "_download", lambda url: b"autre contenu")
+    with pytest.raises(module.ClusterError, match="empreinte"):
+        module.fetch_chart(chart, tmp_path)
+
+
+def test_dex_fige_et_signe_utilisateurs_de_test_avec_groupes():
+    module = cluster()
+    assert module.DEX == (
+        "ghcr.io/dexidp/dex:v2.45.1@sha256:"
+        "8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462"
+    )
+    assert module.DEX_IDENTITY == (
+        "https://github.com/dexidp/dex/.github/workflows/artifacts.yaml"
+        "@refs/tags/v2.45.1"
+    )
+    manifest = (ROOT / "cluster" / "dex.yaml").read_text()
+    assert "${DEX}" in manifest and "issuer: https://dex.cdg.test" in manifest
+    assert "passwordConnector: local" in manifest  # octroi par mot de passe : tests
+    assert 'idTokens: "10m"' in manifest and 'absoluteLifetime: "8h"' in manifest
+    for user, groups in (
+        ("analyste", "cdg-analystes"),
+        ("relecteur", "cdg-relecteurs"),
+    ):
+        assert f"{user}@example.org" in manifest and groups in manifest
+        assert module.TEST_USERS[user]  # mot de passe de test, jamais ailleurs
+
+
+def test_noms_de_test_resolus_vers_traefik_dans_le_cluster():
+    module = cluster()
+    override = module.coredns_override()
+    for name in ("cdg.test", "dex.cdg.test"):
+        assert (
+            f"rewrite name exact {name} traefik.traefik.svc.cluster.local" in override
+        )
+
+
+def test_autorite_de_test_generee_une_fois_puis_reprise():
+    from cryptography import x509
+
+    module = cluster()
+    cert_pem, key_pem = module.certificate_authority()
+    cert = x509.load_pem_x509_certificate(cert_pem.encode())
+    assert cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
+    assert "BEGIN" in key_pem
+    assert (cert.not_valid_after_utc - cert.not_valid_before_utc).days <= 30
+
+
+def test_image_d_oauth2_proxy_poussee_dans_le_registre():
+    assert cluster().LOCAL_IMAGES["oauth2-proxy"] == "cdg-oauth2-proxy:verification"
+
+
+def test_valeurs_de_test_authentification_et_entree():
+    import yaml
+
+    values = yaml.safe_load((ROOT / "cluster" / "valeurs-application.yaml").read_text())
+    auth, ingress = values["authentification"], values["ingress"]
+    assert auth["active"] and auth["emetteur"] == "https://dex.cdg.test"
+    assert (auth["clientId"], auth["autorites"]) == ("cdg-interface", "cdg-autorites")
+    assert auth["session"] == {"duree": "2m", "revalidation": "1m"}  # expiration testée
+    assert ingress["active"] and ingress["hote"] == "cdg.test"
+    assert ingress["emetteurCertificat"] == "cdg-ca"
+    proxy = yaml.safe_load((ROOT / "cluster" / "valeurs-proxy.yaml").read_text())
+    assert "dex.cdg.test" in proxy["domainesAutorises"]  # clés publiques de Dex
+    assert {
+        "espaceDeNoms": "traefik",
+        "selecteur": {"app.kubernetes.io/name": "traefik"},
+        "port": 8443,
+    } in proxy["sortiesInternes"]
+
+
 def test_version_de_k3d_verifiee():
     module = cluster()
 
@@ -231,6 +332,7 @@ def test_images_de_l_application_et_du_proxy_reprises_du_job_image():
     downloads = [s for s in job["steps"] if "download-artifact" in s.get("uses", "")]
     assert sorted(d["with"]["name"] for d in downloads) == [
         "image-amd64",
+        "oauth2-proxy-amd64",
         "proxy-amd64",
     ]
     runs = " ".join(s.get("run", "") for s in job["steps"])
@@ -269,10 +371,13 @@ def test_besoin_de_disque_calcule_sur_la_taille_reelle_des_images():
     module = cluster()
     assert module.IMAGE_SIZES_GB["modele"] == (1.33, 2.25)
     assert module.IMAGE_SIZES_GB["application"] == (0.14, 0.42)
+    assert module.IMAGE_SIZES_GB["oauth2-proxy"] == (0.02, 0.04)  # PR D1
+    # images tierces : 0,78 Go, puis Traefik (0,055) et Dex (0,048) en PR D1
+    assert module.IMAGE_SIZES_GB["tierces"] == (0.88, 2.64)
     nodes = module.PROFILES["ci"].agents + 1
     need = module.disk_need_gb(nodes)
-    assert 28 < need < 29
-    assert module.disk_need_gb(nodes + 1) - need == pytest.approx(7.26)
+    assert 29 < need < 30
+    assert module.disk_need_gb(nodes + 1) - need == pytest.approx(7.72)
 
 
 def test_runner_libere_les_outils_inutilises_sous_le_seuil_de_disque():
@@ -319,7 +424,7 @@ def test_commande_des_scenarios_comprise_par_pytest_hors_du_depot(tmp_path):
     """Un dossier hors du dépôt passé en second mot (`--cluster DOSSIER`) est pris par
     pytest pour une cible : il y cherche sa racine, ne charge pas tests/conftest.py et
     refuse l'option (vu par check.sh le 28/09). La commande du job, telle quelle, avec
-    le dossier du runner : les douze scénarios sont collectés."""
+    le dossier du runner : les vingt-quatre scénarios sont collectés."""
     [command] = [c for c in ORDER if " pytest " in c]
     folder = tmp_path / "cluster"
     folder.mkdir()
@@ -335,7 +440,7 @@ def test_commande_des_scenarios_comprise_par_pytest_hors_du_depot(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert re.match(r"12/\d+ tests collected", result.stdout.splitlines()[-1])
+    assert re.match(r"24/\d+ tests collected", result.stdout.splitlines()[-1])
 
 
 def test_check_sh_sans_cluster_le_dit_et_ne_saute_que_le_cluster():

@@ -8,6 +8,7 @@ from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, TemplateOnly
 from cdg.domain import audit
 from cdg.domain.config import load_config
+from cdg.domain.identity import Identity
 from cdg.domain.models import (
     DOMAIN_KINDS,
     DOMAINS,
@@ -19,6 +20,7 @@ from cdg.domain.models import (
     Usage,
 )
 from cdg.domain.verification import VALUE_UNITS
+from cdg.ports.identity import IdentityRejected, ProviderUnavailable
 from cdg.ports.retriever import Passage
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
@@ -289,6 +291,50 @@ class FakeRetriever:
 
 # horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre
 FIXED_NOW = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)
+
+
+ISSUER = "https://idp.example.org"
+ANALYSTE = Identity(
+    issuer=ISSUER,
+    subject="sub-analyste-1",
+    groups=("cdg-analystes",),
+    display_name="analyste.affiche",
+)
+RELECTEUR = Identity(
+    issuer=ISSUER,
+    subject="sub-relecteur-1",
+    groups=("cdg-relecteurs",),
+    display_name="relecteur.affiche",
+)
+
+
+class FakeVerifier:
+    """Vérificateur d'identité de test : quelques jetons connus, les autres refusés
+    (signature invalide) ; fournisseur injoignable sur demande."""
+
+    def __init__(
+        self,
+        identities: dict[str, Identity] | None = None,
+        end_session: str | None = None,
+        unavailable: bool = False,
+    ):
+        self.identities = (
+            identities
+            if identities is not None
+            else {"jeton-analyste": ANALYSTE, "jeton-relecteur": RELECTEUR}
+        )
+        self.end_session = end_session
+        self.unavailable = unavailable
+
+    def verify(self, token: str) -> Identity:
+        if self.unavailable:
+            raise ProviderUnavailable("fournisseur d'identité injoignable (doublure)")
+        if token not in self.identities:
+            raise IdentityRejected("signature_invalide")
+        return self.identities[token]
+
+    def end_session_endpoint(self) -> str | None:
+        return self.end_session
 
 
 def fixed_clock() -> datetime:

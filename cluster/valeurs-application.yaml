@@ -10,3 +10,24 @@ base:
 # reprise des analyses interrompues plus fréquente : le scénario d'arrêt l'attend
 web:
   repriseIntervalle: 15
+# authentification et entrée (PR D1) : Dex, fournisseur de test, derrière Traefik ; session
+# courte, pour que le scénario d'expiration l'attende (en production : 8 h, revalidée
+# toutes les 5 min) ; débit bas, pour que le scénario de limitation l'atteigne vite
+authentification:
+  active: true
+  emetteur: https://dex.cdg.test
+  clientId: cdg-interface
+  secret: cdg-oidc
+  autorites: cdg-autorites
+  session:
+    duree: 2m
+    revalidation: 1m
+ingress:
+  active: true
+  hote: cdg.test
+  emetteurCertificat: cdg-ca
+  secretTls: cdg-tls
+  debit:
+    moyenne: 5
+    rafale: 10
+    periode: 1s

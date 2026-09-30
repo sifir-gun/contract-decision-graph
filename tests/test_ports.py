@@ -12,6 +12,7 @@ from doubles import (
     FakeCrag,
     FakeLLM,
     FakeRetriever,
+    FakeVerifier,
     FixedExtractor,
     HashEmbedder,
     MemoryAuditStore,
@@ -25,6 +26,7 @@ from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
+from cdg.adapters.oidc import OidcVerifier
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.postgres.rag_store import PgvectorRetriever
@@ -35,6 +37,7 @@ from cdg.domain.config import load_config
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.embedder import Embedder
 from cdg.ports.engine import ContractEngine
+from cdg.ports.identity import IdentityVerifier
 from cdg.ports.llm import LLMProvider
 from cdg.ports.locks import ContractLocks
 from cdg.ports.resumes import ResumeCounter
@@ -49,6 +52,8 @@ IMPLEMENTATIONS = [
     (LLMProvider, FakeLLM),
     (Embedder, lambda: FastembedEmbedder(CONFIG.embedding, model=object())),
     (Embedder, HashEmbedder),
+    (IdentityVerifier, lambda: OidcVerifier("https://idp.example.org", "cdg")),
+    (IdentityVerifier, FakeVerifier),
     (Retriever, lambda: PgvectorRetriever("", HashEmbedder())),
     (Retriever, FakeRetriever),
     (Extractor, lambda: LLMExtractor(FakeLLM())),
@@ -128,6 +133,7 @@ def test_chaque_port_a_ses_methodes():
     assert _methods(LLMProvider) == ["structured"]
     assert _methods(Embedder) == ["embed_passages", "embed_query"]
     assert _methods(Retriever) == ["search"]
+    assert _methods(IdentityVerifier) == ["verify", "end_session_endpoint"]
     assert _methods(Extractor) == ["__call__"]
     assert _methods(Crag) == ["__call__"]
     assert _methods(ContractLocks) == ["hold"]

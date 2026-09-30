@@ -656,13 +656,87 @@ def test_lint_rendu_schemas_et_bonnes_pratiques(tmp_path):
     # ressources propres à CloudNativePG et au greffon : schémas inconnus de kubeconform,
     # validées par le serveur d'API du cluster de test (tests/test_cluster.py)
     skipped = kubeconform[kubeconform.index("-skip") + 1].split(",")
-    assert skipped == ["Cluster", "ObjectStore", "ScheduledBackup"]
+    # et celles de Traefik (PR D1) : validées par son serveur d'API, en CI
+    assert skipped == [
+        "Cluster",
+        "ObjectStore",
+        "ScheduledBackup",
+        "Middleware",
+        "TLSOption",
+    ]
     # kube-linter relie les objets d'un même lot : chaque variante à part, sinon le
     # budget d'interruption du rendu réel est rapproché du Deployment de la démo (28/09)
     linters = [c for c in run.commands if module.KUBE_LINTER in c]
     assert [c[-1] for c in linters] == [f"/rendu/{name}.yaml" for _, name in renders]
     assert all("lint" in c and "/configuration/.kube-linter.yaml" in c for c in linters)
     assert tools  # la liste des commandes n'est pas vide
+
+
+# --- quota de l'espace de noms ----------------------------------------------------------------
+
+
+def quantity(value: str | float) -> float:
+    """Quantité Kubernetes : CPU en cœurs, mémoire en Gio."""
+    text = str(value)
+    for suffix, factor in (("m", 1e-3), ("Mi", 1 / 1024), ("Gi", 1.0)):
+        if text.endswith(suffix):
+            return float(text[: -len(suffix)]) * factor
+    return float(text)
+
+
+def pod_resources(spec: dict, kind: str) -> tuple[float, float]:
+    """Limites ou requêtes d'un pod (CPU, mémoire), conteneurs annexes natifs compris
+    (conteneurs d'initialisation redémarrés, qui tournent avec l'application)."""
+    sidecars = [
+        c for c in spec.get("initContainers", []) if c.get("restartPolicy") == "Always"
+    ]
+    found = [c["resources"][kind] for c in [*spec["containers"], *sidecars]]
+    return (
+        sum(quantity(r["cpu"]) for r in found),
+        sum(quantity(r["memory"]) for r in found),
+    )
+
+
+def chart_values(name: str) -> dict:
+    return yaml.safe_load((ROOT / "chart" / name / "values.yaml").read_text())
+
+
+@pytest.mark.chart
+@pytest.mark.parametrize("kind", ["limits", "requests"])
+def test_quota_couvre_mise_a_jour_ingestion_et_restauration(kind):
+    """Les trois charts vivent dans le même espace de noms (docs/exploitation.md) : aux
+    valeurs par défaut, le quota laisse passer la mise à jour progressive (un pod de
+    l'interface de plus, oauth2-proxy compris), l'ingestion qui la suit, et la bascule
+    vers une base restaurée (une instance de plus). Défaut trouvé par le cluster de test
+    (PR D1) : l'annexe d'oauth2-proxy ne tenait plus sous l'ancien quota."""
+    docs = render(*chart_script().VARIANTS["authentifie"])
+    deployment = of_kind(docs, "Deployment")[0]
+    web = pod_resources(deployment["spec"]["template"]["spec"], kind)
+    replicas = deployment["spec"]["replicas"]
+    surge = deployment["spec"]["strategy"]["rollingUpdate"]["maxSurge"]
+    job = named(docs, "Job", "-ingestion")["spec"]["template"]["spec"]
+    ingestion = pod_resources(job, kind)
+    proxy = chart_values("cdg-proxy")
+    postgres = chart_values("cdg-postgres")
+    instance = [
+        postgres["ressources"][kind],
+        postgres["sauvegardes"]["ressourcesAnnexe"][kind],
+    ]
+    quota = named(docs, "ResourceQuota", "graph")["spec"]["hard"]
+    for index, key in enumerate(("cpu", "memory")):
+        one = sum(quantity(r[key]) for r in instance)
+        base = (
+            proxy["replicas"] * quantity(proxy["ressources"][kind][key])
+            + postgres["instances"] * one
+        )
+        need = max(
+            (replicas + surge) * web[index] + base,  # mise à jour progressive
+            replicas * web[index] + ingestion[index] + base,  # ingestion
+            (replicas + surge) * web[index]
+            + base
+            + one,  # bascule vers la restauration
+        )
+        assert quantity(quota[f"{kind}.{key}"]) >= need, (key, need)
 
 
 # --- CI : job chart, mêmes vérifications que check.sh -----------------------------------------

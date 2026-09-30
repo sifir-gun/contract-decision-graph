@@ -6,8 +6,11 @@
   page tierce qui ferait résoudre son propre nom vers 127.0.0.1).
 - En-têtes : CSP stricte sans script ni style en ligne, et les en-têtes usuels.
 - CSRF : un cookie aléatoire (HttpOnly, SameSite=Strict) et, dans chaque formulaire qui
-  modifie, son HMAC par un secret du processus ; l'en-tête Origin, s'il est présent,
-  doit être celui de l'interface.
+  modifie, un jeton horodaté signé (HMAC du cookie et de l'heure d'émission) ; l'en-tête
+  Origin, s'il est présent, doit être celui de l'interface. Clés partagées entre
+  réplicas, en fichiers relus à chaque usage : la courante signe, la précédente ne fait
+  que vérifier, le temps d'une rotation ; sans clés, un secret tiré par le processus
+  (interface locale, un seul processus).
 - Taille des envois : bornée avant toute lecture, sous le seuil au-delà duquel l'analyseur
   de formulaires écrirait un envoi sur disque.
 """
@@ -16,6 +19,10 @@ import hashlib
 import hmac
 import ipaddress
 import secrets
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from cdg.domain.config import DecisionConfig
@@ -37,6 +44,11 @@ LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
 # envoyé dans un fichier temporaire : le texte original toucherait le disque
 SPOOL_BYTES = 1024 * 1024
 FORM_OVERHEAD_BYTES = 64 * 1024  # autres champs et délimiteurs d'un formulaire
+# durée de vie d'un formulaire (son jeton CSRF) : une session d'oauth2-proxy par défaut ;
+# c'est le délai à attendre avant de retirer une ancienne clé (ADR 005)
+FORM_LIFETIME_SECONDS = 8 * 3600
+CLOCK_SKEW_SECONDS = 60  # écart admis entre les horloges des réplicas
+CSRF_KEY_MIN_CHARS = 32
 
 
 class WebConfigError(Exception):
@@ -112,24 +124,92 @@ def check_body_limit(config: DecisionConfig) -> int:
     return limit
 
 
+class CsrfKeyError(WebConfigError):
+    """Clé CSRF absente, illisible ou trop courte ; le message ne la montre jamais."""
+
+
+@dataclass(frozen=True)
+class CsrfKeys:
+    """Clés CSRF : la courante signe et vérifie, la précédente ne fait que vérifier."""
+
+    current: bytes = field(repr=False)
+    previous: bytes | None = field(default=None, repr=False)
+
+
+def _read_key(path: Path, *, required: bool) -> bytes | None:
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        text = ""
+    except OSError as exc:
+        raise CsrfKeyError(
+            f"clé CSRF illisible : {path} ({type(exc).__name__})"
+        ) from None
+    if not text:
+        if required:
+            raise CsrfKeyError(f"clé CSRF absente : {path}")
+        return None
+    if len(text) < CSRF_KEY_MIN_CHARS:
+        raise CsrfKeyError(
+            f"clé CSRF trop courte : {path} ({CSRF_KEY_MIN_CHARS} caractères au moins)"
+        )
+    return text.encode()
+
+
+def read_csrf_keys(folder: Path) -> CsrfKeys:
+    """Clés du dossier monté (Secret) : `courante`, exigée ; `precedente`, facultative
+    (absente ou vide : aucune)."""
+    current = _read_key(folder / "courante", required=True)
+    assert current is not None
+    return CsrfKeys(current, _read_key(folder / "precedente", required=False))
+
+
 class Csrf:
     COOKIE = "cdg_csrf"
     FIELD = "csrf"
 
-    def __init__(self, secret: bytes | None = None):
-        self._secret = secret if secret is not None else secrets.token_bytes(32)
+    def __init__(
+        self,
+        keys: Callable[[], CsrfKeys] | None = None,
+        *,
+        clock: Callable[[], float] = time.time,
+    ):
+        """`keys` : relues à chaque usage (rotation sans redémarrage) ; sans elles, une
+        clé tirée pour ce processus."""
+        if keys is None:
+            drawn = CsrfKeys(secrets.token_bytes(32))
+            keys = lambda: drawn
+        self._keys, self._clock = keys, clock
 
     @staticmethod
     def new_cookie() -> str:
         return secrets.token_urlsafe(32)
 
+    @staticmethod
+    def _sign(key: bytes, issued: int, cookie: str) -> str:
+        message = f"{issued}.{cookie}".encode()
+        return hmac.new(key, message, hashlib.sha256).hexdigest()
+
     def token(self, cookie: str) -> str:
-        return hmac.new(self._secret, cookie.encode(), hashlib.sha256).hexdigest()
+        """Jeton du formulaire : heure d'émission et signature par la clé courante."""
+        issued = int(self._clock())
+        return f"{issued}.{self._sign(self._keys().current, issued, cookie)}"
 
     def valid(self, cookie: str | None, token: str | None) -> bool:
         if not cookie or not token:
             return False
-        return hmac.compare_digest(self.token(cookie), token)
+        issued_text, _, signature = token.partition(".")
+        if not (issued_text.isascii() and issued_text.isdigit() and signature):
+            return False
+        issued, now = int(issued_text), self._clock()
+        if not now - FORM_LIFETIME_SECONDS <= issued <= now + CLOCK_SKEW_SECONDS:
+            return False
+        keys = self._keys()
+        return any(
+            hmac.compare_digest(self._sign(key, issued, cookie), signature)
+            for key in (keys.current, keys.previous)
+            if key is not None
+        )
 
 
 def same_origin(origin: str | None, scheme: str, host: str) -> bool:

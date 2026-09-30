@@ -124,8 +124,10 @@ def test_image_construite_comme_en_ci():
     assert ci and local == every, "construction des images différente en CI et en local"
     tag = ci[0].split("--tag ")[1].split()[0]
     proxy = ci[1].split("--tag ")[1].split()[0]  # proxy de sortie (PR C3)
+    oauth2 = ci[2].split("--tag ")[1].split()[0]  # oauth2-proxy (PR D1)
     checks = [s["run"] for s in job["steps"] if "pytest" in s.get("run", "")]
     assert checks == [
         f"uv run --no-sync pytest -m image --image {tag}",
         f"uv run --no-sync pytest -m proxy --proxy {proxy} --image {tag}",
+        f"uv run --no-sync pytest -m oauth2proxy --oauth2-proxy {oauth2}",
     ]
