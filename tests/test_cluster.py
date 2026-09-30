@@ -422,17 +422,20 @@ def _submit_ignoring_errors(pod: str, thread: str) -> None:
 
 # --- 3. mise à jour sans interruption, 4. retour arrière ----------------------------------
 
+# chaque échec, daté (UTC) et nommé (délai, refus, code HTTP), pour le diagnostic
 PROBER = """
 import json, time, urllib.request
 url = "http://cdg-contract-decision-graph-sante:8081/sante/pret"
-end, ok, ko = time.monotonic() + {duration}, 0, 0
+end, ok, ko, failures = time.monotonic() + {duration}, 0, 0, []
 while time.monotonic() < end:
     try:
         ok += urllib.request.urlopen(url, timeout=2).status == 200
-    except Exception:
+    except Exception as exc:
         ko += 1
+        stamp = time.strftime("%H:%M:%S", time.gmtime())
+        failures.append(f"{{stamp}} {{type(exc).__name__}} {{exc}}"[:200])
     time.sleep(0.2)
-print(json.dumps({{"ok": ok, "ko": ko}}))
+print(json.dumps({{"ok": ok, "ko": ko, "echecs": failures[:20]}}))
 """
 
 
