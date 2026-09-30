@@ -28,7 +28,8 @@ PROXY_CHART = ROOT / "chart" / "cdg-proxy"
 POSTGRES_CHART = ROOT / "chart" / "cdg-postgres"
 # ressources de CloudNativePG et du greffon : kubeconform n'a pas leurs schémas ; le
 # serveur d'API du cluster de test les valide (PR C3)
-CRD_KINDS = ["Cluster", "ObjectStore", "ScheduledBackup"]
+# ressources des opérateurs et de Traefik (PR D1), sans schéma dans kubeconform
+CRD_KINDS = ["Cluster", "ObjectStore", "ScheduledBackup", "Middleware", "TLSOption"]
 LINTER_CONFIG = ROOT / "chart"
 HELM_VERSION = "v4.3.0"
 KUBERNETES = "1.36.4"  # canal stable de k3s au 27/09/2026
@@ -45,6 +46,21 @@ VARIANTS: dict[str, list[str]] = {
     "reel": [],
     "demo": ["--set", "mode=demo", "--set", "replicas=1"],
     "copie": ["--set", "modele.montage=copie"],
+    # authentification et entrée réseau (PR D1) ; empreinte d'exemple, qui ne tire rien
+    "authentifie": [
+        "--set",
+        "authentification.active=true",
+        "--set",
+        "authentification.emetteur=https://idp.example.org",
+        "--set",
+        "authentification.clientId=cdg-interface",
+        "--set",
+        "authentification.image.digest=sha256:" + "1" * 64,
+        "--set",
+        "ingress.active=true",
+        "--set",
+        "ingress.hote=cdg.example.org",
+    ],
 }
 # proxy de sortie (PR C3) : l'empreinte de l'image n'a pas de valeur par défaut avant la
 # première publication ; une empreinte d'exemple pour le rendu, qui ne tire rien

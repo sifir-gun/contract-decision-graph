@@ -115,6 +115,53 @@ proxy:
   selecteur:
     app.kubernetes.io/name: cdg-proxy
 
+# Authentification (PR D1, ADR 005) : oauth2-proxy en conteneur annexe, seul chemin vers
+# l'interface, qui vérifie le jeton d'identité signé de chaque requête. Désactivée : aucune
+# entrée réseau (ni Service de l'interface, ni Ingress).
+authentification:
+  active: false
+  emetteur: ""  # émetteur OIDC, en https
+  clientId: ""  # client OIDC : audience du jeton
+  # Secret existant : client-secret (secret du client OIDC), cookie-secret (32 octets,
+  # chiffrement du cookie de session) ; montés en fichiers dans oauth2-proxy seulement
+  secret: cdg-oidc
+  # ConfigMap existante (clé ca.crt) : autorités du fournisseur ; vide, celles du système
+  autorites: ""
+  # déconnexion : fermer aussi la session chez le fournisseur, s'il publie une fin de
+  # session (non avec Dex 2.45.1, fournisseur des tests)
+  deconnexionFournisseur: false
+  session:
+    duree: 8h  # cookie-expire
+    revalidation: 5m  # cookie-refresh : un compte retiré perd l'accès dans ce délai
+  image:
+    repository: ghcr.io/sifir-gun/contract-decision-graph/oauth2-proxy
+    digest: ""  # index publié par la CI (oauth2-proxy v7.15.4, binaire vérifié)
+    pullPolicy: IfNotPresent
+  port: 4180
+  ressources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 500m, memory: 128Mi}
+
+# Entrée réseau (PR D1) : Ingress Traefik (≥ 3.7.13) en TLS, exige l'authentification.
+ingress:
+  active: false
+  hote: ""  # nom public de l'interface
+  classe: traefik
+  # Secret TLS de l'hôte ; émis par cert-manager si emetteurCertificat nomme un
+  # ClusterIssuer, sinon fourni
+  secretTls: cdg-tls
+  emetteurCertificat: ""
+  hstsSecondes: 31536000
+  # limitation de débit par adresse du client (préservée : externalTrafficPolicy Local)
+  debit:
+    moyenne: 20
+    rafale: 40
+    periode: 1s
+  traefik:
+    espaceDeNoms: traefik
+    selecteur:
+      app.kubernetes.io/name: traefik
+
 # DNS du cluster, pour les règles de sortie.
 dns:
   espaceDeNoms: kube-system

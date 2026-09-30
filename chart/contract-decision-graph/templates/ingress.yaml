@@ -1,0 +1,127 @@
+{{- if .Values.ingress.active }}
+{{- $nom := include "cdg.nomComplet" . -}}
+{{- $ns := .Release.Namespace -}}
+{{- $ref := printf "%s-%s-%%s@kubernetescrd" $ns $nom -}}
+# Entrée réseau (PR D1, ADR 005) : Traefik ≥ 3.7.13. TLS 1.2 au moins, HSTS, HTTP redirigé
+# vers HTTPS, taille maximale d'un envoi alignée sur l'interface, débit limité par adresse
+# du client. Derrière : oauth2-proxy, puis l'interface, qui vérifie le jeton.
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: {{ $nom }}-tls
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+spec:
+  minVersion: VersionTLS12
+  sniStrict: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $nom }}-securite
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+spec:
+  headers:
+    stsSeconds: {{ .Values.ingress.hstsSecondes }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $nom }}-taille
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+spec:
+  buffering:
+    maxRequestBodyBytes: {{ include "cdg.tailleMaxEnvoi" . }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $nom }}-debit
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+spec:
+  rateLimit:
+    average: {{ .Values.ingress.debit.moyenne }}
+    burst: {{ .Values.ingress.debit.rafale }}
+    period: {{ .Values.ingress.debit.periode }}
+    # l'adresse de la connexion, telle que Traefik la voit (préservée : service de
+    # Traefik en externalTrafficPolicy Local), jamais un en-tête du client
+    sourceCriterion:
+      ipStrategy:
+        depth: 0
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $nom }}-https
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $nom }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.options: {{ printf $ref "tls" }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s,%s,%s" (printf $ref "securite") (printf $ref "taille") (printf $ref "debit") }}
+    {{- with .Values.ingress.emetteurCertificat }}
+    cert-manager.io/cluster-issuer: {{ . }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.classe }}
+  tls:
+    - hosts: [{{ .Values.ingress.hote }}]
+      secretName: {{ .Values.ingress.secretTls }}
+  rules:
+    - host: {{ .Values.ingress.hote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $nom }}
+                port:
+                  number: 80
+---
+# HTTP : redirigé vers HTTPS, rien d'autre
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $nom }}-http
+  namespace: {{ $ns }}
+  labels:
+    {{- include "cdg.etiquettes" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf $ref "https" }}
+spec:
+  ingressClassName: {{ .Values.ingress.classe }}
+  rules:
+    - host: {{ .Values.ingress.hote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $nom }}
+                port:
+                  number: 80
+{{- end }}

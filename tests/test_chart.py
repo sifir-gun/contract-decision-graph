@@ -656,7 +656,14 @@ def test_lint_rendu_schemas_et_bonnes_pratiques(tmp_path):
     # ressources propres à CloudNativePG et au greffon : schémas inconnus de kubeconform,
     # validées par le serveur d'API du cluster de test (tests/test_cluster.py)
     skipped = kubeconform[kubeconform.index("-skip") + 1].split(",")
-    assert skipped == ["Cluster", "ObjectStore", "ScheduledBackup"]
+    # et celles de Traefik (PR D1) : validées par son serveur d'API, en CI
+    assert skipped == [
+        "Cluster",
+        "ObjectStore",
+        "ScheduledBackup",
+        "Middleware",
+        "TLSOption",
+    ]
     # kube-linter relie les objets d'un même lot : chaque variante à part, sinon le
     # budget d'interruption du rendu réel est rapproché du Deployment de la démo (28/09)
     linters = [c for c in run.commands if module.KUBE_LINTER in c]

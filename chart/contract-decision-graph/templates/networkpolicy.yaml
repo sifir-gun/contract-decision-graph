@@ -38,10 +38,25 @@ spec:
       ports:
         - port: sante
           protocol: TCP
+    {{- if .Values.authentification.active }}
+    # oauth2-proxy : depuis Traefik seulement (PR D1)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.ingress.traefik.espaceDeNoms }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.ingress.traefik.selecteur | nindent 14 }}
+      ports:
+        - port: http
+          protocol: TCP
+    {{- end }}
   egress:
     {{- include "cdg.sortieDns" . | nindent 4 }}
     {{- if eq .Values.mode "reel" }}
     {{- include "cdg.sortieBase" . | nindent 4 }}
+    {{- end }}
+    {{- if or (eq .Values.mode "reel") .Values.authentification.active }}
     - to:
         - podSelector:
             matchLabels:
