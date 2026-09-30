@@ -1,11 +1,14 @@
-"""Scénarios sur le cluster de test k3d (ADR 005, PR C3), préparé par scripts/cluster.py :
-plusieurs nœuds, CloudNativePG avec sauvegardes vers SeaweedFS, proxy de sortie, serveur
-factice de Mistral, application. Marqueur `cluster`, option `--cluster=DOSSIER`, en un
-mot (voir tests/test_cluster_outillage.py).
+"""Scénarios sur le cluster de test k3d (ADR 005, PR C3 et D1), préparé par
+scripts/cluster.py : plusieurs nœuds, CloudNativePG avec sauvegardes vers SeaweedFS, proxy
+de sortie, serveur factice de Mistral, Traefik, Dex, application derrière oauth2-proxy.
+Marqueur `cluster`, option `--cluster=DOSSIER`, en un mot (voir
+tests/test_cluster_outillage.py).
 
 Les analyses passent par l'interface (redirection de port vers un pod), comme pour un
 utilisateur : la CLI, lancée dans un pod, chargerait une seconde fois le modèle (ADR 005,
 mesure). La CLI ne sert qu'aux commandes sans modèle (list, journal, verify, resume).
+Chaque requête porte un jeton d'identité de Dex, vérifié par l'interface (PR D1). Les
+scénarios de l'entrée passent par Traefik, depuis deux pods clients, comme un navigateur.
 Les scénarios s'enchaînent sur le même cluster, dans l'ordre du fichier.
 """
 
@@ -24,6 +27,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
+import jwt
 import pytest
 import yaml
 
@@ -38,6 +42,7 @@ WEB = "app.kubernetes.io/instance=cdg,app.kubernetes.io/component=web"
 # d'ingestion : plus de 10 minutes à chaque fois, ADR 005) ; --reuse-values ne suffit pas
 # après un retour arrière, qui reprend les valeurs de la révision visée
 SANS_INGESTION = ("--set", "taches.ingestion.active=false")
+PUBLIC = "https://cdg.test"  # adresse publique de l'interface (PR D1)
 
 
 def _cluster_module():
@@ -176,18 +181,10 @@ def factice(body: dict | None = None) -> dict:
 
 
 @contextlib.contextmanager
-def interface(pod: str) -> Iterator[httpx.Client]:
-    """Client HTTP de l'interface d'un pod, par redirection de port (elle n'écoute que sur
-    127.0.0.1 dans le pod, ADR 004)."""
+def forward(namespace: str, target: str, port: int) -> Iterator[str]:
+    """Adresse locale d'une redirection de port vers un pod ou un service."""
     process = subprocess.Popen(
-        [
-            "kubectl",
-            "--kubeconfig",
-            str(CLUSTER.KUBECONFIG),
-            "--context",
-            CLUSTER.CONTEXT,
-        ]
-        + ["port-forward", "-n", "cdg", f"pod/{pod}", "0:8000"],
+        KUBECTL + ["port-forward", "-n", namespace, target, f"0:{port}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -197,14 +194,87 @@ def interface(pod: str) -> Iterator[httpx.Client]:
         line = process.stdout.readline()
         match = re.search(r"127\.0\.0\.1:(\d+)", line)
         assert match, f"redirection de port impossible : {line}"
-        base = f"http://127.0.0.1:{match[1]}"
-        with httpx.Client(
-            base_url=base, timeout=600, headers={"origin": base}
-        ) as client:
-            yield client
+        yield f"http://127.0.0.1:{match[1]}"
     finally:
         process.terminate()
         process.wait(10)
+
+
+# jetons d'identité de Dex, par utilisateur : échéance locale et jeton ; tous ceux délivrés
+# pendant les scénarios, cherchés ensuite dans les journaux
+TOKENS: dict[str, tuple[float, str]] = {}
+ISSUED: set[str] = set()
+
+
+def client_secret() -> str:
+    encoded = kubectl(
+        "get", "secret", "cdg-oidc", "-n", "cdg", "-o", "jsonpath={.data.client-secret}"
+    )
+    return base64.b64decode(encoded).decode()
+
+
+def id_token(user: str = "analyste") -> str:
+    """Jeton d'identité signé par Dex (octroi par mot de passe, réservé aux tests), repris
+    jusqu'à mi-vie : Dex le délivre pour 10 minutes."""
+    now = time.monotonic()
+    cached = TOKENS.get(user)
+    if cached and cached[0] > now:
+        return cached[1]
+    with forward("cdg-tests", "svc/dex", 5556) as base:
+        response = httpx.post(
+            f"{base}/token",
+            data={
+                "grant_type": "password",
+                "username": f"{user}@example.org",
+                "password": CLUSTER.TEST_USERS[user],
+                "scope": "openid profile groups",
+            },
+            auth=("cdg-interface", client_secret()),
+            timeout=30,
+        )
+    assert response.status_code == 200, response.text
+    token = response.json()["id_token"]
+    TOKENS[user] = (now + 300, token)
+    ISSUED.add(token)
+    return token
+
+
+class Identity(httpx.Auth):
+    """Jeton de Dex sur chaque requête, comme oauth2-proxy le transmet à l'interface."""
+
+    def __init__(self, user: str = "analyste", token: str | None = None) -> None:
+        self.user, self.token = user, token
+
+    def auth_flow(self, request: httpx.Request):
+        token = self.token or id_token(self.user)
+        request.headers["authorization"] = f"Bearer {token}"
+        yield request
+
+
+def _keep_csrf(client: httpx.Client, response: httpx.Response) -> None:
+    """Le cookie CSRF est Secure (interface derrière TLS) : la redirection de port est en
+    HTTP, il est donc renvoyé à la main."""
+    match = re.search(r"cdg_csrf=([^;,]+)", response.headers.get("set-cookie", ""))
+    if match:
+        client.headers["cookie"] = f"cdg_csrf={match[1]}"
+
+
+@contextlib.contextmanager
+def interface(pod: str, auth: httpx.Auth | None = None) -> Iterator[httpx.Client]:
+    """Client HTTP de l'interface d'un pod, par redirection de port (elle n'écoute que sur
+    127.0.0.1 dans le pod, ADR 004), avec le jeton d'identité et l'origine publique que
+    lui transmettrait oauth2-proxy."""
+    with (
+        forward("cdg", f"pod/{pod}", 8000) as base,
+        httpx.Client(
+            base_url=base,
+            timeout=600,
+            headers={"origin": PUBLIC},
+            auth=auth or Identity(),
+        ) as client,
+    ):
+        client.event_hooks["response"] = [lambda r: _keep_csrf(client, r)]
+        yield client
 
 
 def analyse(client: httpx.Client, contract: str, identifier: str) -> httpx.Response:
@@ -515,10 +585,31 @@ def test_domaine_hors_liste_refuse_par_le_proxy():
     assert out.startswith("refuse") and "407" in out, out
 
 
+# fournisseur d'identité de test, interne au cluster (Dex derrière Traefik), d'où sa plage
+# privée et sa sortie interne ; en production, un fournisseur public, sans plage privée
+IDENTITY_EGRESS = (
+    "--set-json",
+    'domainesAutorises=["api.mistral.ai","dex.cdg.test"]',
+    "--set-json",
+    f'plagesAutorisees=["{CLUSTER.SERVICE_CIDR}"]',
+    "--set-json",
+    "sortiesInternes="
+    + json.dumps(
+        [
+            {
+                "espaceDeNoms": "traefik",
+                "selecteur": {"app.kubernetes.io/name": "traefik"},
+                "port": 8443,
+            }
+        ]
+    ),
+)
+
+
 def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(images):
-    """Proxy aux valeurs de production (seulement api.mistral.ai, aucune adresse privée) :
-    l'analyse, pointée sur le serveur factice, échoue explicitement (rapport d'échec,
-    ESCALADE, revue humaine) ; il ne reçoit aucune requête."""
+    """Proxy aux valeurs de production (api.mistral.ai et le fournisseur d'identité,
+    seulement) : l'analyse, pointée sur le serveur factice, échoue explicitement (rapport
+    d'échec, ESCALADE, revue humaine) ; il ne reçoit aucune requête."""
     proxy = images["proxy"]
     chart = str(ROOT / "chart" / "cdg-proxy")
     production = helm(
@@ -531,6 +622,7 @@ def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
         f"image.repository={proxy['repository']}",
         "--set",
         f"image.digest={proxy['digest']}",
+        *IDENTITY_EGRESS,
         "--wait",
         "--timeout",
         "300s",
@@ -635,14 +727,17 @@ def application_password() -> str:
     return base64.b64decode(encoded).decode()
 
 
-def container_logs() -> tuple[str, set[str]]:
-    """Journaux de tous les conteneurs de tous les pods du cluster, conteneurs
-    d'initialisation et exécutions précédentes compris ; et les pods lus. Un conteneur
-    démarré dont le journal est illisible est une erreur, jamais un trou silencieux."""
+def container_logs(namespaces: set[str] | None = None) -> tuple[str, set[str]]:
+    """Journaux de tous les conteneurs de tous les pods du cluster (ou de ces espaces de
+    noms), conteneurs d'initialisation et exécutions précédentes compris ; et les pods lus.
+    Un conteneur démarré dont le journal est illisible est une erreur, jamais un trou
+    silencieux."""
     pods = json.loads(kubectl("get", "pods", "--all-namespaces", "-o", "json"))["items"]
     chunks, read = [], set()
     for pod in pods:
         meta, status = pod["metadata"], pod.get("status", {})
+        if namespaces is not None and meta["namespace"] not in namespaces:
+            continue
         states = {
             s["name"]: s
             for s in status.get("initContainerStatuses", [])
@@ -859,7 +954,446 @@ def test_mise_a_jour_refusee_tant_qu_un_contrat_attend_sous_l_ancienne_configura
     assert forced.returncode == 0, forced.stderr
 
 
-# --- 8. sauvegarde et restauration, puis désinstallation ----------------------------------
+# --- 8. authentification et entrée (PR D1) ------------------------------------------------
+
+CLIENTS = ("client-a", "client-b")
+# navigateur minimal, dans un pod client : Traefik, oauth2-proxy, Dex, comme un utilisateur ;
+# mot de passe lu sur l'entrée standard, jamais en argument ; ni cookie ni jeton imprimés
+BROWSER = r"""
+import html, json, re, socket, ssl, sys, time, urllib.parse
+import httpx
+
+CA, PUBLIC, DEX = "/run/autorites/ca.crt", "https://cdg.test", "dex.cdg.test"
+FORM = re.compile(r'<form[^>]*action="([^"]+)"')
+CSRF = re.compile(r'name="csrf" value="([0-9a-f]{64})"')
+NEXT = re.compile(r'<a id="suite" href="([^"]+)"')
+USER = re.compile(r'class="utilisateur">([^<]*)<')
+SESSION = re.compile(r"^_cdg_session(_\d+)?$")
+
+
+def browser():
+    return httpx.Client(verify=CA, follow_redirects=True, timeout=30)
+
+
+def state(response):
+    shown = USER.search(response.text)
+    return {
+        "hote": response.url.host,
+        "statut": response.status_code,
+        "utilisateur": html.unescape(shown[1]) if shown else None,
+    }
+
+
+def login(client, user, password):
+    page = client.get(PUBLIC + "/")
+    form = FORM.search(page.text)
+    if page.url.host != DEX or not form:
+        raise SystemExit(f"formulaire de Dex absent : {page.status_code} {page.url.host}")
+    target = urllib.parse.urljoin(str(page.url), html.unescape(form[1]))
+    data = {"login": f"{user}@example.org", "password": password}
+    return client.post(target, data=data)
+
+
+def session_attributes(response):
+    found = []
+    for step in [*response.history, response]:
+        for header in step.headers.get_list("set-cookie"):
+            name, _, rest = header.partition("=")
+            if SESSION.match(name):
+                found.append(rest.partition(";")[2].strip())
+    return found
+
+
+def session_cookies(client):
+    return {c.name: c.value for c in client.cookies.jar if SESSION.match(c.name)}
+
+
+action = sys.argv[1]
+if action == "connexion":
+    client = browser()
+    done = login(client, sys.argv[2], sys.stdin.read().strip())
+    print(json.dumps({**state(done), "cookie": session_attributes(done)}))
+elif action == "forge":
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    subject, kid = sys.argv[2], sys.argv[3]
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = int(time.time())
+    claims = {
+        "iss": "https://dex.cdg.test", "aud": "cdg-interface", "sub": subject,
+        "iat": now, "exp": now + 600, "name": "relecteur", "groups": ["cdg-relecteurs"],
+    }
+    forged = jwt.encode(claims, key, algorithm="RS256", headers={"kid": kid})
+    headers = {
+        "authorization": f"Bearer {forged}",
+        "x-forwarded-user": "relecteur",
+        "x-forwarded-email": "relecteur@example.org",
+        "x-forwarded-preferred-username": "relecteur",
+        "x-forwarded-groups": "cdg-relecteurs",
+        "x-forwarded-access-token": forged,
+        "x-auth-request-user": "relecteur",
+    }
+    anonymous = browser().get(PUBLIC + "/", headers=headers)
+    client = browser()
+    login(client, "analyste", sys.stdin.read().strip())
+    connected = client.get(PUBLIC + "/", headers=headers)
+    print(json.dumps({"anonyme": state(anonymous), "connecte": state(connected)}))
+elif action == "direct":
+    opened = {}
+    for port in (4180, 8000):
+        try:
+            socket.create_connection((sys.argv[2], port), timeout=5).close()
+            opened[port] = "ouvert"
+        except OSError as exc:
+            opened[port] = f"refuse {type(exc).__name__}"
+    print(json.dumps(opened))
+elif action == "entree":
+    plain = httpx.get("http://cdg.test/analyse", timeout=10)
+    secure = httpx.get(PUBLIC + "/ping", verify=CA, timeout=10)
+    size = int(sys.argv[2])
+    big = httpx.post(
+        PUBLIC + "/analyse", content=b"x" * size, verify=CA, timeout=60,
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    print(json.dumps({
+        "http": [plain.status_code, plain.headers.get("location")],
+        "hsts": secure.headers.get("strict-transport-security"),
+        "taille": big.status_code,
+    }))
+elif action == "tls":
+    def handshake(version):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(CA)
+        context.set_ciphers("DEFAULT:@SECLEVEL=0")  # TLS 1.1 proposé par le client
+        context.minimum_version = context.maximum_version = version
+        try:
+            with socket.create_connection(("cdg.test", 443), timeout=10) as raw:
+                with context.wrap_socket(raw, server_hostname="cdg.test") as tls:
+                    return tls.version()
+        except ssl.SSLError as exc:
+            return f"refuse {exc.reason}"
+    versions = (ssl.TLSVersion.TLSv1_1, ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3)
+    print(json.dumps({v.name: handshake(v) for v in versions}))
+elif action == "rafale":
+    with httpx.Client(verify=CA, timeout=10) as client:
+        codes = [client.get(PUBLIC + "/ping").status_code for _ in range(int(sys.argv[2]))]
+    print(json.dumps({"codes": codes}))
+elif action == "deconnexion":
+    client = browser()
+    login(client, "analyste", sys.stdin.read().strip())
+    page = client.get(PUBLIC + "/")
+    token = CSRF.search(page.text)[1]
+    transition = client.post(
+        PUBLIC + "/deconnexion", data={"csrf": token}, headers={"origin": PUBLIC}
+    )
+    target = urllib.parse.urljoin(PUBLIC, html.unescape(NEXT.search(transition.text)[1]))
+    after = client.get(target)
+    again = client.get(PUBLIC + "/")
+    print(json.dumps({
+        "avant": state(page), "transition": transition.status_code,
+        "apres": state(after), "ensuite": state(again),
+        "session": sorted(session_cookies(client)),
+    }))
+elif action == "expiration":
+    client = browser()
+    done = login(client, "analyste", sys.stdin.read().strip())
+    kept = session_cookies(client)
+    time.sleep(float(sys.argv[2]))
+    replay = browser()  # l'ancien cookie, rejoué tel quel : sans navigateur qui l'écarte
+    for name, value in kept.items():
+        replay.cookies.set(name, value, domain="cdg.test")
+    stale = replay.get(PUBLIC + "/")
+    print(json.dumps({"avant": state(done), "apres": state(stale), "cookies": len(kept)}))
+"""
+
+
+def _client_pod(name: str, image: str) -> dict:
+    return {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "namespace": "cdg-tests",
+            "labels": {"app": "client-test"},
+        },
+        "spec": {
+            "restartPolicy": "Never",
+            "automountServiceAccountToken": False,
+            "securityContext": {
+                "runAsNonRoot": True,
+                "runAsUser": 65532,
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
+            "containers": [
+                {
+                    "name": "client",
+                    "image": image,
+                    "command": ["python", "-c", "import time; time.sleep(10800)"],
+                    "resources": {
+                        "requests": {"cpu": "50m", "memory": "64Mi"},
+                        "limits": {"cpu": "500m", "memory": "256Mi"},
+                    },
+                    "securityContext": {
+                        "allowPrivilegeEscalation": False,
+                        "readOnlyRootFilesystem": True,
+                        "capabilities": {"drop": ["ALL"]},
+                    },
+                    "volumeMounts": [
+                        {"name": "autorites", "mountPath": "/run/autorites"}
+                    ],
+                }
+            ],
+            "volumes": [{"name": "autorites", "configMap": {"name": "cdg-autorites"}}],
+        },
+    }
+
+
+@pytest.fixture(scope="module")
+def clients(images) -> Iterator[dict[str, str]]:
+    """Deux pods clients dans cdg-tests, l'autorité de test montée ; leur adresse."""
+    image = f"{images['factice']['repository']}@{images['factice']['digest']}"
+    for name in CLIENTS:
+        kubectl("apply", "-f", "-", stdin=json.dumps(_client_pod(name, image)))
+    for name in CLIENTS:
+        kubectl(
+            "wait",
+            "--for=condition=Ready",
+            f"pod/{name}",
+            "-n",
+            "cdg-tests",
+            "--timeout=300s",
+            timeout=320,
+        )
+    yield {
+        name: json.loads(kubectl("get", "pod", name, "-n", "cdg-tests", "-o", "json"))[
+            "status"
+        ]["podIP"]
+        for name in CLIENTS
+    }
+    kubectl("delete", "pod", *CLIENTS, "-n", "cdg-tests", "--wait=false")
+
+
+def browse(pod: str, *args: str, user: str = "analyste", timeout: float = 120) -> dict:
+    """Une action du navigateur dans un pod client ; le mot de passe par l'entrée
+    standard."""
+    result = subprocess.run(
+        KUBECTL
+        + ["exec", "-i", "-n", "cdg-tests", pod, "--", "python", "-c", BROWSER, *args],
+        input=CLUSTER.TEST_USERS[user],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    assert result.returncode == 0, f"navigateur, {args[0]} :\n{result.stderr}"
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def web_logs(pod: str, container: str) -> list[dict]:
+    """Lignes JSON du journal d'un conteneur d'un pod de l'interface."""
+    lines = kubectl("logs", "-n", "cdg", pod, "-c", container).splitlines()
+    return [json.loads(line) for line in lines if line.startswith("{")]
+
+
+def claims(token: str) -> dict:
+    """Revendications d'un jeton, lues sans vérification (le test ne fait que les lire)."""
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def test_connexion_par_le_navigateur_cookie_de_session_securise(clients):
+    """Par Traefik : redirection vers Dex, formulaire, retour ; l'interface affiche
+    l'utilisateur dont elle a vérifié le jeton. Cookie de session Secure, HttpOnly,
+    SameSite=Lax, pour la durée de session réglée."""
+    done = browse("client-a", "connexion", "analyste")
+    assert (done["hote"], done["statut"], done["utilisateur"]) == (
+        "cdg.test",
+        200,
+        "analyste",
+    )
+    assert done["cookie"], "aucun cookie de session"
+    for attributes in done["cookie"]:
+        parts = {part.strip().lower() for part in attributes.split(";")}
+        assert {"secure", "httponly", "samesite=lax"} <= parts, attributes
+        assert "max-age=120" in parts, attributes  # session de test : 2 minutes
+
+
+def test_en_tetes_et_jeton_forges_refuses(clients):
+    """En-têtes d'identité et jeton forgés (clé de l'attaquant, kid et sub réels), depuis
+    un autre pod : sans session, renvoyé vers Dex ; avec la session d'analyste, toujours
+    analyste (oauth2-proxy remplace l'en-tête Authorization par le jeton de la session,
+    l'interface ne croit que lui)."""
+    subject = claims(id_token("relecteur"))["sub"]
+    with forward("cdg-tests", "svc/dex", 5556) as base:
+        kid = httpx.get(f"{base}/keys", timeout=30).json()["keys"][0]["kid"]
+    forged = browse("client-b", "forge", subject, kid)
+    assert forged["anonyme"]["hote"] == "dex.cdg.test", forged
+    assert forged["anonyme"]["utilisateur"] is None
+    assert (forged["connecte"]["hote"], forged["connecte"]["utilisateur"]) == (
+        "cdg.test",
+        "analyste",
+    )
+
+
+def test_interface_joignable_par_traefik_seulement(clients):
+    """Depuis un autre pod, ni oauth2-proxy (règle réseau : Traefik seulement) ni
+    l'interface (boucle locale du pod) ne sont joignables en direct."""
+    for pod in web_pods():
+        opened = browse("client-a", "direct", pod["status"]["podIP"])
+        assert all(state.startswith("refuse") for state in opened.values()), opened
+
+
+def test_https_hsts_et_taille_maximale_par_l_entree(clients):
+    """HTTP redirigé vers HTTPS ; HSTS ; envoi plus gros que la taille maximale de
+    l'interface refusé par Traefik (413), avant oauth2-proxy."""
+    from cdg.adapters.web import security
+    from cdg.domain.config import load_config
+
+    size = security.max_body_bytes(load_config()) + 1
+    seen = browse("client-a", "entree", str(size))
+    code, location = seen["http"]
+    assert code in {301, 308} and location == f"{PUBLIC}/analyse", seen
+    assert seen["hsts"] == "max-age=31536000", seen
+    assert seen["taille"] == 413, seen
+
+
+def test_tls_1_2_au_moins(clients):
+    """TLS 1.1, proposé par le client, refusé par Traefik (alerte protocol_version) ; TLS
+    1.2 et 1.3 acceptés."""
+    versions = browse("client-a", "tls")
+    assert versions["TLSv1_1"] == "refuse TLSV1_ALERT_PROTOCOL_VERSION", versions
+    assert (versions["TLSv1_2"], versions["TLSv1_3"]) == ("TLSv1.2", "TLSv1.3")
+
+
+def test_limites_de_debit_separees_par_client(clients):
+    """Rafale d'un client : limité (429) ; l'autre, aussitôt après, ne l'est pas. Traefik
+    voit l'adresse de chaque pod (journal d'accès) : la limite porte sur elle."""
+    burst = browse("client-a", "rafale", "40")["codes"]
+    other = browse("client-b", "rafale", "5")["codes"]
+    assert 429 in burst and burst[0] == 200, burst
+    assert other == [200] * 5, other
+    lines = kubectl(
+        "logs", "-n", "traefik", "-l", "app.kubernetes.io/name=traefik", "--tail=-1"
+    ).splitlines()
+    entries = [json.loads(line) for line in lines if line.startswith("{")]
+    pings = [
+        e
+        for e in entries
+        if e.get("RequestPath") == "/ping" and e.get("RequestHost") == "cdg.test"
+    ]
+    limited = {e["ClientHost"] for e in pings if e.get("DownstreamStatus") == 429}
+    served = {e["ClientHost"] for e in pings if e.get("DownstreamStatus") == 200}
+    assert limited == {clients["client-a"]}, limited
+    assert clients["client-b"] in served, served
+
+
+def test_rotation_des_cles_du_fournisseur():
+    """Dex redémarre avec de nouvelles clés : un jeton signé par la nouvelle clé est
+    accepté (clés publiques relues par le proxy de sortie, au plus un délai de
+    rafraîchissement après la précédente lecture), l'ancien est refusé et le refus tracé
+    (cle_inconnue)."""
+    pod = web_pods()[0]["metadata"]["name"]
+
+    def accepted(token: str) -> bool:
+        with interface(pod, Identity(token=token)) as client:
+            return client.get("/").status_code == 200
+
+    TOKENS.clear()
+    old = id_token()
+    assert accepted(old)
+    kubectl("rollout", "restart", "deployment/dex", "-n", "cdg-tests")
+    kubectl(
+        "rollout",
+        "status",
+        "deployment/dex",
+        "-n",
+        "cdg-tests",
+        "--timeout=300s",
+        timeout=320,
+    )
+    TOKENS.clear()
+    new = id_token()
+    assert (
+        jwt.get_unverified_header(new)["kid"] != jwt.get_unverified_header(old)["kid"]
+    )
+    # PyJWKClient : une clé inconnue relit les clés, au plus une fois par délai (30 s)
+    wait_for(lambda: accepted(new), "nouvelle clé acceptée", 120, 5)
+    with interface(pod, Identity(token=old)) as client:
+        refused = client.get("/")
+    assert refused.status_code == 401
+    assert refused.headers["www-authenticate"].startswith("Bearer")
+    events = [e for e in web_logs(pod, "web") if e.get("journal") == "cdg.acces"]
+    assert any(
+        e["message"] == "acces_refuse" and e["motif"] == "cle_inconnue" for e in events
+    ), events[-5:]
+
+
+def test_deconnexion_exige_une_nouvelle_connexion(clients):
+    """Déconnexion : page de transition, fin de session d'oauth2-proxy (cookie retiré),
+    puis Dex de nouveau ; tracée avec sub et émetteur, sans nom ni courriel."""
+    seen = browse("client-a", "deconnexion")
+    assert seen["avant"]["utilisateur"] == "analyste", seen
+    assert seen["transition"] == 200
+    assert seen["apres"]["hote"] == "dex.cdg.test", seen
+    assert seen["ensuite"]["hote"] == "dex.cdg.test", seen
+    assert seen["session"] == [], seen
+    events = [
+        e
+        for pod in web_pods()
+        for e in web_logs(pod["metadata"]["name"], "web")
+        if e.get("message") == "deconnexion"
+    ]
+    assert events, "déconnexion non tracée"
+    for event in events:
+        assert event["iss"] == "https://dex.cdg.test" and event["sub"]
+        assert event["session_fournisseur"] == "desactivee"
+        assert not {"email", "name", "preferred_username"} & set(event)
+
+
+def test_session_expiree_refusee(clients):
+    """Session de test de 2 minutes : passé ce délai, l'ancien cookie, rejoué tel quel,
+    ne donne plus accès (retour vers Dex)."""
+    seen = browse("client-b", "expiration", "150", timeout=300)
+    assert (seen["avant"]["hote"], seen["avant"]["utilisateur"]) == (
+        "cdg.test",
+        "analyste",
+    )
+    assert seen["cookies"] >= 1
+    assert seen["apres"]["hote"] == "dex.cdg.test", seen
+
+
+EMAILS = ("analyste@example.org", "relecteur@example.org")
+
+
+def test_journaux_sans_courriel_ni_jeton_connexions_tracees_par_sub():
+    """Journaux de l'entrée, d'oauth2-proxy et de l'application (espaces cdg et traefik ;
+    Dex, fournisseur de test, écarté) : aucun courriel, aucun jeton délivré pendant les
+    scénarios, aucun cookie de session. Chaque connexion est tracée par oauth2-proxy avec
+    le seul sub."""
+    logs, read = container_logs({"cdg", "traefik"})
+    assert {p["metadata"]["name"] for p in web_pods()} <= {
+        name.split("/", 1)[1] for name in read
+    }
+    for email in EMAILS:
+        assert email not in logs, "courriel trouvé dans un journal"
+    assert ISSUED and not any(token in logs for token in ISSUED)
+    assert "_cdg_session=" not in logs
+    auth = [
+        json.loads(line)
+        for pod in web_pods()
+        for line in kubectl(
+            "logs", "-n", "cdg", pod["metadata"]["name"], "-c", "oauth2-proxy"
+        ).splitlines()
+        if line.startswith('{"journal":"oauth2-proxy"')
+    ]
+    successes = [e for e in auth if e["statut"] == "AuthSuccess"]
+    assert successes, auth[-5:]
+    for entry in auth:
+        assert set(entry) == {"journal", "evenement", "statut", "sub"}, entry
+    assert all(e["sub"] and "@" not in e["sub"] for e in successes)
+
+
+# --- 9. sauvegarde et restauration, puis désinstallation ----------------------------------
 
 
 def postgres_ready(name: str) -> bool:
@@ -996,8 +1530,22 @@ def test_sauvegarde_puis_restauration_verifiee_contre_la_tete_conservee():
     jobs = json.loads(kubectl("get", "jobs", "-n", "cdg", "-l", tasks, "-o", "json"))
     for job in jobs["items"]:  # seule une tâche en échec reste, pour le diagnostic
         assert job["status"].get("failed"), job["metadata"]["name"]
+    # certificat de l'entrée : supprimé avec l'Ingress, son propriétaire ; son Secret,
+    # écrit par cert-manager, lui survit (réutilisable à la réinstallation)
+    wait_for(
+        lambda: (
+            not kubectl(
+                "get", "certificate", "cdg-tls", "-n", "cdg", "--ignore-not-found"
+            ).strip()
+        ),
+        "certificat de l'entrée supprimé avec l'Ingress",
+        300,
+        5,
+    )
+    assert kubectl("get", "secret", "cdg-tls", "-n", "cdg", "-o", "name").strip()
     # nettoyage documenté (docs/exploitation.md, « Désinstallation »)
     kubectl("delete", "jobs", "--namespace", "cdg", "--selector", release)
+    kubectl("delete", "secret", "cdg-tls", "--namespace", "cdg")
     wait_for(
         lambda: not release_resources(release), "aucune ressource de la release", 300, 5
     )
