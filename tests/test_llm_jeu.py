@@ -18,7 +18,7 @@ import time
 
 import pytest
 from demo_set import load
-from doubles import ACTEUR_RELECTEUR, make_deps
+from doubles import ACTEUR_ANALYSTE, ACTEUR_RELECTEUR, CODE, make_deps
 from langgraph.checkpoint.memory import InMemorySaver
 from serie import (
     ACCOUNT_TOKENS_PER_MINUTE,
@@ -105,6 +105,8 @@ def analyse(llm, crag, store, contract, thread):
         contract.parties,
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     outcome, human = outcome_of(status), None
     if status["statut"] == "suspendu":

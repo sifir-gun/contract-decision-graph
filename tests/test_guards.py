@@ -9,6 +9,7 @@ import pytest
 from doubles import (
     ACTEUR_ANALYSTE,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
@@ -266,6 +267,7 @@ def test_statut_expose_les_echecs():
         analysis_date=ANALYSIS_DATE,
         config=FAST,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     assert status["statut"] == "suspendu"
     assert status["failures"] == [

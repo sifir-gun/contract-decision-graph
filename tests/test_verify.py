@@ -27,13 +27,14 @@ def verify(capsys, *options):
 def sealed(pg, audit_journal, tmp_path, monkeypatch, capsys):
     """Deux contrats analysés et scellés par la CLI dans le journal jetable."""
 
-    def build(config):
+    def build(config, code_version):
         return Deps(
             extractor=FixedExtractor(clauses()),
             crag=FakeCrag(),
             audit_store=cli.open_audit_store(),
             clock=cli.now,
             explainer=TEMPLATE,
+            code_version=code_version,
         )
 
     monkeypatch.setattr(cli, "build_deps", build)

@@ -7,6 +7,7 @@ from doubles import (
     ACTEUR_ANALYSTE,
     ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     PENALIZED,
     FakeCrag,
@@ -348,6 +349,7 @@ def test_run_contract_masque_avant_le_graphe():
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
     raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
@@ -374,6 +376,7 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     [call] = llm.calls
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
@@ -412,6 +415,7 @@ def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
     assert status["failure_report"] == {
@@ -435,5 +439,6 @@ def test_10_citation_corrigee_au_second_essai():
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     assert len(llm.calls) == 2 and len(status["verdicts"]) == 4

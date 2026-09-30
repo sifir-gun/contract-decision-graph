@@ -20,6 +20,7 @@ from demo_set import DEMO, files, load
 from doubles import (
     ABSENT,
     ACTEUR_ANALYSTE,
+    CODE,
     FakeCrag,
     FixedExtractor,
     MemoryAuditStore,
@@ -129,6 +130,7 @@ def run(contract, store):
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     if contract.human:
         # suspendu : rien de scellé pour ce contrat (le journal peut être partagé)

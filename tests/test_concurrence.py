@@ -17,6 +17,7 @@ from doubles import (
     ACTEUR_ANALYSTE,
     ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FIXED_NOW,
     FakeCrag,
@@ -309,11 +310,12 @@ def test_journal_en_memoire_supporte_les_ajouts_simultanes():
         record = audit.build_record(
             {
                 "contract_id": f"c-{i}",
-                **audit.analysis_context(CONFIG),
+                **audit.analysis_context(CONFIG, CODE),
                 "reject_reason": "texte trop court",
             },
             thread_id=f"c-{i}",
             sealing_config_hash=audit.config_hash(CONFIG),
+            sealing_code_version=CODE,
             sealed_at=FIXED_NOW,
         )
         return store.append(lambda head: audit.seal(record, head))

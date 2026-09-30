@@ -8,6 +8,7 @@ from doubles import (
     ACTEUR_ANALYSTE,
     ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FixedExtractor,
     clauses,
@@ -35,6 +36,7 @@ def suspend(graph, thread_id: str) -> datetime:
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
@@ -107,6 +109,7 @@ def test_thread_termine_jamais_repris(pg, thread_id):
                 analysis_date=ANALYSIS_DATE,
                 config=CONFIG,
                 actor=ACTEUR_ANALYSTE,
+                code=CODE,
             )["statut"]
             == "termine"
         )

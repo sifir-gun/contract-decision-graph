@@ -21,7 +21,7 @@ KILLED_RUN = textwrap.dedent("""
     from datetime import date
     text, clauses_path, thread_id, tests_dir = sys.argv[1:5]
     sys.path.insert(0, tests_dir)
-    from doubles import ACTEUR_ANALYSTE, FakeCrag, FixedExtractor, make_deps
+    from doubles import ACTEUR_ANALYSTE, CODE, FakeCrag, FixedExtractor, make_deps
     from cdg import settings
     from cdg.adapters.langgraph import orchestrator
     from cdg.adapters.postgres import conninfo
@@ -40,6 +40,7 @@ KILLED_RUN = textwrap.dedent("""
             analysis_date=date(2026, 9, 25),
             config=load_config(),
             actor=ACTEUR_ANALYSTE,
+            code=CODE,
         )
         print(json.dumps(status["statut"]), flush=True)
         os.kill(os.getpid(), signal.SIGKILL)

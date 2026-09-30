@@ -7,6 +7,7 @@ import psycopg
 import pytest
 from cli_helpers import INSUFFICIENT, run_cli
 from doubles import (
+    CODE,
     CONTRACT_TEXT,
     FakeLLM,
     FixedExtractor,
@@ -281,7 +282,7 @@ def test_resume_sans_cle_n_appelle_ni_llm_ni_corpus(
         thread_id,
     )
 
-    def forbidden(config):
+    def forbidden(config, code_version):
         raise AssertionError("resume ne doit pas construire les dépendances d'analyse")
 
     monkeypatch.setattr(cli, "build_deps", forbidden)
@@ -646,7 +647,7 @@ def test_run_explication_par_le_llm_de_l_analyse(monkeypatch, tmp_path):
     monkeypatch.setattr(
         cli.fastembed, "FastembedEmbedder", lambda config, cache_dir: HashEmbedder()
     )
-    deps = cli.build_deps(load_config())
+    deps = cli.build_deps(load_config(), CODE)
     assert isinstance(deps.explainer, LLMExplainer) and deps.explainer.provider is llm
 
 

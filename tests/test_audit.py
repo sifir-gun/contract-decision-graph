@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 import yaml
-from doubles import ABSENT, ANALYSIS_DATE, clauses, usage
+from doubles import ABSENT, ANALYSIS_DATE, CODE, clauses, usage
 from pydantic import BaseModel, ValidationError
 
 from cdg.domain import audit, explanation
@@ -90,7 +90,8 @@ def analysed(
     contract_id="c-1", refs=("réf",), used=None, failures=(), config=CONFIG, **overrides
 ):
     """État d'un contrat passé par les analystes et le gate, sans revue humaine ; le
-    contexte d'analyse (config_hash, modèles) est celui que pose run_contract."""
+    contexte d'analyse (config_hash, modèles, version du code) est celui que pose
+    run_contract."""
     found = clauses(**overrides)
     verdicts = [traced(d, found, refs) for d in DOMAINS if d not in _failed(failures)]
     used = used or [
@@ -100,7 +101,7 @@ def analysed(
     outcome = decide(verdicts, list(failures), used, CONFIG)
     return {
         "contract_id": contract_id,
-        **audit.analysis_context(config),
+        **audit.analysis_context(config, CODE),
         "analysis_date": ANALYSIS_DATE,
         "clauses": found,
         "verdicts": verdicts,
@@ -119,12 +120,14 @@ def _failed(failures):
     return {f.domain for f in failures}
 
 
-def record(state, thread_id=None, sealed_at=SEALED_AT, config=CONFIG):
-    """Scellement par un processus dont la configuration est `config`."""
+def record(state, thread_id=None, sealed_at=SEALED_AT, config=CONFIG, code=CODE):
+    """Scellement par un processus dont la configuration est `config`, et le code
+    `code`."""
     return audit.build_record(
         state,
         thread_id=thread_id or state["contract_id"],
         sealing_config_hash=audit.config_hash(config),
+        sealing_code_version=code,
         sealed_at=sealed_at,
     )
 
@@ -458,7 +461,7 @@ def test_rejeu_analyste_en_echec():
 def test_rejeu_rien_a_recalculer_pour_un_rejet():
     state = {
         "contract_id": "c-r",
-        **audit.analysis_context(CONFIG),
+        **audit.analysis_context(CONFIG, CODE),
         "analysis_date": ANALYSIS_DATE,
         "reject_reason": "texte trop court",
         "verdicts": [],

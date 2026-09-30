@@ -51,6 +51,8 @@ from cdg.domain import audit, authorization, expiry
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
+from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
+from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
@@ -115,9 +117,45 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
-def build_deps(config: DecisionConfig) -> Deps:
+COMMIT_VAR = "CDG_COMMIT"  # posée par l'image, à sa construction (Dockerfile)
+IMAGE_VAR = "CDG_EMPREINTE_IMAGE"  # posée par le chart, au lancement
+
+
+class VersionError(Exception):
+    """Version du code mal fournie : le programme s'arrête, jamais de repli."""
+
+
+def code_version() -> CodeVersion:
+    """Version du code qui décide, scellée avec chaque enregistrement : le commit, fourni
+    à la construction de l'image, et l'empreinte de l'image, fournie au lancement par le
+    chart. Jamais devinée : ni git, ni registre. Sans commit (poste de développement) :
+    « inconnu », scellé tel quel ; une valeur fournie mais mal formée arrête le
+    programme. Dans le cluster, l'empreinte de l'image est exigée."""
+    commit = os.environ.get(COMMIT_VAR, UNKNOWN_COMMIT)
+    image = os.environ.get(IMAGE_VAR)
+    if image is None and in_cluster():
+        raise VersionError(
+            f"{IMAGE_VAR} absente : dans le cluster, l'empreinte de l'image est exigée, "
+            "scellée avec chaque décision ; le chart la fournit"
+        )
+    try:
+        return CodeVersion(commit=commit, image=image)
+    except ValidationError as exc:
+        fields = {str(error["loc"][0]) for error in exc.errors()}
+        names = [
+            var
+            for field, var in (("commit", COMMIT_VAR), ("image", IMAGE_VAR))
+            if field in fields
+        ]
+        raise VersionError(
+            f"{', '.join(names)} mal formée : commit complet (40 caractères "
+            f"hexadécimaux) ou « {UNKNOWN_COMMIT} » ; empreinte sha256:… de l'image"
+        ) from None
+
+
+def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
     """Dépendances réelles d'une analyse : fournisseur LLM, embedding local, corpus,
-    journal d'audit.
+    journal d'audit, version du code.
 
     Le fournisseur d'abord : une clé d'API absente échoue avant tout chargement de
     modèle et avant la création du thread.
@@ -130,6 +168,7 @@ def build_deps(config: DecisionConfig) -> Deps:
         audit_store=open_audit_store(),
         clock=now,
         explainer=LLMExplainer(llm),
+        code_version=code,
     )
 
 
@@ -159,7 +198,9 @@ def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
     return LLMExplainer(build_provider(config.llm))
 
 
-def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> Deps:
+def review_deps(
+    config: DecisionConfig, explainer: Explainer | TemplateOnly, code: CodeVersion
+) -> Deps:
     """resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
     aucun modèle d'embedding chargé, un appel échouerait explicitement. Seule
     l'explication peut appeler le LLM (resume avec clé). Le contrat repris est scellé dans
@@ -170,6 +211,7 @@ def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> 
         audit_store=open_audit_store(),
         clock=now,
         explainer=explainer,
+        code_version=code,
     )
 
 
@@ -231,15 +273,17 @@ def _graph(config: DecisionConfig, deps: Deps):
 def build_service(config: DecisionConfig) -> ContractService:
     """Service des contrats sur la base PostgreSQL. Chaque opération construit ses
     dépendances à l'appel, comme chaque commande : le fournisseur LLM pour run, qui échoue
-    d'abord si la clé manque ; l'explication seule pour resume ; rien pour la lecture."""
+    d'abord si la clé manque ; l'explication seule pour resume ; rien pour la lecture.
+    La version du code est lue d'abord : mal fournie, rien ne démarre."""
+    code = code_version()
     engine = LangGraphEngine(
         config,
         lambda deps: _graph(config, deps),
         EngineDeps(
-            run=lambda: build_deps(config),
-            resume=lambda: review_deps(config, resume_explainer(config)),
-            expire=lambda: review_deps(config, EXPIRE_EXPLAINER),
-            read=lambda: review_deps(config, HISTORY_EXPLAINER),
+            run=lambda: build_deps(config, code),
+            resume=lambda: review_deps(config, resume_explainer(config), code),
+            expire=lambda: review_deps(config, EXPIRE_EXPLAINER, code),
+            read=lambda: review_deps(config, HISTORY_EXPLAINER, code),
         ),
         PostgresContractLocks(app_pool),
         PostgresResumeCounter(app_pool),
@@ -265,6 +309,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
     rattachement déclaré, explication par le gabarit. Ni clé d'API, ni base, ni coût.
     Date d'analyse par défaut : celle des attendus, pour que le jeu rende ses issues
     documentées quel que soit le jour (versions des textes du corpus)."""
+    code = code_version()
     expected_on, contracts = demo_set.load()
     store = MemoryAuditStore()
     deps = Deps(
@@ -273,6 +318,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
         audit_store=store,
         clock=now,
         explainer=DEMO_EXPLAINER,
+        code_version=code,
     )
     engine = LangGraphEngine(
         config,

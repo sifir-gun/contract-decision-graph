@@ -15,6 +15,7 @@ from demo_set import load
 from doubles import (
     ACTEUR_ANALYSTE,
     ACTEUR_RELECTEUR,
+    CODE,
     FakeCrag,
     FakeLLM,
     FixedExtractor,
@@ -60,6 +61,7 @@ class Run:
             analysis_date=ANALYSIS_DATE,
             config=CONFIG,
             actor=ACTEUR_ANALYSTE,
+            code=CODE,
         )
 
     def resume(self, human):

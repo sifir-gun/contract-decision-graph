@@ -3,6 +3,10 @@
 - L'enregistrement porte sa version (2) ; l'acteur de l'analyse (`analyse_par`) et celui
   de la décision humaine (`human.acteur`) remplacent le relecteur nommé : canal, iss et
   sub, ou opérateur non nominatif ; jamais de nom ni d'e-mail.
+- La version du code de l'analyse et celle du processus qui scelle (commit, et empreinte
+  de l'image dans le cluster) sont scellées hors de la partie décision : decision_hash ne
+  dépend que des entrées de la décision et de la configuration (critère 6), la chaîne
+  couvre tout. Inconnue, elle le dit ; différentes, un constat.
 - Les enregistrements v1 (sans version, relecteur nommé) restent vérifiables et
   rejouables : la vérification recalcule tout sur le JSON stocké, et le rejeu les relit
   par leurs propres modèles, figés. Jeu v1 synthétique : aucune donnée du vrai journal.
@@ -11,11 +15,13 @@
 import json
 
 import pytest
-from test_audit import CONFIG, analysed, record
+from doubles import CODE
+from test_audit import CONFIG, analysed, other_config, record
 
 from cdg.domain import audit
 from cdg.domain.authorization import Actor
 from cdg.domain.models import HumanDecision, HumanReview
+from cdg.domain.version import UNKNOWN, CodeVersion
 
 ISS = "https://idp.example.org"
 ANALYSTE = Actor(canal="interface", authentifie=True, iss=ISS, sub="sub-analyste")
@@ -51,8 +57,8 @@ def v1_record() -> dict:
     """Enregistrement au format d'avant la PR D2 : sans version, sans acteur de
     l'analyse, relecteur nommé ; synthétique."""
     data = record(reviewed()).model_dump(mode="json")
-    data.pop("version")
-    data.pop("analyse_par")
+    for v2_only in ("version", "analyse_par", "code_version", "sealing_code_version"):
+        data.pop(v2_only)
     human = data["decision"]["human"]
     data["decision"]["human"] = HumanDecision(
         decision=human["decision"], reviewer="Relecteur de test", reason="revu"
@@ -95,6 +101,77 @@ def test_analyse_sans_acteur_scellee_sans_acteur():
     state = reviewed()
     del state["analyse_par"]
     assert record(state).model_dump(mode="json")["analyse_par"] is None
+
+
+# --- version du code ----------------------------------------------------------------------
+
+AUTRE_CODE = CodeVersion(commit="0" * 40, image="sha256:" + "1" * 64)
+
+
+def test_versions_du_code_de_l_analyse_et_du_scellement_scellees():
+    data = record(reviewed()).model_dump(mode="json")
+    expected = CODE.model_dump(mode="json")
+    assert data["code_version"] == data["sealing_code_version"] == expected
+    assert data["sealing_findings"] == []
+
+
+def test_contexte_d_analyse_porte_la_version_du_code():
+    context = audit.analysis_context(CONFIG, AUTRE_CODE)
+    assert context["code_version"] == AUTRE_CODE.model_dump(mode="json")
+
+
+def test_code_modifie_entre_l_analyse_et_le_scellement_constat():
+    data = record(reviewed(), code=AUTRE_CODE).model_dump(mode="json")
+    assert data["code_version"] == CODE.model_dump(mode="json")  # celle de l'analyse
+    assert data["sealing_code_version"] == AUTRE_CODE.model_dump(mode="json")
+    assert data["sealing_findings"] == [audit.CODE_CHANGED]
+    assert audit.CODE_CHANGED == "code modifié entre l'analyse et le scellement"
+
+
+def test_configuration_et_code_modifies_deux_constats():
+    data = record(reviewed(), config=other_config(), code=AUTRE_CODE).model_dump(
+        mode="json"
+    )
+    assert data["sealing_findings"] == [audit.CONFIG_CHANGED, audit.CODE_CHANGED]
+
+
+def test_version_inconnue_scellee_telle_quelle():
+    unknown = CodeVersion(commit=UNKNOWN, image=None)
+    state = reviewed(**audit.analysis_context(CONFIG, unknown))
+    data = record(state, code=unknown).model_dump(mode="json")
+    assert data["code_version"] == data["sealing_code_version"]
+    assert data["code_version"] == {"commit": "inconnu", "image": None}
+
+
+def test_version_du_code_hors_de_la_partie_decision_mais_chainee():
+    first = record(reviewed()).model_dump(mode="json")
+    state = reviewed(**audit.analysis_context(CONFIG, AUTRE_CODE))
+    other = record(state, code=AUTRE_CODE).model_dump(mode="json")
+    assert "code_version" not in first["decision"]
+    assert audit.decision_hash(first) == audit.decision_hash(other)
+    assert audit.chain_hash(first, audit.GENESIS) != audit.chain_hash(
+        other, audit.GENESIS
+    )
+
+
+def test_analyse_sans_version_du_code_scellee_nulle():
+    """Analyse lancée avant le scellement de la version du code : null, comme l'acteur
+    d'une analyse antérieure aux rôles ; celle du scellement est toujours connue."""
+    state = reviewed()
+    del state["code_version"]
+    data = record(state).model_dump(mode="json")
+    assert data["code_version"] is None
+    assert data["sealing_code_version"] == CODE.model_dump(mode="json")
+
+
+def test_version_du_code_du_scellement_exigee():
+    with pytest.raises(TypeError, match="sealing_code_version"):
+        audit.build_record(
+            reviewed(),
+            thread_id="c-1",
+            sealing_config_hash=audit.config_hash(CONFIG),
+            sealed_at=record(reviewed()).sealed_at,
+        )
 
 
 # --- v1 vérifiable et rejouable --------------------------------------------------------------

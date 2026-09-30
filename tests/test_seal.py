@@ -11,6 +11,7 @@ from doubles import (
     ACTEUR_ANALYSTE,
     ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FIXED_NOW,
     FakeCrag,
@@ -292,6 +293,7 @@ def test_run_contract_pose_l_empreinte_d_analyse_scellee():
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     [entry] = store.entries()
     assert status["config_hash"] == entry.config_hash == audit.config_hash(CONFIG)
@@ -310,6 +312,7 @@ def test_resume_refuse_si_la_configuration_a_change_avant_toute_reprise():
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     with pytest.raises(orchestrator.ThreadError) as refused:
         orchestrator.resume_thread(graph, "c-conf", HUMAN, config=changed_config())
@@ -334,6 +337,7 @@ def test_expire_continue_et_scelle_les_deux_empreintes_avec_le_constat():
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     # expire lancé par un processus dont la configuration a changé depuis l'analyse
     other = changed_config()

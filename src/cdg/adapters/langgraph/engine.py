@@ -153,6 +153,7 @@ class LangGraphEngine:
                 analysis_date=analysis_date,
                 config=self._config,
                 actor=actor,
+                code=deps.code_version,
             )
 
     def resume(self, thread_id: str, answer: dict[str, Any]) -> dict[str, Any]:

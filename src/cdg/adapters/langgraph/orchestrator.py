@@ -44,6 +44,7 @@ from cdg.domain import audit, expiry, masking, policy, resumption
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
+from cdg.domain.version import CodeVersion
 from cdg.ports.engine import ThreadError
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
 from cdg.ports.locks import ContractBusy
@@ -357,6 +358,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
                 audit_store=deps.audit_store,
                 clock=deps.clock,
                 decision_config=config,
+                code_version=deps.code_version,
                 thread_id=current_thread(state),
             ),
         ),
@@ -456,6 +458,7 @@ def run_contract(
     analysis_date: date,
     config: DecisionConfig,
     actor: Actor,
+    code: CodeVersion,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
 
@@ -463,8 +466,9 @@ def run_contract(
     premier checkpoint, le texte original n'atteint donc jamais la base ni le LLM.
     `analysis_date` fixe la date à laquelle les versions des textes sont jugées ; elle est
     écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
-    produit la décision, et modèles) est posé dans l'état initial, avant tout nœud :
-    c'est lui qui est scellé, comme l'acteur qui lance l'analyse (quatre yeux).
+    produit la décision, modèles et version du code) est posé dans l'état initial, avant
+    tout nœud : c'est lui qui est scellé, comme l'acteur qui lance l'analyse (quatre
+    yeux).
     """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
@@ -477,7 +481,7 @@ def run_contract(
             "contract_id": contract_id,
             "raw_text": masked.text,
             "analysis_date": analysis_date,
-            **audit.analysis_context(config),
+            **audit.analysis_context(config, code),
             "analyse_par": actor,
         },
         _thread(contract_id),

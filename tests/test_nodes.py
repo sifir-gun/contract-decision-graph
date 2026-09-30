@@ -4,6 +4,7 @@ import pytest
 from doubles import (
     ABSENT,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
@@ -228,6 +229,7 @@ def seal(state, store, thread_id="c-1"):
         audit_store=store,
         clock=fixed_clock,
         decision_config=CONFIG,
+        code_version=CODE,
         thread_id=thread_id,
     )
 

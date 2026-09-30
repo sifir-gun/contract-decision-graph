@@ -15,8 +15,10 @@ chaîne et insère ; l'horodatage vient de l'appelant.
 - `replay` : recalcule règles, justification et décision à partir de l'enregistrement
   scellé et des références figées, sans LLM ni CRAG.
 - Formats : v2 (PR D2) porte sa version, l'acteur de l'analyse et celui de la décision
-  humaine (jamais de nom ni d'e-mail) ; v1, sans version, relecteur nommé, reste
-  vérifiable (tout est recalculé sur le JSON stocké) et rejouable par ses modèles, figés.
+  humaine (jamais de nom ni d'e-mail), la version du code de l'analyse et celle du
+  scellement (hors de `decision_hash`, chaînées) ; v1, sans version, relecteur nommé,
+  reste vérifiable (tout est recalculé sur le JSON stocké) et rejouable par ses modèles,
+  figés.
 """
 
 import hashlib
@@ -46,9 +48,11 @@ from cdg.domain.models import (
 )
 from cdg.domain.numeric import rounded
 from cdg.domain.rules import RULES
+from cdg.domain.version import CodeVersion
 
 GENESIS = "0" * 64  # prev_hash du premier maillon
 CONFIG_CHANGED = "configuration modifiée entre l'analyse et le scellement"
+CODE_CHANGED = "code modifié entre l'analyse et le scellement"
 _HASH = re.compile(r"[0-9a-f]{64}")
 
 # nœuds exécutés après decision_gate : leur consommation et leurs échecs n'ont pas pesé
@@ -111,11 +115,16 @@ def models_of(config: DecisionConfig) -> dict[str, str]:
     }
 
 
-def analysis_context(config: DecisionConfig) -> dict[str, Any]:
+def analysis_context(config: DecisionConfig, code: CodeVersion) -> dict[str, Any]:
     """Contexte d'analyse, placé dans l'état initial par `run_contract` avant tout nœud :
-    empreinte de la configuration qui produira la décision, et modèles qui analyseront.
-    C'est lui qui est scellé, même si un autre processus scelle."""
-    return {"config_hash": config_hash(config), "models": models_of(config)}
+    empreinte de la configuration qui produira la décision, modèles qui analyseront, et
+    version du code qui analyse (en JSON). C'est lui qui est scellé, même si un autre
+    processus scelle."""
+    return {
+        "config_hash": config_hash(config),
+        "models": models_of(config),
+        "code_version": code.model_dump(mode="json"),
+    }
 
 
 def decision_hash(record: Mapping[str, Any]) -> str:
@@ -231,10 +240,14 @@ class AuditRecordV1(_RecordPart):
 
 
 class AuditRecord(_RecordPart):
-    """Format v2 (PR D2) : version, acteur de l'analyse, acteur de la décision."""
+    """Format v2 (PR D2) : version, acteur de l'analyse, acteur de la décision, version
+    du code de l'analyse et du scellement."""
 
     version: Literal[2] = 2
     analyse_par: Actor | None  # None : analyse antérieure aux rôles
+    # None : analyse antérieure au scellement de la version du code
+    code_version: CodeVersion | None
+    sealing_code_version: CodeVersion  # processus qui scelle
     decision: DecisionRecord  # config_hash : celui de l'analyse
 
 
@@ -250,12 +263,14 @@ def build_record(
     *,
     thread_id: str,
     sealing_config_hash: str,
+    sealing_code_version: CodeVersion,
     sealed_at: datetime,
 ) -> AuditRecord:
     """Enregistrement d'un contrat à partir de son état final. Une clé absente de l'état
     (rejet, escalade avant les analystes) est scellée vide ou nulle ; le contexte
-    d'analyse (config_hash, modèles), lui, est exigé. Une configuration de scellement
-    différente de celle de l'analyse est scellée aussi, avec un constat."""
+    d'analyse (config_hash, modèles), lui, est exigé. Une configuration ou un code de
+    scellement différents de ceux de l'analyse sont scellés aussi, chacun avec un
+    constat."""
     missing = [k for k in ("config_hash", "models") if k not in state]
     if missing:
         raise ValueError(
@@ -270,10 +285,17 @@ def build_record(
             "l'acteur qui tranche"
         )
     by_domain = {v.domain: v for v in state.get("verdicts", [])}
+    analysed_by = state.get("code_version")
+    code = None if analysed_by is None else CodeVersion.model_validate(analysed_by)
+    findings = [] if sealing_config_hash == analysed_with else [CONFIG_CHANGED]
+    if code is not None and code != sealing_code_version:
+        findings.append(CODE_CHANGED)
     return AuditRecord(
         contract_id=state["contract_id"],
         thread_id=thread_id,
         analyse_par=state.get("analyse_par"),
+        code_version=code,
+        sealing_code_version=sealing_code_version,
         decision=DecisionRecord(
             analysis_date=state.get("analysis_date"),
             clauses=state.get("clauses", []),
@@ -289,9 +311,7 @@ def build_record(
         ),
         failure_report=state.get("failure_report"),
         sealing_config_hash=sealing_config_hash,
-        sealing_findings=[]
-        if sealing_config_hash == analysed_with
-        else [CONFIG_CHANGED],
+        sealing_findings=findings,
         explanation=state.get("explanation"),
         failures=state.get("failures", []),
         usage=state.get("usage", []),

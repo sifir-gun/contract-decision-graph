@@ -271,7 +271,7 @@ def analysis(monkeypatch, request):
         extractor = extractor or FixedExtractor(clauses())
         crag = FakeCrag(empty)
 
-        def build(config):
+        def build(config, code_version):
             request.getfixturevalue("audit_journal")
             return Deps(
                 extractor=extractor,
@@ -279,6 +279,7 @@ def analysis(monkeypatch, request):
                 audit_store=cli.open_audit_store(),
                 clock=cli.now,
                 explainer=TEMPLATE,
+                code_version=code_version,
             )
 
         monkeypatch.setattr(cli, "build_deps", build)

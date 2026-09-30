@@ -6,6 +6,7 @@ from doubles import (
     ACTEUR_ANALYSTE,
     ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FixedExtractor,
     clauses,
@@ -127,6 +128,7 @@ def test_texte_original_jamais_ecrit_en_base(pg, thread_id):
             analysis_date=ANALYSIS_DATE,
             config=CONFIG,
             actor=ACTEUR_ANALYSTE,
+            code=CODE,
         )
     # colonnes binaires des writes et des blobs, JSON des checkpoints
     columns = {
