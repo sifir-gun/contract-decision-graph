@@ -424,7 +424,7 @@ def test_commande_des_scenarios_comprise_par_pytest_hors_du_depot(tmp_path):
     """Un dossier hors du dépôt passé en second mot (`--cluster DOSSIER`) est pris par
     pytest pour une cible : il y cherche sa racine, ne charge pas tests/conftest.py et
     refuse l'option (vu par check.sh le 28/09). La commande du job, telle quelle, avec
-    le dossier du runner : les vingt-quatre scénarios sont collectés."""
+    le dossier du runner : les vingt-sept scénarios sont collectés."""
     [command] = [c for c in ORDER if " pytest " in c]
     folder = tmp_path / "cluster"
     folder.mkdir()
@@ -440,7 +440,7 @@ def test_commande_des_scenarios_comprise_par_pytest_hors_du_depot(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert re.match(r"24/\d+ tests collected", result.stdout.splitlines()[-1])
+    assert re.match(r"27/\d+ tests collected", result.stdout.splitlines()[-1])
 
 
 def test_check_sh_sans_cluster_le_dit_et_ne_saute_que_le_cluster():

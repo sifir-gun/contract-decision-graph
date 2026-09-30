@@ -42,6 +42,12 @@ stringData:
         username: relecteur
         userID: 2b9d7e44-5c0a-4f18-8e37-9d1c6a2f4b02
         groups: [cdg-relecteurs]
+      # analyste et relecteur à la fois : scénario des quatre yeux (PR D2)
+      - email: polyvalent@example.org
+        hash: "$2a$10$S8ZV393iJrzfeVcf/.eOK.mhmLnpOWljQZTTbT4JBQYZ9ZXjZkpAK"
+        username: polyvalent
+        userID: 6a55690a-f798-46d4-bef5-01025ebfed90
+        groups: [cdg-analystes, cdg-relecteurs]
 ---
 apiVersion: apps/v1
 kind: Deployment
