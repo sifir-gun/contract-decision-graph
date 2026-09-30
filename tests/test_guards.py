@@ -7,7 +7,9 @@ l'humain. Les erreurs transitoires d'un analyste sont d'abord reprises par Retry
 
 import pytest
 from doubles import (
+    ACTEUR_ANALYSTE,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
@@ -259,7 +261,13 @@ def test_statut_expose_les_echecs():
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
     status = orchestrator.run_contract(
-        graph, "c-statut", CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=FAST
+        graph,
+        "c-statut",
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=FAST,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     assert status["statut"] == "suspendu"
     assert status["failures"] == [

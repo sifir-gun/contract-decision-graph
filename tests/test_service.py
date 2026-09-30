@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from doubles import (
     ABSENT,
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
     CONTRACT_TEXT,
     FIXED_NOW,
@@ -22,7 +24,12 @@ from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.application import ingestion
-from cdg.application.service import ContractService, extraction_refusals, state_label
+from cdg.application.service import (
+    ContractService,
+    FourEyesRefused,
+    extraction_refusals,
+    state_label,
+)
 from cdg.domain.audit import GENESIS, ReplayError
 from cdg.domain.config import load_config
 from cdg.domain.identifiers import ContractIdError
@@ -72,14 +79,14 @@ def make_service(
 
 def pending_service():
     service = make_service()
-    service.analyse(PENDING_TEXT, contract_id="c-attente")
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
     return service
 
 
 def answer(**overrides) -> dict:
     return {
         "decision": "GO_RESERVES",
-        "reviewer": "Camille Relectrice",
+        "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
         "reason": "pénalités à négocier",
         "overrides_block": False,
     } | overrides
@@ -90,7 +97,7 @@ def answer(**overrides) -> dict:
 
 def test_analyse_termine_et_date_du_jour_par_defaut():
     service = make_service()
-    status = service.analyse(CONTRACT_TEXT, contract_id="c1")
+    status = service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
     assert (status["statut"], status["final_decision"]) == ("termine", "GO")
     assert status["analysis_date"] == ANALYSIS_DATE
     assert status["chain_hash"] is not None
@@ -99,7 +106,10 @@ def test_analyse_termine_et_date_du_jour_par_defaut():
 def test_analyse_masque_les_parties_avant_le_graphe():
     service = make_service()
     status = service.analyse(
-        f"{CONTRACT_TEXT}\nFournisseur : {PARTY}.\n", contract_id="c1", parties=[PARTY]
+        f"{CONTRACT_TEXT}\nFournisseur : {PARTY}.\n",
+        contract_id="c1",
+        parties=[PARTY],
+        actor=ACTEUR_ANALYSTE,
     )
     assert status["masquage"] == {"PARTIE": 1}
     assert PARTY not in service.dossier("c1")["texte_masque"]
@@ -107,9 +117,9 @@ def test_analyse_masque_les_parties_avant_le_graphe():
 
 def test_analyse_refuse_un_thread_existant():
     service = make_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c1")
+    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
     with pytest.raises(ThreadError, match="existe déjà"):
-        service.analyse(CONTRACT_TEXT, contract_id="c1")
+        service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
 
 
 # --- liste des contrats -------------------------------------------------------------------
@@ -117,7 +127,7 @@ def test_analyse_refuse_un_thread_existant():
 
 def test_liste_des_contrats_avec_etat_et_filtre_en_attente():
     service = pending_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c-termine")
+    service.analyse(CONTRACT_TEXT, contract_id="c-termine", actor=ACTEUR_ANALYSTE)
     rows = {r["thread_id"]: r for r in service.contracts()}
     assert rows["c-attente"]["etat"] == "en_attente"
     assert rows["c-attente"]["proposed_decision"] == "GO"
@@ -132,7 +142,9 @@ def test_liste_des_contrats_avec_etat_et_filtre_en_attente():
 
 def test_contrat_rejete_dans_la_liste():
     service = make_service()
-    service.analyse("Too short, in English.", contract_id="c-rejet")
+    service.analyse(
+        "Too short, in English.", contract_id="c-rejet", actor=ACTEUR_ANALYSTE
+    )
     (row,) = service.contracts()
     assert row["etat"] == "rejete"
     assert row["final_decision"] is None
@@ -151,7 +163,7 @@ def test_liste_des_contrats_en_une_seule_ouverture_du_graphe():
     service = make_service(opener=counting)
     openings = []
     for contract_id in ("c1", "c2", "c3"):
-        service.analyse(CONTRACT_TEXT, contract_id=contract_id)
+        service.analyse(CONTRACT_TEXT, contract_id=contract_id, actor=ACTEUR_ANALYSTE)
         opened.clear()
         rows = service.contracts()
         openings.append(len(opened))
@@ -165,7 +177,7 @@ def test_liste_des_contrats_en_une_seule_ouverture_du_graphe():
 def test_analyse_refuse_un_identifiant_invalide_sans_rien_creer():
     service = make_service()
     with pytest.raises(ContractIdError, match="identifiant de contrat invalide"):
-        service.analyse(CONTRACT_TEXT, contract_id="a b/../c")
+        service.analyse(CONTRACT_TEXT, contract_id="a b/../c", actor=ACTEUR_ANALYSTE)
     assert service.contracts() == [] and service.journal() == []
 
 
@@ -174,7 +186,7 @@ def test_contrat_existant_d_identifiant_ancien_reste_lisible_et_tranchable():
     faisait la CLI) : listé, lu, tranché ; la règle ne vaut qu'à la création."""
     service = make_service()
     legacy = "revue 1#é"
-    service.engine.run(legacy, PENDING_TEXT, (), ANALYSIS_DATE)
+    service.engine.run(legacy, PENDING_TEXT, (), ANALYSIS_DATE, ACTEUR_ANALYSTE)
     [row] = service.contracts()
     assert (row["thread_id"], row["etat"]) == (legacy, "en_attente")
     assert service.dossier(legacy)["thread_id"] == legacy
@@ -187,7 +199,7 @@ def test_revue_humaine_acceptee_scelle_la_decision():
     service = pending_service()
     status = service.decide("c-attente", answer())
     assert (status["statut"], status["final_decision"]) == ("termine", "GO_RESERVES")
-    assert status["human"]["reviewer"] == "Camille Relectrice"
+    assert status["human"]["acteur"] == ACTEUR_RELECTEUR.model_dump(mode="json")
     assert service.contracts(pending_only=True) == []
 
 
@@ -195,7 +207,6 @@ def test_revue_humaine_acceptee_scelle_la_decision():
     ("overrides", "error"),
     [
         ({"reason": "  "}, "reason obligatoire"),
-        ({"reviewer": "systeme:moi"}, "réservé aux décisions système"),
         ({"decision": "ESCALADE"}, "non autorisée"),
         ({"overrides_block": True}, "overrides_block sans blocage dur levé"),
     ],
@@ -207,9 +218,20 @@ def test_reponse_refusee_redemandee_avec_son_motif(overrides, error):
     assert error in status["demande"]["error"]
 
 
+def test_quatre_yeux_premier_controle_avant_le_graphe():
+    """L'analyste ne tranche pas sa propre analyse : refusé par le service, avant toute
+    reprise du graphe (la politique du graphe fait le second contrôle)."""
+    service = pending_service()
+    own = answer(acteur=ACTEUR_ANALYSTE.model_dump(mode="json"))
+    with pytest.raises(FourEyesRefused, match="a lancé l'analyse"):
+        service.decide("c-attente", own)
+    status = service.dossier("c-attente")["status"]
+    assert status["statut"] == "suspendu" and status["demande"].get("error") is None
+
+
 def test_reprise_d_un_thread_inconnu_ou_termine_refusee():
     service = make_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c1")
+    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
     with pytest.raises(ThreadError, match="inconnu"):
         service.decide("absent", answer())
     with pytest.raises(ThreadError, match="pas en attente"):
@@ -242,7 +264,7 @@ def test_dossier_d_un_contrat_en_attente():
 
 def test_dossier_references_retenues_avec_leur_texte():
     service = make_service(FixedExtractor(clauses(penalites_execution=ABSENT)))
-    service.analyse(CONTRACT_TEXT, contract_id="c1")
+    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
     references = service.dossier("c1")["references"]
     # FakeCrag retient une référence fictive par domaine : absente du corpus, signalée
     assert references["financier-ref-1"] is None
@@ -264,7 +286,7 @@ def test_levee_de_blocage_possible_seulement_si_permise():
     config = CONFIG.model_copy(update={"human_policy": policy})
     blocked = FixedExtractor(clauses(responsabilite_acheteur=None))  # illimitée
     service = make_service(blocked, config=config)
-    service.analyse(CONTRACT_TEXT, contract_id="c-bloque")
+    service.analyse(CONTRACT_TEXT, contract_id="c-bloque", actor=ACTEUR_ANALYSTE)
     assert service.dossier("c-bloque")["status"]["proposed_decision"] == "NO_GO"
     assert service.dossier("c-bloque")["levee_possible"] is True
     forbidden = policy.model_copy(update={"allow_block_override": False})
@@ -288,7 +310,7 @@ def test_dossier_extractions_refusees_puis_escalade():
         for c in clauses()
     ]
     service = make_service(FixedExtractor(wrong))
-    service.analyse(CONTRACT_TEXT, contract_id="c1")
+    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
     dossier = service.dossier("c1")
     assert len(dossier["extractions_refusees"]) == CONFIG.extraction.max_attempts
     assert all(
@@ -326,8 +348,8 @@ def test_expiration_des_contrats_en_attente():
     # les checkpoints sont datés à l'heure réelle : « plus tard » part d'elle
     at = datetime.now(UTC) + timedelta(days=3)
     later = replace(pending_service(), now=lambda: at)
-    assert later.expire(timedelta(days=5)) == (at, [])
-    now, expired = later.expire(timedelta(hours=24))
+    assert later.expire(timedelta(days=5), ACTEUR_RELECTEUR) == (at, [])
+    now, expired = later.expire(timedelta(hours=24), ACTEUR_RELECTEUR)
     assert now == at
     (status,) = expired
     assert status["final_decision"] == "NO_GO"
@@ -339,7 +361,7 @@ def test_expiration_des_contrats_en_attente():
 
 def test_journal_verification_et_rejeu():
     service = pending_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c-go")
+    service.analyse(CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE)
     decided = service.decide("c-attente", answer())
     entries = service.journal()
     assert [(e["thread_id"], e["final_decision"]) for e in entries] == [

@@ -39,7 +39,12 @@ def inert(*args, **kwargs):
 
 def mermaid() -> str:
     deps = Deps(
-        extractor=inert, crag=inert, audit_store=inert, clock=inert, explainer=inert
+        extractor=inert,
+        crag=inert,
+        audit_store=inert,
+        clock=inert,
+        explainer=inert,
+        code_version=inert,
     )
     graph = build_graph(load_config(), deps).compile()
     return graph.get_graph().draw_mermaid(node_colors=STYLES).rstrip("\n") + "\n"

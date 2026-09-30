@@ -84,8 +84,11 @@ UniqueKeys.add_constructor(
 
 
 def render(*options: str) -> list[dict]:
+    """Rendu avec les valeurs d'authentification, exigées (PR D2) : `options` les
+    complète ou les remplace. `refused` rend sans elles, pour tester leurs refus."""
+    auth = chart_script().AUTH
     result = subprocess.run(
-        ["helm", "template", "cdg", str(CHART), "--namespace", "cdg", *options],
+        ["helm", "template", "cdg", str(CHART), "--namespace", "cdg", *auth, *options],
         capture_output=True,
         text=True,
         check=False,
@@ -301,6 +304,32 @@ def test_images_par_empreinte_jamais_par_etiquette(reel):
 
 
 @pytest.mark.chart
+@pytest.mark.chart
+@pytest.mark.parametrize("variant", ["reel", "demo", "copie"])
+def test_empreinte_de_l_image_fournie_a_chaque_conteneur_de_la_cli(variant):
+    """Version du code scellée (PR D2, ADR 005) : l'empreinte que le chart déploie, la même
+    que celle qui tire l'image, passée au lancement à chaque conteneur qui lance la CLI de
+    l'application (interface, tâches) ; la CLI la refuse absente dans le cluster."""
+    image = chart_values("contract-decision-graph")["image"]
+    app = f"{image['repository']}@{image['digest']}"
+    docs, launched = render(*chart_script().VARIANTS[variant]), []
+    for name, spec in pod_specs(docs):
+        for container in containers(spec):
+            variables = env(container)
+            if container["image"] == app and "command" not in container:
+                assert variables["CDG_EMPREINTE_IMAGE"] == {
+                    "name": "CDG_EMPREINTE_IMAGE",
+                    "value": image["digest"],
+                }, name
+                launched.append(name)
+            else:
+                assert "CDG_EMPREINTE_IMAGE" not in variables, (name, container["name"])
+    [interface] = of_kind(docs, "Deployment")
+    jobs = [job["metadata"]["name"] for job in of_kind(docs, "Job")]
+    assert launched == [interface["metadata"]["name"], *jobs]
+    assert jobs or variant == "demo", "les tâches lancent aussi la CLI"
+
+
 def secret_files(spec: dict, container: dict) -> set[str]:
     """Fichiers de secrets que voit un conteneur : le volume projeté monté, en lecture
     seule, au dossier des secrets de l'application."""
@@ -541,14 +570,16 @@ def test_volume_image_du_modele_en_lecture_seule(reel):
     )
     [mount] = [m for m in pod["containers"][0]["volumeMounts"] if m["name"] == "modele"]
     assert mount["readOnly"] is True and mount["mountPath"] == "/modele"
-    assert "initContainers" not in pod
+    # aucune copie : le seul conteneur d'initialisation est l'annexe native (oauth2-proxy)
+    assert [c["name"] for c in pod["initContainers"]] == ["oauth2-proxy"]
 
 
 @pytest.mark.chart
 def test_repli_par_copie_sans_outil_dans_l_image_du_modele():
     docs = render("--set", "modele.montage=copie")
     pod = of_kind(docs, "Deployment")[0]["spec"]["template"]["spec"]
-    first, second = pod["initContainers"]
+    copies = [c for c in pod["initContainers"] if c.get("restartPolicy") != "Always"]
+    first, second = copies
     assert first["image"].startswith("docker.io/library/busybox@sha256:")
     assert second["image"].startswith(
         "ghcr.io/sifir-gun/contract-decision-graph/modele-embedding@sha256:"
@@ -566,7 +597,15 @@ def test_mode_demonstration_sans_base_ni_modele_ni_cle():
     assert not of_kind(docs, "PodDisruptionBudget")  # un seul réplica
     pod = of_kind(docs, "Deployment")[0]["spec"]["template"]["spec"]
     web = pod["containers"][0]
-    assert "--demo" in web["args"] and "env" not in web
+    assert "--demo" in web["args"]
+    # ni base ni clé : seul le proxy de sortie, pour les clés publiques du fournisseur, et
+    # l'empreinte de l'image, scellée avec chaque décision
+    assert {e["name"] for e in web["env"]} == {
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "CDG_EMPREINTE_IMAGE",
+    }
     assert not {"modele", "secrets"} & {v["name"] for v in pod["volumes"]}
     assert web["resources"]["limits"]["memory"] == "256Mi"
 

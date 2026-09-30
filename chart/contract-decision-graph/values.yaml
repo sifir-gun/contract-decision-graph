@@ -116,10 +116,10 @@ proxy:
     app.kubernetes.io/name: cdg-proxy
 
 # Authentification (PR D1, ADR 005) : oauth2-proxy en conteneur annexe, seul chemin vers
-# l'interface, qui vérifie le jeton d'identité signé de chaque requête. Désactivée : aucune
-# entrée réseau (ni Service de l'interface, ni Ingress).
+# l'interface, qui vérifie le jeton d'identité signé de chaque requête. Exigée dans le
+# cluster (PR D2) : l'interface locale, non authentifiée, n'y existe jamais.
 authentification:
-  active: false
+  active: true
   emetteur: ""  # émetteur OIDC, en https
   clientId: ""  # client OIDC : audience du jeton
   # Secret existant : client-secret (secret du client OIDC), cookie-secret (32 octets,
@@ -134,6 +134,16 @@ authentification:
   # déconnexion : fermer aussi la session chez le fournisseur, s'il publie une fin de
   # session (non avec Dex 2.45.1, fournisseur des tests)
   deconnexionFournisseur: false
+  # rôles (PR D2) : groupes du jeton qui les donnent ; l'analyste analyse, le relecteur
+  # tranche et expire, les deux lisent ; sans rôle, 403
+  roles:
+    analyste: [cdg-analystes]
+    relecteur: [cdg-relecteurs]
+  # second facteur exigé pour trancher et expirer : valeurs amr ou acr acceptées ; vides,
+  # non exigé (avertissement au démarrage et dans les notes) : prérequis de production
+  secondFacteur:
+    amr: []
+    acr: []
   # écran d'accord chez le fournisseur (approval_prompt d'oauth2-proxy, qui envoie
   # « force » si rien n'est réglé) : « auto » ne le force pas, et les fournisseurs qui ne
   # connaissent pas ce paramètre l'ignorent ; « force » le demande à chaque connexion
@@ -143,7 +153,9 @@ authentification:
     revalidation: 5m  # cookie-refresh : un compte retiré perd l'accès dans ce délai
   image:
     repository: ghcr.io/sifir-gun/contract-decision-graph/oauth2-proxy
-    digest: ""  # index publié par la CI (oauth2-proxy v7.15.4, binaire vérifié)
+    # index publié par la CI à la fusion de la D1 (sha-e338f31 ; oauth2-proxy v7.15.4,
+    # binaire vérifié) ; signature cosign et provenance vérifiées le 30/09/2026
+    digest: sha256:1ea518c8f7b97699d64fec957921ae83de5bc1f75008c8b9bf66ebee8db87795
     pullPolicy: IfNotPresent
   port: 4180
   ressources:

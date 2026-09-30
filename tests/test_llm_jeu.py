@@ -18,7 +18,7 @@ import time
 
 import pytest
 from demo_set import load
-from doubles import make_deps
+from doubles import ACTEUR_ANALYSTE, ACTEUR_RELECTEUR, CODE, make_deps
 from langgraph.checkpoint.memory import InMemorySaver
 from serie import (
     ACCOUNT_TOKENS_PER_MINUTE,
@@ -56,7 +56,7 @@ RUNS = range(1, 6)
 # revue non prévue par le jeu (une autre issue que l'attendue) : décision prudente
 UNPLANNED_REVIEW = {
     "decision": "NO_GO",
-    "reviewer": "relecteur-serie",
+    "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
     "reason": "revue non prévue par le jeu : décision prudente de la série",
 }
 
@@ -105,6 +105,8 @@ def analyse(llm, crag, store, contract, thread):
         contract.parties,
         analysis_date=ANALYSIS_DATE,
         config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     outcome, human = outcome_of(status), None
     if status["statut"] == "suspendu":

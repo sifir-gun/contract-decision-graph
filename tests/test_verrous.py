@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import processus
 import psycopg
 import pytest
-from doubles import CONTRACT_TEXT
+from doubles import ACTEUR_ANALYSTE, ACTEUR_RELECTEUR, CONTRACT_TEXT
 from psycopg import sql
 from test_service import PENDING_TEXT, answer, make_service
 
@@ -59,7 +59,7 @@ def test_cle_du_verrou_stable_sur_64_bits_et_distincte_du_journal():
 def test_revue_refusee_tant_que_le_contrat_est_verrouille():
     locks = LocalContractLocks()
     service = make_service(locks=locks)
-    service.analyse(PENDING_TEXT, contract_id="c-attente")
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
     with locks.hold("c-attente"), pytest.raises(ContractBusy):
         service.decide("c-attente", answer())
     assert service.decide("c-attente", answer())["statut"] == "termine"
@@ -69,7 +69,7 @@ def test_analyse_refusee_tant_que_le_contrat_est_verrouille():
     locks = LocalContractLocks()
     service = make_service(locks=locks)
     with locks.hold("c1"), pytest.raises(ContractBusy):
-        service.analyse(CONTRACT_TEXT, contract_id="c1")
+        service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
     assert service.contracts() == []  # rien de créé
 
 
@@ -78,13 +78,15 @@ def test_expiration_laisse_un_contrat_verrouille_et_le_dit(caplog):
     locks = LocalContractLocks()
     later = datetime.now(UTC) + timedelta(days=3)
     service = make_service(locks=locks, now=lambda: later)
-    service.analyse(PENDING_TEXT, contract_id="c-attente")
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
     with locks.hold("c-attente"):
-        _, expired = service.expire(timedelta(hours=24))
+        _, expired = service.expire(timedelta(hours=24), ACTEUR_RELECTEUR)
     assert expired == []
     assert "c-attente" in caplog.text and "en cours de traitement" in caplog.text
     assert [r["etat"] for r in service.contracts()] == ["en_attente"]
-    _, expired = service.expire(timedelta(hours=24))  # verrou rendu : expiré
+    _, expired = service.expire(
+        timedelta(hours=24), ACTEUR_RELECTEUR
+    )  # verrou rendu : expiré
     assert [s["final_decision"] for s in expired] == ["NO_GO"]
 
 

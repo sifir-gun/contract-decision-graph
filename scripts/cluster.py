@@ -555,6 +555,7 @@ DEX_ISSUER = "https://token.actions.githubusercontent.com"
 TEST_USERS = {
     "analyste": "96eOvec_MZ79T-bsh5wYSsrj",
     "relecteur": "uyD6U39cC-MKL7dNss2HBLVP",
+    "polyvalent": "u-5ntghYOQGp6S9rf5LjV2pP",
 }
 
 

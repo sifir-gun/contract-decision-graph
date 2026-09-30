@@ -49,6 +49,13 @@ chacune une seule fois (une clé en double est refusée, par kubeconform notamme
 {{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
 {{- end -}}
 
+{{/* Empreinte de l'image, fournie au lancement à la CLI : scellée avec chaque décision
+(version du code, PR D2, ADR 005), la même que celle qui tire l'image. */}}
+{{- define "cdg.envVersion" -}}
+- name: CDG_EMPREINTE_IMAGE
+  value: {{ .Values.image.digest | quote }}
+{{- end -}}
+
 {{- define "cdg.imageModele" -}}
 {{- printf "%s@%s" .Values.modele.image.repository .Values.modele.image.digest -}}
 {{- end -}}

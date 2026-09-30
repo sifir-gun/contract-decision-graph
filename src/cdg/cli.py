@@ -18,9 +18,11 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, get_args
+from typing import Any, TextIO, get_args
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
+
+from pydantic import ValidationError
 
 from cdg import settings
 from cdg.adapters import fastembed, journaux, oidc
@@ -36,8 +38,8 @@ from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.postgres.resumes import PostgresResumeCounter
+from cdg.adapters.web import acces, sante
 from cdg.adapters.web import app as web_app
-from cdg.adapters.web import sante
 from cdg.adapters.web import security as web_security
 from cdg.adapters.web import server as web_server
 from cdg.application import demo_set, ingestion
@@ -45,9 +47,12 @@ from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
 from cdg.application.service import ContractService
-from cdg.domain import audit, expiry
+from cdg.domain import audit, authorization, expiry
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
+from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
+from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
@@ -112,9 +117,59 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
-def build_deps(config: DecisionConfig) -> Deps:
+COMMIT_VAR = "CDG_COMMIT"  # posée par l'image, à sa construction (Dockerfile)
+IMAGE_VAR = "CDG_EMPREINTE_IMAGE"  # posée par le chart, au lancement
+
+
+class VersionError(Exception):
+    """Version du code mal fournie : le programme s'arrête, jamais de repli."""
+
+
+def code_version() -> CodeVersion:
+    """Version du code qui décide, scellée avec chaque enregistrement : le commit, fourni
+    à la construction de l'image, et l'empreinte de l'image, fournie au lancement par le
+    chart. Jamais devinée : ni git, ni registre. Une valeur fournie mais mal formée
+    arrête le programme. Sans commit (poste de développement) : « inconnu », scellé tel
+    quel ; dans le cluster, commit connu et empreinte de l'image sont exigés."""
+    try:
+        version = CodeVersion(
+            commit=os.environ.get(COMMIT_VAR, UNKNOWN_COMMIT),
+            image=os.environ.get(IMAGE_VAR),
+        )
+    except ValidationError as exc:
+        fields = {str(error["loc"][0]) for error in exc.errors()}
+        names = [
+            var
+            for field, var in (("commit", COMMIT_VAR), ("image", IMAGE_VAR))
+            if field in fields
+        ]
+        raise VersionError(
+            f"{', '.join(names)} mal formée : commit complet (40 caractères "
+            f"hexadécimaux) ou « {UNKNOWN_COMMIT} » ; empreinte sha256:… de l'image"
+        ) from None
+    if in_cluster():
+        missing = []
+        if version.commit == UNKNOWN_COMMIT:
+            missing.append(
+                f"{COMMIT_VAR} « {UNKNOWN_COMMIT} » ou absente : image construite sans "
+                f"le commit de sa construction (--build-arg {COMMIT_VAR}, depuis un "
+                "contexte identique au commit)"
+            )
+        if version.image is None:
+            missing.append(
+                f"{IMAGE_VAR} absente : empreinte de l'image, que le chart fournit"
+            )
+        if missing:
+            raise VersionError(
+                "dans le cluster, la version du code est exigée, scellée avec chaque "
+                "décision : " + " ; ".join(missing)
+            )
+    return version
+
+
+def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
     """Dépendances réelles d'une analyse : fournisseur LLM, embedding local, corpus,
-    journal d'audit.
+    journal d'audit, version du code.
 
     Le fournisseur d'abord : une clé d'API absente échoue avant tout chargement de
     modèle et avant la création du thread.
@@ -127,6 +182,7 @@ def build_deps(config: DecisionConfig) -> Deps:
         audit_store=open_audit_store(),
         clock=now,
         explainer=LLMExplainer(llm),
+        code_version=code,
     )
 
 
@@ -156,7 +212,9 @@ def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
     return LLMExplainer(build_provider(config.llm))
 
 
-def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> Deps:
+def review_deps(
+    config: DecisionConfig, explainer: Explainer | TemplateOnly, code: CodeVersion
+) -> Deps:
     """resume, history, expire : le graphe ne repasse ni par l'extraction ni par le CRAG ;
     aucun modèle d'embedding chargé, un appel échouerait explicitement. Seule
     l'explication peut appeler le LLM (resume avec clé). Le contrat repris est scellé dans
@@ -167,6 +225,7 @@ def review_deps(config: DecisionConfig, explainer: Explainer | TemplateOnly) -> 
         audit_store=open_audit_store(),
         clock=now,
         explainer=explainer,
+        code_version=code,
     )
 
 
@@ -228,15 +287,17 @@ def _graph(config: DecisionConfig, deps: Deps):
 def build_service(config: DecisionConfig) -> ContractService:
     """Service des contrats sur la base PostgreSQL. Chaque opération construit ses
     dépendances à l'appel, comme chaque commande : le fournisseur LLM pour run, qui échoue
-    d'abord si la clé manque ; l'explication seule pour resume ; rien pour la lecture."""
+    d'abord si la clé manque ; l'explication seule pour resume ; rien pour la lecture.
+    La version du code est lue d'abord : mal fournie, rien ne démarre."""
+    code = code_version()
     engine = LangGraphEngine(
         config,
         lambda deps: _graph(config, deps),
         EngineDeps(
-            run=lambda: build_deps(config),
-            resume=lambda: review_deps(config, resume_explainer(config)),
-            expire=lambda: review_deps(config, EXPIRE_EXPLAINER),
-            read=lambda: review_deps(config, HISTORY_EXPLAINER),
+            run=lambda: build_deps(config, code),
+            resume=lambda: review_deps(config, resume_explainer(config), code),
+            expire=lambda: review_deps(config, EXPIRE_EXPLAINER, code),
+            read=lambda: review_deps(config, HISTORY_EXPLAINER, code),
         ),
         PostgresContractLocks(app_pool),
         PostgresResumeCounter(app_pool),
@@ -262,6 +323,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
     rattachement déclaré, explication par le gabarit. Ni clé d'API, ni base, ni coût.
     Date d'analyse par défaut : celle des attendus, pour que le jeu rende ses issues
     documentées quel que soit le jour (versions des textes du corpus)."""
+    code = code_version()
     expected_on, contracts = demo_set.load()
     store = MemoryAuditStore()
     deps = Deps(
@@ -270,6 +332,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
         audit_store=store,
         clock=now,
         explainer=DEMO_EXPLAINER,
+        code_version=code,
     )
     engine = LangGraphEngine(
         config,
@@ -292,21 +355,98 @@ def demo_service(config: DecisionConfig) -> ContractService:
     )
 
 
+class AccesRefuse(Exception):
+    """Décision par la CLI refusée : dans le cluster, en accès d'urgence seulement."""
+
+
+URGENCY_MAX_CHARS = 200
+# sortie du processus principal du conteneur : celle que Kubernetes collecte ; celle d'un
+# processus lancé par kubectl exec part vers le terminal de l'opérateur
+CONTAINER_LOG = Path("/proc/1/fd/1")
+
+
+def in_cluster() -> bool:
+    """Dans un pod : le kubelet pose toujours cette variable, quel que soit le chart."""
+    return "KUBERNETES_SERVICE_HOST" in os.environ
+
+
+def _cli_actor(args: argparse.Namespace, command: str, *, decides: bool) -> Actor:
+    """Acteur de la CLI : un opérateur non nominatif. Dans le cluster, une décision
+    (resume, expire) n'est admise qu'en accès d'urgence (--urgence MOTIF) : tracé au
+    journal des accès, et scellé avec la décision."""
+    urgency = getattr(args, "urgence", None)
+    if urgency is not None and not (0 < len(urgency.strip()) <= URGENCY_MAX_CHARS):
+        raise AccesRefuse(
+            f"--urgence : un motif, {URGENCY_MAX_CHARS} caractères au plus, sans donnée "
+            "personnelle"
+        )
+    if decides and in_cluster() and urgency is None:
+        raise AccesRefuse(
+            f"{command} : dans le cluster, une décision par la CLI n'est admise qu'en "
+            "accès d'urgence (--urgence MOTIF, tracé au journal des accès et scellé) ; "
+            "la voie normale est l'interface authentifiée"
+        )
+    try:
+        actor = Actor(
+            canal="cli",
+            authentifie=False,
+            operateur=args.operateur,
+            urgence=urgency is not None,
+        )
+    except ValidationError:
+        raise AccesRefuse(
+            "--operateur : identifiant non nominatif (minuscules, chiffres, tirets), "
+            "jamais un nom ni une adresse"
+        ) from None
+    if urgency is not None:
+        _trace_urgency(args.operateur, command, urgency.strip())
+    return actor
+
+
+def _trace_urgency(operator: str, command: str, reason: str) -> None:
+    """Accès d'urgence au journal des accès : sur la sortie du processus, et, dans le
+    cluster, sur celle du processus principal du conteneur, collectée ; si elle est
+    inaccessible, l'accès est refusé, jamais laissé sans trace."""
+    log = logging.getLogger("cdg.acces")
+    handler: logging.StreamHandler[TextIO] | None = None
+    if in_cluster():
+        try:
+            stream = CONTAINER_LOG.open("a", encoding="utf-8")
+        except OSError as exc:
+            raise AccesRefuse(
+                "accès d'urgence refusé : trace impossible dans le journal du conteneur "
+                f"({CONTAINER_LOG}, {type(exc).__name__})"
+            ) from None
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(journaux.JsonFormatter())
+        log.addHandler(handler)
+    try:
+        acces.event("acces_urgence", operateur=operator, commande=command, motif=reason)
+    finally:
+        if handler is not None:
+            log.removeHandler(handler)
+            handler.close()
+            handler.stream.close()
+
+
 def _run(args: argparse.Namespace) -> dict:
     contract = Path(args.contract)
+    actor = _cli_actor(args, "run", decides=False)
     raw_text = contract.read_text(encoding="utf-8")
     return build_service(load_config()).analyse(
         raw_text,
         contract_id=args.contract_id or contract.stem,
+        actor=actor,
         parties=args.party,
         analysis_date=args.analysis_date,
     )
 
 
 def _resume(args: argparse.Namespace) -> dict:
+    actor = _cli_actor(args, "resume", decides=True)
     answer = {
         "decision": args.decision,
-        "reviewer": args.reviewer,
+        "acteur": actor.model_dump(mode="json"),
         "reason": args.reason,
         "overrides_block": args.overrides_block,
     }
@@ -366,7 +506,8 @@ def _history(args: argparse.Namespace) -> dict:
 
 def _expire(args: argparse.Namespace) -> dict:
     older_than = expiry.parse_duration(args.older_than)
-    at, expired = build_service(load_config()).expire(older_than)
+    actor = _cli_actor(args, "expire", decides=True)
+    at, expired = build_service(load_config()).expire(older_than, actor)
     return {
         "older_than": args.older_than,
         "now": at.isoformat(),
@@ -388,6 +529,11 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
     l'interface ; elle n'écoute donc que sur 127.0.0.1, et vérifie le jeton d'identité
     de chaque requête. Toute option manquante ou contradictoire arrête le lancement."""
     if args.identite == "aucune":
+        if in_cluster():
+            raise web_security.WebConfigError(
+                "dans le cluster, l'interface exige --identite en-tetes : jamais "
+                "d'interface locale, non authentifiée, derrière un réseau"
+            )
         return None
     if args.host != "127.0.0.1":
         raise web_security.WebConfigError(
@@ -405,6 +551,9 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
         ("--adresse-publique", args.adresse_publique),
         # plusieurs réplicas : un formulaire servi par l'un est envoyé à l'autre
         ("--cles-csrf", args.cles_csrf),
+        # rôles tirés des groupes du jeton (PR D2)
+        ("--groupes-analyste", args.groupes_analyste),
+        ("--groupes-relecteur", args.groupes_relecteur),
     ):
         if not value:
             raise web_security.WebConfigError(f"--identite en-tetes exige {option}")
@@ -414,14 +563,31 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
             f"--adresse-publique : https://hôte attendu, sans chemin (reçu "
             f"{args.adresse_publique})"
         )
+    roles = {
+        "analyste": _names(args.groupes_analyste),
+        "relecteur": _names(args.groupes_relecteur),
+    }
+    try:
+        authorization.check_mapping(roles)
+    except authorization.AuthorizationConfigError as exc:
+        raise web_security.WebConfigError(f"--groupes-… : {exc}") from None
     return web_app.Authentication(
         verifier=oidc.OidcVerifier(
             args.oidc_emetteur, args.oidc_audience, ca_file=args.oidc_ca
         ),
         public_origin=f"https://{public.netloc}",
         client_id=args.oidc_audience,
+        roles=roles,
+        second_factor=authorization.SecondFactor(
+            amr=_names(args.second_facteur_amr), acr=_names(args.second_facteur_acr)
+        ),
         provider_logout=args.deconnexion_fournisseur,
     )
+
+
+def _names(value: str | None) -> tuple[str, ...]:
+    """Liste séparée par des virgules, sans vides."""
+    return tuple(name.strip() for name in (value or "").split(",") if name.strip())
 
 
 def _csrf_keys(
@@ -465,6 +631,14 @@ def _web(args: argparse.Namespace) -> dict:
         interrompues commence. Sur un port déjà pris, ni annonce ni reprise."""
         if warning:
             _tell(args, logging.WARNING, warning)
+        if authentication is not None and not authentication.second_factor.required:
+            _tell(
+                args,
+                logging.WARNING,
+                "AVERTISSEMENT : second facteur non exigé pour trancher et expirer "
+                "(--second-facteur-amr, --second-facteur-acr) : prérequis de production "
+                "(ADR 005)",
+            )
         _tell(
             args,
             logging.INFO,
@@ -622,6 +796,14 @@ def build_parser() -> argparse.ArgumentParser:
         "identifiants administrateur ; rejouable, supprime les extraits disparus",
     ).set_defaults(handler=_ingest)
 
+    OPERATOR_HELP = (
+        "qui agit : identifiant d'opérateur non nominatif (minuscules, chiffres, "
+        "tirets), scellé ; jamais un nom ni une adresse"
+    )
+    URGENCY_HELP = (
+        "accès d'urgence, avec son motif (sans donnée personnelle) : seul moyen de "
+        "décider par la CLI dans le cluster ; tracé au journal des accès et scellé"
+    )
     run_notice = (
         "Masque le contrat, puis extrait ses clauses, interroge le juge du CRAG et rédige "
         "l'explication par le fournisseur LLM de la configuration (appels payants, clé "
@@ -649,6 +831,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="date à laquelle les versions des textes sont jugées, AAAA-MM-JJ "
         "(défaut : aujourd'hui, heure de Paris)",
     )
+    run.add_argument("--operateur", required=True, help=OPERATOR_HELP)
     run.set_defaults(handler=_run)
 
     resume = sub.add_parser(
@@ -658,8 +841,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resume.add_argument("thread_id")
     resume.add_argument("--decision", required=True, choices=get_args(Decision))
-    resume.add_argument("--reviewer", required=True)
+    resume.add_argument("--operateur", required=True, help=OPERATOR_HELP)
     resume.add_argument("--reason", required=True)
+    resume.add_argument("--urgence", metavar="MOTIF", help=URGENCY_HELP)
     resume.add_argument(
         "--overrides-block",
         action="store_true",
@@ -680,6 +864,8 @@ def build_parser() -> argparse.ArgumentParser:
         "par le gabarit, sans LLM",
     )
     expire.add_argument("--older-than", required=True, help="délai : 24h, 30m, 2d…")
+    expire.add_argument("--operateur", required=True, help=OPERATOR_HELP)
+    expire.add_argument("--urgence", metavar="MOTIF", help=URGENCY_HELP)
     expire.set_defaults(handler=_expire)
 
     verify = sub.add_parser(
@@ -798,6 +984,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--adresse-publique",
         help="adresse publique de l'interface, https://hôte : origine des formulaires, "
         "retour après la fin de session du fournisseur",
+    )
+    web.add_argument(
+        "--groupes-analyste",
+        help="groupes du jeton qui donnent le rôle analyste (séparés par des "
+        "virgules) ; exigé avec --identite en-tetes",
+    )
+    web.add_argument(
+        "--groupes-relecteur",
+        help="groupes du jeton qui donnent le rôle relecteur (séparés par des "
+        "virgules) ; exigé avec --identite en-tetes",
+    )
+    web.add_argument(
+        "--second-facteur-amr",
+        help="valeurs amr acceptées comme preuve d'un second facteur, pour trancher et "
+        "expirer (séparées par des virgules) ; aucune : non exigé, avec un avertissement",
+    )
+    web.add_argument(
+        "--second-facteur-acr",
+        help="valeurs acr acceptées comme preuve d'un second facteur (séparées par des "
+        "virgules)",
     )
     web.add_argument(
         "--cles-csrf",

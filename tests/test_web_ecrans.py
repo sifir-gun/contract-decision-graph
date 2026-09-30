@@ -31,7 +31,7 @@ def text_of(page: str) -> str:
 
 
 def decide(web, thread, **fields):
-    data = {"decision": "GO_RESERVES", "relecteur": "Camille", "motif": "réserves"}
+    data = {"decision": "GO_RESERVES", "motif": "réserves"}
     token = csrf(web)  # le jeton tient au cookie, pas à la page
     return web.post(
         f"/contrats/{thread}/decision", data={"csrf": token, **data, **fields}
@@ -285,7 +285,7 @@ def test_revue_humaine_demande_et_formulaire():
     for decision in CONFIG.human_policy.allowed_decisions:
         assert f'<option value="{decision}"' in page
     assert 'id="motif"' in page and "required" in page
-    assert 'id="relecteur"' in page
+    assert 'id="relecteur"' not in page  # l'acteur vient de la session, jamais d'un nom
     assert 'name="levee"' not in page  # aucun blocage dur : pas de levée proposée
 
 
@@ -296,7 +296,7 @@ def test_revue_humaine_acceptee():
     assert response.status_code == 303
     page = web.get(f"/contrats/{thread}").text
     assert 'class="badge badge-go_reserves"' in page
-    assert "Camille" in page
+    assert "interface locale, non authentifiée" in page  # acteur scellé, sans nom
     assert 'id="revue"' not in page  # plus de formulaire
 
 
@@ -304,7 +304,6 @@ def test_revue_humaine_acceptee():
     ("fields", "message"),
     [
         ({"motif": " "}, "reason obligatoire"),
-        ({"relecteur": "systeme:moi"}, "réservé aux décisions système"),
         ({"levee": "oui"}, "overrides_block sans blocage dur levé"),
     ],
 )
@@ -408,3 +407,13 @@ def test_expiration_delai_invalide(hours):
     )
     assert response.status_code == 400
     assert "nombre d'heures" in text_of(response.text)
+
+
+def test_nom_saisi_dans_le_formulaire_jamais_scelle_ni_affiche():
+    """Un champ « relecteur » envoyé malgré tout est ignoré : l'acteur vient de la
+    session (interface authentifiée) ou du canal (interface locale), jamais d'un nom."""
+    web = client()
+    thread = analyse(web, PENDING_TEXT)
+    response = decide(web, thread, relecteur="Camille Martin")
+    assert response.status_code == 303
+    assert "Camille" not in web.get(f"/contrats/{thread}").text

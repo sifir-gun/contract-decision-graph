@@ -10,7 +10,7 @@
 # Bases figées par empreinte (index multi-architecture : amd64 et arm64), mises à jour à la
 # main, délibérément. Pas de directive « syntax » : elle tirerait un frontal non figé.
 #
-#   docker build --tag cdg:verification .
+#   docker build --build-arg CDG_COMMIT="$(uv run --no-sync python scripts/chaine.py revision)" --tag cdg:verification .
 #   uv run pytest -m image --image cdg:verification
 
 ARG PYTHON_VERSION=3.12.14
@@ -55,8 +55,8 @@ RUN /app/.venv/bin/python -m compileall -q --invalidation-mode checked-hash /app
 
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:54df941ed0d06a1bd95ef5e0ce391fd8d9f94b64782dc9a60062727849ee3f97
 
-# la source relie le paquet ghcr.io au dépôt ; la révision est dans l'attestation de
-# provenance, pas dans l'image : la même construction en CI et sur le poste
+# la source relie le paquet ghcr.io au dépôt ; la provenance attestée relie l'image publiée
+# à son commit
 LABEL org.opencontainers.image.source="https://github.com/sifir-gun/contract-decision-graph" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.title="contract-decision-graph" \
@@ -66,6 +66,12 @@ LABEL org.opencontainers.image.source="https://github.com/sifir-gun/contract-dec
 COPY --from=construction /python /python
 COPY --from=construction /app /app
 
+# commit de la construction, scellé avec chaque décision (PR D2, ADR 005) : fourni par
+# `scripts/chaine.py revision`, en CI comme sur le poste, jamais deviné ; « inconnu » si le
+# contexte diffère du commit ou sans argument. Après les copies : seule la configuration de
+# l'image en dépend. L'empreinte de l'image est fournie au lancement, par le chart.
+ARG CDG_COMMIT=inconnu
+
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONPATH=/app/src \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -73,7 +79,8 @@ ENV PATH=/app/.venv/bin:$PATH \
     CDG_JOURNAUX=json \
     HF_HUB_OFFLINE=1 \
     ORT_DISABLE_TELEMETRY=1 \
-    LANGSMITH_TRACING=false
+    LANGSMITH_TRACING=false \
+    CDG_COMMIT=${CDG_COMMIT}
 
 USER 65532:65532
 WORKDIR /app

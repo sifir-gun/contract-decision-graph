@@ -3,9 +3,10 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from doubles import ACTEUR_RELECTEUR
 
 from cdg.domain import expiry
-from cdg.domain.models import HumanDecision
+from cdg.domain.models import HumanReview
 
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
@@ -46,12 +47,14 @@ def test_horloge_naive_refusee():
 
 def test_decision_systeme_d_expiration():
     answer = expiry.system_decision(
-        waited=timedelta(hours=25, minutes=5), older_than=timedelta(hours=24)
+        waited=timedelta(hours=25, minutes=5),
+        older_than=timedelta(hours=24),
+        actor=ACTEUR_RELECTEUR,
     )
-    h = HumanDecision.model_validate(answer)
-    assert (h.decision, h.reviewer, h.source, h.overrides_block) == (
+    h = HumanReview.model_validate(answer)
+    assert (h.decision, h.acteur, h.source, h.overrides_block) == (
         "NO_GO",
-        "systeme:expire",
+        ACTEUR_RELECTEUR,
         "systeme",
         False,
     )

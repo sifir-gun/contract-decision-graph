@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, TemplateOnly
 from cdg.domain import audit
+from cdg.domain.authorization import Actor, interface_actor
 from cdg.domain.config import load_config
 from cdg.domain.identity import Identity
 from cdg.domain.models import (
@@ -20,6 +21,7 @@ from cdg.domain.models import (
     Usage,
 )
 from cdg.domain.verification import VALUE_UNITS
+from cdg.domain.version import CodeVersion
 from cdg.ports.identity import IdentityRejected, ProviderUnavailable
 from cdg.ports.retriever import Passage
 
@@ -306,6 +308,22 @@ RELECTEUR = Identity(
     groups=("cdg-relecteurs",),
     display_name="relecteur.affiche",
 )
+# acteurs scellés (PR D2) : l'analyste et le relecteur sont deux personnes (quatre yeux)
+ACTEUR_ANALYSTE = interface_actor(ANALYSTE)
+ACTEUR_RELECTEUR = interface_actor(RELECTEUR)
+OPERATEUR = Actor(canal="cli", authentifie=False, operateur="relecteur-synth")
+# version du code des tests : fournie explicitement, comme la CLI la lit au lancement
+CODE = CodeVersion(commit="c0de" * 10, image=None)
+
+
+def answer(decision="NO_GO", reason="motif", acteur=ACTEUR_RELECTEUR, **extra) -> dict:
+    """Réponse humaine brute à la reprise, au format v2 (acteur, jamais de nom)."""
+    return {
+        "decision": decision,
+        "acteur": acteur.model_dump(mode="json"),
+        "reason": reason,
+        **extra,
+    }
 
 
 class FakeVerifier:
@@ -346,16 +364,22 @@ TEMPLATE = TemplateOnly("tests : explication par le gabarit")
 
 
 def make_deps(
-    extractor=None, crag=None, audit_store=None, clock=fixed_clock, explainer=TEMPLATE
+    extractor=None,
+    crag=None,
+    audit_store=None,
+    clock=fixed_clock,
+    explainer=TEMPLATE,
+    code_version=CODE,
 ) -> Deps:
     """Dépendances de test : doublures, journal d'audit en mémoire, horloge fixe,
-    explication par le gabarit."""
+    explication par le gabarit, version du code des tests."""
     return Deps(
         extractor=extractor if extractor is not None else FixedExtractor(clauses()),
         crag=crag if crag is not None else FakeCrag(),
         audit_store=audit_store if audit_store is not None else MemoryAuditStore(),
         clock=clock,
         explainer=explainer,
+        code_version=code_version,
     )
 
 
@@ -377,6 +401,10 @@ def faithful_explanation(user: str) -> dict:
 
 
 def context(config=None) -> dict:
-    """Contexte d'analyse (config_hash, modèles), tel que run_contract le pose dans l'état
-    initial : à joindre à toute entrée passée directement au graphe."""
-    return audit.analysis_context(config if config is not None else load_config())
+    """Contexte d'analyse (config_hash, modèles, version du code) et acteur de l'analyse,
+    tels que run_contract les pose dans l'état initial : à joindre à toute entrée passée
+    directement au graphe."""
+    return {
+        **audit.analysis_context(config if config is not None else load_config(), CODE),
+        "analyse_par": ACTEUR_ANALYSTE,
+    }

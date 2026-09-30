@@ -13,7 +13,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from doubles import MemoryAuditStore
+from doubles import CODE, MemoryAuditStore
 from psycopg import sql
 from pydantic import BaseModel
 
@@ -34,11 +34,12 @@ def record(contract_id, reason="texte trop court", sealed_at=SEALED_AT):
     return audit.build_record(
         {
             "contract_id": contract_id,
-            **audit.analysis_context(CONFIG),
+            **audit.analysis_context(CONFIG, CODE),
             "reject_reason": reason,
         },
         thread_id=contract_id,
         sealing_config_hash=audit.config_hash(CONFIG),
+        sealing_code_version=CODE,
         sealed_at=sealed_at,
     )
 

@@ -3,7 +3,10 @@
 import psycopg
 import pytest
 from doubles import (
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FixedExtractor,
     clauses,
@@ -15,7 +18,7 @@ from langgraph.types import Command
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.application.deps import Deps
 from cdg.domain.config import load_config
-from cdg.domain.models import AgentVerdict, HumanDecision
+from cdg.domain.models import AgentVerdict, HumanReview
 
 pytestmark = pytest.mark.pg
 
@@ -25,7 +28,7 @@ CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 VALID = {
     "decision": "NO_GO",
-    "reviewer": "relecteur-synth",
+    "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
     "reason": "marge trop faible",
 }
 
@@ -96,7 +99,7 @@ def test_4_cycle_complet_run_interrupt_resume_avec_app_role(pg, thread_id):
         assert all(isinstance(v, AgentVerdict) for v in state.values["verdicts"])
         out = graph.invoke(Command(resume=VALID), thread(thread_id))
         assert "__interrupt__" not in out and out["final_decision"] == "NO_GO"
-        assert out["human"] == HumanDecision(**VALID)
+        assert out["human"] == HumanReview(**VALID)
         assert len(list(graph.get_state_history(thread(thread_id)))) > 3
 
 
@@ -119,7 +122,13 @@ def test_texte_original_jamais_ecrit_en_base(pg, thread_id):
     original = CONTRACT_TEXT + "Contact : jeanne.martin@example.com, 01 99 00 45 67.\n"
     with orchestrator.open_graph(CONFIG, deps(), pg.app) as graph:
         orchestrator.run_contract(
-            graph, thread_id, original, analysis_date=ANALYSIS_DATE, config=CONFIG
+            graph,
+            thread_id,
+            original,
+            analysis_date=ANALYSIS_DATE,
+            config=CONFIG,
+            actor=ACTEUR_ANALYSTE,
+            code=CODE,
         )
     # colonnes binaires des writes et des blobs, JSON des checkpoints
     columns = {

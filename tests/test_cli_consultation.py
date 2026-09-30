@@ -12,7 +12,15 @@ from cdg.domain.audit import GENESIS
 @pytest.mark.pg
 def test_list_et_filtre_en_attente(pg, thread_id, contract, analysis, capsys):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     code, out = run_cli(capsys, "list")
     assert code == 0
     rows = {r["thread_id"]: r for r in out["contrats"]}
@@ -27,7 +35,15 @@ def test_list_et_filtre_en_attente(pg, thread_id, contract, analysis, capsys):
 @pytest.mark.pg
 def test_show_dossier_d_un_contrat(pg, thread_id, contract, analysis, capsys):
     analysis(*INSUFFICIENT)
-    run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     code, out = run_cli(capsys, "show", thread_id)
     assert code == 0
     assert (out["thread_id"], out["etat"]) == (thread_id, "en_attente")
@@ -58,7 +74,15 @@ def test_journal_puis_replay(
     capsys,
 ):
     analysis()
-    _, run = run_cli(capsys, "run", contract, "--contract-id", thread_id)
+    _, run = run_cli(
+        capsys,
+        "run",
+        "--operateur",
+        "analyste-synth",
+        contract,
+        "--contract-id",
+        thread_id,
+    )
     code, out = run_cli(capsys, "journal")
     assert code == 0
     [entry] = out["enregistrements"]

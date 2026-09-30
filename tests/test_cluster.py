@@ -30,6 +30,7 @@ import httpx
 import jwt
 import pytest
 import yaml
+from test_chaine_approvisionnement import chaine
 
 pytestmark = pytest.mark.cluster
 
@@ -179,10 +180,25 @@ def cli(pod: str, *args: str) -> tuple[int, dict]:
         timeout=180,
         check=False,
     )
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
-    if result.returncode == 0:
-        return 0, json.loads(lines[-1])
-    return result.returncode, json.loads(result.stderr.strip().splitlines()[-1])
+    return cli_result(result)
+
+
+# ajoutée par kubectl exec à la sortie d'erreur quand la commande échoue
+KUBECTL_EXIT = re.compile(r"command terminated with exit code \d+")
+
+
+def cli_result(result: subprocess.CompletedProcess[str]) -> tuple[int, dict]:
+    """Code et résultat JSON de la CLI : sa dernière ligne, sur la sortie standard
+    (après les journaux) si elle réussit, sur la sortie d'erreur sinon ; jamais la ligne
+    que kubectl ajoute à une commande en échec."""
+    output = result.stdout if result.returncode == 0 else result.stderr
+    lines = [
+        line
+        for line in output.splitlines()
+        if line.strip() and not KUBECTL_EXIT.fullmatch(line.strip())
+    ]
+    assert lines, f"aucun résultat de la CLI (code {result.returncode}) : {output!r}"
+    return result.returncode, json.loads(lines[-1])
 
 
 def factice(body: dict | None = None) -> dict:
@@ -323,23 +339,29 @@ def analyse(client: httpx.Client, contract: str, identifier: str) -> httpx.Respo
     )
 
 
+def decide_in_interface(pod: str, thread: str, user: str = "relecteur"):
+    """Revue par l'interface authentifiée, la voie normale (PR D2) : le relecteur, une
+    autre personne que l'analyste (quatre yeux)."""
+    with interface(pod, Identity(user)) as client:
+        page = client.get(f"/contrats/{thread}")
+        assert page.status_code == 200, page.text
+        return client.post(
+            f"/contrats/{thread}/decision",
+            data={
+                "csrf": TOKEN.search(page.text)[1],
+                "decision": "NO_GO",
+                "motif": "scénario du cluster",
+            },
+        )
+
+
 def seal_if_pending(pod: str, thread: str) -> None:
-    """Un contrat en attente de revue est tranché, pour être scellé."""
+    """Un contrat en attente de revue est tranché par le relecteur, pour être scellé."""
     code, listing = cli(pod, "list", "--en-attente")
     assert code == 0, listing
     if any(c["thread_id"] == thread for c in listing["contrats"]):
-        code, out = cli(
-            pod,
-            "resume",
-            thread,
-            "--decision",
-            "NO_GO",
-            "--reviewer",
-            "Camille",
-            "--reason",
-            "scénario du cluster",
-        )
-        assert code == 0, out
+        response = decide_in_interface(pod, thread)
+        assert response.status_code == 303, response.text
 
 
 def sealed(pod: str, thread: str) -> int:
@@ -1497,7 +1519,7 @@ def test_session_expiree_refusee(clients):
     assert seen["apres"]["hote"] == "dex.cdg.test", seen
 
 
-EMAILS = ("analyste@example.org", "relecteur@example.org")
+EMAILS = ("analyste@example.org", "relecteur@example.org", "polyvalent@example.org")
 
 
 def test_journaux_sans_courriel_ni_jeton_connexions_tracees_par_sub():
@@ -1528,7 +1550,113 @@ def test_journaux_sans_courriel_ni_jeton_connexions_tracees_par_sub():
     assert all(e["sub"] and "@" not in e["sub"] for e in successes)
 
 
-# --- 9. sauvegarde et restauration, puis désinstallation ----------------------------------
+# --- 9. autorisation et traçabilité (PR D2) -----------------------------------------------
+
+
+def sealed_records(thread: str | None = None) -> list[dict]:
+    """Enregistrements scellés tels que stockés (lecture sur l'instance primaire, par le
+    superutilisateur de CloudNativePG, comme la rotation du mot de passe)."""
+    where = "" if thread is None else f" WHERE thread_id = '{thread}'"
+    out = kubectl(
+        "exec",
+        "-n",
+        "cdg",
+        primary(),
+        "-c",
+        "postgres",
+        "--",
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "cdg",
+        "-Atc",
+        f"SELECT record::text FROM audit_decisions{where} ORDER BY id",
+    )
+    return [json.loads(line) for line in out.splitlines() if line.strip()]
+
+
+def test_roles_quatre_yeux_et_acteurs_scelles_sans_nom(images):
+    """Le polyvalent (analyste et relecteur) ne tranche pas ce qu'il a analysé : 403,
+    tracé ; l'analyste ne tranche pas, le relecteur n'analyse pas : 403, tracés ; le
+    relecteur tranche. Scellé en v2 : les deux acteurs par leur sub, aucun courriel, et
+    la version du code, celle de l'analyse comme celle du scellement : le commit de la
+    construction de l'image et l'empreinte que le chart déploie."""
+    pod = web_pods()[0]["metadata"]["name"]
+    thread = f"quatre-yeux-{uuid.uuid4().hex[:8]}"
+    with interface(pod, Identity("polyvalent")) as client:
+        assert analyse(client, PIEGE, thread).status_code == 303
+    assert decide_in_interface(pod, thread, "polyvalent").status_code == 403
+    assert decide_in_interface(pod, thread, "analyste").status_code == 403
+    with interface(pod, Identity("relecteur")) as client:
+        assert analyse(client, PIEGE, f"{thread}-refus").status_code == 403
+    assert decide_in_interface(pod, thread, "relecteur").status_code == 303
+    polyvalent = claims(id_token("polyvalent"))["sub"]
+    relecteur = claims(id_token("relecteur"))["sub"]
+    [record] = sealed_records(thread)
+    assert record["version"] == 2
+    assert (record["analyse_par"]["canal"], record["analyse_par"]["sub"]) == (
+        "interface",
+        polyvalent,
+    )
+    human = record["decision"]["human"]
+    assert (human["acteur"]["sub"], human["acteur"]["urgence"]) == (relecteur, False)
+    deployed = {
+        "commit": chaine().revision(ROOT),
+        "image": images["application"]["digest"],
+    }
+    assert record["code_version"] == record["sealing_code_version"] == deployed
+    everything = json.dumps(sealed_records())
+    assert not any(email in everything for email in EMAILS)
+    events = [e for e in web_logs(pod, "web") if e.get("journal") == "cdg.acces"]
+    kinds = {(e["message"], e.get("sub")) for e in events}
+    assert ("quatre_yeux_refuse", polyvalent) in kinds
+    assert ("acces_interdit", claims(id_token("analyste"))["sub"]) in kinds
+    assert ("acces_interdit", relecteur) in kinds
+
+
+def test_decision_par_la_cli_en_urgence_seulement_tracee_dans_le_pod():
+    """Dans le cluster, resume sans --urgence est refusé ; avec, il est admis, scellé
+    (canal cli, urgence) et tracé dans le journal collecté du conteneur."""
+    pod = web_pods()[0]["metadata"]["name"]
+    thread = f"urgence-{uuid.uuid4().hex[:8]}"
+    with interface(pod) as client:
+        assert analyse(client, PIEGE, thread).status_code == 303
+    base = ["resume", thread, "--decision", "NO_GO", "--reason", "scénario"]
+    code, error = cli(pod, *base, "--operateur", "astreinte-scenario")
+    assert code == 1 and error["erreur"] == "AccesRefuse", error
+    code, status = cli(
+        pod,
+        *base,
+        "--operateur",
+        "astreinte-scenario",
+        "--urgence",
+        "scénario du cluster, fournisseur supposé injoignable",
+    )
+    assert code == 0 and status["final_decision"] == "NO_GO", status
+    [record] = sealed_records(thread)
+    acteur = record["decision"]["human"]["acteur"]
+    assert (acteur["canal"], acteur["operateur"], acteur["urgence"]) == (
+        "cli",
+        "astreinte-scenario",
+        True,
+    )
+    collected = [e for e in web_logs(pod, "web") if e.get("message") == "acces_urgence"]
+    assert any(
+        e["operateur"] == "astreinte-scenario" and e["commande"] == "resume"
+        for e in collected
+    ), collected
+
+
+def test_second_facteur_non_exige_averti_au_demarrage():
+    """Dex ne prouve aucun second facteur : non exigé dans le cluster de test, et
+    l'interface le dit au démarrage (prérequis de production)."""
+    for found in web_pods():
+        lines = kubectl("logs", "-n", "cdg", found["metadata"]["name"], "-c", "web")
+        assert "second facteur non exigé" in lines
+
+
+# --- 10. sauvegarde et restauration, puis désinstallation ----------------------------------
 
 
 def postgres_ready(name: str) -> bool:

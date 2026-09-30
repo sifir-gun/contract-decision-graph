@@ -14,6 +14,11 @@ chaîne et insère ; l'horodatage vient de l'appelant.
   maillon part de `GENESIS`.
 - `replay` : recalcule règles, justification et décision à partir de l'enregistrement
   scellé et des références figées, sans LLM ni CRAG.
+- Formats : v2 (PR D2) porte sa version, l'acteur de l'analyse et celui de la décision
+  humaine (jamais de nom ni d'e-mail), la version du code de l'analyse et celle du
+  scellement (hors de `decision_hash`, chaînées) ; v1, sans version, relecteur nommé,
+  reste vérifiable (tout est recalculé sur le JSON stocké) et rejouable par ses modèles,
+  figés.
 """
 
 import hashlib
@@ -22,10 +27,11 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.decision import decide
 from cdg.domain.explanation import Explanation
@@ -36,14 +42,17 @@ from cdg.domain.models import (
     Clause,
     Decision,
     HumanDecision,
+    HumanReview,
     NodeFailure,
     Usage,
 )
 from cdg.domain.numeric import rounded
 from cdg.domain.rules import RULES
+from cdg.domain.version import CodeVersion
 
 GENESIS = "0" * 64  # prev_hash du premier maillon
 CONFIG_CHANGED = "configuration modifiée entre l'analyse et le scellement"
+CODE_CHANGED = "code modifié entre l'analyse et le scellement"
 _HASH = re.compile(r"[0-9a-f]{64}")
 
 # nœuds exécutés après decision_gate : leur consommation et leurs échecs n'ont pas pesé
@@ -106,11 +115,16 @@ def models_of(config: DecisionConfig) -> dict[str, str]:
     }
 
 
-def analysis_context(config: DecisionConfig) -> dict[str, Any]:
+def analysis_context(config: DecisionConfig, code: CodeVersion) -> dict[str, Any]:
     """Contexte d'analyse, placé dans l'état initial par `run_contract` avant tout nœud :
-    empreinte de la configuration qui produira la décision, et modèles qui analyseront.
-    C'est lui qui est scellé, même si un autre processus scelle."""
-    return {"config_hash": config_hash(config), "models": models_of(config)}
+    empreinte de la configuration qui produira la décision, modèles qui analyseront, et
+    version du code qui analyse (en JSON). C'est lui qui est scellé, même si un autre
+    processus scelle."""
+    return {
+        "config_hash": config_hash(config),
+        "models": models_of(config),
+        "code_version": code.model_dump(mode="json"),
+    }
 
 
 def decision_hash(record: Mapping[str, Any]) -> str:
@@ -153,8 +167,9 @@ def decision_report(report: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return fact
 
 
-class DecisionRecord(BaseModel):
-    """Partie décision de l'enregistrement, seule hachée par `decision_hash`."""
+class _DecisionPart(BaseModel):
+    """Partie décision de l'enregistrement, seule hachée par `decision_hash` ; commune
+    aux deux formats, qui ne diffèrent que par la décision humaine."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -163,7 +178,6 @@ class DecisionRecord(BaseModel):
     verdicts: list[AgentVerdict]  # dans l'ordre de DOMAINS
     proposed_decision: Decision | None
     margin: float | None
-    human: HumanDecision | None
     final_decision: Decision | None
     failure_report: dict[str, Any] | None
     reject_reason: str | None
@@ -183,14 +197,25 @@ class DecisionRecord(BaseModel):
         return verdicts
 
 
-class AuditRecord(BaseModel):
-    """Enregistrement complet, haché par `chain_hash`."""
+class DecisionRecordV1(_DecisionPart):
+    """Format v1, figé : relecteur nommé."""
+
+    human: HumanDecision | None
+
+
+class DecisionRecord(_DecisionPart):
+    """Format v2 : l'acteur de la décision humaine."""
+
+    human: HumanReview | None
+
+
+class _RecordPart(BaseModel):
+    """Enregistrement complet, haché par `chain_hash` ; commun aux deux formats."""
 
     model_config = ConfigDict(extra="forbid")
 
     contract_id: str
     thread_id: str
-    decision: DecisionRecord  # config_hash : celui de l'analyse
     failure_report: dict[str, Any] | None  # complet, mesures comprises
     sealing_config_hash: str  # configuration du processus qui scelle
     sealing_findings: list[str]  # constats du scellement (configuration modifiée…)
@@ -208,17 +233,44 @@ class AuditRecord(BaseModel):
         return value
 
 
+class AuditRecordV1(_RecordPart):
+    """Format v1, figé : sans version ni acteur de l'analyse."""
+
+    decision: DecisionRecordV1  # config_hash : celui de l'analyse
+
+
+class AuditRecord(_RecordPart):
+    """Format v2 (PR D2) : version, acteur de l'analyse, acteur de la décision, version
+    du code de l'analyse et du scellement."""
+
+    version: Literal[2] = 2
+    analyse_par: Actor | None  # None : analyse antérieure aux rôles
+    # None : analyse antérieure au scellement de la version du code
+    code_version: CodeVersion | None
+    sealing_code_version: CodeVersion  # processus qui scelle
+    decision: DecisionRecord  # config_hash : celui de l'analyse
+
+
+# modèles de la partie décision, par version d'enregistrement ; sans version : v1
+FORMATS: dict[int, type[DecisionRecordV1] | type[DecisionRecord]] = {
+    1: DecisionRecordV1,
+    2: DecisionRecord,
+}
+
+
 def build_record(
     state: Mapping[str, Any],
     *,
     thread_id: str,
     sealing_config_hash: str,
+    sealing_code_version: CodeVersion,
     sealed_at: datetime,
 ) -> AuditRecord:
     """Enregistrement d'un contrat à partir de son état final. Une clé absente de l'état
     (rejet, escalade avant les analystes) est scellée vide ou nulle ; le contexte
-    d'analyse (config_hash, modèles), lui, est exigé. Une configuration de scellement
-    différente de celle de l'analyse est scellée aussi, avec un constat."""
+    d'analyse (config_hash, modèles), lui, est exigé. Une configuration ou un code de
+    scellement différents de ceux de l'analyse sont scellés aussi, chacun avec un
+    constat."""
     missing = [k for k in ("config_hash", "models") if k not in state]
     if missing:
         raise ValueError(
@@ -226,17 +278,31 @@ def build_record(
             "se lance par run_contract, qui le pose avant tout nœud"
         )
     analysed_with = state["config_hash"]
+    human = state.get("human")
+    if isinstance(human, HumanDecision):
+        raise TypeError(
+            "décision humaine au format v1 (relecteur nommé) : le scellement v2 exige "
+            "l'acteur qui tranche"
+        )
     by_domain = {v.domain: v for v in state.get("verdicts", [])}
+    analysed_by = state.get("code_version")
+    code = None if analysed_by is None else CodeVersion.model_validate(analysed_by)
+    findings = [] if sealing_config_hash == analysed_with else [CONFIG_CHANGED]
+    if code is not None and code != sealing_code_version:
+        findings.append(CODE_CHANGED)
     return AuditRecord(
         contract_id=state["contract_id"],
         thread_id=thread_id,
+        analyse_par=state.get("analyse_par"),
+        code_version=code,
+        sealing_code_version=sealing_code_version,
         decision=DecisionRecord(
             analysis_date=state.get("analysis_date"),
             clauses=state.get("clauses", []),
             verdicts=[by_domain[d] for d in DOMAINS if d in by_domain],
             proposed_decision=state.get("proposed_decision"),
             margin=state.get("margin"),
-            human=state.get("human"),
+            human=human,
             final_decision=state.get("final_decision"),
             failure_report=decision_report(state.get("failure_report")),
             reject_reason=state.get("reject_reason"),
@@ -245,9 +311,7 @@ def build_record(
         ),
         failure_report=state.get("failure_report"),
         sealing_config_hash=sealing_config_hash,
-        sealing_findings=[]
-        if sealing_config_hash == analysed_with
-        else [CONFIG_CHANGED],
+        sealing_findings=findings,
         explanation=state.get("explanation"),
         failures=state.get("failures", []),
         usage=state.get("usage", []),
@@ -357,7 +421,16 @@ def verify_chain(
 
 
 class ReplayError(Exception):
-    """Rejeu impossible : configuration différente, ou références non figées."""
+    """Rejeu impossible : configuration différente, références non figées, ou version
+    d'enregistrement inconnue."""
+
+
+def record_version(record: Mapping[str, Any]) -> int:
+    """Version d'un enregistrement stocké ; sans version : v1."""
+    version = record.get("version", 1)
+    if version not in FORMATS:
+        raise ReplayError(f"version d'enregistrement inconnue : {version!r}")
+    return int(version)
 
 
 @dataclass(frozen=True)
@@ -379,7 +452,7 @@ def replay(record: Mapping[str, Any], config: DecisionConfig) -> ReplayReport:
     """Recalcule la partie décision : règles sur les clauses scellées, justification sur les
     références figées (résumés du CRAG), puis décision du gate avec la consommation et les
     échecs d'avant le gate. La décision humaine est reprise telle quelle."""
-    sealed = DecisionRecord.model_validate(record["decision"])
+    sealed = FORMATS[record_version(record)].model_validate(record["decision"])
     if sealed.config_hash != config_hash(config):
         raise ReplayError(
             "configuration différente de celle du scellement : rejeu impossible "

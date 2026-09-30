@@ -18,11 +18,14 @@
   <p class="error">Rejeté à l'entrée : {{ s.reject_reason }}</p>
   {% endif %}
   {% if s.human %}
-  <p class="meta">Décision humaine : {{ decisions[s.human.decision] }}, par {{ s.human.reviewer }} ({{ s.human.source }}) : {{ s.human.reason }}{% if s.human.overrides_block %} ; blocage dur levé{% endif %}.</p>
+  <p class="meta">Décision humaine : {{ decisions[s.human.decision] }}, par {{ human_label(s.human) }} ({{ s.human.source }}) : {{ s.human.reason }}{% if s.human.overrides_block %} ; blocage dur levé{% endif %}.</p>
+  {% endif %}
+  {% if s.sealing_findings %}
+  <p class="error" role="alert">Constats du scellement : {% for f in s.sealing_findings %}{{ f }}{% if not loop.last %} ; {% endif %}{% endfor %}.</p>
   {% endif %}
 </header>
 
-{% if s.demande %}
+{% if s.demande and can_decide %}
 <section id="revue" class="panel review" aria-labelledby="revue-titre">
   <h2 id="revue-titre">Revue humaine</h2>
   <dl class="facts">
@@ -54,8 +57,6 @@
     </select>
     <label for="motif">Motif (obligatoire)</label>
     <textarea id="motif" name="motif" rows="3" required></textarea>
-    <label for="relecteur">Relecteur (nom)</label>
-    <input type="text" id="relecteur" name="relecteur" required autocomplete="name">
     {% if d.levee_possible %}
     <div class="warning">
       <input type="checkbox" id="levee" name="levee" value="oui" aria-describedby="levee-aide">

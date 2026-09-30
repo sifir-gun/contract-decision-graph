@@ -33,6 +33,7 @@ def authenticated(verifier=None, provider_logout=False):
             verifier=verifier or FakeVerifier(),
             public_origin=PUBLIC,
             client_id="cdg-interface",
+            roles={"analyste": ("cdg-analystes",), "relecteur": ("cdg-relecteurs",)},
             provider_logout=provider_logout,
         ),
     )
@@ -214,6 +215,10 @@ IDENTITY = [
     PUBLIC,
     "--cles-csrf",
     "/run/secrets/csrf",
+    "--groupes-analyste",
+    "cdg-analystes",
+    "--groupes-relecteur",
+    "cdg-relecteurs",
 ]
 
 
@@ -238,7 +243,14 @@ def test_mode_identite_incompatible_avec_l_ecoute_non_locale(capsys):
 
 @pytest.mark.parametrize(
     "option",
-    ["--oidc-emetteur", "--oidc-audience", "--adresse-publique", "--cles-csrf"],
+    [
+        "--oidc-emetteur",
+        "--oidc-audience",
+        "--adresse-publique",
+        "--cles-csrf",
+        "--groupes-analyste",
+        "--groupes-relecteur",
+    ],
 )
 def test_mode_identite_exige_emetteur_audience_et_adresse_publique(option, capsys):
     argv = list(IDENTITY)

@@ -19,12 +19,14 @@ from psycopg import Connection, sql
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import ConnectionPool, PoolTimeout
 
+from cdg.domain.authorization import Actor
 from cdg.domain.explanation import ExplainedFinding, Explanation
 from cdg.domain.models import (
     AgentVerdict,
     Clause,
     ClauseRetrieval,
     HumanDecision,
+    HumanReview,
     NodeFailure,
     RetrievalTrace,
     Usage,
@@ -48,7 +50,9 @@ CHECKPOINT_TYPES = (
     ClauseRetrieval,
     ExplainedFinding,
     Explanation,
-    HumanDecision,
+    HumanDecision,  # v1, états d'avant la PR D2
+    HumanReview,
+    Actor,
     NodeFailure,
     RetrievalTrace,
     Usage,

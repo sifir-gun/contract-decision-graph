@@ -6,7 +6,7 @@ Les fonctions sont au niveau du module : un processus lancé par spawn les impor
 leur nom. Le résultat revient par une file : ("ok", statut) ou ("erreur", type, message).
 """
 
-from doubles import FakeCrag, FixedExtractor, clauses, make_deps
+from doubles import ACTEUR_ANALYSTE, FakeCrag, FixedExtractor, clauses, make_deps
 
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine
@@ -58,7 +58,7 @@ def analyse(conninfo, journal, thread_id, text, started, release, results) -> No
     try:
         extractor = GatedExtractor(started, release)
         status = engine(conninfo, journal, extractor).run(
-            thread_id, text, (), date(2026, 9, 25)
+            thread_id, text, (), date(2026, 9, 25), ACTEUR_ANALYSTE
         )
         results.put(("ok", status["statut"]))
     except Exception as exc:  # noqa: BLE001 : rendue au test par la file

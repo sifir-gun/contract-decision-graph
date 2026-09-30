@@ -11,9 +11,17 @@ Modèle d'embedding : {{ include "cdg.imageModele" . }} (montage : {{ .Values.mo
 Test de disponibilité :
   helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}
 
-L'interface n'écoute que sur 127.0.0.1 dans le pod (ADR 004) : aucune entrée réseau avant
-l'authentification (PR D). Pour y accéder depuis le poste, le temps d'une vérification :
-  kubectl --namespace {{ .Release.Namespace }} port-forward deploy/{{ include "cdg.nomComplet" . }} 8000:8000
+L'interface n'écoute que sur 127.0.0.1 dans le pod : oauth2-proxy, à côté d'elle, en est
+le seul chemin, et elle vérifie le jeton d'identité de chaque requête (ADR 005).
+{{- if .Values.ingress.active }}
+Adresse publique : https://{{ .Values.ingress.hote }}
+{{- end }}
+Rôles : analyste ({{ join ", " .Values.authentification.roles.analyste }}), relecteur ({{ join ", " .Values.authentification.roles.relecteur }}).
+{{- if not (or .Values.authentification.secondFacteur.amr .Values.authentification.secondFacteur.acr) }}
+
+AVERTISSEMENT : second facteur non exigé pour trancher et expirer
+(authentification.secondFacteur) : prérequis de production (ADR 005).
+{{- end }}
 
 Espace de noms : Pod Security au niveau « restricted » (étiquette
 pod-security.kubernetes.io/enforce=restricted), posée avant l'installation.

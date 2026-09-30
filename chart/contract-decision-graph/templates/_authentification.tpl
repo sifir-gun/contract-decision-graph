@@ -5,6 +5,9 @@ Authentification et entrée réseau (PR D1, ADR 005).
 {{- /* Valeurs exigées : aucune entrée sans authentification, rien de flou avec elle. */}}
 {{- define "cdg.authentification.valider" -}}
 {{- $auth := .Values.authentification -}}
+{{- if not $auth.active -}}
+{{- fail "authentification.active : exigée dans le cluster ; l'interface locale, non authentifiée, n'y existe jamais (ADR 005, PR D2)" -}}
+{{- end -}}
 {{- if and .Values.ingress.active (not $auth.active) -}}
 {{- fail "ingress.active exige authentification.active : aucune entrée réseau sans authentification (ADR 004, ADR 005)" -}}
 {{- end -}}

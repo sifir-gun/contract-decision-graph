@@ -24,6 +24,12 @@ from cdg.domain.config import load_config
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--journal-reel",
+        action="store_true",
+        help="exécute aussi les tests marqués journal_reel : le vrai journal d'audit du "
+        "poste, en lecture seule (jamais en CI, aucune donnée copiée)",
+    )
+    parser.addoption(
         "--llm",
         action="store_true",
         help="exécute aussi les tests marqués llm (vrai modèle, payant)",
@@ -89,6 +95,7 @@ def pytest_collection_modifyitems(config, items):
         ("proxy", "--proxy"),
         ("oauth2proxy", "--oauth2-proxy"),
         ("cluster", "--cluster"),
+        ("journal_reel", "--journal-reel"),
     ):
         if config.getoption(option):
             continue
@@ -264,7 +271,7 @@ def analysis(monkeypatch, request):
         extractor = extractor or FixedExtractor(clauses())
         crag = FakeCrag(empty)
 
-        def build(config):
+        def build(config, code_version):
             request.getfixturevalue("audit_journal")
             return Deps(
                 extractor=extractor,
@@ -272,6 +279,7 @@ def analysis(monkeypatch, request):
                 audit_store=cli.open_audit_store(),
                 clock=cli.now,
                 explainer=TEMPLATE,
+                code_version=code_version,
             )
 
         monkeypatch.setattr(cli, "build_deps", build)

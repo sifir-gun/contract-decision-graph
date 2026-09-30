@@ -161,6 +161,19 @@ spec:
             # clés CSRF partagées entre réplicas, relues à chaque usage (rotation)
             - --cles-csrf
             - /run/secrets/csrf
+            # rôles tirés des groupes du jeton, second facteur du relecteur (PR D2)
+            - --groupes-analyste
+            - {{ join "," .Values.authentification.roles.analyste | quote }}
+            - --groupes-relecteur
+            - {{ join "," .Values.authentification.roles.relecteur | quote }}
+            {{- with .Values.authentification.secondFacteur.amr }}
+            - --second-facteur-amr
+            - {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.authentification.secondFacteur.acr }}
+            - --second-facteur-acr
+            - {{ join "," . | quote }}
+            {{- end }}
             {{- if .Values.authentification.autorites }}
             - --oidc-ca
             - /run/autorites/ca.crt
@@ -169,8 +182,8 @@ spec:
             - --deconnexion-fournisseur
             {{- end }}
             {{- end }}
-          {{- if or $reel $auth }}
           env:
+            {{- include "cdg.envVersion" . | nindent 12 }}
             {{- if $reel }}
             {{- include "cdg.envBase" . | nindent 12 }}
             - name: EMBEDDING_CACHE_DIR
@@ -188,7 +201,6 @@ spec:
               value: {{ .Values.proxy.url | quote }}
             - name: NO_PROXY
               value: {{ ternary (printf "%s,127.0.0.1,localhost" .Values.base.hote) "127.0.0.1,localhost" $reel | quote }}
-          {{- end }}
           ports:
             - name: sante
               containerPort: {{ .Values.web.portSante }}

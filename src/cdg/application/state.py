@@ -7,6 +7,7 @@ import operator
 from datetime import date
 from typing import Annotated, Any, Literal, TypedDict
 
+from cdg.domain.authorization import Actor
 from cdg.domain.explanation import Explanation
 from cdg.domain.models import (
     AgentVerdict,
@@ -14,6 +15,7 @@ from cdg.domain.models import (
     Decision,
     Domain,
     HumanDecision,
+    HumanReview,
     NodeFailure,
     Usage,
 )
@@ -40,15 +42,20 @@ class ContractState(TypedDict, total=False):
     margin: float
     route: Route  # écrite par un nœud, lue par l'arête
     failure_report: dict[str, Any] | None
-    human: HumanDecision | None
+    # HumanReview (v2) ; HumanDecision (v1) dans les états d'avant la PR D2
+    human: HumanReview | HumanDecision | None
+    analyse_par: Actor | None  # qui a lancé l'analyse, posé par run_contract (PR D2)
     final_decision: (
         Decision | None
     )  # decision_gate (route explain) ou human_review ; None après reject
     explanation: Explanation  # écrite par explain ; absente après reject
     config_hash: str  # configuration de l'analyse, posée par run_contract (J4)
     models: dict[str, str]  # modèles de l'analyse, posés par run_contract (J4)
+    # version du code de l'analyse (CodeVersion en JSON), posée par run_contract (PR D2)
+    code_version: dict[str, str | None]
     decision_hash: str
     chain_hash: str
+    sealing_findings: list[str]  # constats du scellement, écrits par audit_seal
 
 
 class AnalystInput(TypedDict):  # état privé reçu via Send

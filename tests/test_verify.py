@@ -27,13 +27,14 @@ def verify(capsys, *options):
 def sealed(pg, audit_journal, tmp_path, monkeypatch, capsys):
     """Deux contrats analysés et scellés par la CLI dans le journal jetable."""
 
-    def build(config):
+    def build(config, code_version):
         return Deps(
             extractor=FixedExtractor(clauses()),
             crag=FakeCrag(),
             audit_store=cli.open_audit_store(),
             clock=cli.now,
             explainer=TEMPLATE,
+            code_version=code_version,
         )
 
     monkeypatch.setattr(cli, "build_deps", build)
@@ -41,7 +42,19 @@ def sealed(pg, audit_journal, tmp_path, monkeypatch, capsys):
     contract.write_text(CONTRACT_TEXT, encoding="utf-8")
     threads = [f"test-{uuid.uuid4()}" for _ in range(2)]
     for tid in threads:
-        assert cli.main(["run", str(contract), "--contract-id", tid]) == 0
+        assert (
+            cli.main(
+                [
+                    "run",
+                    str(contract),
+                    "--operateur",
+                    "analyste-synth",
+                    "--contract-id",
+                    tid,
+                ]
+            )
+            == 0
+        )
     capsys.readouterr()
     yield audit_journal.entries()
     for tid in threads:
@@ -92,6 +105,27 @@ def test_8_modifier_hors_decision_casse_aussi_la_chaine(pg, sealed, journal, cap
     )
     code, err = verify(capsys)
     assert (code, err["maillon_fautif"]) == (1, sealed[1].id)
+    assert "chain_hash" in err["raison"]
+
+
+@pytest.mark.parametrize("field", ["code_version", "sealing_code_version"])
+def test_modifier_la_version_du_code_scellee_casse_la_chaine(
+    pg, sealed, journal, capsys, field
+):
+    admin_execute(
+        pg,
+        journal,
+        "UPDATE {} SET record = jsonb_set(record, %s::text[], %s::jsonb) WHERE id = %s",
+        [field, "commit"],
+        json.dumps("0" * 40),
+        sealed[0].id,
+    )
+    code, err = verify(capsys)
+    assert (code, err["erreur"], err["maillon_fautif"]) == (
+        1,
+        "ChaineRompue",
+        sealed[0].id,
+    )
     assert "chain_hash" in err["raison"]
 
 

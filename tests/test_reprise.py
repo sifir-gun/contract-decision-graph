@@ -21,7 +21,7 @@ KILLED_RUN = textwrap.dedent("""
     from datetime import date
     text, clauses_path, thread_id, tests_dir = sys.argv[1:5]
     sys.path.insert(0, tests_dir)
-    from doubles import FakeCrag, FixedExtractor, make_deps
+    from doubles import ACTEUR_ANALYSTE, CODE, FakeCrag, FixedExtractor, make_deps
     from cdg import settings
     from cdg.adapters.langgraph import orchestrator
     from cdg.adapters.postgres import conninfo
@@ -39,6 +39,8 @@ KILLED_RUN = textwrap.dedent("""
             open(text).read(),
             analysis_date=date(2026, 9, 25),
             config=load_config(),
+            actor=ACTEUR_ANALYSTE,
+            code=CODE,
         )
         print(json.dumps(status["statut"]), flush=True)
         os.kill(os.getpid(), signal.SIGKILL)
@@ -93,7 +95,7 @@ def test_5_processus_tue_pendant_l_interrupt_puis_reprise(
             thread_id,
             "--decision",
             "NO_GO",
-            "--reviewer",
+            "--operateur",
             "relecteur-synth",
             "--reason",
             "référentiel insuffisant",
@@ -106,10 +108,10 @@ def test_5_processus_tue_pendant_l_interrupt_puis_reprise(
     assert resumed.returncode == 0, resumed.stderr
     out = json.loads(resumed.stdout)
     assert (out["statut"], out["final_decision"]) == ("termine", "NO_GO")
-    assert out["human"]["reviewer"] == "relecteur-synth"
+    assert out["human"]["acteur"]["operateur"] == "relecteur-synth"
     # scellé une fois, par le processus de reprise, dans le journal jetable
     [entry] = PostgresAuditStore(pg.app, table=journal).entries()
     decision = entry.record["decision"]
     assert (entry.thread_id, decision["final_decision"]) == (thread_id, "NO_GO")
-    assert decision["human"]["reviewer"] == "relecteur-synth"
+    assert decision["human"]["acteur"]["operateur"] == "relecteur-synth"
     assert out["chain_hash"] == entry.chain_hash

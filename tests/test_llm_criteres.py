@@ -15,7 +15,9 @@ import pytest
 from demo_set import load
 from doubles import (
     ABSENT,
+    ACTEUR_ANALYSTE,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
@@ -170,7 +172,14 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(
     graph = compiled(make_deps(LLMExtractor(llm)))
     thread = f"llm-10-{contract}-{run}"
     orchestrator.run_contract(
-        graph, thread, text, parties, analysis_date=ANALYSIS_DATE, config=CONFIG
+        graph,
+        thread,
+        text,
+        parties,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     failures = values.get("failures", [])
@@ -325,7 +334,13 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
     graph = compiled(make_deps(FixedExtractor(clauses(**FLAGGED_3)), crag))
     thread = f"llm-3-{run}"
     orchestrator.run_contract(
-        graph, thread, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+        graph,
+        thread,
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     by_domain = {v.domain: v for v in values["verdicts"]}
@@ -424,7 +439,14 @@ def analyse_p1(llm, text: str, thread: str) -> dict:
     deps = make_deps(LLMExtractor(llm), FakeCrag(), explainer=LLMExplainer(llm))
     graph = compiled(deps)
     status = orchestrator.run_contract(
-        graph, thread, text, P1.parties, analysis_date=DEMO_DATE, config=CONFIG
+        graph,
+        thread,
+        text,
+        P1.parties,
+        analysis_date=DEMO_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     found = {c.kind: c for c in values.get("clauses", [])}
@@ -540,6 +562,8 @@ def test_explication_reelle_sur_le_jeu(llm, real_crag, series_explain, pace, con
         contract.parties,
         analysis_date=DEMO_DATE,
         config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     if contract.human:
         orchestrator.resume_thread(graph, thread, contract.human, config=CONFIG)

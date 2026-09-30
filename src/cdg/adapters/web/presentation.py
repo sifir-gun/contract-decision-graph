@@ -109,3 +109,23 @@ def reference_rows(
 
 def short_hash(value: str | None) -> str:
     return f"{value[:12]}…" if value else "—"
+
+
+def actor_label(actor: Mapping[str, Any] | None) -> str:
+    """Acteur scellé, lisible : l'identifiant pseudonyme (sub) ou l'opérateur, jamais un
+    nom, que le journal ne porte pas."""
+    if actor is None:
+        return "inconnu (analyse antérieure aux rôles)"
+    if actor["canal"] == "interface":
+        return f"utilisateur {actor['sub']} (interface authentifiée)"
+    if actor["canal"] == "cli":
+        urgency = ", accès d'urgence" if actor.get("urgence") else ""
+        return f"opérateur {actor['operateur']} (CLI{urgency})"
+    return "interface locale, non authentifiée"
+
+
+def human_label(human: Mapping[str, Any]) -> str:
+    """Auteur d'une décision humaine : relecteur nommé au format v1, acteur en v2."""
+    if "reviewer" in human:
+        return str(human["reviewer"])
+    return actor_label(human["acteur"])

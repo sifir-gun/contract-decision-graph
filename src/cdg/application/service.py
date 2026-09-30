@@ -32,8 +32,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from pydantic import ValidationError
+
 from cdg.application import ingestion
-from cdg.domain import audit
+from cdg.domain import audit, authorization
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.identifiers import check_contract_id
 from cdg.domain.models import Clause, Usage
@@ -102,6 +105,11 @@ def _retained(verdicts: Sequence[Mapping[str, Any]]) -> list[str]:
     return list(dict.fromkeys(references))
 
 
+class FourEyesRefused(Exception):
+    """Revue refusée par les quatre yeux, avant le graphe (premier contrôle ; la
+    politique du graphe fait le second)."""
+
+
 @dataclass(frozen=True)
 class ContractService:
     engine: ContractEngine
@@ -119,6 +127,7 @@ class ContractService:
         raw_text: str,
         *,
         contract_id: str,
+        actor: Actor,
         parties: Sequence[str] = (),
         analysis_date: date | None = None,
     ) -> dict[str, Any]:
@@ -127,13 +136,31 @@ class ContractService:
         )  # à la création seulement : l'existant reste lisible
         on = analysis_date if analysis_date is not None else self.today()
         with self._writes:
-            return self.engine.run(contract_id, raw_text, parties, on)
+            return self.engine.run(contract_id, raw_text, parties, on, actor)
 
     def decide(self, thread_id: str, answer: Mapping[str, Any]) -> dict[str, Any]:
         """Réponse humaine brute : validée par la politique dans le graphe, redemandée
         avec son motif si elle est mal formée ou refusée."""
         with self._writes:
+            self._four_eyes(thread_id, answer)
             return self.engine.resume(thread_id, dict(answer))
+
+    def _four_eyes(self, thread_id: str, answer: Mapping[str, Any]) -> None:
+        """Premier contrôle des quatre yeux, pour les deux portes : l'acteur de l'analyse,
+        lu dans l'état, et celui de la réponse. Une réponse mal formée passe : la
+        politique du graphe la refuse et la redemande."""
+        if answer.get("source", "humain") != "humain":
+            return
+        try:
+            reviewer = Actor.model_validate(answer.get("acteur"))
+        except ValidationError:
+            return
+        analyst = self.engine.status(thread_id).get("analyse_par")
+        refused = authorization.four_eyes(
+            None if analyst is None else Actor.model_validate(analyst), reviewer
+        )
+        if refused:
+            raise FourEyesRefused(refused)
 
     def contracts(self, *, pending_only: bool = False) -> list[dict[str, Any]]:
         """Contrats du checkpointer, du plus récemment modifié au plus ancien ; le graphe
@@ -187,10 +214,12 @@ class ContractService:
     def history(self, thread_id: str) -> list[dict[str, Any]]:
         return self.engine.history(thread_id)
 
-    def expire(self, older_than: timedelta) -> tuple[datetime, list[dict[str, Any]]]:
+    def expire(
+        self, older_than: timedelta, actor: Actor
+    ) -> tuple[datetime, list[dict[str, Any]]]:
         with self._writes:
             now = self.now()  # après l'attente du verrou : l'heure de l'expiration
-            return now, self.engine.expire(older_than, now)
+            return now, self.engine.expire(older_than, now, actor)
 
     def config_check(self) -> dict[str, Any]:
         """Contrats en attente d'une revue analysés sous une autre configuration que la

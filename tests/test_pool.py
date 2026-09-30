@@ -5,7 +5,14 @@ connexion rendue ; pool épuisé : erreur explicite, 503 dans l'interface."""
 
 import psycopg
 import pytest
-from doubles import ANALYSIS_DATE, CONTRACT_TEXT, FakeCrag, HashEmbedder, make_deps
+from doubles import (
+    ACTEUR_ANALYSTE,
+    ANALYSIS_DATE,
+    CONTRACT_TEXT,
+    FakeCrag,
+    HashEmbedder,
+    make_deps,
+)
 from psycopg.rows import dict_row
 from test_audit_store import Sealer, record
 from web_helpers import BASE_URL, memory_service
@@ -115,7 +122,7 @@ def test_analyse_complete_par_le_pool_de_taille_par_defaut(pool, thread_id, jour
         PostgresContractLocks(lambda: pool),
         PostgresResumeCounter(lambda: pool),
     )
-    status = engine.run(thread_id, CONTRACT_TEXT, (), ANALYSIS_DATE)
+    status = engine.run(thread_id, CONTRACT_TEXT, (), ANALYSIS_DATE, ACTEUR_ANALYSTE)
     assert status["statut"] == "termine" and status["chain_hash"]
     assert engine.status(thread_id)["final_decision"] == status["final_decision"]
 

@@ -30,6 +30,7 @@ from langgraph.graph.state import CompiledStateGraph
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application.deps import Deps
+from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.ports.engine import ThreadError
 from cdg.ports.locks import ContractLocks
@@ -138,6 +139,7 @@ class LangGraphEngine:
         raw_text: str,
         parties: Sequence[str],
         analysis_date: date,
+        actor: Actor,
     ) -> dict[str, Any]:
         deps = self._deps.run()  # le fournisseur d'abord : clé absente, rien d'ouvert
         # verrou d'abord : un contrat en cours ailleurs est refusé sans rien ouvrir, et la
@@ -150,6 +152,8 @@ class LangGraphEngine:
                 parties,
                 analysis_date=analysis_date,
                 config=self._config,
+                actor=actor,
+                code=deps.code_version,
             )
 
     def resume(self, thread_id: str, answer: dict[str, Any]) -> dict[str, Any]:
@@ -175,10 +179,12 @@ class LangGraphEngine:
         with self._open(self._deps.read()) as graph:
             return orchestrator.threads_overview(graph)
 
-    def expire(self, older_than: timedelta, now: datetime) -> list[dict[str, Any]]:
+    def expire(
+        self, older_than: timedelta, now: datetime, actor: Actor
+    ) -> list[dict[str, Any]]:
         with self._open(self._deps.expire()) as graph:
             return orchestrator.expire_threads(
-                graph, older_than, now, hold=self._locks.hold
+                graph, older_than, now, hold=self._locks.hold, actor=actor
             )
 
     def resume_interrupted(self) -> list[dict[str, Any]]:

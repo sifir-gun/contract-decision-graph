@@ -66,7 +66,7 @@ def cli_calls(tmp_path, monkeypatch, capsys) -> dict[str, set[str]]:
     pending = tmp_path / "c-attente.txt"
     pending.write_text(PENDING_TEXT, encoding="utf-8")
     commands = {
-        "run": ["run", str(pending)],
+        "run": ["run", str(pending), "--operateur", "lot-parite"],
         "show": ["show", "c-attente"],
         "history": ["history", "c-attente"],
         "list": ["list"],
@@ -75,15 +75,15 @@ def cli_calls(tmp_path, monkeypatch, capsys) -> dict[str, set[str]]:
             "c-attente",
             "--decision",
             "GO",
-            "--reviewer",
-            "Camille",
+            "--operateur",
+            "relecteur-parite",
             "--reason",
             "revu",
         ],
         "journal": ["journal"],
         "verify": ["verify"],
         "replay": ["replay", "c-attente"],
-        "expire": ["expire", "--older-than", "24h"],
+        "expire": ["expire", "--older-than", "24h", "--operateur", "relecteur-parite"],
         "config-check": ["config-check"],
     }
     calls = {}

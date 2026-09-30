@@ -4,6 +4,7 @@ import pytest
 from doubles import (
     ABSENT,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
@@ -228,6 +229,7 @@ def seal(state, store, thread_id="c-1"):
         audit_store=store,
         clock=fixed_clock,
         decision_config=CONFIG,
+        code_version=CODE,
         thread_id=thread_id,
     )
 
@@ -242,6 +244,7 @@ def test_audit_seal_ecrit_les_empreintes_du_journal():
         "config_hash": entry.config_hash,
         "decision_hash": entry.decision_hash,
         "chain_hash": entry.chain_hash,
+        "sealing_findings": [],  # montrés au réviseur par la sortie de la revue
     }
     assert entry.config_hash == audit.config_hash(CONFIG)
 

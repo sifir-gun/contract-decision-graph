@@ -13,6 +13,9 @@ valeur à la vraie clause. Chacun mène à l'ESCALADE, jamais à une décision a
 
 from demo_set import load
 from doubles import (
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
+    CODE,
     FakeCrag,
     FakeLLM,
     FixedExtractor,
@@ -57,6 +60,8 @@ class Run:
             P1.parties,
             analysis_date=ANALYSIS_DATE,
             config=CONFIG,
+            actor=ACTEUR_ANALYSTE,
+            code=CODE,
         )
 
     def resume(self, human):
@@ -92,7 +97,11 @@ def test_9_version_piegee_en_revue_obligatoire_jamais_plus_favorable():
     assert len(shown) == 2 and all(f.startswith(instructions.FINDING) for f in shown)
     assert any(ORDER in f for f in shown)
     assert status["input_findings"] == shown
-    human = {"decision": "NO_GO", "reviewer": "relecteur-synth", "reason": "consigne"}
+    human = {
+        "decision": "NO_GO",
+        "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
+        "reason": "consigne",
+    }
     final = injected.resume(human)["final_decision"]
     assert RANK[final] <= RANK[clean.status["final_decision"]]
     [sealed] = injected.store.entries()
@@ -105,7 +114,13 @@ def test_9_consigne_seulement_dans_le_bloc_delimite_de_l_extraction():
     llm = FakeLLM({"extract_clauses": answer, "explain": faithful_explanation})
     extractor = LLMExtractor(llm, boundary=lambda: "fedcba9876543210")
     run = Run(P1.text, "p1-prompts", extractor=extractor, explainer=LLMExplainer(llm))
-    run.resume({"decision": "NO_GO", "reviewer": "r", "reason": "consigne"})
+    run.resume(
+        {
+            "decision": "NO_GO",
+            "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
+            "reason": "consigne",
+        }
+    )
     calls = {c["node"]: c for c in llm.calls}
     user = calls["extract_clauses"]["user"]
     start = user.index("<<<CONTRAT-fedcba9876543210>>>")

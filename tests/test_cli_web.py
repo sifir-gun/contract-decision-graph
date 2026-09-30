@@ -60,6 +60,52 @@ def test_ecoute_non_locale_avec_option_et_avertissement(served, capsys):
     assert "AVERTISSEMENT" in capsys.readouterr().err
 
 
+def identity_argv(tmp_path, *extra: str) -> list[str]:
+    """Interface derrière oauth2-proxy (mode démonstration : ni base ni modèle)."""
+    keys = tmp_path / "cles"
+    keys.mkdir()
+    (keys / "courante").write_text("k" * 40, encoding="utf-8")
+    return [
+        "web",
+        "--demo",
+        "--identite",
+        "en-tetes",
+        "--oidc-emetteur",
+        "https://idp.example.org",
+        "--oidc-audience",
+        "cdg-interface",
+        "--adresse-publique",
+        "https://cdg.example.org",
+        "--cles-csrf",
+        str(keys),
+        "--groupes-analyste",
+        "cdg-analystes",
+        "--groupes-relecteur",
+        "cdg-relecteurs,cdg-direction",
+        *extra,
+    ]
+
+
+def test_second_facteur_non_exige_avertissement_au_demarrage(served, capsys, tmp_path):
+    assert cli.main(identity_argv(tmp_path)) == 0
+    err = capsys.readouterr().err
+    assert "AVERTISSEMENT" in err and "second facteur" in err
+
+
+def test_second_facteur_exige_ni_avertissement_ni_trou(served, capsys, tmp_path):
+    argv = identity_argv(tmp_path, "--second-facteur-amr", "mfa,otp")
+    assert cli.main(argv) == 0
+    assert "second facteur" not in capsys.readouterr().err
+
+
+def test_groupes_d_un_role_vides_refuses_au_lancement(served, capsys, tmp_path):
+    argv = identity_argv(tmp_path, "--groupes-relecteur", " , ")
+    assert cli.main(argv) == 1
+    error = json.loads(capsys.readouterr().err)
+    assert error["erreur"] == "WebConfigError"
+    assert "--groupes-" in error["detail"] and "relecteur" in error["detail"]
+
+
 def test_rien_n_est_annonce_tant_que_le_port_n_est_pas_ouvert(monkeypatch, capsys):
     """Ni adresse ni avertissement d'écoute avant l'ouverture du port : une relance sur
     un port déjà pris laissait croire que l'interface avait démarré (28/09)."""

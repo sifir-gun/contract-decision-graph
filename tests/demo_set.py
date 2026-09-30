@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from doubles import ACTEUR_RELECTEUR
 
 from cdg.domain.models import Clause
 
@@ -32,8 +33,13 @@ class DemoContract:
         return "reject_reason" in self.expected
 
     @property
-    def human(self) -> dict[str, str] | None:
-        return self.expected.get("human")
+    def human(self) -> dict[str, Any] | None:
+        """Réponse humaine attendue, au format v2 : décision et motif des attendus, par
+        un relecteur autre que l'analyste (quatre yeux)."""
+        expected = self.expected.get("human")
+        if expected is None:
+            return None
+        return {**expected, "acteur": ACTEUR_RELECTEUR.model_dump(mode="json")}
 
     def clean_text(self) -> str:
         """Le même contrat sans le paragraphe injecté (critère 9)."""

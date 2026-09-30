@@ -26,6 +26,7 @@ from web_helpers import (
 
 from cdg.adapters.web import presentation, security
 from cdg.adapters.web.app import WEB_ROOT, create_app
+from cdg.domain.authorization import Actor
 from cdg.domain.explanation import Draft, ExplainedFinding
 from cdg.domain.models import Usage
 from cdg.settings import SettingsError
@@ -152,7 +153,7 @@ def test_cookie_csrf_strict_et_inaccessible_au_javascript():
 
 FORMS = [
     ("/analyse", {"source": "texte", "texte": CONTRACT_TEXT}),
-    ("/contrats/c-web/decision", {"decision": "GO", "relecteur": "x", "motif": "y"}),
+    ("/contrats/c-web/decision", {"decision": "GO", "motif": "y"}),
     ("/administration/expiration", {"heures": "24", "confirme": "oui"}),
 ]
 
@@ -245,7 +246,7 @@ def test_citation_et_explication_du_llm_echappees():
     assert "&lt;b&gt;penalites_execution&lt;/b&gt;" in page
 
 
-def test_nom_du_relecteur_echappe():
+def test_motif_de_la_revue_echappe_et_nom_saisi_jamais_repris():
     web = client()
     thread = analyse(web, PENDING_TEXT)
     token = csrf(web, f"/contrats/{thread}")
@@ -411,7 +412,8 @@ def test_adresse_d_un_contrat_action_inconnue_refusee():
 def legacy_contract(service, thread: str) -> None:
     """Contrat d'identifiant ancien, créé par le moteur directement : la règle des
     identifiants ne vaut qu'à la création, les contrats existants restent lisibles."""
-    service.engine.run(thread, PENDING_TEXT, (), service.today())
+    local = Actor(canal="locale", authentifie=False)  # interface du poste
+    service.engine.run(thread, PENDING_TEXT, (), service.today(), local)
 
 
 def test_redirection_apres_revue_vers_le_dossier_quel_que_soit_l_identifiant():
@@ -419,7 +421,7 @@ def test_redirection_apres_revue_vers_le_dossier_quel_que_soit_l_identifiant():
     service = memory_service()
     legacy_contract(service, thread)
     web = client(service)
-    data = {"decision": "GO_RESERVES", "relecteur": "Camille", "motif": "réserves"}
+    data = {"decision": "GO_RESERVES", "motif": "réserves"}
     response = web.post(
         presentation.contract_path(thread, "decision"),
         data={"csrf": csrf(web), **data},

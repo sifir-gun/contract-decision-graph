@@ -122,6 +122,11 @@ def test_image_construite_comme_en_ci():
     )
     local = docker_builds(SCRIPT.read_text(encoding="utf-8").splitlines())
     assert ci and local == every, "construction des images différente en CI et en local"
+    # le commit de la construction, scellé avec chaque décision (PR D2, ADR 005)
+    assert ci[0] == (
+        'docker build --build-arg CDG_COMMIT="$(uv run --no-sync python '
+        'scripts/chaine.py revision)" --tag cdg:verification .'
+    )
     tag = ci[0].split("--tag ")[1].split()[0]
     proxy = ci[1].split("--tag ")[1].split()[0]  # proxy de sortie (PR C3)
     oauth2 = ci[2].split("--tag ")[1].split()[0]  # oauth2-proxy (PR D1)

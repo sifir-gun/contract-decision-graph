@@ -1,7 +1,7 @@
 # Mise en production : liste de contrôle
 
 - **Statut** : validée le 27/09/2026. Périmètre retenu par le propriétaire, pour le moment : le déploiement (phase 2 de la feuille de route) et ce qu'il faut pour tenir dans la durée (phase 3). Rien n'est commencé.
-- **Hors de cette liste, pour le moment** : l'authentification, le chiffrement des échanges et les rôles, traités à part dans la PR D (ADR 005 : authentification et entrée réseau en D1, rôles en D2) ; le traitement de vrais contrats et de leurs données personnelles (RGPD) ; la validation des règles et des fiches par un juriste ; un coffre de secrets.
+- **Hors de cette liste, pour le moment** : l'authentification, le chiffrement des échanges et les rôles, traités à part dans la PR D (ADR 005 : authentification et entrée réseau en D1, rôles, quatre yeux et journal d'audit v2 en D2 ; second facteur à exiger en production) ; le traitement de vrais contrats et de leurs données personnelles (RGPD) ; la validation des règles et des fiches par un juriste ; un coffre de secrets.
 - **Rappel de l'ADR 004** : l'interface n'est exposée sur aucun réseau avant l'authentification.
 
 Chaque point dit d'où il vient et à quoi on reconnaît qu'il est fait.

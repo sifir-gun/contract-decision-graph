@@ -5,7 +5,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from doubles import (
+    ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FixedExtractor,
     clauses,
@@ -27,7 +30,13 @@ LOW_MARGIN = {"responsabilite_fournisseur": 50, "duree_engagement": 48}
 
 def suspend(graph, thread_id: str) -> datetime:
     status = orchestrator.run_contract(
-        graph, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+        graph,
+        thread_id,
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
     )
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
@@ -50,6 +59,7 @@ def test_11_thread_expire_no_go_systeme_motif_timeout(graph, thread_id):
         now=since + DAY + timedelta(hours=1),
         thread_ids={thread_id},
         hold=LocalContractLocks().hold,
+        actor=ACTEUR_RELECTEUR,
     )
     assert (status["thread_id"], status["statut"], status["final_decision"]) == (
         thread_id,
@@ -57,9 +67,9 @@ def test_11_thread_expire_no_go_systeme_motif_timeout(graph, thread_id):
         "NO_GO",
     )
     human = status["human"]
-    assert (human["source"], human["reviewer"], human["decision"]) == (
+    assert (human["source"], human["acteur"], human["decision"]) == (
         "systeme",
-        "systeme:expire",
+        ACTEUR_RELECTEUR.model_dump(mode="json"),
         "NO_GO",
     )
     assert human["reason"].startswith("timeout : en attente depuis 25 h")
@@ -81,6 +91,7 @@ def test_thread_recent_non_expire(graph, thread_id):
             now=since + DAY,  # pile au délai
             thread_ids={thread_id},
             hold=LocalContractLocks().hold,
+            actor=ACTEUR_RELECTEUR,
         )
         == []
     )
@@ -92,14 +103,25 @@ def test_thread_termine_jamais_repris(pg, thread_id):
     with orchestrator.open_graph(CONFIG, deps, pg.app) as g:
         assert (
             orchestrator.run_contract(
-                g, thread_id, CONTRACT_TEXT, analysis_date=ANALYSIS_DATE, config=CONFIG
+                g,
+                thread_id,
+                CONTRACT_TEXT,
+                analysis_date=ANALYSIS_DATE,
+                config=CONFIG,
+                actor=ACTEUR_ANALYSTE,
+                code=CODE,
             )["statut"]
             == "termine"
         )
         far = datetime.now(UTC) + timedelta(days=365)
         assert (
             orchestrator.expire_threads(
-                g, DAY, now=far, thread_ids={thread_id}, hold=LocalContractLocks().hold
+                g,
+                DAY,
+                now=far,
+                thread_ids={thread_id},
+                hold=LocalContractLocks().hold,
+                actor=ACTEUR_RELECTEUR,
             )
             == []
         )
@@ -110,7 +132,11 @@ def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
     refused = orchestrator.resume_thread(
         graph,
         thread_id,
-        {"decision": "ESCALADE", "reviewer": "r", "reason": "m"},
+        {
+            "decision": "ESCALADE",
+            "acteur": ACTEUR_RELECTEUR.model_dump(mode="json"),
+            "reason": "m",
+        },
         config=CONFIG,
     )
     assert refused["statut"] == "suspendu"
@@ -120,17 +146,32 @@ def test_thread_ayant_recu_une_reponse_refusee_expire_aussi(graph, thread_id):
         now=since + 2 * DAY,
         thread_ids={thread_id},
         hold=LocalContractLocks().hold,
+        actor=ACTEUR_RELECTEUR,
     )
     assert status["final_decision"] == "NO_GO"
 
 
 def test_cli_expire_sans_effet_sous_le_delai(pg, capsys):
     # délai de 1 000 jours : aucun thread réel ne peut être touché
-    assert cli.main(["expire", "--older-than", "1000d"]) == 0
+    assert (
+        cli.main(["expire", "--older-than", "1000d", "--operateur", "relecteur-synth"])
+        == 0
+    )
     out = json.loads(capsys.readouterr().out)
     assert (out["older_than"], out["expired"]) == ("1000d", [])
 
 
 def test_cli_expire_duree_invalide(capsys):
-    assert cli.main(["expire", "--older-than", "vingt-quatre heures"]) == 1
+    assert (
+        cli.main(
+            [
+                "expire",
+                "--older-than",
+                "vingt-quatre heures",
+                "--operateur",
+                "relecteur-synth",
+            ]
+        )
+        == 1
+    )
     assert "durée" in json.loads(capsys.readouterr().err)["detail"]
