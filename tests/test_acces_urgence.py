@@ -107,6 +107,21 @@ def test_hors_du_cluster_la_cli_decide_sans_urgence(pending, capsys, monkeypatch
     assert code == 0 and status["human"]["acteur"]["urgence"] is False
 
 
+def test_hors_du_cluster_urgence_tracee_sur_la_seule_sortie_du_processus(
+    pending, capsys, monkeypatch, tmp_path
+):
+    """Sur le poste, l'urgence est admise et tracée au journal des accès du processus ;
+    aucun journal de conteneur n'est ouvert."""
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    container = tmp_path / "jamais-ouvert"
+    monkeypatch.setattr(cli, "CONTAINER_LOG", container)
+    argv = ["--journaux", "json", *RESUME, "--operateur", "astreinte-1"]
+    assert cli.main([*argv, "--urgence", "incident 46"]) == 0
+    event = json.loads(capsys.readouterr().out.partition("\n")[0])
+    assert (event["message"], event["motif"]) == ("acces_urgence", "incident 46")
+    assert not container.exists()
+
+
 @pytest.mark.parametrize("operator", ["Camille Martin", "camille@example.org", "R"])
 def test_operateur_nominatif_refuse(pending, capsys, operator):
     code, error = run_cli(capsys, *RESUME, "--operateur", operator)

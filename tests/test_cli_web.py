@@ -98,6 +98,14 @@ def test_second_facteur_exige_ni_avertissement_ni_trou(served, capsys, tmp_path)
     assert "second facteur" not in capsys.readouterr().err
 
 
+def test_groupes_d_un_role_vides_refuses_au_lancement(served, capsys, tmp_path):
+    argv = identity_argv(tmp_path, "--groupes-relecteur", " , ")
+    assert cli.main(argv) == 1
+    error = json.loads(capsys.readouterr().err)
+    assert error["erreur"] == "WebConfigError"
+    assert "--groupes-" in error["detail"] and "relecteur" in error["detail"]
+
+
 def test_rien_n_est_annonce_tant_que_le_port_n_est_pas_ouvert(monkeypatch, capsys):
     """Ni adresse ni avertissement d'écoute avant l'ouverture du port : une relance sur
     un port déjà pris laissait croire que l'interface avait démarré (28/09)."""

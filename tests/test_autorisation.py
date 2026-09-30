@@ -39,6 +39,8 @@ def identity(groups=(), amr=(), acr=None) -> Identity:
         {"canal": "interface", "authentifie": False, "iss": ISS, "sub": "s"},
         {"canal": "locale", "authentifie": True},
         {"canal": "locale", "authentifie": False, "sub": "s"},
+        {"canal": "locale", "authentifie": False, "operateur": "poste-1"},
+        {"canal": "locale", "authentifie": False, "urgence": True},
         {"canal": "cli", "authentifie": False},  # sans opérateur
         {"canal": "cli", "authentifie": True, "operateur": "astreinte-1"},
         {"canal": "cli", "authentifie": False, "operateur": "camille@example.org"},

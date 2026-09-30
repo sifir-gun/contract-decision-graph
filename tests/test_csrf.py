@@ -137,6 +137,13 @@ def test_cle_absente_ou_trop_courte_refusee_sans_la_montrer(
     assert "zzzz-secret-zzzz" not in message and ANCIENNE not in message
 
 
+def test_cle_illisible_refusee_explicitement(tmp_path):
+    folder = keys(tmp_path / "cles", ANCIENNE)
+    (folder / "precedente").mkdir()  # illisible comme un fichier
+    with pytest.raises(security.CsrfKeyError, match="illisible.*IsADirectoryError"):
+        security.read_csrf_keys(folder)
+
+
 def test_cles_jamais_dans_leur_representation(tmp_path):
     loaded = security.read_csrf_keys(keys(tmp_path / "cles", ANCIENNE, NOUVELLE))
     assert ANCIENNE not in repr(loaded) and NOUVELLE not in repr(loaded)

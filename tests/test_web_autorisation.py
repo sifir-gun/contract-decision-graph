@@ -10,12 +10,21 @@
 import logging
 
 import pytest
-from doubles import ACTEUR_ANALYSTE, ANALYSTE, ISSUER, RELECTEUR, FakeVerifier
+from doubles import (
+    ACTEUR_ANALYSTE,
+    ANALYSTE,
+    ISSUER,
+    OPERATEUR,
+    RELECTEUR,
+    FakeVerifier,
+    answer,
+)
 from fastapi.testclient import TestClient
 from web_helpers import PENDING_TEXT, memory_service
 
 from cdg.adapters.web.app import Authentication, create_app
-from cdg.domain.authorization import SecondFactor
+from cdg.adapters.web.presentation import actor_label, human_label
+from cdg.domain.authorization import Actor, SecondFactor
 from cdg.domain.identity import Identity
 
 PUBLIC = "https://cdg.example.org"
@@ -220,3 +229,70 @@ def test_second_facteur_non_exige_par_defaut():
     web = interface()
     analyse(web, "analyste")
     assert decide(web, "relecteur").status_code == 303
+
+
+# --- acteurs lisibles, jamais un nom ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("actor", "label"),
+    [
+        (None, "inconnu (analyse antérieure aux rôles)"),
+        (ACTEUR_ANALYSTE, f"utilisateur {ANALYSTE.subject} (interface authentifiée)"),
+        (OPERATEUR, "opérateur relecteur-synth (CLI)"),
+        (
+            Actor(
+                canal="cli", authentifie=False, operateur="astreinte-1", urgence=True
+            ),
+            "opérateur astreinte-1 (CLI, accès d'urgence)",
+        ),
+        (
+            Actor(canal="locale", authentifie=False),
+            "interface locale, non authentifiée",
+        ),
+    ],
+)
+def test_acteur_lisible_par_son_pseudonyme_ou_son_operateur(actor, label):
+    assert (
+        actor_label(None if actor is None else actor.model_dump(mode="json")) == label
+    )
+
+
+def test_auteur_d_une_decision_relecteur_nomme_en_v1_acteur_en_v2():
+    v1 = {"decision": "GO", "reviewer": "Relecteur de test", "reason": "revu"}
+    assert human_label(v1) == "Relecteur de test"
+    assert human_label(answer(acteur=OPERATEUR)) == "opérateur relecteur-synth (CLI)"
+
+
+def test_dossier_tranche_montre_le_pseudonyme_du_relecteur_jamais_son_nom():
+    web = interface()
+    analyse(web, "analyste")
+    decide(web, "relecteur")
+    page = web.get("/contrats/c-attente", headers=bearer("analyste")).text
+    assert f"utilisateur {RELECTEUR.subject} (interface authentifiée)" in page
+    assert "relecteur.affiche" not in page
+
+
+# --- premier contrôle des quatre yeux : ce qu'il laisse au graphe ------------------------------
+
+
+def test_reponse_mal_formee_laissee_a_la_politique_du_graphe():
+    """Le service ne tranche pas sur une réponse invalide : le graphe la refuse et la
+    redemande, rien n'est scellé."""
+    service = memory_service()
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    malformed = answer() | {"acteur": {"canal": "inconnu"}}
+    assert service.decide("c-attente", malformed)["statut"] == "suspendu"
+    assert service.audit_store().entries() == []
+
+
+def test_decision_systeme_hors_quatre_yeux_toujours_no_go():
+    """Une décision système (expiration) n'est soumise aux quatre yeux ni au service ni
+    dans le graphe ; elle ne peut être qu'un NO_GO. Aucune porte n'envoie de source."""
+    service = memory_service()
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    go = answer("GO", acteur=ACTEUR_ANALYSTE) | {"source": "systeme"}
+    assert service.decide("c-attente", go)["statut"] == "suspendu"  # refusée
+    no_go = answer("NO_GO", acteur=ACTEUR_ANALYSTE) | {"source": "systeme"}
+    status = service.decide("c-attente", no_go)
+    assert (status["final_decision"], status["human"]["source"]) == ("NO_GO", "systeme")
