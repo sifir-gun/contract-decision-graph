@@ -69,6 +69,7 @@ spec:
           args:
             {{- toYaml .args | nindent 12 }}
           env:
+            {{- include "cdg.envVersion" $racine | nindent 12 }}
             {{- include "cdg.envBase" $racine | nindent 12 }}
             {{- if .modele }}
             - name: EMBEDDING_CACHE_DIR

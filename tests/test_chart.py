@@ -304,6 +304,32 @@ def test_images_par_empreinte_jamais_par_etiquette(reel):
 
 
 @pytest.mark.chart
+@pytest.mark.chart
+@pytest.mark.parametrize("variant", ["reel", "demo", "copie"])
+def test_empreinte_de_l_image_fournie_a_chaque_conteneur_de_la_cli(variant):
+    """Version du code scellée (PR D2, ADR 005) : l'empreinte que le chart déploie, la même
+    que celle qui tire l'image, passée au lancement à chaque conteneur qui lance la CLI de
+    l'application (interface, tâches) ; la CLI la refuse absente dans le cluster."""
+    image = chart_values("contract-decision-graph")["image"]
+    app = f"{image['repository']}@{image['digest']}"
+    docs, launched = render(*chart_script().VARIANTS[variant]), []
+    for name, spec in pod_specs(docs):
+        for container in containers(spec):
+            variables = env(container)
+            if container["image"] == app and "command" not in container:
+                assert variables["CDG_EMPREINTE_IMAGE"] == {
+                    "name": "CDG_EMPREINTE_IMAGE",
+                    "value": image["digest"],
+                }, name
+                launched.append(name)
+            else:
+                assert "CDG_EMPREINTE_IMAGE" not in variables, (name, container["name"])
+    [interface] = of_kind(docs, "Deployment")
+    jobs = [job["metadata"]["name"] for job in of_kind(docs, "Job")]
+    assert launched == [interface["metadata"]["name"], *jobs]
+    assert jobs or variant == "demo", "les tâches lancent aussi la CLI"
+
+
 def secret_files(spec: dict, container: dict) -> set[str]:
     """Fichiers de secrets que voit un conteneur : le volume projeté monté, en lecture
     seule, au dossier des secrets de l'application."""
@@ -572,8 +598,14 @@ def test_mode_demonstration_sans_base_ni_modele_ni_cle():
     pod = of_kind(docs, "Deployment")[0]["spec"]["template"]["spec"]
     web = pod["containers"][0]
     assert "--demo" in web["args"]
-    # ni base ni clé : seul le proxy de sortie, pour les clés publiques du fournisseur
-    assert {e["name"] for e in web["env"]} == {"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
+    # ni base ni clé : seul le proxy de sortie, pour les clés publiques du fournisseur, et
+    # l'empreinte de l'image, scellée avec chaque décision
+    assert {e["name"] for e in web["env"]} == {
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "CDG_EMPREINTE_IMAGE",
+    }
     assert not {"modele", "secrets"} & {v["name"] for v in pod["volumes"]}
     assert web["resources"]["limits"]["memory"] == "256Mi"
 

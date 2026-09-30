@@ -182,8 +182,8 @@ spec:
             - --deconnexion-fournisseur
             {{- end }}
             {{- end }}
-          {{- if or $reel $auth }}
           env:
+            {{- include "cdg.envVersion" . | nindent 12 }}
             {{- if $reel }}
             {{- include "cdg.envBase" . | nindent 12 }}
             - name: EMBEDDING_CACHE_DIR
@@ -201,7 +201,6 @@ spec:
               value: {{ .Values.proxy.url | quote }}
             - name: NO_PROXY
               value: {{ ternary (printf "%s,127.0.0.1,localhost" .Values.base.hote) "127.0.0.1,localhost" $reel | quote }}
-          {{- end }}
           ports:
             - name: sante
               containerPort: {{ .Values.web.portSante }}

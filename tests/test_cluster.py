@@ -30,6 +30,7 @@ import httpx
 import jwt
 import pytest
 import yaml
+from test_chaine_approvisionnement import chaine
 
 pytestmark = pytest.mark.cluster
 
@@ -1560,10 +1561,12 @@ def sealed_records(thread: str | None = None) -> list[dict]:
     return [json.loads(line) for line in out.splitlines() if line.strip()]
 
 
-def test_roles_quatre_yeux_et_acteurs_scelles_sans_nom():
+def test_roles_quatre_yeux_et_acteurs_scelles_sans_nom(images):
     """Le polyvalent (analyste et relecteur) ne tranche pas ce qu'il a analysé : 403,
     tracé ; l'analyste ne tranche pas, le relecteur n'analyse pas : 403, tracés ; le
-    relecteur tranche. Scellé en v2 : les deux acteurs par leur sub, aucun courriel."""
+    relecteur tranche. Scellé en v2 : les deux acteurs par leur sub, aucun courriel, et
+    la version du code, celle de l'analyse comme celle du scellement : le commit de la
+    construction de l'image et l'empreinte que le chart déploie."""
     pod = web_pods()[0]["metadata"]["name"]
     thread = f"quatre-yeux-{uuid.uuid4().hex[:8]}"
     with interface(pod, Identity("polyvalent")) as client:
@@ -1583,6 +1586,11 @@ def test_roles_quatre_yeux_et_acteurs_scelles_sans_nom():
     )
     human = record["decision"]["human"]
     assert (human["acteur"]["sub"], human["acteur"]["urgence"]) == (relecteur, False)
+    deployed = {
+        "commit": chaine().revision(ROOT),
+        "image": images["application"]["digest"],
+    }
+    assert record["code_version"] == record["sealing_code_version"] == deployed
     everything = json.dumps(sealed_records())
     assert not any(email in everything for email in EMAILS)
     events = [e for e in web_logs(pod, "web") if e.get("journal") == "cdg.acces"]
