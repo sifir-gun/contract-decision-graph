@@ -20,3 +20,6 @@ dist/
 
 # Réglages locaux de l'assistant de code
 .claude/
+
+# macOS : métadonnées du Finder
+.DS_Store
