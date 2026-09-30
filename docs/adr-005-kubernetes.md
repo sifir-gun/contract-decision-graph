@@ -342,6 +342,11 @@ Ressources du chart de l'application, créées seulement avec l'authentification
 
 Dans le cluster de test seulement, derrière Traefik (`https://dex.cdg.test`, autorité de test), stockage en mémoire, deux utilisateurs de test (`analyste@example.org`, `relecteur@example.org`, avec leurs groupes ; mots de passe hachés en bcrypt dans `cluster/dex.yaml`, en clair dans `scripts/cluster.py` pour ce cluster jetable). Octroi par mot de passe activé pour les scénarios (`passwordConnector`), à ne jamais activer en production. Limites, qui sont celles des tests : aucun `amr` ni `acr` dans les jetons (second facteur non testable, PR D2), pas de fin de session publiée ; clés régénérées à chaque redémarrage (le scénario de rotation s'en sert). Avis GHSA-7qjx-gp9h-65qj (haut, 20/05/2026, échange de jetons), sans correctif publié : l'échange de jetons n'est pas utilisé, et Dex ne sort pas des tests.
 
+#### Défauts trouvés par le cluster, corrigés
+
+- **Quota de l'espace de noms** : l'annexe d'oauth2-proxy (500m de CPU par pod) ne tenait plus sous le quota de 12 cœurs ; la bascule vers la base restaurée demandait 13 cœurs dans le cluster de test, et le nouveau pod était refusé (« exceeded quota »). Aux valeurs par défaut, la procédure de restauration documentée dépassait déjà le quota avant la D1 (14,5 cœurs), et une mise à jour progressive le dépasse avec oauth2-proxy (13,5) : le cluster de test, aux ressources de base réduites, ne le montrait pas. Limites de CPU portées à 17 cœurs (16 au pire, plus un de marge) ; un test du chart calcule le besoin depuis les valeurs des trois charts (mise à jour, ingestion, bascule vers la restauration ; limites et requêtes).
+- **Écran d'accord de Dex** : oauth2-proxy demande `approval_prompt=force` (sa valeur par défaut), que Dex 2.45.1 honore même avec `skipApprovalScreen` (`server/handlers.go`) ; la connexion s'arrêtait sur l'écran d'accord. Le navigateur des scénarios accorde l'accès, comme un utilisateur. En production, le fournisseur décide : la plupart ignorent ce paramètre non standard.
+
 #### Modèle de menaces du chemin d'authentification (STRIDE)
 
 Chemin : navigateur → Traefik → oauth2-proxy (pod de l'interface) → interface (boucle locale) ; oauth2-proxy et l'interface → proxy de sortie → fournisseur d'identité.
