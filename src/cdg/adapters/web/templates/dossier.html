@@ -22,7 +22,7 @@
   {% endif %}
 </header>
 
-{% if s.demande %}
+{% if s.demande and can_decide %}
 <section id="revue" class="panel review" aria-labelledby="revue-titre">
   <h2 id="revue-titre">Revue humaine</h2>
   <dl class="facts">

@@ -47,7 +47,7 @@ from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
 from cdg.application.service import ContractService
-from cdg.domain import audit, expiry
+from cdg.domain import audit, authorization, expiry
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
@@ -467,6 +467,9 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
         ("--adresse-publique", args.adresse_publique),
         # plusieurs réplicas : un formulaire servi par l'un est envoyé à l'autre
         ("--cles-csrf", args.cles_csrf),
+        # rôles tirés des groupes du jeton (PR D2)
+        ("--groupes-analyste", args.groupes_analyste),
+        ("--groupes-relecteur", args.groupes_relecteur),
     ):
         if not value:
             raise web_security.WebConfigError(f"--identite en-tetes exige {option}")
@@ -476,14 +479,31 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
             f"--adresse-publique : https://hôte attendu, sans chemin (reçu "
             f"{args.adresse_publique})"
         )
+    roles = {
+        "analyste": _names(args.groupes_analyste),
+        "relecteur": _names(args.groupes_relecteur),
+    }
+    try:
+        authorization.check_mapping(roles)
+    except authorization.AuthorizationConfigError as exc:
+        raise web_security.WebConfigError(f"--groupes-… : {exc}") from None
     return web_app.Authentication(
         verifier=oidc.OidcVerifier(
             args.oidc_emetteur, args.oidc_audience, ca_file=args.oidc_ca
         ),
         public_origin=f"https://{public.netloc}",
         client_id=args.oidc_audience,
+        roles=roles,
+        second_factor=authorization.SecondFactor(
+            amr=_names(args.second_facteur_amr), acr=_names(args.second_facteur_acr)
+        ),
         provider_logout=args.deconnexion_fournisseur,
     )
+
+
+def _names(value: str | None) -> tuple[str, ...]:
+    """Liste séparée par des virgules, sans vides."""
+    return tuple(name.strip() for name in (value or "").split(",") if name.strip())
 
 
 def _csrf_keys(
@@ -527,6 +547,14 @@ def _web(args: argparse.Namespace) -> dict:
         interrompues commence. Sur un port déjà pris, ni annonce ni reprise."""
         if warning:
             _tell(args, logging.WARNING, warning)
+        if authentication is not None and not authentication.second_factor.required:
+            _tell(
+                args,
+                logging.WARNING,
+                "AVERTISSEMENT : second facteur non exigé pour trancher et expirer "
+                "(--second-facteur-amr, --second-facteur-acr) : prérequis de production "
+                "(ADR 005)",
+            )
         _tell(
             args,
             logging.INFO,
@@ -872,6 +900,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--adresse-publique",
         help="adresse publique de l'interface, https://hôte : origine des formulaires, "
         "retour après la fin de session du fournisseur",
+    )
+    web.add_argument(
+        "--groupes-analyste",
+        help="groupes du jeton qui donnent le rôle analyste (séparés par des "
+        "virgules) ; exigé avec --identite en-tetes",
+    )
+    web.add_argument(
+        "--groupes-relecteur",
+        help="groupes du jeton qui donnent le rôle relecteur (séparés par des "
+        "virgules) ; exigé avec --identite en-tetes",
+    )
+    web.add_argument(
+        "--second-facteur-amr",
+        help="valeurs amr acceptées comme preuve d'un second facteur, pour trancher et "
+        "expirer (séparées par des virgules) ; aucune : non exigé, avec un avertissement",
+    )
+    web.add_argument(
+        "--second-facteur-acr",
+        help="valeurs acr acceptées comme preuve d'un second facteur (séparées par des "
+        "virgules)",
     )
     web.add_argument(
         "--cles-csrf",

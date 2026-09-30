@@ -24,7 +24,12 @@ from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.application import ingestion
-from cdg.application.service import ContractService, extraction_refusals, state_label
+from cdg.application.service import (
+    ContractService,
+    FourEyesRefused,
+    extraction_refusals,
+    state_label,
+)
 from cdg.domain.audit import GENESIS, ReplayError
 from cdg.domain.config import load_config
 from cdg.domain.identifiers import ContractIdError
@@ -202,8 +207,6 @@ def test_revue_humaine_acceptee_scelle_la_decision():
     ("overrides", "error"),
     [
         ({"reason": "  "}, "reason obligatoire"),
-        # quatre yeux : l'analyste ne tranche pas sa propre analyse
-        ({"acteur": ACTEUR_ANALYSTE.model_dump(mode="json")}, "a lancé l'analyse"),
         ({"decision": "ESCALADE"}, "non autorisée"),
         ({"overrides_block": True}, "overrides_block sans blocage dur levé"),
     ],
@@ -213,6 +216,17 @@ def test_reponse_refusee_redemandee_avec_son_motif(overrides, error):
     status = service.decide("c-attente", answer(**overrides))
     assert status["statut"] == "suspendu"
     assert error in status["demande"]["error"]
+
+
+def test_quatre_yeux_premier_controle_avant_le_graphe():
+    """L'analyste ne tranche pas sa propre analyse : refusé par le service, avant toute
+    reprise du graphe (la politique du graphe fait le second contrôle)."""
+    service = pending_service()
+    own = answer(acteur=ACTEUR_ANALYSTE.model_dump(mode="json"))
+    with pytest.raises(FourEyesRefused, match="a lancé l'analyse"):
+        service.decide("c-attente", own)
+    status = service.dossier("c-attente")["status"]
+    assert status["statut"] == "suspendu" and status["demande"].get("error") is None
 
 
 def test_reprise_d_un_thread_inconnu_ou_termine_refusee():

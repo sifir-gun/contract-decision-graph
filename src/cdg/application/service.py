@@ -32,8 +32,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from pydantic import ValidationError
+
 from cdg.application import ingestion
-from cdg.domain import audit
+from cdg.domain import audit, authorization
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.identifiers import check_contract_id
@@ -103,6 +105,11 @@ def _retained(verdicts: Sequence[Mapping[str, Any]]) -> list[str]:
     return list(dict.fromkeys(references))
 
 
+class FourEyesRefused(Exception):
+    """Revue refusée par les quatre yeux, avant le graphe (premier contrôle ; la
+    politique du graphe fait le second)."""
+
+
 @dataclass(frozen=True)
 class ContractService:
     engine: ContractEngine
@@ -135,7 +142,25 @@ class ContractService:
         """Réponse humaine brute : validée par la politique dans le graphe, redemandée
         avec son motif si elle est mal formée ou refusée."""
         with self._writes:
+            self._four_eyes(thread_id, answer)
             return self.engine.resume(thread_id, dict(answer))
+
+    def _four_eyes(self, thread_id: str, answer: Mapping[str, Any]) -> None:
+        """Premier contrôle des quatre yeux, pour les deux portes : l'acteur de l'analyse,
+        lu dans l'état, et celui de la réponse. Une réponse mal formée passe : la
+        politique du graphe la refuse et la redemande."""
+        if answer.get("source", "humain") != "humain":
+            return
+        try:
+            reviewer = Actor.model_validate(answer.get("acteur"))
+        except ValidationError:
+            return
+        analyst = self.engine.status(thread_id).get("analyse_par")
+        refused = authorization.four_eyes(
+            None if analyst is None else Actor.model_validate(analyst), reviewer
+        )
+        if refused:
+            raise FourEyesRefused(refused)
 
     def contracts(self, *, pending_only: bool = False) -> list[dict[str, Any]]:
         """Contrats du checkpointer, du plus récemment modifié au plus ancien ; le graphe
