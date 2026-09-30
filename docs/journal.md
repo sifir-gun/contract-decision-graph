@@ -2515,3 +2515,30 @@ Les onze passent, un par un, sur le même cluster : deux réplicas sur deux nœu
 - **Désinstallation** : compte et règle réseau des tâches, configuration à venir survivaient à `helm uninstall` (Helm ne supprime que les ressources ordinaires). Supprimés après leur crochet ; une tâche en échec reste pour le diagnostic, et son nettoyage, documenté, est vérifié à la fin du scénario de restauration.
 - **Disque du runner** : tailles mesurées (registre, linux/amd64) : modèle 1,33 Go compressé, 2,25 Go décompressé ; application 0,14 et 0,42 ; images tierces 0,78 Go compressés. Besoin au pire, 28,4 Go pour trois nœuds ; nettoyage sous 30 Go libres seulement (85 Go constatés).
 - **`check.sh --sans-cluster`**, pour le poste ; le cluster n'est alors vérifié que par la CI.
+
+## 2026-09-30 · Kubernetes, PR D1 : authentification et entrée réseau (branche `authentification`)
+
+Plan révisé validé le 30/09, découpé en deux PR avec un arrêt pour fusion : D1 (authentification, entrée réseau), puis D2 (rôles, quatre yeux, second facteur, journal d'audit v2, accès d'urgence). Détail et modèle de menaces : ADR 005.
+
+### Décisions du propriétaire (30/09)
+
+- **Zéro confiance** : oauth2-proxy transmet le jeton d'identité signé, l'application le vérifie à chaque requête ; les en-têtes seuls ne suffisent plus. PyJWT 2.15.1 retenue (ajoutée par le propriétaire) ; liste fermée d'algorithmes asymétriques publiés, `exp`, `iat`, `iss`, `aud`, `sub` exigés, tolérance d'horloge courte (30 s), tests d'attaque exigés.
+- **oauth2-proxy, option B** : l'image officielle ne passe pas la vérification exigée (binaire identique à l'empreinte publiée dans la release) ; image construite par notre chaîne depuis le binaire publié, vérifié.
+- **Traefik de k3s désactivé** au profit du chart officiel figé ; TLS 1.2 au moins, HSTS, HTTP redirigé ; débit limité par adresse du client, adresse réellement vue par Traefik vérifiée par un test à deux clients.
+- **Durées de session** validées (8 h, revalidation 5 min) ; déconnexion chez le fournisseur réglable ; scénarios en CI seulement (profil local trop lourd pour le poste).
+- **Prénom dans l'enregistrement n° 3 du journal local** : gardé (le prénom du propriétaire, journal jamais publié) ; aucun jeu de test tiré du vrai journal. Il illustre, en D2, la règle « jamais de nom scellé ».
+
+### Vérifications et défauts trouvés
+
+- **Image officielle d'oauth2-proxy** (30/09) : binaires extraits par `docker cp`, empreintes `shasum -a 256` : amd64 `3c48a5a1…` et arm64 `a2da41ed…`, contre `d2cc1a81…` et `dd70759f…` publiées. Option B.
+- **Construction d'oauth2-proxy** : `go mod download` échouait (`x509: certificate signed by unknown authority`) : la base de uv n'a pas de certificats ; ceux de distroless `static` copiés dans l'étape de construction.
+- **Scan d'oauth2-proxy** : quatre avis hauts dans des modules liés au binaire publié (gRPC, x/crypto) ; `govulncheck -mode=binary` n'en atteint aucun ; exceptions justifiées d'un mois, le binaire ne pouvant être reconstruit sans perdre l'identité avec la release.
+- **Rotation des clés** : `PyJWKClient` ne relit les clés qu'une fois par 30 s, lecture initiale comprise ; un test de rotation échouait. Le test abaisse le délai ; le scénario du cluster attend la nouvelle clé (30 s au plus).
+- **Cookie CSRF** : `Secure` derrière TLS, il n'est pas renvoyé par un client en HTTP (tests : client en HTTPS ; scénarios : cookie renvoyé à la main par la redirection de port).
+- **Déconnexion** : `form-action 'self'` s'applique aussi aux redirections, et bloquait la chaîne vers le fournisseur ; page de transition.
+- **Session d'oauth2-proxy** (code de la v7.15.4) : tout entière dans le cookie, horodatage signé ; un cookie volé survit à la déconnexion jusqu'à la revalidation ou l'expiration. Limite notée dans l'ADR (stockage côté serveur, hors D1).
+- **Dex 2.45.1, essayé seul sur le poste** (un conteneur, pas le cluster) : configuration de test valide, octroi par mot de passe avec le secret du client, revendications `name`, `groups`, `sub` opaque, sans courriel ; formulaire `login` et `password` ; retour direct vers le callback (écran d'accord sauté).
+- **TLS 1.1** : le Python de l'image propose bien TLS 1.1 (OpenSSL 3.5.8, `SECLEVEL=0`) et reçoit l'alerte `protocol_version` d'un serveur en TLS 1.2 au moins : le scénario prouve un refus du serveur, pas du client.
+- **CoreDNS de k3s 1.36.4** (1.14.6, code de `plugin/rewrite/name.go`) : une réécriture `name exact` rétablit aussi le nom dans la réponse ; `cdg.test` et `dex.cdg.test` mènent à Traefik sans réponse refusée par le résolveur.
+- **Désinstallation** : le Secret du certificat de l'entrée, écrit par cert-manager, survit à la release ; commande documentée, vérifiée par le scénario de restauration.
+- **Disque du runner** : oauth2-proxy, Traefik et Dex portent le besoin au pire à 29,9 Go, sous le seuil de nettoyage (30 Go).
