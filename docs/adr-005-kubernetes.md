@@ -368,6 +368,13 @@ Dans le cluster de test seulement, derrière Traefik (`https://dex.cdg.test`, au
 - **Quota de l'espace de noms** : l'annexe d'oauth2-proxy (500m de CPU par pod) ne tenait plus sous le quota de 12 cœurs ; la bascule vers la base restaurée demandait 13 cœurs dans le cluster de test, et le nouveau pod était refusé (« exceeded quota »). Aux valeurs par défaut, la procédure de restauration documentée dépassait déjà le quota avant la D1 (14,5 cœurs), et une mise à jour progressive le dépasse avec oauth2-proxy (13,5) : le cluster de test, aux ressources de base réduites, ne le montrait pas. Limites de CPU portées à 17 cœurs (16 au pire, plus un de marge) ; un test du chart calcule le besoin depuis les valeurs des trois charts (mise à jour, ingestion, bascule vers la restauration ; limites et requêtes).
 - **Écran d'accord forcé** : oauth2-proxy demandait `approval_prompt=force` (sa valeur par défaut), que Dex 2.45.1 honore même avec `skipApprovalScreen` (`server/handlers.go`) ; la connexion s'arrêtait sur l'écran d'accord. Le chart fixe désormais `auto` (ci-dessus) ; le navigateur des scénarios accorde encore l'accès si l'écran s'affiche, en filet de sécurité, et le scénario de connexion échoue s'il s'affiche.
 
+#### Échec isolé, non expliqué : requête perdue pendant une mise à jour
+
+- **Constat** : au passage du job `cluster` sur `9c7580e` (30/09), la sonde du scénario de mise à jour sans interruption a perdu 1 requête sur 2 071. Aux six autres passages de la PR (`29fcf9a`, `f5af37c`, `3ba66a4`, `e36b0b3`, `c272cd2`, `4578696`), aucune.
+- **Cause inconnue** : la sonde ne gardait alors que ses comptes, et les événements du cluster ne désignent pas la requête. La piste d'oauth2-proxy est écartée : la sonde interroge le port de santé de l'interface (service `-sante`), sans passer par lui. Hypothèse non vérifiée : délai de 2 s de la sonde dépassé pendant que le nouveau pod charge le modèle et sature le processeur du runner.
+- **Critère inchangé** : zéro requête perdue ; rien n'a été corrigé à l'aveugle.
+- **Ce que la sonde surveille désormais** : l'heure (UTC, à la seconde), le type et le message de chaque requête perdue (délai dépassé, connexion refusée, code HTTP de la sonde de disponibilité), vingt au plus, affichés par l'assertion ; avec le diagnostic à l'échec de chaque scénario (journaux de l'interface, d'oauth2-proxy et de Traefik, écrits aussitôt), de quoi rattacher une récidive à un pod et à une étape de la mise à jour. En cas de récidive, la cause est établie avant toute correction.
+
 #### Modèle de menaces du chemin d'authentification (STRIDE)
 
 Chemin : navigateur → Traefik → oauth2-proxy (pod de l'interface) → interface (boucle locale) ; oauth2-proxy et l'interface → proxy de sortie → fournisseur d'identité.
