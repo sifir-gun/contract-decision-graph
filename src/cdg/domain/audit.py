@@ -99,10 +99,17 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def configuration_hash(data: Mapping[str, Any]) -> str:
+    """Empreinte d'une configuration sous sa forme validée (JSON), par la sérialisation
+    canonique : ni l'ordre des clés ni la mise en forme n'y changent rien. Toujours
+    recalculée ainsi, jamais sur un texte relu (JSONB ne garde ni l'un ni l'autre)."""
+    return _sha256(canonical(data))
+
+
 def config_hash(config: DecisionConfig) -> str:
     """Empreinte de la configuration validée, sous forme canonique : un commentaire ou une
     mise en forme du fichier n'y change rien."""
-    return _sha256(canonical(config.model_dump(mode="json")))
+    return configuration_hash(config.model_dump(mode="json"))
 
 
 def models_of(config: DecisionConfig) -> dict[str, str]:
@@ -117,14 +124,37 @@ def models_of(config: DecisionConfig) -> dict[str, str]:
 
 def analysis_context(config: DecisionConfig, code: CodeVersion) -> dict[str, Any]:
     """Contexte d'analyse, placé dans l'état initial par `run_contract` avant tout nœud :
-    empreinte de la configuration qui produira la décision, modèles qui analyseront, et
-    version du code qui analyse (en JSON). C'est lui qui est scellé, même si un autre
-    processus scelle."""
+    empreinte de la configuration qui produira la décision et sa forme validée (archivée
+    au scellement), modèles qui analyseront, et version du code qui analyse (en JSON).
+    C'est lui qui est scellé, même si un autre processus scelle."""
     return {
         "config_hash": config_hash(config),
+        "analysis_config": config.model_dump(mode="json"),
         "models": models_of(config),
         "code_version": code.model_dump(mode="json"),
     }
+
+
+def configurations_to_archive(
+    state: Mapping[str, Any], sealing: DecisionConfig
+) -> dict[str, dict[str, Any]]:
+    """Configurations archivées avec l'enregistrement, par empreinte : celle de l'analyse
+    (contexte posé par `run_contract`), dont l'empreinte est celle de la partie décision,
+    et celle du processus qui scelle, si elle diffère (expiration après un changement de
+    configuration). Une analyse antérieure à l'archive n'a pas sa configuration dans
+    l'état : seule celle du processus qui scelle est archivée, et verify signale
+    l'enregistrement si ce n'est pas celle de sa décision."""
+    archived = {config_hash(sealing): sealing.model_dump(mode="json")}
+    analysed = state.get("analysis_config")
+    if analysed is not None:
+        key = configuration_hash(analysed)
+        if key != state["config_hash"]:
+            raise ValueError(
+                f"configuration de l'analyse différente de son empreinte ({key}, "
+                f"{state['config_hash']} dans l'état) : état incohérent"
+            )
+        archived[key] = dict(analysed)
+    return archived
 
 
 def decision_hash(record: Mapping[str, Any]) -> str:

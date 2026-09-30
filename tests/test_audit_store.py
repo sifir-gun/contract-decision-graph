@@ -27,6 +27,8 @@ from cdg.ports.audit_store import AuditStoreError
 
 CONFIG = load_config()
 SEALED_AT = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)
+# configuration de la décision, archivée avec l'enregistrement (empreinte → forme validée)
+ARCHIVED = {audit.config_hash(CONFIG): CONFIG.model_dump(mode="json")}
 
 
 def record(contract_id, reason="texte trop court", sealed_at=SEALED_AT):
@@ -66,9 +68,33 @@ def store(request):
 # --- Contrat du port, sur les deux implémentations -----------------------------------------
 
 
+def other_config() -> DecisionConfig:
+    return CONFIG.model_copy(update={"min_margin": 0.06})
+
+
+def test_configuration_archivee_avec_l_enregistrement(store):
+    store.append(Sealer(record("c-1")), ARCHIVED)
+    [(key, archived)] = store.configurations().items()
+    assert key == audit.config_hash(CONFIG) == audit.configuration_hash(archived)
+
+
+def test_configuration_archivee_une_seule_fois(store):
+    store.append(Sealer(record("c-1")), ARCHIVED)
+    store.append(Sealer(record("c-2")), ARCHIVED)
+    assert list(store.configurations()) == list(ARCHIVED)
+
+
+def test_ajout_refuse_rien_n_est_archive(store):
+    store.append(Sealer(record("c-1")), ARCHIVED)
+    other = {audit.config_hash(other_config()): other_config().model_dump(mode="json")}
+    with pytest.raises(AuditStoreError):
+        store.append(Sealer(record("c-1", reason="texte en anglais")), other)
+    assert list(store.configurations()) == list(ARCHIVED)
+
+
 def test_premier_ajout_depuis_la_genese(store):
     sealer = Sealer(record("c-1"))
-    stored = store.append(sealer)
+    stored = store.append(sealer, ARCHIVED)
     assert sealer.heads == [None] and stored.prev_hash == audit.GENESIS
     assert stored.id >= 1 and stored.created_at.tzinfo is not None
     assert store.entries() == [stored]
@@ -76,7 +102,7 @@ def test_premier_ajout_depuis_la_genese(store):
 
 def test_ajouts_chaines_puis_verifies(store):
     sealers = [Sealer(record(f"c-{i}")) for i in range(1, 4)]
-    stored = [store.append(s) for s in sealers]
+    stored = [store.append(s, ARCHIVED) for s in sealers]
     assert [s.heads for s in sealers] == [
         [None],
         [stored[0].chain_hash],
@@ -90,17 +116,17 @@ def test_ajouts_chaines_puis_verifies(store):
 
 
 def test_ajout_rejoue_pour_un_meme_thread_idempotent(store):
-    first = store.append(Sealer(record("c-1")))
+    first = store.append(Sealer(record("c-1")), ARCHIVED)
     # audit_seal rejoué après un arrêt : autre horodatage, même décision
     later = datetime(2026, 9, 26, 9, 0, tzinfo=UTC)
-    again = store.append(Sealer(record("c-1", sealed_at=later)))
+    again = store.append(Sealer(record("c-1", sealed_at=later)), ARCHIVED)
     assert again == first and len(store.entries()) == 1
 
 
 def test_meme_thread_autre_decision_refusee(store):
-    store.append(Sealer(record("c-1")))
+    store.append(Sealer(record("c-1")), ARCHIVED)
     with pytest.raises(AuditStoreError, match="c-1"):
-        store.append(Sealer(record("c-1", reason="texte en anglais")))
+        store.append(Sealer(record("c-1", reason="texte en anglais")), ARCHIVED)
     assert len(store.entries()) == 1
 
 
@@ -112,7 +138,9 @@ def test_ajouts_concurrents_sous_app_role_chaine_lineaire(pg, journal):
     store = PostgresAuditStore(pg.app, table=journal)
     with ThreadPoolExecutor(max_workers=8) as pool:
         stored = list(
-            pool.map(lambda i: store.append(Sealer(record(f"c-{i}"))), range(8))
+            pool.map(
+                lambda i: store.append(Sealer(record(f"c-{i}")), ARCHIVED), range(8)
+            )
         )
     entries = store.entries()
     assert len(entries) == 8 and len({e.prev_hash for e in entries}) == 8
@@ -158,7 +186,7 @@ def _insert_copy(pg, journal, **changes):
 
 @pytest.mark.pg
 def test_fourche_refusee_par_la_base(pg, journal):
-    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")))
+    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")), ARCHIVED)
     # même prev_hash qu'un maillon existant : une seconde branche serait une fourche
     with pytest.raises(psycopg.errors.UniqueViolation):
         _insert_copy(pg, journal, thread_id="c-2", chain_hash="f" * 64)
@@ -166,7 +194,7 @@ def test_fourche_refusee_par_la_base(pg, journal):
 
 @pytest.mark.pg
 def test_un_seul_enregistrement_par_thread_en_base(pg, journal):
-    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")))
+    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")), ARCHIVED)
     with pytest.raises(psycopg.errors.UniqueViolation):
         _insert_copy(pg, journal, prev_hash="e" * 64, chain_hash="f" * 64)
 
@@ -176,7 +204,7 @@ def test_un_seul_enregistrement_par_thread_en_base(pg, journal):
     "statement", ["UPDATE {} SET contract_id = 'x'", "DELETE FROM {}"]
 )
 def test_app_role_ni_modification_ni_suppression(pg, journal, statement):
-    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")))
+    PostgresAuditStore(pg.app, table=journal).append(Sealer(record("c-1")), ARCHIVED)
     with (
         psycopg.connect(pg.app) as conn,
         pytest.raises(psycopg.errors.InsufficientPrivilege),
@@ -263,7 +291,7 @@ def test_nom_de_table_hostile_reste_un_identifiant(pg):
     with pytest.raises(psycopg.errors.UndefinedTable):
         store.entries()
     with pytest.raises(psycopg.errors.UndefinedTable):
-        store.append(Sealer(record("c-1")))
+        store.append(Sealer(record("c-1")), ARCHIVED)
     with psycopg.connect(pg.admin) as conn:
         assert conn.execute("SELECT to_regclass('audit_decisions')").fetchone()[0]
 

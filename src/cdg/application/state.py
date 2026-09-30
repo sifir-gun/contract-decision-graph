@@ -50,6 +50,8 @@ class ContractState(TypedDict, total=False):
     )  # decision_gate (route explain) ou human_review ; None après reject
     explanation: Explanation  # écrite par explain ; absente après reject
     config_hash: str  # configuration de l'analyse, posée par run_contract (J4)
+    # sa forme validée (JSON), archivée au scellement (PR d'archivage)
+    analysis_config: dict[str, Any]
     models: dict[str, str]  # modèles de l'analyse, posés par run_contract (J4)
     # version du code de l'analyse (CodeVersion en JSON), posée par run_contract (PR D2)
     code_version: dict[str, str | None]

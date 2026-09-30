@@ -318,7 +318,10 @@ def test_journal_en_memoire_supporte_les_ajouts_simultanes():
             sealing_code_version=CODE,
             sealed_at=FIXED_NOW,
         )
-        return store.append(lambda head: audit.seal(record, head))
+        return store.append(
+            lambda head: audit.seal(record, head),
+            {audit.config_hash(CONFIG): CONFIG.model_dump(mode="json")},
+        )
 
     with frequent_switches(), ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(append, range(40)))

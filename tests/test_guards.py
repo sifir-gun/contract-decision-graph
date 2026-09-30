@@ -389,11 +389,14 @@ def test_regle_de_reprise_classe_hors_exception_refusee():
 
 
 class BrokenStore:
-    def append(self, seal):
+    def append(self, seal, configurations):
         raise ConnectionError("base injoignable")
 
     def entries(self):
         return []
+
+    def configurations(self):
+        return {}
 
 
 def test_audit_seal_en_echec_consigne_sans_empreinte():
