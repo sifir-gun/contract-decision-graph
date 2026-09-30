@@ -475,6 +475,89 @@ def test_check_sh_deroule_le_meme_cluster():
     assert f"{SCRIPT} detruire" in lines[positions[-1] + 1 :]
 
 
+# --- check.sh : commit « inconnu » arrêté avant l'image, avec le cluster ------------------------
+
+SHA = "deadbeef" * 5
+FAKE_UV = """#!/usr/bin/env bash
+echo "uv $*" >> "$APPELS"
+if [[ "$*" == "run --no-sync python scripts/chaine.py revision" ]]; then
+    if [[ "$REVISION" == inconnu ]]; then
+        echo "révision inconnue : contexte de construction différent du commit (src/a.py)" >&2
+    fi
+    echo "$REVISION"
+fi
+"""
+FAKE_DOCKER = """#!/usr/bin/env bash
+echo "docker $*" >> "$APPELS"
+"""
+
+
+def run_check_sh(tmp_path: Path, revision: str, *options: str):
+    """check.sh copié dans un dépôt factice, uv et docker remplacés par des doublures qui
+    consignent leurs appels : rien n'est construit ni lancé."""
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts" / "check.sh"
+    script.write_text(
+        (ROOT / "scripts" / "check.sh").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in (("uv", FAKE_UV), ("docker", FAKE_DOCKER)):
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
+    calls = tmp_path / "appels"
+    calls.touch()
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "APPELS": str(calls),
+        "REVISION": revision,
+        "HOME": str(tmp_path),
+    }
+    result = subprocess.run(
+        ["bash", str(script), *options],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        check=False,
+    )
+    return result, calls.read_text(encoding="utf-8").splitlines()
+
+
+def test_check_sh_avec_cluster_s_arrete_si_le_commit_serait_inconnu(tmp_path):
+    """Fichiers non commités dans le contexte de construction : l'image porterait le
+    commit « inconnu », refusé au démarrage dans le cluster. check.sh s'arrête avant de
+    construire l'image, et dit pourquoi et comment faire."""
+    result, calls = run_check_sh(tmp_path, "inconnu")
+    assert result.returncode == 1
+    assert "« inconnu »" in result.stderr and "cluster" in result.stderr
+    assert "commiter" in result.stderr.lower() and "--sans-cluster" in result.stderr
+    assert "src/a.py" in result.stderr  # la raison donnée par chaine.py revision
+    assert calls == [
+        "uv sync --locked --all-groups",
+        "uv run --no-sync python scripts/chaine.py revision",
+    ]  # arrêté d'emblée : ni lint, ni tests, ni image
+
+
+def test_check_sh_sans_cluster_accepte_un_commit_inconnu(tmp_path):
+    result, calls = run_check_sh(tmp_path, "inconnu", "--sans-cluster")
+    assert result.returncode == 0, result.stderr
+    builds = [c for c in calls if c.startswith("docker build --build-arg")]
+    assert builds == [
+        "docker build --build-arg CDG_COMMIT=inconnu --tag cdg:verification ."
+    ]
+    assert not [c for c in calls if "cluster.py" in c]
+
+
+def test_check_sh_avec_cluster_commit_connu_va_jusqu_au_cluster(tmp_path):
+    result, calls = run_check_sh(tmp_path, SHA)
+    assert result.returncode == 0, result.stderr
+    assert (
+        f"docker build --build-arg CDG_COMMIT={SHA} --tag cdg:verification ." in calls
+    )
+    assert f"{SCRIPT} detruire" in calls
+
+
 # --- CLI dans un pod : résultat lu malgré les ajouts de kubectl --------------------------------
 
 
