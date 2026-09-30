@@ -672,6 +672,69 @@ def test_lint_rendu_schemas_et_bonnes_pratiques(tmp_path):
     assert tools  # la liste des commandes n'est pas vide
 
 
+# --- quota de l'espace de noms ----------------------------------------------------------------
+
+
+def quantity(value: str | float) -> float:
+    """Quantité Kubernetes : CPU en cœurs, mémoire en Gio."""
+    text = str(value)
+    for suffix, factor in (("m", 1e-3), ("Mi", 1 / 1024), ("Gi", 1.0)):
+        if text.endswith(suffix):
+            return float(text[: -len(suffix)]) * factor
+    return float(text)
+
+
+def pod_resources(spec: dict, kind: str) -> tuple[float, float]:
+    """Limites ou requêtes d'un pod (CPU, mémoire), conteneurs annexes compris."""
+    found = [c["resources"][kind] for c in spec["containers"]]
+    return (
+        sum(quantity(r["cpu"]) for r in found),
+        sum(quantity(r["memory"]) for r in found),
+    )
+
+
+def chart_values(name: str) -> dict:
+    return yaml.safe_load((ROOT / "chart" / name / "values.yaml").read_text())
+
+
+@pytest.mark.chart
+@pytest.mark.parametrize("kind", ["limits", "requests"])
+def test_quota_couvre_mise_a_jour_ingestion_et_restauration(kind):
+    """Les trois charts vivent dans le même espace de noms (docs/exploitation.md) : aux
+    valeurs par défaut, le quota laisse passer la mise à jour progressive (un pod de
+    l'interface de plus, oauth2-proxy compris), l'ingestion qui la suit, et la bascule
+    vers une base restaurée (une instance de plus). Défaut trouvé par le cluster de test
+    (PR D1) : l'annexe d'oauth2-proxy ne tenait plus sous l'ancien quota."""
+    docs = render(*chart_script().VARIANTS["authentifie"])
+    deployment = of_kind(docs, "Deployment")[0]
+    web = pod_resources(deployment["spec"]["template"]["spec"], kind)
+    replicas = deployment["spec"]["replicas"]
+    surge = deployment["spec"]["strategy"]["rollingUpdate"]["maxSurge"]
+    job = named(docs, "Job", "-ingestion")["spec"]["template"]["spec"]
+    ingestion = pod_resources(job, kind)
+    proxy = chart_values("cdg-proxy")
+    postgres = chart_values("cdg-postgres")
+    instance = [
+        postgres["ressources"][kind],
+        postgres["sauvegardes"]["ressourcesAnnexe"][kind],
+    ]
+    quota = named(docs, "ResourceQuota", "graph")["spec"]["hard"]
+    for index, key in enumerate(("cpu", "memory")):
+        one = sum(quantity(r[key]) for r in instance)
+        base = (
+            proxy["replicas"] * quantity(proxy["ressources"][kind][key])
+            + postgres["instances"] * one
+        )
+        need = max(
+            (replicas + surge) * web[index] + base,  # mise à jour progressive
+            replicas * web[index] + ingestion[index] + base,  # ingestion
+            (replicas + surge) * web[index]
+            + base
+            + one,  # bascule vers la restauration
+        )
+        assert quantity(quota[f"{kind}.{key}"]) >= need, (key, need)
+
+
 # --- CI : job chart, mêmes vérifications que check.sh -----------------------------------------
 
 HELM_SHA256 = "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"

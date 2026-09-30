@@ -188,12 +188,16 @@ taches:
 configuration:
   decision: ""
 
-# Quota et limites par défaut de l'espace de noms.
+# Quota et limites par défaut de l'espace de noms, où vivent les trois charts. Limites de
+# CPU au pire, aux valeurs par défaut : bascule vers une base restaurée, 16 cœurs (trois
+# pods de l'interface pendant la mise à jour, oauth2-proxy compris, 3 × 2,5 ; proxy de
+# sortie, 2 × 0,5 ; trois instances PostgreSQL avec leur annexe, 3 × 2,5), plus un de
+# marge (pod de test de Helm, tâche). Vérifié par tests/test_chart.py (PR D1).
 espaceDeNoms:
   quota:
     requests.cpu: "8"
     requests.memory: 12Gi
-    limits.cpu: "12"
+    limits.cpu: "17"
     limits.memory: 20Gi
     pods: "20"
   limitesParDefaut:
