@@ -41,25 +41,29 @@ KUBE_LINTER = (
     "docker.io/stackrox/kube-linter:v0.8.3"
     "@sha256:f2bfce7879206d32f69ab6572c376f916643f54ca291ac38cf7d01ef591ff3f9"
 )
-# variantes rendues et vérifiées : valeurs par défaut, démonstration, repli par copie
+# authentification, exigée dans le cluster (PR D2 : jamais d'interface locale) : valeurs
+# d'exemple ; empreinte d'exemple de l'image d'oauth2-proxy, qui ne tire rien
+AUTH = [
+    "--set",
+    "authentification.emetteur=https://idp.example.org",
+    "--set",
+    "authentification.clientId=cdg-interface",
+    "--set",
+    "authentification.image.digest=sha256:" + "1" * 64,
+    # adresse publique : retour d'oauth2-proxy, origine des formulaires
+    "--set",
+    "ingress.hote=cdg.example.org",
+]
+# variantes rendues et vérifiées : valeurs par défaut, démonstration, repli par copie,
+# entrée réseau (PR D1)
 VARIANTS: dict[str, list[str]] = {
-    "reel": [],
-    "demo": ["--set", "mode=demo", "--set", "replicas=1"],
-    "copie": ["--set", "modele.montage=copie"],
-    # authentification et entrée réseau (PR D1) ; empreinte d'exemple, qui ne tire rien
+    "reel": AUTH,
+    "demo": [*AUTH, "--set", "mode=demo", "--set", "replicas=1"],
+    "copie": [*AUTH, "--set", "modele.montage=copie"],
     "authentifie": [
-        "--set",
-        "authentification.active=true",
-        "--set",
-        "authentification.emetteur=https://idp.example.org",
-        "--set",
-        "authentification.clientId=cdg-interface",
-        "--set",
-        "authentification.image.digest=sha256:" + "1" * 64,
+        *AUTH,
         "--set",
         "ingress.active=true",
-        "--set",
-        "ingress.hote=cdg.example.org",
     ],
 }
 # proxy de sortie (PR C3) : l'empreinte de l'image n'a pas de valeur par défaut avant la

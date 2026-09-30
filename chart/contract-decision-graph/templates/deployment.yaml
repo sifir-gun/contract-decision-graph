@@ -161,6 +161,19 @@ spec:
             # clés CSRF partagées entre réplicas, relues à chaque usage (rotation)
             - --cles-csrf
             - /run/secrets/csrf
+            # rôles tirés des groupes du jeton, second facteur du relecteur (PR D2)
+            - --groupes-analyste
+            - {{ join "," .Values.authentification.roles.analyste | quote }}
+            - --groupes-relecteur
+            - {{ join "," .Values.authentification.roles.relecteur | quote }}
+            {{- with .Values.authentification.secondFacteur.amr }}
+            - --second-facteur-amr
+            - {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.authentification.secondFacteur.acr }}
+            - --second-facteur-acr
+            - {{ join "," . | quote }}
+            {{- end }}
             {{- if .Values.authentification.autorites }}
             - --oidc-ca
             - /run/autorites/ca.crt

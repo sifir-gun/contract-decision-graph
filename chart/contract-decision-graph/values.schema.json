@@ -591,6 +591,8 @@
         "secretCsrf",
         "autorites",
         "deconnexionFournisseur",
+        "roles",
+        "secondFacteur",
         "accord",
         "session",
         "image",
@@ -622,6 +624,56 @@
         },
         "deconnexionFournisseur": {
           "type": "boolean"
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "analyste",
+            "relecteur"
+          ],
+          "properties": {
+            "analyste": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^,\\s]+$"
+              },
+              "minItems": 1
+            },
+            "relecteur": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^,\\s]+$"
+              },
+              "minItems": 1
+            }
+          }
+        },
+        "secondFacteur": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "amr",
+            "acr"
+          ],
+          "properties": {
+            "amr": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^,\\s]+$"
+              }
+            },
+            "acr": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[^,\\s]+$"
+              }
+            }
+          }
         },
         "accord": {
           "enum": [

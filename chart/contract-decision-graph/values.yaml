@@ -116,10 +116,10 @@ proxy:
     app.kubernetes.io/name: cdg-proxy
 
 # Authentification (PR D1, ADR 005) : oauth2-proxy en conteneur annexe, seul chemin vers
-# l'interface, qui vérifie le jeton d'identité signé de chaque requête. Désactivée : aucune
-# entrée réseau (ni Service de l'interface, ni Ingress).
+# l'interface, qui vérifie le jeton d'identité signé de chaque requête. Exigée dans le
+# cluster (PR D2) : l'interface locale, non authentifiée, n'y existe jamais.
 authentification:
-  active: false
+  active: true
   emetteur: ""  # émetteur OIDC, en https
   clientId: ""  # client OIDC : audience du jeton
   # Secret existant : client-secret (secret du client OIDC), cookie-secret (32 octets,
@@ -134,6 +134,16 @@ authentification:
   # déconnexion : fermer aussi la session chez le fournisseur, s'il publie une fin de
   # session (non avec Dex 2.45.1, fournisseur des tests)
   deconnexionFournisseur: false
+  # rôles (PR D2) : groupes du jeton qui les donnent ; l'analyste analyse, le relecteur
+  # tranche et expire, les deux lisent ; sans rôle, 403
+  roles:
+    analyste: [cdg-analystes]
+    relecteur: [cdg-relecteurs]
+  # second facteur exigé pour trancher et expirer : valeurs amr ou acr acceptées ; vides,
+  # non exigé (avertissement au démarrage et dans les notes) : prérequis de production
+  secondFacteur:
+    amr: []
+    acr: []
   # écran d'accord chez le fournisseur (approval_prompt d'oauth2-proxy, qui envoie
   # « force » si rien n'est réglé) : « auto » ne le force pas, et les fournisseurs qui ne
   # connaissent pas ce paramètre l'ignorent ; « force » le demande à chaque connexion

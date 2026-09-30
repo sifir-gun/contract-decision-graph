@@ -7,10 +7,20 @@ HSTS, HTTP redirigé vers HTTPS, taille maximale alignée sur celle de l'interfa
 limitation de débit par adresse du client. Journal de connexion d'oauth2-proxy réduit au
 sub ; secrets en fichiers."""
 
+import subprocess
 from urllib.parse import urlsplit
 
 import pytest
-from test_chart import chart_script, containers, env, named, of_kind, refused, render
+from test_chart import (
+    CHART,
+    chart_script,
+    containers,
+    env,
+    named,
+    of_kind,
+    refused,
+    render,
+)
 
 from cdg.adapters.web import security
 from cdg.domain.config import load_config
@@ -39,20 +49,31 @@ def flags(found: dict) -> dict[str, str]:
     return dict(arg.removeprefix("--").split("=", 1) for arg in found["args"])
 
 
-# --- sans authentification, aucune entrée -------------------------------------------------
+# --- authentification obligatoire : jamais d'interface locale dans le cluster --------------
 
 
-def test_sans_authentification_ni_ingress_ni_service_de_l_interface():
-    docs = render()
-    assert not of_kind(docs, "Ingress")
-    assert [s["metadata"]["name"] for s in of_kind(docs, "Service")] == [
-        "cdg-contract-decision-graph-sante"
-    ]
-    assert [c["name"] for c in pod(docs)["containers"]] == ["web"]
+def test_authentification_obligatoire_jamais_d_interface_locale_dans_le_cluster():
+    """PR D2 : le canal locale (interface non authentifiée) n'existe pas dans le cluster ;
+    l'interface y refuse aussi de démarrer sans --identite en-tetes."""
+    auth = chart_script().AUTH
+    message = refused(*auth, "--set", "authentification.active=false")
+    assert "authentification" in message and "locale" in message
+
+
+@pytest.mark.parametrize("variant", ["reel", "demo", "copie", "authentifie"])
+def test_interface_toujours_derriere_oauth2_proxy(variant):
+    args = container(render(*chart_script().VARIANTS[variant]), "web")["args"]
+    assert args[args.index("--identite") + 1] == "en-tetes"
+
+
+def test_sans_entree_ni_ingress():
+    assert not of_kind(render(), "Ingress")
 
 
 def test_entree_sans_authentification_refusee():
-    message = refused("--set", "ingress.active=true", "--set", f"ingress.hote={HOST}")
+    auth = chart_script().AUTH
+    options = ["--set", "ingress.active=true", "--set", f"ingress.hote={HOST}"]
+    message = refused(*auth, "--set", "authentification.active=false", *options)
     assert "authentification" in message
 
 
@@ -201,12 +222,6 @@ def test_cles_csrf_partagees_montees_dans_l_interface_seulement(auth):
     assert "cles-csrf" not in [m["name"] for m in proxy["volumeMounts"]]
 
 
-def test_sans_authentification_aucune_cle_csrf_montee():
-    docs = render()
-    assert "cles-csrf" not in [v["name"] for v in pod(docs)["volumes"]]
-    assert "--cles-csrf" not in container(docs, "web")["args"]
-
-
 def test_oauth2_proxy_joint_le_fournisseur_par_le_proxy_de_sortie(auth):
     variables = env(container(auth, "oauth2-proxy"))
     assert variables["HTTPS_PROXY"]["value"] == "http://cdg-proxy:4750"
@@ -343,3 +358,60 @@ def test_entree_de_l_interface_depuis_traefik_seulement(auth):
         "kubernetes.io/metadata.name": "traefik"
     }
     assert source["podSelector"]["matchLabels"] == {"app.kubernetes.io/name": "traefik"}
+
+
+# --- rôles et second facteur (PR D2) -------------------------------------------------------
+
+
+def test_roles_tires_des_groupes_transmis_a_l_interface(auth):
+    args = container(auth, "web")["args"]
+    assert args[args.index("--groupes-analyste") + 1] == "cdg-analystes"
+    assert args[args.index("--groupes-relecteur") + 1] == "cdg-relecteurs"
+
+
+def test_roles_reglables_et_jamais_vides():
+    docs = render(
+        "--set-json",
+        'authentification.roles.relecteur=["achats-relecteurs","direction"]',
+    )
+    args = container(docs, "web")["args"]
+    assert args[args.index("--groupes-relecteur") + 1] == "achats-relecteurs,direction"
+    auth = chart_script().AUTH
+    message = refused(*auth, "--set-json", "authentification.roles.analyste=[]")
+    assert "analyste" in message
+
+
+def test_second_facteur_non_exige_par_defaut(auth):
+    args = container(auth, "web")["args"]
+    assert "--second-facteur-amr" not in args and "--second-facteur-acr" not in args
+
+
+def test_second_facteur_transmis_quand_exige():
+    docs = render(
+        "--set-json",
+        'authentification.secondFacteur.amr=["mfa","otp"]',
+        "--set-json",
+        'authentification.secondFacteur.acr=["urn:exemple:aal2"]',
+    )
+    args = container(docs, "web")["args"]
+    assert args[args.index("--second-facteur-amr") + 1] == "mfa,otp"
+    assert args[args.index("--second-facteur-acr") + 1] == "urn:exemple:aal2"
+
+
+def install_notes(*options: str) -> str:
+    """Notes d'installation, rendues sans cluster (helm install --dry-run=client)."""
+    result = subprocess.run(
+        ["helm", "install", "cdg", str(CHART), "--namespace", "cdg"]
+        + ["--dry-run=client", *chart_script().AUTH, *options],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.split("NOTES:", 1)[1]
+
+
+def test_notes_d_installation_avertissent_sans_second_facteur():
+    assert "second facteur non exigé" in install_notes()
+    exige = install_notes("--set-json", 'authentification.secondFacteur.amr=["mfa"]')
+    assert "second facteur non exigé" not in exige
