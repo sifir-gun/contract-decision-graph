@@ -108,6 +108,27 @@ def test_8_modifier_hors_decision_casse_aussi_la_chaine(pg, sealed, journal, cap
     assert "chain_hash" in err["raison"]
 
 
+@pytest.mark.parametrize("field", ["code_version", "sealing_code_version"])
+def test_modifier_la_version_du_code_scellee_casse_la_chaine(
+    pg, sealed, journal, capsys, field
+):
+    admin_execute(
+        pg,
+        journal,
+        "UPDATE {} SET record = jsonb_set(record, %s::text[], %s::jsonb) WHERE id = %s",
+        [field, "commit"],
+        json.dumps("0" * 40),
+        sealed[0].id,
+    )
+    code, err = verify(capsys)
+    assert (code, err["erreur"], err["maillon_fautif"]) == (
+        1,
+        "ChaineRompue",
+        sealed[0].id,
+    )
+    assert "chain_hash" in err["raison"]
+
+
 def test_8_supprimer_un_maillon_du_milieu_casse_la_chaine(pg, sealed, journal, capsys):
     admin_execute(pg, journal, "DELETE FROM {} WHERE id = %s", sealed[0].id)
     code, err = verify(capsys)

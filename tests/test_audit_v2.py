@@ -154,6 +154,20 @@ def test_version_du_code_hors_de_la_partie_decision_mais_chainee():
     )
 
 
+@pytest.mark.parametrize("field", ["code_version", "sealing_code_version"])
+def test_version_du_code_alteree_apres_scellement_chaine_rompue(field):
+    """Hors de decision_hash, mais couverte par chain_hash : un commit réécrit dans un
+    enregistrement scellé est vu par la vérification de la chaîne."""
+    first = entry(record(reviewed()).model_dump(mode="json"), audit.GENESIS)
+    second = entry(record(reviewed()).model_dump(mode="json"), first.chain_hash)
+    tampered = json.loads(json.dumps(first.record))
+    tampered[field]["commit"] = "0" * 40
+    altered = first.model_copy(update={"record": tampered, "id": 1})
+    report = audit.verify_chain([altered, second])
+    assert (report.ok, report.broken_id) == (False, 1)
+    assert "chain_hash" in report.reason  # decision_hash, lui, reste juste
+
+
 def test_analyse_sans_version_du_code_scellee_nulle():
     """Analyse lancée avant le scellement de la version du code : null, comme l'acteur
     d'une analyse antérieure aux rôles ; celle du scellement est toujours connue."""
