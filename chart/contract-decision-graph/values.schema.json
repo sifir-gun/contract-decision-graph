@@ -588,6 +588,7 @@
         "emetteur",
         "clientId",
         "secret",
+        "secretCsrf",
         "autorites",
         "deconnexionFournisseur",
         "accord",
@@ -609,6 +610,10 @@
           "pattern": "^[^\\s]*$"
         },
         "secret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secretCsrf": {
           "type": "string",
           "minLength": 1
         },

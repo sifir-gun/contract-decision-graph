@@ -108,6 +108,9 @@ spec:
             - {{ .Values.authentification.clientId | quote }}
             - --adresse-publique
             - {{ include "cdg.adressePublique" . | quote }}
+            # clés CSRF partagées entre réplicas, relues à chaque usage (rotation)
+            - --cles-csrf
+            - /run/secrets/csrf
             {{- if .Values.authentification.autorites }}
             - --oidc-ca
             - /run/autorites/ca.crt
@@ -181,6 +184,12 @@ spec:
               mountPath: /run/autorites
               readOnly: true
             {{- end }}
+            {{- if $auth }}
+            # sans subPath : le kubelet met le fichier à jour quand le Secret change
+            - name: cles-csrf
+              mountPath: /run/secrets/csrf
+              readOnly: true
+            {{- end }}
         {{- if $auth }}
         # seul chemin vers l'interface (PR D1) : authentifie, puis transmet le jeton
         # d'identité signé à l'interface, sur la boucle locale du pod
@@ -252,6 +261,13 @@ spec:
                       path: client-secret
                     - key: cookie-secret
                       path: cookie-secret
+        # clés CSRF, pour l'interface seule : tout le Secret (courante, precedente)
+        - name: cles-csrf
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ .Values.authentification.secretCsrf }}
         {{- with .Values.authentification.autorites }}
         - name: autorites
           configMap:

@@ -161,6 +161,29 @@ def test_secrets_d_oauth2_proxy_en_fichiers_jamais_en_variables(auth):
     assert "secrets-oauth2-proxy" not in [m["name"] for m in web["volumeMounts"]]
 
 
+def test_cles_csrf_partagees_montees_dans_l_interface_seulement(auth):
+    """Deux réplicas derrière Traefik : un formulaire servi par l'un est envoyé à
+    l'autre. Clés CSRF partagées (Secret), tout le Secret monté (courante, et precedente
+    pendant une rotation), mis à jour sans redémarrage ; jamais dans oauth2-proxy."""
+    web, proxy = container(auth, "web"), container(auth, "oauth2-proxy")
+    args = web["args"]
+    assert args[args.index("--cles-csrf") + 1] == "/run/secrets/csrf"
+    [volume] = [v for v in pod(auth)["volumes"] if v["name"] == "cles-csrf"]
+    assert volume["projected"]["defaultMode"] == 0o440
+    [source] = volume["projected"]["sources"]
+    assert source["secret"] == {"name": "cdg-csrf"}  # toutes ses clés, sans liste
+    [mount] = [m for m in web["volumeMounts"] if m["name"] == "cles-csrf"]
+    assert (mount["mountPath"], mount["readOnly"]) == ("/run/secrets/csrf", True)
+    assert "subPath" not in mount  # sinon, aucune mise à jour du fichier
+    assert "cles-csrf" not in [m["name"] for m in proxy["volumeMounts"]]
+
+
+def test_sans_authentification_aucune_cle_csrf_montee():
+    docs = render()
+    assert "cles-csrf" not in [v["name"] for v in pod(docs)["volumes"]]
+    assert "--cles-csrf" not in container(docs, "web")["args"]
+
+
 def test_oauth2_proxy_joint_le_fournisseur_par_le_proxy_de_sortie(auth):
     variables = env(container(auth, "oauth2-proxy"))
     assert variables["HTTPS_PROXY"]["value"] == "http://cdg-proxy:4750"

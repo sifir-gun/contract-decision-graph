@@ -125,6 +125,10 @@ authentification:
   # Secret existant : client-secret (secret du client OIDC), cookie-secret (32 octets,
   # chiffrement du cookie de session) ; montés en fichiers dans oauth2-proxy seulement
   secret: cdg-oidc
+  # Secret existant des clés CSRF, partagées entre réplicas : courante (signe), et
+  # precedente pendant une rotation (vérifie seulement) ; au moins 32 caractères chacune ;
+  # tout le Secret monté dans l'interface, mis à jour sans redémarrage (docs/exploitation.md)
+  secretCsrf: cdg-csrf
   # ConfigMap existante (clé ca.crt) : autorités du fournisseur ; vide, celles du système
   autorites: ""
   # déconnexion : fermer aussi la session chez le fournisseur, s'il publie une fin de
