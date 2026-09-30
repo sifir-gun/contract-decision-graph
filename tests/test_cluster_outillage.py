@@ -473,3 +473,47 @@ def test_check_sh_deroule_le_meme_cluster():
     positions = [lines.index(command) for command in ORDER]
     assert positions == sorted(positions)
     assert f"{SCRIPT} detruire" in lines[positions[-1] + 1 :]
+
+
+# --- CLI dans un pod : résultat lu malgré les ajouts de kubectl --------------------------------
+
+
+def test_cli_dans_un_pod_erreur_lue_malgre_la_ligne_de_kubectl():
+    """Commande en échec : kubectl exec ajoute sa propre ligne à la sortie d'erreur ; le
+    résultat est la dernière ligne de la CLI, jamais celle de kubectl (scénario de
+    l'accès d'urgence, première commande en échec lue dans un pod)."""
+    from test_cluster import cli_result
+
+    error = {"erreur": "AccesRefuse", "detail": "--urgence exigé"}
+    failed = subprocess.CompletedProcess(
+        args=["kubectl", "exec"],
+        returncode=1,
+        stdout="",
+        stderr=json.dumps(error) + "\ncommand terminated with exit code 1\n",
+    )
+    assert cli_result(failed) == (1, error)
+
+
+def test_cli_dans_un_pod_resultat_apres_les_journaux():
+    from test_cluster import cli_result
+
+    done = subprocess.CompletedProcess(
+        args=["kubectl", "exec"],
+        returncode=0,
+        stdout='{"journal": "cdg.acces", "message": "acces_urgence"}\n{"statut": "termine"}\n',
+        stderr="",
+    )
+    assert cli_result(done) == (0, {"statut": "termine"})
+
+
+def test_cli_dans_un_pod_sortie_sans_resultat_erreur_explicite():
+    from test_cluster import cli_result
+
+    silent = subprocess.CompletedProcess(
+        args=["kubectl", "exec"],
+        returncode=1,
+        stdout="",
+        stderr="command terminated with exit code 1\n",
+    )
+    with pytest.raises(AssertionError, match="aucun résultat"):
+        cli_result(silent)

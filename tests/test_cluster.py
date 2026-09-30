@@ -180,10 +180,25 @@ def cli(pod: str, *args: str) -> tuple[int, dict]:
         timeout=180,
         check=False,
     )
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
-    if result.returncode == 0:
-        return 0, json.loads(lines[-1])
-    return result.returncode, json.loads(result.stderr.strip().splitlines()[-1])
+    return cli_result(result)
+
+
+# ajoutée par kubectl exec à la sortie d'erreur quand la commande échoue
+KUBECTL_EXIT = re.compile(r"command terminated with exit code \d+")
+
+
+def cli_result(result: subprocess.CompletedProcess[str]) -> tuple[int, dict]:
+    """Code et résultat JSON de la CLI : sa dernière ligne, sur la sortie standard
+    (après les journaux) si elle réussit, sur la sortie d'erreur sinon ; jamais la ligne
+    que kubectl ajoute à une commande en échec."""
+    output = result.stdout if result.returncode == 0 else result.stderr
+    lines = [
+        line
+        for line in output.splitlines()
+        if line.strip() and not KUBECTL_EXIT.fullmatch(line.strip())
+    ]
+    assert lines, f"aucun résultat de la CLI (code {result.returncode}) : {output!r}"
+    return result.returncode, json.loads(lines[-1])
 
 
 def factice(body: dict | None = None) -> dict:
