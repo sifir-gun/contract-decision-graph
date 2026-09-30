@@ -334,10 +334,23 @@ def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
     module = chaine()
     module.scan(tmp_path, EXCEPTIONS, today=TODAY, run=ok)
     config = yaml.safe_load((tmp_path / "grype.yaml").read_text(encoding="utf-8"))
-    [rule] = config["ignore"]
-    assert rule["vulnerability"] == "CVE-2026-82049"
+    rules = {rule["vulnerability"]: rule for rule in config["ignore"]}
+    rule = rules["CVE-2026-82049"]
     assert rule["package"] == {"name": "python", "type": "binary", "version": "3.12.14"}
     assert "157454" in rule["reason"]  # report sur 3.12 non fusionné
+    # oauth2-proxy v7.15.4 (PR D1) : binaire publié, dépendances figées ; failles jugées
+    # hors d'atteinte (aucun serveur gRPC, pas de SSH ; govulncheck)
+    grpc = {"name": "google.golang.org/grpc", "type": "go-module", "version": "v1.83.0"}
+    crypto = {"name": "golang.org/x/crypto", "type": "go-module", "version": "v0.55.0"}
+    for name, package in (
+        ("GHSA-2v4p-qf9q-27wj", grpc),
+        ("GHSA-vp52-pcj8-j9qc", grpc),
+        ("GO-2026-6354", crypto),
+        ("GO-2026-6355", crypto),
+    ):
+        assert rules[name]["package"] == package
+        assert "govulncheck" in rules[name]["reason"]
+    assert len(rules) == 5
 
 
 def exceptions(tmp_path, **changes) -> Path:
@@ -406,6 +419,12 @@ PUBLISHED = [
         "locale": "cdg-proxy:verification",
         "depot": "/proxy-sortie",
     },
+    {  # PR D1 : binaire de la release, vérifié par son empreinte publiée
+        "image": "oauth2-proxy",
+        "artefact": "oauth2-proxy",
+        "locale": "cdg-oauth2-proxy:verification",
+        "depot": "/oauth2-proxy",
+    },
 ]
 IDENTITY = "https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/main"
 
@@ -471,10 +490,15 @@ def test_les_images_publiees_sont_celles_testees_et_scannees():
     uploads = {
         s["with"]["name"]: s for s in image_steps if uses(s, "actions/upload-artifact")
     }
-    assert set(uploads) == {"image-${{ matrix.arch }}", "proxy-${{ matrix.arch }}"}
+    assert set(uploads) == {
+        "image-${{ matrix.arch }}",
+        "proxy-${{ matrix.arch }}",
+        "oauth2-proxy-${{ matrix.arch }}",
+    }
     for folder, upload in (
         ("chaine", uploads["image-${{ matrix.arch }}"]),
         ("chaine-proxy", uploads["proxy-${{ matrix.arch }}"]),
+        ("chaine-oauth2-proxy", uploads["oauth2-proxy-${{ matrix.arch }}"]),
     ):
         # toujours produit : le job cluster reprend les images testées (PR C3)
         assert "if" not in upload

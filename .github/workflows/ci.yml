@@ -251,6 +251,30 @@ jobs:
             ${{ runner.temp }}/chaine-proxy/sbom.spdx.json
           if-no-files-found: error
           retention-days: 1
+      # oauth2-proxy (PR D1) : binaire de la release, vérifié par son empreinte publiée
+      - name: oauth2-proxy, signatures des images de base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python scripts/chaine.py bases --dockerfile docker/oauth2-proxy/Dockerfile
+      - name: oauth2-proxy, construction (binaire publié, empreinte vérifiée, licences des modules)
+        run: docker build --file docker/oauth2-proxy/Dockerfile --tag cdg-oauth2-proxy:verification docker/oauth2-proxy
+      - name: oauth2-proxy, vérifications (non root, version, binaire, licences)
+        run: uv run --no-sync pytest -m oauth2proxy --oauth2-proxy cdg-oauth2-proxy:verification
+      - name: oauth2-proxy, inventaire des composants (Syft)
+        run: >-
+          uv run --no-sync python scripts/chaine.py inventaire cdg-oauth2-proxy:verification
+          --dossier "$RUNNER_TEMP/chaine-oauth2-proxy"
+      - name: oauth2-proxy, scan (Grype)
+        run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-oauth2-proxy"
+      - name: oauth2-proxy, image et inventaire, pour le cluster et la publication
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oauth2-proxy-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/chaine-oauth2-proxy/image.tar
+            ${{ runner.temp }}/chaine-oauth2-proxy/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 1
 
   cluster:
     name: cluster (k3d, scénarios)
@@ -362,7 +386,7 @@ jobs:
     # après une fusion dans main seulement : ni pull request, ni lundi. Les images publiées
     # sont celles que le job image a construites, testées, inventoriées et scannées sur
     # chaque architecture, jamais reconstruites ; un index les réunit. Mêmes étapes pour
-    # l'application et le proxy de sortie (PR C3)
+    # l'application, le proxy de sortie (PR C3) et oauth2-proxy (PR D1)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint, types, audit, tests, chart, image, cluster]
     strategy:
@@ -377,6 +401,10 @@ jobs:
             artefact: proxy
             locale: cdg-proxy:verification
             depot: /proxy-sortie
+          - image: oauth2-proxy
+            artefact: oauth2-proxy
+            locale: cdg-oauth2-proxy:verification
+            depot: /oauth2-proxy
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

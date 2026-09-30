@@ -75,6 +75,11 @@ docker build --file docker/proxy-sortie/Dockerfile --tag cdg-proxy:verification 
 uv run --no-sync pytest -m proxy --proxy cdg-proxy:verification --image cdg:verification
 uv run --no-sync python scripts/chaine.py inventaire cdg-proxy:verification --dossier "$RUNNER_TEMP/chaine-proxy"
 uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"
+uv run --no-sync python scripts/chaine.py bases --dockerfile docker/oauth2-proxy/Dockerfile
+docker build --file docker/oauth2-proxy/Dockerfile --tag cdg-oauth2-proxy:verification docker/oauth2-proxy
+uv run --no-sync pytest -m oauth2proxy --oauth2-proxy cdg-oauth2-proxy:verification
+uv run --no-sync python scripts/chaine.py inventaire cdg-oauth2-proxy:verification --dossier "$RUNNER_TEMP/chaine-oauth2-proxy"
+uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-oauth2-proxy"
 
 if [[ "$SANS_CLUSTER" == true ]]; then
     echo "==> cluster : NON LANCÉ (--sans-cluster) ; seul le job cluster de la CI le vérifie"

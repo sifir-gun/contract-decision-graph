@@ -18,3 +18,59 @@ exceptions:
       (HF_HUB_OFFLINE=1). À revoir dès la sortie de CPython 3.12.15.
     decidee: 2026-09-28
     expire: 2026-10-28
+  # oauth2-proxy v7.15.4 (PR D1) : binaire de la release, vérifié par l'empreinte publiée
+  # (ADR 005, option B) ; ses dépendances ne peuvent donc pas être mises à jour ici. Faits du
+  # 30/09/2026 : gRPC n'y est qu'une dépendance indirecte (google.golang.org/api, fournisseur
+  # Google, non configuré), ses sources ne l'importent pas et ne créent aucun serveur gRPC ;
+  # govulncheck -mode=binary (v1.1.4) sur le binaire publié.
+  - vulnerabilite: GHSA-2v4p-qf9q-27wj
+    paquet:
+      nom: google.golang.org/grpc
+      type: go-module
+      version: v1.83.0
+    motif: >-
+      Plantage des serveurs gRPC-Go construits par xds.NewGRPCServer. oauth2-proxy ne
+      démarre aucun serveur gRPC : ses ports servent HTTP(S) et les métriques. Le symbole
+      transport.http2Server.HandleStreams est lié au binaire (govulncheck), sans serveur
+      gRPC pour l'atteindre ; seul Traefik atteint oauth2-proxy (règles réseau). À revoir
+      dès la prochaine version d'oauth2-proxy.
+    decidee: 2026-09-30
+    expire: 2026-10-30
+  - vulnerabilite: GHSA-vp52-pcj8-j9qc
+    paquet:
+      nom: google.golang.org/grpc
+      type: go-module
+      version: v1.83.0
+    motif: >-
+      Épuisement mémoire d'un serveur gRPC-Go par des trames DATA fragmentées. Aucun
+      serveur gRPC dans oauth2-proxy ; côté client, seul le fournisseur Google appellerait
+      des API Google, et il n'est pas configuré (fournisseur OIDC), le proxy de sortie ne
+      laissant joindre que le fournisseur d'identité. Symboles du paquet mem liés au
+      binaire (govulncheck), sans serveur pour les atteindre. À revoir dès la prochaine
+      version d'oauth2-proxy.
+    decidee: 2026-09-30
+    expire: 2026-10-30
+  - vulnerabilite: GO-2026-6354
+    paquet:
+      nom: golang.org/x/crypto
+      type: go-module
+      version: v0.55.0
+    motif: >-
+      Déni de service du paquet golang.org/x/crypto/ssh (canal non encore établi).
+      govulncheck -mode=binary : le binaire d'oauth2-proxy n'appelle aucun symbole
+      vulnérable ; oauth2-proxy ne fait pas de SSH. À revoir dès la prochaine version
+      d'oauth2-proxy.
+    decidee: 2026-09-30
+    expire: 2026-10-30
+  - vulnerabilite: GO-2026-6355
+    paquet:
+      nom: golang.org/x/crypto
+      type: go-module
+      version: v0.55.0
+    motif: >-
+      Déni de service du paquet golang.org/x/crypto/ssh (canal établi).
+      govulncheck -mode=binary : le binaire d'oauth2-proxy n'appelle aucun symbole
+      vulnérable ; oauth2-proxy ne fait pas de SSH. À revoir dès la prochaine version
+      d'oauth2-proxy.
+    decidee: 2026-09-30
+    expire: 2026-10-30

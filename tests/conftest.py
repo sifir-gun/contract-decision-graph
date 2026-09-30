@@ -62,6 +62,13 @@ def pytest_addoption(parser):
         help="exécute aussi les tests marqués proxy, sur l'image du proxy de sortie déjà "
         "construite sous cette étiquette (avec --image : l'image de l'application)",
     )
+    parser.addoption(
+        "--oauth2-proxy",
+        metavar="ÉTIQUETTE",
+        default=None,
+        help="exécute aussi les tests marqués oauth2proxy, sur l'image d'oauth2-proxy "
+        "déjà construite sous cette étiquette",
+    )
 
 
 def pytest_report_header(config):
@@ -73,13 +80,14 @@ def pytest_report_header(config):
 def pytest_collection_modifyitems(config, items):
     # exclusion par défaut, comptée comme « deselected » : jamais de saut silencieux,
     # et -m "not pg" n'active par accident aucun test llm, image, modele, chart, proxy,
-    # cluster
+    # oauth2proxy, cluster
     for marker, option in (
         ("llm", "--llm"),
         ("image", "--image"),
         ("modele", "--modele"),
         ("chart", "--chart"),
         ("proxy", "--proxy"),
+        ("oauth2proxy", "--oauth2-proxy"),
         ("cluster", "--cluster"),
     ):
         if config.getoption(option):
