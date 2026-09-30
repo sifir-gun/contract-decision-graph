@@ -403,6 +403,8 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
         ("--oidc-emetteur", args.oidc_emetteur),
         ("--oidc-audience", args.oidc_audience),
         ("--adresse-publique", args.adresse_publique),
+        # plusieurs réplicas : un formulaire servi par l'un est envoyé à l'autre
+        ("--cles-csrf", args.cles_csrf),
     ):
         if not value:
             raise web_security.WebConfigError(f"--identite en-tetes exige {option}")
@@ -422,9 +424,23 @@ def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
     )
 
 
+def _csrf_keys(
+    args: argparse.Namespace,
+) -> Callable[[], web_security.CsrfKeys] | None:
+    """Clés CSRF partagées entre réplicas (Secret monté), lues au lancement (une clé
+    absente ou trop courte l'arrête), puis relues à chaque usage : une rotation
+    s'applique sans redémarrage. Sans --cles-csrf : une clé tirée par le processus."""
+    if not args.cles_csrf:
+        return None
+    folder = Path(args.cles_csrf)
+    web_security.read_csrf_keys(folder)
+    return lambda: web_security.read_csrf_keys(folder)
+
+
 def _web(args: argparse.Namespace) -> dict:
     """Interface web, sur le même service que les autres commandes ; jusqu'à Ctrl+C."""
     authentication = _authentication(args)  # avant tout : une option fausse arrête là
+    csrf_keys = _csrf_keys(args)
     warning = web_security.bind_warning(
         args.host, allow_non_local=args.ecoute_non_locale
     )
@@ -439,6 +455,7 @@ def _web(args: argparse.Namespace) -> dict:
         hosts=web_security.allowed_hosts(args.host),
         draining=stopping.is_set,
         authentication=authentication,
+        csrf_keys=csrf_keys,
     )
     shown = f"[{args.host}]" if ":" in args.host else args.host
     mode = "démonstration, en mémoire" if args.demo else "réel"
@@ -781,6 +798,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--adresse-publique",
         help="adresse publique de l'interface, https://hôte : origine des formulaires, "
         "retour après la fin de session du fournisseur",
+    )
+    web.add_argument(
+        "--cles-csrf",
+        help="dossier des clés CSRF partagées entre réplicas (Secret monté) : courante, "
+        "et precedente pendant une rotation ; exigé avec --identite en-tetes",
     )
     web.add_argument(
         "--deconnexion-fournisseur",

@@ -115,7 +115,7 @@ def create_app(
     *,
     demo: bool = False,
     hosts: Sequence[str] | None = security.LOOPBACK_NAMES,
-    csrf_secret: bytes | None = None,
+    csrf_keys: Callable[[], security.CsrfKeys] | None = None,
     draining: Callable[[], bool] = lambda: False,
     authentication: Authentication | None = None,
 ) -> FastAPI:
@@ -123,7 +123,7 @@ def create_app(
     explicite). `demo` : bandeau permanent, contrats du jeu seulement.
     `authentication` : derrière oauth2-proxy, jeton d'identité exigé et vérifié."""
     limit = security.check_body_limit(service.config)
-    csrf = security.Csrf(csrf_secret)
+    csrf = security.Csrf(csrf_keys)
     env = Environment(
         loader=DictLoader(_templates(WEB_ROOT / "templates")),
         autoescape=True,

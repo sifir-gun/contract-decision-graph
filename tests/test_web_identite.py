@@ -101,7 +101,7 @@ def test_jeton_valide_page_servie_avec_le_nom_affiche_et_la_deconnexion():
 def test_origine_des_formulaires_comparee_a_l_adresse_publique():
     web = authenticated()
     page = web.get("/analyse", headers=BEARER)
-    token = page.text.split('name="csrf" value="')[1][:64]
+    token = page.text.split('name="csrf" value="')[1].split('"')[0]
     form = {"csrf": token, "source": "texte", "texte": CONTRACT_TEXT, "partie": "X"}
     local = web.post(
         "/analyse", data=form, headers=BEARER | {"origin": "http://127.0.0.1:8000"}
@@ -127,7 +127,7 @@ def target(response) -> str:
 
 def logout(web, **headers):
     page = web.get("/", headers=BEARER)
-    token = page.text.split('name="csrf" value="')[1][:64]
+    token = page.text.split('name="csrf" value="')[1].split('"')[0]
     return web.post(
         "/deconnexion", data={"csrf": token}, headers=BEARER | {"origin": PUBLIC}
     )
@@ -212,6 +212,8 @@ IDENTITY = [
     "cdg-interface",
     "--adresse-publique",
     PUBLIC,
+    "--cles-csrf",
+    "/run/secrets/csrf",
 ]
 
 
@@ -235,7 +237,8 @@ def test_mode_identite_incompatible_avec_l_ecoute_non_locale(capsys):
 
 
 @pytest.mark.parametrize(
-    "option", ["--oidc-emetteur", "--oidc-audience", "--adresse-publique"]
+    "option",
+    ["--oidc-emetteur", "--oidc-audience", "--adresse-publique", "--cles-csrf"],
 )
 def test_mode_identite_exige_emetteur_audience_et_adresse_publique(option, capsys):
     argv = list(IDENTITY)
@@ -243,6 +246,28 @@ def test_mode_identite_exige_emetteur_audience_et_adresse_publique(option, capsy
     del argv[index : index + 2]
     code, error = run_cli(argv, capsys)
     assert code == 1 and option in error["detail"]
+
+
+def with_keys(folder, **files) -> list[str]:
+    folder.mkdir()
+    for name, value in files.items():
+        (folder / name).write_text(value, encoding="utf-8")
+    argv = list(IDENTITY)
+    argv[argv.index("--cles-csrf") + 1] = str(folder)
+    return argv
+
+
+def test_mode_identite_cles_csrf_absentes_refus_de_demarrer(tmp_path, capsys):
+    code, error = run_cli(with_keys(tmp_path / "cles"), capsys)
+    assert code == 1 and "courante" in error["detail"]
+
+
+def test_mode_identite_cle_csrf_trop_courte_jamais_montree(tmp_path, capsys):
+    code, error = run_cli(
+        with_keys(tmp_path / "cles", courante="zzzz-secret-zzzz"), capsys
+    )
+    assert code == 1 and "32" in error["detail"]
+    assert "zzzz-secret-zzzz" not in json.dumps(error)
 
 
 def test_adresse_publique_en_https(capsys):
