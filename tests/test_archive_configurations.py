@@ -231,6 +231,12 @@ def test_configuration_archivee_relue_dans_un_autre_ordre_reste_conforme():
     assert audit.verify_journal(chain_of(v2()), reordered).ok
 
 
+def test_version_d_enregistrement_inconnue_journal_non_conforme():
+    report = audit.verify_journal(chain_of(v2() | {"version": 3}), ARCHIVED)
+    assert (report.ok, report.archive_fault, report.broken_id) == (False, False, 1)
+    assert "version" in report.reason
+
+
 def test_chaine_rompue_signalee_avant_l_archive():
     entries = chain_of(v2(), v2() | {"thread_id": "c-2", "contract_id": "c-2"})
     tampered = entries[0].model_copy(update={"prev_hash": "0" * 63 + "1"})
