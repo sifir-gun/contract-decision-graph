@@ -23,7 +23,7 @@ Déploiement de contract-decision-graph sur Kubernetes (k3s), selon l'ADR 005 : 
 ## Installation et mise à jour
 
 ```bash
-helm upgrade --install cdg chart/contract-decision-graph --namespace cdg --set authentification.emetteur=https://idp.example.org --set authentification.clientId=cdg-interface --set authentification.image.digest=<empreinte de l'index publié d'oauth2-proxy> --set ingress.hote=cdg.example.org
+helm upgrade --install cdg chart/contract-decision-graph --namespace cdg --set authentification.emetteur=https://idp.example.org --set authentification.clientId=cdg-interface --set ingress.hote=cdg.example.org
 ```
 
 ```bash
@@ -45,7 +45,7 @@ Avant chaque mise à jour, la tâche de contrôle de configuration refuse de dé
 | `embedding.lot` | `16` | Taille des lots d'embeddings : 2,9 Gio au pic de l'ingestion (fastembed en prend 256 par défaut). |
 | `llm.adresseApi` | vide | Adresse de l'API de Mistral ; vide, celle du SDK. Le proxy ne laisse passer que Mistral. |
 | `configuration.decision` | vide | Autre configuration de décision, en texte ; vide, `files/decision.yaml`. |
-| `authentification.active` | `true` | oauth2-proxy en conteneur annexe natif, démarré avant l'interface, arrêté après elle ; l'interface vérifie le jeton de chaque requête (`web --identite en-tetes`). Exige `emetteur` (HTTPS), `clientId` (audience) et `image.digest`. |
+| `authentification.active` | `true` | oauth2-proxy en conteneur annexe natif, démarré avant l'interface, arrêté après elle ; l'interface vérifie le jeton de chaque requête (`web --identite en-tetes`). Exige `emetteur` (HTTPS), `clientId` (audience) et `ingress.hote` (adresse publique) ; image d'oauth2-proxy : l'index publié par défaut, signature et provenance vérifiées. |
 | `authentification.session` | `8h`, revalidée toutes les `5m` | Durée de la session d'oauth2-proxy et revalidation auprès du fournisseur. |
 | `authentification.roles` | `cdg-analystes`, `cdg-relecteurs` | Groupes du jeton qui donnent les rôles analyste (analyse) et relecteur (revue, expiration) ; jamais vides. |
 | `authentification.secondFacteur` | vide | Valeurs `amr` ou `acr` acceptées comme preuve d'un second facteur pour trancher et expirer ; vide : non exigé, annoncé dans les notes d'installation et au démarrage (prérequis de production). |

@@ -90,16 +90,26 @@ def test_authentification_exige_ses_valeurs(missing):
     assert missing.split(".")[-1] in refused(*kept)
 
 
-def test_image_d_oauth2_proxy_par_empreinte_exigee():
-    options = chart_script().VARIANTS["authentifie"]
-    pairs = [options[i : i + 2] for i in range(0, len(options), 2)]
-    kept = [
-        word
-        for pair in pairs
-        if not pair[1].startswith("authentification.image.digest=")
-        for word in pair
-    ]
-    assert "digest" in refused(*kept)
+# index publié par la CI à la fusion de la D1 (sha-e338f31), signature cosign et
+# provenance vérifiées le 30/09/2026 (docs/exploitation.md, « Image publiée »)
+OAUTH2_PROXY_INDEX = (
+    "sha256:1ea518c8f7b97699d64fec957921ae83de5bc1f75008c8b9bf66ebee8db87795"
+)
+
+
+def test_image_d_oauth2_proxy_par_defaut_l_index_publie():
+    """Installation sans option d'image : l'index publié et vérifié."""
+    assert not any("image.digest" in word for word in chart_script().AUTH)
+    proxy = container(render(), "oauth2-proxy")
+    assert proxy["image"] == (
+        "ghcr.io/sifir-gun/contract-decision-graph/oauth2-proxy@" + OAUTH2_PROXY_INDEX
+    )
+
+
+def test_image_d_oauth2_proxy_jamais_par_etiquette():
+    auth = chart_script().AUTH
+    message = refused(*auth, "--set", "authentification.image.digest=v7.15.4")
+    assert "digest" in message
 
 
 # --- oauth2-proxy, conteneur annexe -------------------------------------------------------
@@ -107,10 +117,7 @@ def test_image_d_oauth2_proxy_par_empreinte_exigee():
 
 def test_oauth2_proxy_annexe_image_par_empreinte(auth):
     proxy = container(auth, "oauth2-proxy")
-    assert proxy["image"] == (
-        "ghcr.io/sifir-gun/contract-decision-graph/oauth2-proxy@"
-        + chart_script().EXAMPLE_DIGEST
-    )
+    assert proxy["image"].endswith("@" + OAUTH2_PROXY_INDEX)
     assert [p["containerPort"] for p in proxy["ports"]] == [4180]
     assert proxy["readinessProbe"]["httpGet"]["path"] == "/ping"
 

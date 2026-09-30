@@ -42,14 +42,12 @@ KUBE_LINTER = (
     "@sha256:f2bfce7879206d32f69ab6572c376f916643f54ca291ac38cf7d01ef591ff3f9"
 )
 # authentification, exigée dans le cluster (PR D2 : jamais d'interface locale) : valeurs
-# d'exemple ; empreinte d'exemple de l'image d'oauth2-proxy, qui ne tire rien
+# d'exemple ; l'image d'oauth2-proxy par défaut est l'index publié
 AUTH = [
     "--set",
     "authentification.emetteur=https://idp.example.org",
     "--set",
     "authentification.clientId=cdg-interface",
-    "--set",
-    "authentification.image.digest=sha256:" + "1" * 64,
     # adresse publique : retour d'oauth2-proxy, origine des formulaires
     "--set",
     "ingress.hote=cdg.example.org",
