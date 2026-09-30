@@ -2583,3 +2583,11 @@ Conception validée par le propriétaire le 30/09, avec ses décisions : interfa
 - **Seuil de couverture contourné par un arrondi** : la D2 a fait passer la couverture de 98,05 % (fusion de la D1) à 97,77 %, en CI comme sur le poste. Le résumé de pytest-cov affichait « FAIL Required test coverage of 98.0% not reached », mais le job restait vert : pytest-cov 7.1.0 fait échouer la session par `should_fail_under` de coverage.py, qui compare le total arrondi à `precision` décimales, 0 par défaut (code installé). Le seuil réel était donc 97,5 %. Seuil désormais appliqué au centième (`precision = 2`, testé) ; les chemins de la D2 non couverts ont leurs tests : 98,20 %.
 - **Collision de nom dans un fichier de test** : une constante `IDENTITY` ajoutée pour les commandes git masquait celle de l'identité de publication, déjà définie plus haut ; le test de publication l'a vu. Renommée.
 
+
+## 2026-09-30 · Défaut connu : analyse interrompue reprise sous une autre configuration
+
+À corriger dans la PR qui suivra l'archivage des configurations (décision du propriétaire, 30/09).
+
+- **Constat** (relevé en concevant l'archivage) : `resume_interrupted` reprend une analyse interrompue avec le graphe du processus qui reprend, donc avec sa configuration, même si elle a changé depuis le début de l'analyse. L'état garde l'empreinte de configuration posée par `run_contract` au départ : règles et décision peuvent alors être calculées sous une configuration autre que celle que l'enregistrement déclare dans sa partie décision.
+- **Déjà visible, pas encore empêché** : le scellement porte le constat « configuration modifiée entre l'analyse et le scellement », et un rejeu fidèle, sur la configuration archivée de l'analyse, verra la différence comme une anomalie.
+- **Correction envisagée** : comme `resume` refuse une configuration modifiée, une analyse interrompue dont la configuration a changé part en revue humaine (ESCALADE, rapport d'échec qui le dit), au lieu d'être reprise sous l'autre configuration. Tests d'abord.
