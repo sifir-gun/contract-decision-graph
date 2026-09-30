@@ -60,6 +60,9 @@ class Cosign:
     identity: str
     issuer: str
 
+    def expected(self) -> str:
+        return f"cosign : identité {self.identity}, émetteur {self.issuer}"
+
     def command(self, image: str) -> list[str]:
         return [
             "docker",
@@ -81,6 +84,11 @@ class GitHubAttestation:
 
     owner: str
     workflow: str
+
+    def expected(self) -> str:
+        return (
+            f"attestation GitHub : propriétaire {self.owner}, workflow {self.workflow}"
+        )
 
     def command(self, image: str) -> list[str]:
         return [
@@ -137,28 +145,91 @@ def bases(dockerfile: Path) -> list[str]:
     return found
 
 
-def command(image: str) -> list[str]:
-    for prefix, policy in POLICIES.items():
+def policy(image: str) -> Cosign | GitHubAttestation:
+    for prefix, found in POLICIES.items():
         if image.startswith(prefix):
-            return policy.command(image)
+            return found
     raise ValueError(
         f"image de base sans politique de vérification de signature : {image} "
         "(scripts/chaine.py, POLICIES)"
     )
 
 
+def command(image: str) -> list[str]:
+    return policy(image).command(image)
+
+
+# causes d'environnement reconnues dans le message d'un outil de vérification : la
+# signature n'a été ni vérifiée ni refusée. Toute autre cause est une signature invalide,
+# le cas le plus prudent (le 29/09, un échec réseau s'annonçait « signature refusée »).
+UNVERIFIABLE = (
+    (
+        "erreur réseau",
+        re.compile(
+            r"no such host|dial tcp|i/o timeout|TLS handshake timeout"
+            r"|connection (refused|reset)|network is unreachable"
+            r"|temporary failure in name resolution|context deadline exceeded",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "service indisponible",
+        re.compile(
+            r"\b(HTTP|status code) (429|5\d\d)\b|TOOMANYREQUESTS", re.IGNORECASE
+        ),
+    ),
+    ("gh non authentifié", re.compile(r"gh auth login")),
+    ("Docker indisponible", re.compile(r"Cannot connect to the Docker daemon")),
+)
+
+
+def unverifiable(output: str) -> str | None:
+    """Cause d'environnement d'un échec de vérification, si elle est reconnue."""
+    for reason, pattern in UNVERIFIABLE:
+        if pattern.search(output):
+            return reason
+    return None
+
+
 def verify_bases(dockerfile: Path, *, run: Run = subprocess.run) -> int:
-    failed = []
+    """Signature de chaque base. Deux échecs, distingués, font échouer la vérification :
+    signature invalide (erreur de sécurité) ou vérification impossible (environnement)."""
+    invalid, impossible = [], []
     for image in bases(dockerfile):
-        result = run(command(image), capture_output=True, text=True, check=False)
+        expected = policy(image)
+        result = run(
+            expected.command(image), capture_output=True, text=True, check=False
+        )
         if result.returncode == 0:
             print(f"signature vérifiée : {image}")
-        else:
-            failed.append(image)
+            continue
+        details = "\n".join(
+            part.strip() for part in (result.stderr, result.stdout) if part.strip()
+        )
+        reason = unverifiable(details)
+        if reason is None:
+            invalid.append(image)
             print(
-                f"signature refusée : {image}\n{result.stderr.strip()}", file=sys.stderr
+                f"signature invalide : {image}\n  erreur de sécurité : l'image n'est pas "
+                f"signée comme attendu ({expected.expected()}) ; ne pas construire\n"
+                f"{details}",
+                file=sys.stderr,
             )
-    return 1 if failed else 0
+        else:
+            impossible.append(image)
+            print(
+                f"vérification impossible : {image}\n  {reason} : la signature n'a été "
+                f"ni vérifiée ni refusée ; relancer une fois la cause levée\n{details}",
+                file=sys.stderr,
+            )
+    if invalid or impossible:
+        print(
+            f"bases non vérifiées : signatures invalides {len(invalid)}, "
+            f"vérifications impossibles {len(impossible)}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 def inventory(image: str, folder: Path, *, run: Run = subprocess.run) -> int:

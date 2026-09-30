@@ -174,6 +174,78 @@ def test_verification_echouee_arrete_avec_la_base_en_cause(tmp_path, capsys):
     assert module.verify_bases(dockerfile, run=accepted) == 0
 
 
+DISTROLESS = "gcr.io/distroless/cc-debian13:nonroot@sha256:" + "a" * 64
+UV = "ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:" + "b" * 64
+# messages d'échec des outils de vérification : un problème d'environnement, reconnu, ne
+# dit rien de la signature ; toute autre cause est une signature invalide
+UNVERIFIABLE = {
+    # gh attestation verify, 29/09/2026 : stockage des attestations injoignable
+    "réseau (DNS)": "Error: failed to fetch bundle with URL: request to fetch bundle from"
+    ' URL failed: Get "https://tmaproduction.blob.core.windows.net/attestations/1.json":'
+    " dial tcp: lookup tmaproduction.blob.core.windows.net: no such host",
+    "réseau (délai)": 'Error: Get "https://api.github.com/orgs/astral-sh/attestations":'
+    " dial tcp 140.82.121.6:443: i/o timeout",
+    "réseau (TLS)": 'Error: getting signatures: Get "https://ghcr.io/v2/": net/http: TLS'
+    " handshake timeout",
+    "service indisponible": "HTTP 502: Bad Gateway (https://api.github.com/orgs/x)",
+    "service indisponible (quota)": "Error: GET https://ghcr.io/v2/x: TOOMANYREQUESTS",
+    "gh non authentifié": "To get started with GitHub CLI, please run:  gh auth login",
+    "Docker indisponible": "docker: Cannot connect to the Docker daemon at"
+    " unix:///var/run/docker.sock. Is the docker daemon running?",
+}
+INVALID = {
+    "cosign : aucune signature attendue": "Error: no matching signatures: none of the"
+    " expected identities matched what was in the certificate",
+    "gh : aucune attestation": "Error: HTTP 404: Not Found (https://api.github.com/x)",
+    "cause inconnue": "erreur inattendue de l'outil de vérification",
+}
+
+
+def verify_one(tmp_path, image: str, stderr: str) -> int:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(f"FROM {image}\n")
+
+    def failed(command, **_):
+        return subprocess.CompletedProcess(command, 1, "", stderr)
+
+    return chaine().verify_bases(dockerfile, run=failed)
+
+
+@pytest.mark.parametrize("stderr", UNVERIFIABLE.values(), ids=UNVERIFIABLE.keys())
+def test_verification_impossible_n_est_pas_une_signature_invalide(
+    tmp_path, capsys, stderr
+):
+    """Le 29/09, un échec réseau s'est annoncé « signature refusée ». Une vérification
+    impossible le dit, avec sa cause ; elle fait échouer la vérification comme une
+    signature invalide, sans en être une."""
+    assert verify_one(tmp_path, UV, stderr) == 1
+    err = capsys.readouterr().err
+    assert f"vérification impossible : {UV}" in err
+    assert "signature invalide" not in err and "erreur de sécurité" not in err
+    assert stderr in err  # le message de l'outil, tel quel
+    assert (
+        "bases non vérifiées : signatures invalides 0, vérifications impossibles 1"
+        in err
+    )
+
+
+@pytest.mark.parametrize("stderr", INVALID.values(), ids=INVALID.keys())
+def test_signature_invalide_erreur_de_securite_explicite(tmp_path, capsys, stderr):
+    """Une signature qui ne correspond pas à l'identité attendue est une erreur de
+    sécurité ; une cause non reconnue est traitée de même, le cas le plus prudent."""
+    assert verify_one(tmp_path, DISTROLESS, stderr) == 1
+    err = capsys.readouterr().err
+    assert f"signature invalide : {DISTROLESS}" in err
+    assert "erreur de sécurité" in err and "ne pas construire" in err
+    assert "keyless@distroless.iam.gserviceaccount.com" in err  # l'identité attendue
+    assert "vérification impossible" not in err
+    assert stderr in err
+    assert (
+        "bases non vérifiées : signatures invalides 1, vérifications impossibles 0"
+        in err
+    )
+
+
 def test_bases_verifiees_avant_la_construction_en_ci_et_en_local():
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
