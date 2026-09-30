@@ -37,6 +37,7 @@ import sys
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -174,7 +175,9 @@ PROFILES = {
 IMAGE_SIZES_GB = {
     "modele": (1.33, 2.25),
     "application": (0.14, 0.42),
-    "tierces": (0.78, 2.34),
+    "oauth2-proxy": (0.02, 0.04),  # PR D1 : binaire publié, distroless static
+    # 0,78 Go, puis Traefik (0,055) et Dex (0,048) en PR D1 ; décompressées : le triple
+    "tierces": (0.88, 2.64),
 }
 DATA_GB = 1.0  # bases (trois instances au plus), WAL, sauvegardes : mesurés sous 1 Go
 EVICTION_GB = 1.07  # seuil d'éviction des nœuds (1 Gi, KUBELET_ARGS)
@@ -186,7 +189,7 @@ def disk_need_gb(nodes: int) -> float:
     (compressées) et sur l'hôte (décompressées, plus l'archive de l'application) ; les
     données ; le seuil d'éviction."""
     per_node = sum(c + u for c, u in IMAGE_SIZES_GB.values())
-    ours = [IMAGE_SIZES_GB[name] for name in ("modele", "application")]
+    ours = [IMAGE_SIZES_GB[name] for name in ("modele", "application", "oauth2-proxy")]
     registry = sum(c for c, _ in ours)
     host = sum(u for _, u in ours) + IMAGE_SIZES_GB["application"][1]
     return nodes * per_node + registry + host + DATA_GB + EVICTION_GB
@@ -326,6 +329,7 @@ LOCAL_IMAGES = {
     "proxy": "cdg-proxy:verification",
     "factice": "cdg-mistral-factice:verification",
     "modele": "cdg-modele:verification",
+    "oauth2-proxy": "cdg-oauth2-proxy:verification",  # PR D1
 }
 
 
@@ -472,6 +476,7 @@ def _namespaces() -> None:
         (NAMESPACE, "restricted"),
         (TESTS_NAMESPACE, "restricted"),
         (STORAGE_NAMESPACE, "baseline"),
+        ("traefik", "restricted"),  # PR D1 : contexte de sécurité du chart, conforme
     ):
         labels = {
             f"pod-security.kubernetes.io/{mode}": level
@@ -532,10 +537,230 @@ def _storage(access: str, secret: str) -> None:
     )
 
 
+# --- authentification et entrée réseau (PR D1, ADR 005) --------------------------------------
+
+TRAEFIK_NAMESPACE = "traefik"
+PUBLIC_HOST, DEX_HOST = "cdg.test", "dex.cdg.test"
+# Dex v2.45.1, fournisseur d'identité de test ; signature vérifiée avant l'installation
+DEX = (
+    "ghcr.io/dexidp/dex:v2.45.1@sha256:"
+    "8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462"
+)
+DEX_IDENTITY = (
+    "https://github.com/dexidp/dex/.github/workflows/artifacts.yaml@refs/tags/v2.45.1"
+)
+DEX_ISSUER = "https://token.actions.githubusercontent.com"
+# mots de passe de test des utilisateurs de Dex (hachés en bcrypt dans cluster/dex.yaml) :
+# tirés pour ce cluster jetable, jamais ailleurs
+TEST_USERS = {
+    "analyste": "96eOvec_MZ79T-bsh5wYSsrj",
+    "relecteur": "uyD6U39cC-MKL7dNss2HBLVP",
+}
+
+
+@dataclass(frozen=True)
+class Chart:
+    url: str
+    sha256: str
+
+
+# chart officiel de Traefik : Traefik v3.7.13 (celui de k3s 1.36.4, 3.7.8, désactivé)
+TRAEFIK_CHART = Chart(
+    url="https://traefik.github.io/charts/traefik/traefik-41.6.0.tgz",
+    sha256="cd7254ea853da73bdb88edc896f079b88d43ffa0bfe699fdbf21081361eac365",
+)
+
+
+def _download(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read()
+
+
+def fetch_chart(chart: Chart, folder: Path) -> Path:
+    """Archive d'un chart, vérifiée par son empreinte avant tout usage."""
+    data = _download(chart.url)
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != chart.sha256:
+        raise ClusterError(
+            f"chart {chart.url} : empreinte {digest}, {chart.sha256} attendue"
+        )
+    path = folder / chart.url.rsplit("/", 1)[1]
+    path.write_bytes(data)
+    return path
+
+
+def coredns_override() -> str:
+    """Noms de test résolus vers Traefik dans le cluster (coredns-custom de k3s)."""
+    target = f"traefik.{TRAEFIK_NAMESPACE}.svc.cluster.local"
+    return "".join(
+        f"rewrite name exact {name} {target}\n" for name in (PUBLIC_HOST, DEX_HOST)
+    )
+
+
+def certificate_authority() -> tuple[str, str]:
+    """Autorité de test (EC P-256, 30 jours), en PEM : certificat et clé."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name(
+        [
+            x509.NameAttribute(
+                NameOID.COMMON_NAME, "contract-decision-graph, autorité de test"
+            )
+        ]
+    )
+    now = datetime.now(UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False
+        )
+        .sign(key, hashes.SHA256())
+    )
+    return (
+        cert.public_bytes(serialization.Encoding.PEM).decode(),
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode(),
+    )
+
+
+def _config_map(namespace: str, name: str, data: dict[str, str]) -> None:
+    manifest = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": name, "namespace": namespace},
+        "data": data,
+    }
+    kubectl("apply", "-f", "-", stdin=json.dumps(manifest), what=f"ConfigMap {name}")
+
+
+def _authority() -> None:
+    """Autorité de test (reprise si elle existe), émetteur cert-manager, et son certificat
+    publié pour oauth2-proxy, l'application et les clients de test."""
+    drawn: dict[str, str] = {}
+
+    def draw(key: str) -> str:
+        # certificat et clé tirés ensemble, une seule fois
+        if not drawn:
+            drawn.update(
+                zip(("tls.crt", "tls.key"), certificate_authority(), strict=True)
+            )
+        return drawn[key]
+
+    authority = generated(
+        "cert-manager",
+        "cdg-autorite",
+        {key: (lambda key=key: draw(key)) for key in ("tls.crt", "tls.key")},
+    )
+    _secret("cert-manager", "cdg-autorite", authority, kind="kubernetes.io/tls")
+    issuer = {
+        "apiVersion": "cert-manager.io/v1",
+        "kind": "ClusterIssuer",
+        "metadata": {"name": "cdg-ca"},
+        "spec": {"ca": {"secretName": "cdg-autorite"}},
+    }
+    kubectl("apply", "-f", "-", stdin=json.dumps(issuer), what="émetteur cdg-ca")
+    kubectl(
+        "wait",
+        "--for=condition=Ready",
+        "clusterissuer/cdg-ca",
+        f"--timeout={WAIT}",
+        what="émetteur cdg-ca prêt",
+    )
+    for namespace in (NAMESPACE, TESTS_NAMESPACE):
+        _config_map(namespace, "cdg-autorites", {"ca.crt": authority["tls.crt"]})
+
+
+def _dns() -> None:
+    _config_map("kube-system", "coredns-custom", {"cdg.override": coredns_override()})
+    kubectl(
+        "rollout", "restart", "deployment/coredns", "-n", "kube-system", what="CoreDNS"
+    )
+    kubectl(
+        "rollout",
+        "status",
+        "deployment/coredns",
+        "-n",
+        "kube-system",
+        f"--timeout={WAIT}",
+        what="CoreDNS relancé",
+    )
+
+
+def _traefik(folder: Path) -> None:
+    helm(
+        "upgrade",
+        "--install",
+        "traefik",
+        str(fetch_chart(TRAEFIK_CHART, folder)),
+        "--namespace",
+        TRAEFIK_NAMESPACE,
+        "--values",
+        str(MANIFESTS_DIR / "valeurs-traefik.yaml"),
+        "--wait",
+        "--timeout",
+        WAIT,
+        what="Traefik",
+    )
+
+
+def _dex(client_secret: str) -> None:
+    run(_chaine().Cosign(DEX_IDENTITY, DEX_ISSUER).command(DEX), "signature de Dex")
+    kubectl(
+        "apply",
+        "-f",
+        "-",
+        stdin=_manifest("dex.yaml", DEX=DEX, CLIENT_SECRET=client_secret),
+        what="Dex",
+    )
+    for kind, name in (("deployment", "dex"), ("certificate", "dex-tls")):
+        condition = "Available" if kind == "deployment" else "Ready"
+        kubectl(
+            "wait",
+            f"--for=condition={condition}",
+            f"{kind}/{name}",
+            "-n",
+            TESTS_NAMESPACE,
+            f"--timeout={WAIT}",
+            what=f"{name} prêt",
+        )
+
+
 def install(profile: Profile, folder: Path) -> None:
     images = json.loads((folder / "images.json").read_text(encoding="utf-8"))
     _apply_components()
     _namespaces()
+    # entrée (PR D1) : autorité de test, noms de test, Traefik figé
+    _authority()
+    _dns()
+    _traefik(folder)
     # secrets tirés au premier passage, repris ensuite (installation rejouable)
     s3 = generated(
         NAMESPACE,
@@ -562,6 +787,16 @@ def install(profile: Profile, folder: Path) -> None:
         labels={"cnpg.io/reload": "true"},
     )
     _secret(NAMESPACE, "cdg-mistral", {"MISTRAL_API_KEY": "cle-du-serveur-factice"})
+    # oauth2-proxy (PR D1) : secret du client OIDC, partagé avec Dex ; clé du cookie
+    oidc = generated(
+        NAMESPACE,
+        "cdg-oidc",
+        {
+            "client-secret": lambda: secrets.token_urlsafe(32),
+            "cookie-secret": lambda: secrets.token_urlsafe(24),  # 32 caractères
+        },
+    )
+    _secret(NAMESPACE, "cdg-oidc", oidc)
     helm(
         "upgrade",
         "--install",
@@ -604,6 +839,7 @@ def install(profile: Profile, folder: Path) -> None:
         f"--timeout={WAIT}",
         what="serveur factice disponible",
     )
+    _dex(oidc["client-secret"])
     proxy = images["proxy"]
     helm(
         "upgrade",
@@ -624,6 +860,7 @@ def install(profile: Profile, folder: Path) -> None:
         what="proxy de sortie",
     )
     application, modele = images["application"], images["modele"]
+    oauth2 = images["oauth2-proxy"]
     helm(
         "upgrade",
         "--install",
@@ -643,12 +880,16 @@ def install(profile: Profile, folder: Path) -> None:
         f"modele.image.digest={modele['digest']}",
         "--set",
         f"ressources.reel.requests.memory={profile.web_memory_request}",
+        "--set",
+        f"authentification.image.repository={oauth2['repository']}",
+        "--set",
+        f"authentification.image.digest={oauth2['digest']}",
         "--wait",
         "--timeout",
         APPLICATION_WAIT,
         what="application",
     )
-    print("cluster installé : base, serveur factice, proxy, application")
+    print("cluster installé : entrée, Dex, base, serveur factice, proxy, application")
 
 
 def destroy() -> None:

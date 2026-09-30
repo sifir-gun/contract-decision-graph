@@ -3,6 +3,9 @@
 # valeurs par défaut (seulement api.mistral.ai, aucune adresse privée).
 domainesAutorises:
   - mistral-factice.cdg-tests.svc.cluster.local
+  # fournisseur d'identité de test (PR D1) : découverte et clés publiques, pour oauth2-proxy
+  # et l'application
+  - dex.cdg.test
 plagesAutorisees:
   - 10.43.0.0/16
 sortiesInternes:
@@ -10,3 +13,8 @@ sortiesInternes:
     selecteur:
       app: mistral-factice
     port: 8080
+  # dex.cdg.test : Traefik (PR D1), port de websecure dans le pod
+  - espaceDeNoms: traefik
+    selecteur:
+      app.kubernetes.io/name: traefik
+    port: 8443
