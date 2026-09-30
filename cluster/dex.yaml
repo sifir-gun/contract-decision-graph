@@ -52,6 +52,10 @@ metadata:
     app: dex
 spec:
   replicas: 1
+  # clés en mémoire, propres à chaque pod : jamais deux Dex à la fois, dont les clés
+  # différeraient derrière le même nom (redémarrage du scénario de rotation)
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: dex

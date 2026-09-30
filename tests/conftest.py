@@ -278,3 +278,12 @@ def analysis(monkeypatch, request):
         return extractor, crag
 
     return use
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    """Rapport de chaque phase sur l'élément (rapport_setup, rapport_call…) : une fixture
+    sait ainsi, au démontage, si le test a échoué (diagnostic du cluster)."""
+    report = yield
+    setattr(item, f"rapport_{report.when}", report)
+    return report

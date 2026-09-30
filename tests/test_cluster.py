@@ -24,7 +24,6 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -70,6 +69,36 @@ KUBECTL = [
 def images(request) -> dict[str, dict[str, str]]:
     folder = Path(request.config.getoption("--cluster"))
     return json.loads((folder / "images.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(autouse=True)
+def _diagnostic(request, capsys):
+    """Scénario en échec : journaux de l'interface, d'oauth2-proxy et de Traefik écrits
+    aussitôt, avant que le dernier scénario ne désinstalle l'application. Ni secret ni
+    jeton : les scénarios le vérifient pour ces journaux."""
+    yield
+    report = getattr(request.node, "rapport_call", None)
+    if report is None or not report.failed:
+        return
+    pods = json.loads(kubectl("get", "pods", "-n", "cdg", "-l", WEB, "-o", "json"))
+    sources = [
+        ["-n", "cdg", p["metadata"]["name"], "-c", container]
+        for p in pods["items"]
+        for container in ("web", "oauth2-proxy")
+    ]
+    sources.append(["-n", "traefik", "-l", "app.kubernetes.io/name=traefik"])
+    with capsys.disabled():
+        for source in sources:
+            result = subprocess.run(
+                KUBECTL + ["logs", "--tail=60", *source],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            print(
+                f"\n--- diagnostic : {' '.join(source)}\n{result.stdout}{result.stderr}"
+            )
 
 
 def kubectl(*args: str, stdin: str | None = None, timeout: float = 120) -> str:
@@ -731,6 +760,14 @@ def application_password() -> str:
     return base64.b64decode(encoded).decode()
 
 
+def gone(namespace: str, pod: str) -> bool:
+    """Pod supprimé (et non seulement en cours d'arrêt)."""
+    found = kubectl(
+        "get", "pod", "-n", namespace, pod, "--ignore-not-found", "-o", "name"
+    )
+    return not found.strip()
+
+
 def container_logs(namespaces: set[str] | None = None) -> tuple[str, set[str]]:
     """Journaux de tous les conteneurs de tous les pods du cluster (ou de ces espaces de
     noms), conteneurs d'initialisation et exécutions précédentes compris ; et les pods lus.
@@ -766,6 +803,8 @@ def container_logs(namespaces: set[str] | None = None) -> tuple[str, set[str]]:
                     check=False,
                 )
                 where = f"{meta['namespace']}/{meta['name']}/{container['name']}"
+                if result.returncode != 0 and gone(meta["namespace"], meta["name"]):
+                    continue  # remplacé pendant la lecture (mise à jour d'un scénario)
                 assert result.returncode == 0, f"journal illisible : {where}"
                 chunks.append(result.stdout)
                 read.add(f"{meta['namespace']}/{meta['name']}")
@@ -1221,32 +1260,24 @@ def claims(token: str) -> dict:
     return jwt.decode(token, options={"verify_signature": False})
 
 
-def stopped_at(pod: str) -> dict[str, datetime]:
-    """Heure à laquelle le kubelet a arrêté chaque conteneur d'un pod (événements)."""
-    events = json.loads(
-        kubectl(
-            "get",
-            "events",
-            "-n",
-            "cdg",
-            "--field-selector",
-            f"involvedObject.name={pod},reason=Killing",
-            "-o",
-            "json",
-        )
-    )["items"]
-    return {
-        e["message"].removeprefix("Stopping container "): datetime.fromisoformat(
-            e.get("firstTimestamp") or e["eventTime"]
-        )
-        for e in events
-    }
+def container_states(pod: str) -> dict[str, dict] | None:
+    """État de chaque conteneur d'un pod, conteneurs d'initialisation compris ; None
+    s'il n'existe plus."""
+    found = kubectl("get", "pod", "-n", "cdg", pod, "--ignore-not-found", "-o", "json")
+    if not found.strip():
+        return None
+    status = json.loads(found)["status"]
+    statuses = status.get("initContainerStatuses", []) + status["containerStatuses"]
+    return {s["name"]: s["state"] for s in statuses}
 
 
 def test_oauth2_proxy_demarre_avant_l_interface_et_s_arrete_apres():
-    """Conteneur annexe natif : dans chaque pod, oauth2-proxy démarre avant l'interface ;
-    à l'arrêt d'un pod, le kubelet n'arrête oauth2-proxy qu'après l'interface, au moins
-    la pause avant l'arrêt plus tard, sans délai choisi à la main pour l'ordonner."""
+    """Conteneur annexe natif : dans chaque pod, oauth2-proxy démarre avant l'interface.
+    À l'arrêt d'un pod, l'état de ses conteneurs, relevé en continu, ne montre jamais
+    oauth2-proxy arrêté tant que l'interface tourne (le kubelet émet l'événement
+    d'arrêt de chaque conteneur dès le début, kuberuntime_container.go : il ne dit pas
+    l'ordre) ; oauth2-proxy tourne pendant la pause de l'interface, puis s'arrête dès
+    qu'elle est sortie, sans délai choisi à la main."""
     pods = wait_for(lambda: len(web_pods()) == 2 and web_pods(), "deux pods prêts")
     for found in pods:
         status = found["status"]
@@ -1257,33 +1288,25 @@ def test_oauth2_proxy_demarre_avant_l_interface_et_s_arrete_apres():
         assert proxy["started"] and proxy["ready"]
         started = (proxy["state"]["running"]["startedAt"], web["state"]["running"])
         assert started[0] <= started[1]["startedAt"], started
-    deployment = json.loads(
-        kubectl(
-            "get",
-            "deployment",
-            "-n",
-            "cdg",
-            "cdg-contract-decision-graph",
-            "-o",
-            "json",
-        )
-    )
-    [web_spec] = deployment["spec"]["template"]["spec"]["containers"]
-    pause = web_spec["lifecycle"]["preStop"]["sleep"]["seconds"]
     victim = pods[0]["metadata"]["name"]
     kubectl("delete", "pod", "-n", "cdg", victim, "--wait=false")
-    wait_for(
-        lambda: (
-            not kubectl(
-                "get", "pod", "-n", "cdg", victim, "--ignore-not-found", "-o", "name"
-            ).strip()
-        ),
-        "pod arrêté",
-        300,
-        2,
-    )
-    stops = stopped_at(victim)
-    assert stops["oauth2-proxy"] - stops["web"] >= timedelta(seconds=pause), stops
+    samples: list[tuple[float, dict]] = []
+    deadline = time.monotonic() + 300
+    while (states := container_states(victim)) is not None:
+        samples.append((time.monotonic(), states))
+        assert time.monotonic() < deadline, "pod toujours là après 300 s"
+        time.sleep(0.3)
+    gone_at = time.monotonic()
+    for _, states in samples:
+        if "terminated" in states["oauth2-proxy"]:
+            assert "terminated" in states["web"], states  # jamais avant l'interface
+    assert any(
+        "running" in states["web"] and "running" in states["oauth2-proxy"]
+        for _, states in samples
+    ), "aucun relevé pendant la pause de l'interface"
+    web_done = [at for at, states in samples if "terminated" in states["web"]]
+    if web_done:  # interface sortie : oauth2-proxy suit, sans attendre de délai fixe
+        assert gone_at - web_done[0] < 20, gone_at - web_done[0]
     wait_for(lambda: len(web_pods()) == 2, "deux pods prêts de nouveau")
 
 
@@ -1399,10 +1422,11 @@ def test_rotation_des_cles_du_fournisseur():
     accepté (clés publiques relues par le proxy de sortie, au plus un délai de
     rafraîchissement après la précédente lecture), l'ancien est refusé et le refus tracé
     (cle_inconnue)."""
-    pod = web_pods()[0]["metadata"]["name"]
+    pods = [p["metadata"]["name"] for p in web_pods()]
+    pod = pods[0]
 
-    def accepted(token: str) -> bool:
-        with interface(pod, Identity(token=token)) as client:
+    def accepted(token: str, where: str = pod) -> bool:
+        with interface(where, Identity(token=token)) as client:
             return client.get("/").status_code == 200
 
     TOKENS.clear()
@@ -1423,8 +1447,12 @@ def test_rotation_des_cles_du_fournisseur():
     assert (
         jwt.get_unverified_header(new)["kid"] != jwt.get_unverified_header(old)["kid"]
     )
-    # PyJWKClient : une clé inconnue relit les clés, au plus une fois par délai (30 s)
-    wait_for(lambda: accepted(new), "nouvelle clé acceptée", 120, 5)
+    # PyJWKClient : une clé inconnue relit les clés, au plus une fois par délai (30 s) ;
+    # chaque réplica a son cache, chacun doit accepter la nouvelle clé
+    for each in pods:
+        wait_for(
+            lambda each=each: accepted(new, each), f"nouvelle clé : {each}", 120, 5
+        )
     with interface(pod, Identity(token=old)) as client:
         refused = client.get("/")
     assert refused.status_code == 401
