@@ -50,6 +50,13 @@ def _access(record: logging.LogRecord) -> dict[str, Any] | None:
     return {"methode": method, "chemin": path, "statut": status}
 
 
+def _fields(record: logging.LogRecord) -> dict[str, Any]:
+    """Champs d'un événement du journal des accès (`extra={"acces": {...}}`), déjà
+    filtrés par liste blanche à leur source (`adapters/web/acces.py`)."""
+    fields = getattr(record, "acces", None)
+    return dict(fields) if isinstance(fields, dict) else {}
+
+
 class JsonFormatter(logging.Formatter):
     """Une ligne JSON par entrée : horodatage UTC, niveau, journal, message."""
 
@@ -65,6 +72,7 @@ class JsonFormatter(logging.Formatter):
             entry |= {"message": "requête", **access}
         else:
             entry["message"] = record.getMessage().strip()
+        entry |= _fields(record)
         exception = _exception(record)
         if exception is not None:
             entry["exception"] = exception
@@ -85,6 +93,9 @@ class TextFormatter(logging.Formatter):
             else record.getMessage().strip()
         )
         line = f"{self.formatTime(record)} {record.levelname} {record.name} : {message}"
+        fields = _fields(record)
+        if fields:
+            line += " " + " ".join(f"{key}={value}" for key, value in fields.items())
         exception = _exception(record)
         if exception is not None:
             line += f"\n  {exception['type']}\n  " + "\n  ".join(exception["pile"])

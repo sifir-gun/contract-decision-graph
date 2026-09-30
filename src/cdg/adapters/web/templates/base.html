@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/static/style.css">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <script src="/static/htmx.min.js" defer></script>
+{% block head %}{% endblock %}
 </head>
 <body hx-boost="true" hx-history="false">
 <a class="skip" href="#contenu">Aller au contenu</a>
@@ -23,12 +24,19 @@
     <a href="/journal">Journal d'audit</a>
     <a href="/administration">Administration</a>
   </nav>
+{% if identity %}
+  <form class="session" method="post" action="/deconnexion">
+    <span class="utilisateur">{{ identity.display_name }}</span>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit">Se déconnecter</button>
+  </form>
+{% endif %}
 </header>
 <main id="contenu">
 {% block content %}{% endblock %}
 </main>
 <footer>
-  <p>Le code décide ; le LLM extrait et explique. Interface locale, sans authentification{% if demo %}, en démonstration{% endif %}.</p>
+  <p>Le code décide ; le LLM extrait et explique. {% if authenticated %}Interface authentifiée{% else %}Interface locale, sans authentification{% endif %}{% if demo %}, en démonstration{% endif %}.</p>
 </footer>
 </body>
 </html>

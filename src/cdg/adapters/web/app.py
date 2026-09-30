@@ -8,6 +8,10 @@ aucune logique métier ici, seulement la lecture des formulaires et la mise en p
 Le texte d'un contrat reçu n'est ni journalisé, ni renvoyé, ni gardé en session : il est
 passé au service, qui le masque avant le graphe, comme la CLI.
 
+Derrière oauth2-proxy (`Authentication`, PR D1) : chaque requête porte le jeton
+d'identité signé, vérifié avant tout (zéro confiance) ; sans jeton valide, 401, tracé au
+journal des accès. Les en-têtes d'identité seuls ne comptent pas.
+
 Les pages sont des fonctions ordinaires : FastAPI les exécute dans son pool de threads, et
 une analyse en cours (appels au LLM, plusieurs secondes) ne bloque pas les autres pages.
 Seule la lecture du formulaire, avec son contrôle CSRF, reste asynchrone (`Depends`). Le
@@ -19,9 +23,11 @@ import logging
 import re
 import secrets
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote, urlencode
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
@@ -31,13 +37,14 @@ from jinja2 import DictLoader, Environment, StrictUndefined
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 
-from cdg.adapters.web import presentation, security
+from cdg.adapters.web import acces, presentation, security
 from cdg.application import demo_set
 from cdg.application.service import ContractService
 from cdg.domain import audit
 from cdg.domain.identifiers import ContractIdError, check_contract_id
 from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
+from cdg.ports.identity import IdentityRejected, IdentityVerifier, ProviderUnavailable
 from cdg.ports.locks import ContractBusy
 from cdg.settings import SettingsError
 
@@ -57,6 +64,52 @@ class Forbidden(Exception):
     """Jeton CSRF absent ou faux, ou origine étrangère : code 403."""
 
 
+@dataclass(frozen=True)
+class Authentication:
+    """Interface derrière oauth2-proxy (`web --identite en-tetes`)."""
+
+    verifier: IdentityVerifier
+    public_origin: str  # https://hôte : origine des formulaires, cookies Secure
+    client_id: str  # audience du jeton ; client annoncé à la fin de session
+    provider_logout: bool = (
+        False  # déconnexion : fermer aussi la session du fournisseur
+    )
+
+
+BEARER = "bearer "
+SIGN_OUT = "/oauth2/sign_out"  # fin de session d'oauth2-proxy, même origine
+
+
+def bearer(header: str | None) -> str | None:
+    """Jeton d'un en-tête `Authorization: Bearer …`, ou None."""
+    if header and header[: len(BEARER)].lower() == BEARER:
+        return header[len(BEARER) :].strip() or None
+    return None
+
+
+def logout_target(auth: Authentication) -> tuple[str, str]:
+    """Suite de la déconnexion (fin de session d'oauth2-proxy, puis celle du fournisseur
+    quand il la publie et que le chart la demande) et l'état de la session du fournisseur.
+    Le jeton n'y figure jamais : le client est désigné par son identifiant."""
+    back, state = "/", "desactivee"
+    if auth.provider_logout:
+        try:
+            endpoint = auth.verifier.end_session_endpoint()
+        except ProviderUnavailable:
+            endpoint, state = None, "fournisseur_injoignable"
+        else:
+            state = "fermee" if endpoint else "non_publiee"
+        if endpoint:
+            query = urlencode(
+                {
+                    "client_id": auth.client_id,
+                    "post_logout_redirect_uri": f"{auth.public_origin}/",
+                }
+            )
+            back = f"{endpoint}{'&' if '?' in endpoint else '?'}{query}"
+    return f"{SIGN_OUT}?rd={quote(back, safe='')}", state
+
+
 def create_app(
     service: ContractService,
     *,
@@ -64,9 +117,11 @@ def create_app(
     hosts: Sequence[str] | None = security.LOOPBACK_NAMES,
     csrf_secret: bytes | None = None,
     draining: Callable[[], bool] = lambda: False,
+    authentication: Authentication | None = None,
 ) -> FastAPI:
     """`hosts` : noms admis dans l'en-tête Host (None : tous, écoute non locale
-    explicite). `demo` : bandeau permanent, contrats du jeu seulement."""
+    explicite). `demo` : bandeau permanent, contrats du jeu seulement.
+    `authentication` : derrière oauth2-proxy, jeton d'identité exigé et vérifié."""
     limit = security.check_body_limit(service.config)
     csrf = security.Csrf(csrf_secret)
     env = Environment(
@@ -78,6 +133,7 @@ def create_app(
     )
     env.globals.update(
         demo=demo,
+        authenticated=authentication is not None,
         decisions=presentation.DECISION_LABELS,
         states=presentation.STATE_LABELS,
         domains=presentation.DOMAIN_LABELS,
@@ -106,15 +162,21 @@ def create_app(
         fresh = cookie is None
         if cookie is None:
             cookie = csrf.new_cookie()
+        identity = getattr(request.state, "identity", None)
         response = templates.TemplateResponse(
             request,
             name,
-            {**context, "csrf": csrf.token(cookie)},
+            {**context, "csrf": csrf.token(cookie), "identity": identity},
             status_code=status,
         )
         if fresh:
             response.set_cookie(
-                csrf.COOKIE, cookie, httponly=True, samesite="strict", path="/"
+                csrf.COOKIE,
+                cookie,
+                httponly=True,
+                samesite="strict",
+                path="/",
+                secure=authentication is not None,  # derrière TLS
             )
         return response
 
@@ -135,11 +197,14 @@ def create_app(
             request.cookies.get(csrf.COOKIE),
             token if isinstance(token, str) else None,
         )
-        if not valid or not security.same_origin(
-            request.headers.get("origin"),
-            request.url.scheme,
-            request.headers.get("host", ""),
-        ):
+        origin = request.headers.get("origin")
+        if authentication is not None:  # derrière le proxy : l'origine publique
+            same = origin is None or origin == authentication.public_origin
+        else:
+            same = security.same_origin(
+                origin, request.url.scheme, request.headers.get("host", "")
+            )
+        if not valid or not same:
             raise Forbidden
         return form
 
@@ -151,8 +216,11 @@ def create_app(
         name = security.host_name(request.headers.get("host", ""))
         length = request.headers.get("content-length", "")
         posted = request.method == "POST"
+        refused = None if authentication is None else authenticate(request)
         if hosts is not None and name not in hosts:
             response: Response = HTMLResponse("Hôte non admis.", status_code=400)
+        elif refused is not None:
+            response = refused
         elif posted and not length:
             response = HTMLResponse("Longueur de l'envoi requise.", status_code=411)
         elif posted and draining():
@@ -182,6 +250,46 @@ def create_app(
             response = await call_next(request)
         response.headers.update(security.HEADERS)
         return response
+
+    def authenticate(request: Request) -> Response | None:
+        """Jeton d'identité vérifié, ou la réponse de refus (401, 503), tracée."""
+        assert authentication is not None
+        where = {"methode": request.method, "chemin": request.url.path}
+        token = bearer(request.headers.get("authorization"))
+        try:
+            if token is None:
+                raise IdentityRejected("jeton_absent")
+            request.state.identity = authentication.verifier.verify(token)
+        except IdentityRejected as exc:
+            acces.event("acces_refuse", motif=exc.reason, **where, statut=401)
+            response = page(
+                request,
+                "erreur.html",
+                {
+                    "title": "Authentification requise",
+                    "message": "Identité non vérifiée : reconnectez-vous.",
+                },
+                401,
+            )
+            response.headers["www-authenticate"] = (
+                'Bearer realm="contract-decision-graph"'
+            )
+            return response
+        except ProviderUnavailable:
+            acces.event("fournisseur_injoignable", **where, statut=503)
+            response = page(
+                request,
+                "erreur.html",
+                {
+                    "title": "Fournisseur d'identité injoignable",
+                    "message": "L'identité ne peut pas être vérifiée pour le moment : "
+                    "réessayez dans quelques instants.",
+                },
+                503,
+            )
+            response.headers["Retry-After"] = "30"
+            return response
+        return None
 
     @app.exception_handler(Forbidden)
     async def forbidden(request: Request, exc: Forbidden) -> Response:
@@ -233,6 +341,25 @@ def create_app(
         # servie hors du middleware (ServerErrorMiddleware) : en-têtes posés ici
         response.headers.update(security.HEADERS)
         return response
+
+    # --- déconnexion (derrière oauth2-proxy) -------------------------------------------
+
+    if authentication is not None:
+
+        @app.post("/deconnexion")
+        def deconnexion(request: Request, form: CheckedForm) -> Response:
+            """Page de transition vers la fin de session d'oauth2-proxy : une redirection
+            après le formulaire serait soumise à form-action 'self', redirections
+            comprises, et bloquée vers le fournisseur."""
+            identity = request.state.identity
+            target, state = logout_target(authentication)
+            acces.event(
+                "deconnexion",
+                iss=identity.issuer,
+                sub=identity.subject,
+                session_fournisseur=state,
+            )
+            return page(request, "deconnexion.html", {"target": target})
 
     # --- liste des contrats (list) ----------------------------------------------------
 

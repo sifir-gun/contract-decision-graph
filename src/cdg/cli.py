@@ -19,10 +19,11 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, get_args
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from cdg import settings
-from cdg.adapters import fastembed, journaux
+from cdg.adapters import fastembed, journaux, oidc
 from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.adapters.demo.extraction import ExpectedExtractor
 from cdg.adapters.demo.locks import LocalContractLocks
@@ -382,8 +383,48 @@ def _tell(args: argparse.Namespace, level: int, message: str) -> None:
         print(message, file=sys.stderr)
 
 
+def _authentication(args: argparse.Namespace) -> web_app.Authentication | None:
+    """`--identite en-tetes` : derrière oauth2-proxy, dans le même pod, seul chemin vers
+    l'interface ; elle n'écoute donc que sur 127.0.0.1, et vérifie le jeton d'identité
+    de chaque requête. Toute option manquante ou contradictoire arrête le lancement."""
+    if args.identite == "aucune":
+        return None
+    if args.host != "127.0.0.1":
+        raise web_security.WebConfigError(
+            f"--identite en-tetes : l'interface n'écoute que sur 127.0.0.1 (reçu --host "
+            f"{args.host}) ; oauth2-proxy, dans le même pod, est le seul chemin vers elle"
+        )
+    if args.ecoute_non_locale:
+        raise web_security.WebConfigError(
+            "--identite en-tetes et --ecoute-non-locale sont incompatibles : l'interface "
+            "n'écoute que sur 127.0.0.1"
+        )
+    for option, value in (
+        ("--oidc-emetteur", args.oidc_emetteur),
+        ("--oidc-audience", args.oidc_audience),
+        ("--adresse-publique", args.adresse_publique),
+    ):
+        if not value:
+            raise web_security.WebConfigError(f"--identite en-tetes exige {option}")
+    public = urlsplit(args.adresse_publique)
+    if public.scheme != "https" or not public.netloc or public.path not in ("", "/"):
+        raise web_security.WebConfigError(
+            f"--adresse-publique : https://hôte attendu, sans chemin (reçu "
+            f"{args.adresse_publique})"
+        )
+    return web_app.Authentication(
+        verifier=oidc.OidcVerifier(
+            args.oidc_emetteur, args.oidc_audience, ca_file=args.oidc_ca
+        ),
+        public_origin=f"https://{public.netloc}",
+        client_id=args.oidc_audience,
+        provider_logout=args.deconnexion_fournisseur,
+    )
+
+
 def _web(args: argparse.Namespace) -> dict:
     """Interface web, sur le même service que les autres commandes ; jusqu'à Ctrl+C."""
+    authentication = _authentication(args)  # avant tout : une option fausse arrête là
     warning = web_security.bind_warning(
         args.host, allow_non_local=args.ecoute_non_locale
     )
@@ -397,6 +438,7 @@ def _web(args: argparse.Namespace) -> dict:
         demo=args.demo,
         hosts=web_security.allowed_hosts(args.host),
         draining=stopping.is_set,
+        authentication=authentication,
     )
     shown = f"[{args.host}]" if ":" in args.host else args.host
     mode = "démonstration, en mémoire" if args.demo else "réel"
@@ -721,6 +763,30 @@ def build_parser() -> argparse.ArgumentParser:
         default="127.0.0.1",
         help="adresse d'écoute des sondes (0.0.0.0 dans un pod : le kubelet appelle "
         "l'adresse du pod) ; elles ne servent aucune donnée",
+    )
+    web.add_argument(
+        "--identite",
+        choices=("aucune", "en-tetes"),
+        default="aucune",
+        help="en-tetes : derrière oauth2-proxy (chart), jeton d'identité signé exigé et "
+        "vérifié à chaque requête ; l'interface n'écoute alors que sur 127.0.0.1",
+    )
+    web.add_argument("--oidc-emetteur", help="émetteur OIDC attendu (https)")
+    web.add_argument("--oidc-audience", help="audience attendue : le client OIDC")
+    web.add_argument(
+        "--oidc-ca",
+        help="autorités de confiance du fournisseur, en fichier (défaut : du système)",
+    )
+    web.add_argument(
+        "--adresse-publique",
+        help="adresse publique de l'interface, https://hôte : origine des formulaires, "
+        "retour après la fin de session du fournisseur",
+    )
+    web.add_argument(
+        "--deconnexion-fournisseur",
+        action="store_true",
+        help="déconnexion : fermer aussi la session chez le fournisseur, s'il publie "
+        "une fin de session (end_session_endpoint)",
     )
     web.set_defaults(handler=_web)
     return parser
