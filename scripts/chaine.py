@@ -3,11 +3,15 @@
 empreinte : rien à installer sur le poste, et le même binaire partout.
 
   uv run --no-sync python scripts/chaine.py bases
+  uv run --no-sync python scripts/chaine.py revision
   uv run --no-sync python scripts/chaine.py inventaire IMAGE --dossier DOSSIER
   uv run --no-sync python scripts/chaine.py scan --dossier DOSSIER
 
 - `bases` : vérifie la signature de chaque image de base du Dockerfile avant la
   construction ; une base sans politique de vérification est refusée, jamais ignorée.
+- `revision` : commit passé à la construction de l'image (`--build-arg CDG_COMMIT`),
+  scellé avec chaque décision : celui de HEAD si le contexte de construction est
+  exactement celui du commit, sinon « inconnu », avec la raison sur la sortie d'erreur.
 - `inventaire` : inventaire des composants de l'image construite (Syft), en SPDX (pour
   l'attestation) et au format de Syft (pour le scan), dans DOSSIER.
 - `scan` : failles connues de cet inventaire (Grype) ; échec sur une faille critique ou
@@ -24,12 +28,14 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
-from pathlib import Path
+from fnmatch import fnmatch
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
 
 from cdg.cli import today
+from cdg.domain.version import UNKNOWN
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCEPTIONS = ROOT / "securite" / "exceptions-vulnerabilites.yaml"
@@ -356,11 +362,88 @@ def scan(
     return 0
 
 
+# --- révision fournie à la construction ----------------------------------------------------
+
+
+def build_context(root: Path) -> tuple[list[str], list[str]]:
+    """Chemins admis dans le contexte de construction, et motifs qui en sont exclus, lus
+    dans `.dockerignore` (tout exclure, puis admettre) ; tout autre motif est refusé."""
+    admitted, excluded = [], []
+    for raw in (root / ".dockerignore").read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line == "*":
+            continue
+        if line.startswith("!"):
+            admitted.append(line[1:].rstrip("/"))
+        elif line.startswith("**/"):
+            excluded.append(line[3:])
+        else:
+            raise ValueError(f".dockerignore : motif non pris en charge : {line}")
+    return admitted, excluded
+
+
+def _changed(porcelain: str) -> list[str]:
+    """Chemins de `git status --porcelain -z` ; un renommage donne aussi l'ancien."""
+    fields, paths = porcelain.split("\0"), []
+    while fields:
+        entry = fields.pop(0)
+        if not entry:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC":
+            paths.append(fields.pop(0))
+    return paths
+
+
+def revision(root: Path = ROOT, *, run: Run = subprocess.run) -> str:
+    """Commit de la construction, passé à l'image (CDG_COMMIT) et scellé avec chaque
+    décision : celui de HEAD si le contexte de construction est exactement celui du
+    commit (ni modification, ni ajout, ni fichier ignoré par git mais copié) ; sinon
+    « inconnu », avec la raison sur la sortie d'erreur. Jamais un commit qui ne décrirait
+    pas le code copié."""
+    admitted, excluded = build_context(root)
+    head = run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if head.returncode != 0:
+        print("révision inconnue : aucun commit git", file=sys.stderr)
+        return UNKNOWN
+    status = run(
+        ["git", "-C", str(root), "status", "--porcelain", "-z"]
+        + ["--untracked-files=all", "--ignored", "--", *admitted],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    differing = [
+        path
+        for path in _changed(status.stdout)
+        if not any(
+            fnmatch(part, pattern)
+            for part in PurePosixPath(path).parts
+            for pattern in excluded
+        )
+    ]
+    if differing:
+        shown = ", ".join(differing[:5]) + (" …" if len(differing) > 5 else "")
+        print(
+            "révision inconnue : contexte de construction différent du commit "
+            f"({shown})",
+            file=sys.stderr,
+        )
+        return UNKNOWN
+    return head.stdout.strip()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="commande", required=True)
     verify = commands.add_parser("bases", help="signatures des images de base")
     verify.add_argument("--dockerfile", type=Path, default=ROOT / "Dockerfile")
+    commands.add_parser("revision", help="commit passé à la construction de l'image")
     inventory_ = commands.add_parser("inventaire", help="inventaire (Syft)")
     inventory_.add_argument("image")
     inventory_.add_argument("--dossier", type=Path, required=True)
@@ -370,6 +453,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.commande == "bases":
         return verify_bases(args.dockerfile)
+    if args.commande == "revision":
+        print(revision())
+        return 0
     if args.commande == "inventaire":
         return inventory(args.image, args.dossier)
     return scan(args.dossier, args.exceptions, today=today())

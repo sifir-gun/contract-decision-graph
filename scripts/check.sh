@@ -66,7 +66,7 @@ uv run --no-sync pytest -m chart --chart
 
 echo "==> image (signatures des bases, construction, vérifications, inventaire, scan)"
 uv run --no-sync python scripts/chaine.py bases
-docker build --tag cdg:verification .
+docker build --build-arg CDG_COMMIT="$(uv run --no-sync python scripts/chaine.py revision)" --tag cdg:verification .
 uv run --no-sync pytest -m image --image cdg:verification
 uv run --no-sync python scripts/chaine.py inventaire cdg:verification --dossier "$RUNNER_TEMP/chaine"
 uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"

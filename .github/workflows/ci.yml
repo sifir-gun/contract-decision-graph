@@ -208,7 +208,7 @@ jobs:
         run: uv run --no-sync python scripts/chaine.py bases
       - name: Construction, bases figées par empreinte, dépendances strictement depuis uv.lock
         # l'image n'est ni publiée ni signée ici : c'est l'objet de la PR B (ADR 005)
-        run: docker build --tag cdg:verification .
+        run: docker build --build-arg CDG_COMMIT="$(uv run --no-sync python scripts/chaine.py revision)" --tag cdg:verification .
       - name: Vérifications de l'image construite (non root, lecture seule, sans shell)
         run: uv run --no-sync pytest -m image --image cdg:verification
       - name: Inventaire des composants (Syft), en SPDX et au format de Syft

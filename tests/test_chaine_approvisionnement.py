@@ -603,3 +603,115 @@ def test_aucune_expression_dans_les_scripts_de_publication():
     for step in publication_steps():
         assert "${{" not in step.get("run", ""), step.get("name")
     assert ci()["jobs"]["publication"]["env"]["IMAGE"] == IMAGE
+
+
+# --- révision fournie à la construction (version du code scellée, PR D2) --------------------
+#
+# `chaine.py revision` donne le commit passé à l'image (CDG_COMMIT) : celui de HEAD si le
+# contexte de construction est exactement celui du commit, sinon « inconnu », avec la raison
+# sur la sortie d'erreur. Jamais un commit qui ne décrirait pas le code copié.
+
+GIT_AUTHOR = ["-c", "user.name=test", "-c", "user.email=test@example.org"]
+
+
+def git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *GIT_AUTHOR, "-c", "commit.gpgsign=false", *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+@pytest.fixture
+def depot(tmp_path):
+    """Dépôt minimal : contexte de construction `src/` et `pyproject.toml`, comme le
+    `.dockerignore` du projet (tout exclure, puis admettre ; caches exclus)."""
+    repo = tmp_path / "depot"
+    (repo / "src").mkdir(parents=True)
+    (repo / "docs").mkdir()
+    (repo / ".dockerignore").write_text(
+        "# contexte\n*\n!src/\n!pyproject.toml\n**/__pycache__\n**/*.py[cod]\n",
+        encoding="utf-8",
+    )
+    (repo / ".gitignore").write_text("__pycache__/\n*.egg-info/\n", encoding="utf-8")
+    (repo / "src" / "a.py").write_text("A = 1\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (repo / "docs" / "notes.md").write_text("notes\n", encoding="utf-8")
+    git(repo, "init", "-q")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
+def test_revision_commit_complet_si_le_contexte_est_celui_du_commit(depot):
+    head = git(depot, "rev-parse", "HEAD")
+    assert len(head) == 40
+    assert chaine().revision(depot) == head
+
+
+def test_revision_hors_du_contexte_une_modification_ne_compte_pas(depot):
+    (depot / "docs" / "notes.md").write_text("autre\n", encoding="utf-8")
+    (depot / "docs" / "brouillon.md").write_text("pr\n", encoding="utf-8")
+    assert chaine().revision(depot) == git(depot, "rev-parse", "HEAD")
+
+
+def test_revision_caches_exclus_de_l_image_ne_comptent_pas(depot):
+    cache = depot / "src" / "__pycache__"
+    cache.mkdir()
+    (cache / "a.cpython-312.pyc").write_bytes(b"\0")
+    assert chaine().revision(depot) == git(depot, "rev-parse", "HEAD")
+
+
+def _modifie(repo: Path) -> None:
+    (repo / "src" / "a.py").write_text("A = 2\n", encoding="utf-8")
+
+
+def _ajoute(repo: Path) -> None:
+    (repo / "src" / "b.py").write_text("B = 1\n", encoding="utf-8")
+
+
+def _supprime(repo: Path) -> None:
+    (repo / "pyproject.toml").unlink()
+
+
+def _ignore_mais_copie(repo: Path) -> None:
+    # ignoré par git, mais admis dans le contexte : il entrerait dans l'image
+    info = repo / "src" / "cdg.egg-info"
+    info.mkdir()
+    (info / "PKG-INFO").write_text("Name: cdg\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("change", [_modifie, _ajoute, _supprime, _ignore_mais_copie])
+def test_revision_inconnue_si_le_contexte_differe_du_commit(depot, capsys, change):
+    change(depot)
+    assert chaine().revision(depot) == "inconnu"
+    err = capsys.readouterr().err
+    assert "révision inconnue" in err and "contexte de construction" in err
+
+
+def test_revision_inconnue_sans_commit(tmp_path, capsys):
+    (tmp_path / ".dockerignore").write_text("*\n!src/\n", encoding="utf-8")
+    git(tmp_path, "init", "-q")  # dépôt sans aucun commit
+    assert chaine().revision(tmp_path) == "inconnu"
+    assert "aucun commit" in capsys.readouterr().err
+
+
+def test_revision_motif_du_contexte_non_pris_en_charge_refuse(depot):
+    (depot / ".dockerignore").write_text("*\n!src/\nsrc/secret\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="src/secret"):
+        chaine().revision(depot)
+
+
+def test_revision_meme_valeur_que_le_modele_de_la_version_du_code():
+    from cdg.domain.version import UNKNOWN
+
+    assert chaine().UNKNOWN == UNKNOWN
+
+
+def test_commande_revision_imprime_la_seule_revision(capsys):
+    module = chaine()
+    expected = module.revision(ROOT)
+    capsys.readouterr()
+    assert module.main(["revision"]) == 0
+    assert capsys.readouterr().out == expected + "\n"

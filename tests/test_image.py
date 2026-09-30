@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from test_chaine_approvisionnement import chaine
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = ROOT / "Dockerfile"
@@ -177,6 +178,21 @@ def test_environnement_de_l_image_finale():
     assert env["PATH"].startswith("/app/.venv/bin:")
 
 
+def test_commit_fourni_a_la_construction_inconnu_sinon():
+    """Version du code scellée (PR D2, ADR 005) : le commit est un argument de
+    construction, posé dans l'environnement de l'image, que la CLI lit au lancement ;
+    sans lui, « inconnu », dit tel quel. Déclaré après les copies : sa valeur ne change que
+    la configuration de l'image, jamais une couche du code."""
+    final = stages()[-1]
+    assert ("ARG", "CDG_COMMIT=inconnu") in final
+    assert env_of(final)["CDG_COMMIT"] == "${CDG_COMMIT}"
+    keywords = [keyword for keyword, _ in final]
+    assert keywords.index("ARG") > max(
+        i for i, keyword in enumerate(keywords) if keyword == "COPY"
+    )
+    assert not [rest for keyword, rest in stages()[0] if "CDG_COMMIT" in rest]
+
+
 def test_etiquettes_oci_de_l_image():
     labels = {}
     for keyword, rest in stages()[-1]:
@@ -253,6 +269,16 @@ def test_configuration_de_l_image(image):
     )
     names = [e.split("=", 1)[0] for e in config["Config"]["Env"]]
     assert not [n for n in names if re.search("KEY|PASSWORD|SECRET|TOKEN", n)]
+
+
+@pytest.mark.image
+def test_image_porte_le_commit_de_sa_construction(image):
+    """Construite par `docker build --build-arg CDG_COMMIT="$(… chaine.py revision)"`,
+    en CI comme dans scripts/check.sh : même révision, calculée sur le même dépôt."""
+    [config] = json.loads(docker("image", "inspect", image).stdout)
+    env = dict(e.split("=", 1) for e in config["Config"]["Env"])
+    assert env["CDG_COMMIT"] == chaine().revision(ROOT)
+    assert "CDG_EMPREINTE_IMAGE" not in env  # fournie au lancement, par le chart
 
 
 @pytest.mark.image
