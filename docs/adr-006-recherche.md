@@ -1,7 +1,11 @@
 # ADR-006 : qualité de la recherche dans le corpus
 
-- **Statut** : en cours, depuis le 01/10/2026 (chantier « qualité de la recherche », PR 1 : évaluation, branche `evaluation-recherche`).
+- **Statut** : en cours, depuis le 01/10/2026 (chantier « qualité de la recherche » : PR 1, évaluation, fusionnée le 01/10 ; PR 2, améliorations mesurées, branche `recherche-amelioree`).
 - **Portée** : la recherche du CRAG dans le corpus (`rag_chunks`, pgvector), son évaluation, et les améliorations mesurées que retient ou écarte ce chantier. Inspiré de l'article d'Anthropic « Introducing Contextual Retrieval » (septembre 2024, https://www.anthropic.com/engineering/contextual-retrieval).
+
+## Résultat clé : les fiches repoussent les articles hors des quatre premiers
+
+Mesure de référence du 01/10 (détail plus bas) : **la fiche du projet sort au rang 1 pour les 21 requêtes**, avec et sans filtre. Écrite dans le vocabulaire même des requêtes, et souvent en deux extraits, elle occupe à elle seule les premiers rangs, puis les extraits multiples d'un long article prennent les suivants. **Au rang du CRAG (k = 4, avec filtre), le juge ne voit l'article de loi attendu que dans 62,7 % des cas** : pour les plafonds de responsabilité, jamais les articles 1170 ni 1231-3 du code civil, classés 5e à 8e. Le CRAG retient alors la fiche, paraphrase du projet, et jamais le texte qu'elle paraphrase. Les références attendues sont pourtant presque toutes dans le corpus proche (rappel de 96,8 % à k = 20) : elles sont trop bas, pas absentes. Ce constat ordonne la PR 2 : sa cause directe, plusieurs extraits d'une même référence parmi les quatre premiers, est traitée en premier.
 
 ## Contexte
 
