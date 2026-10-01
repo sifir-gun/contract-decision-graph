@@ -273,7 +273,10 @@ def create_app(
         ):
             return None
         if request.method == "POST":
-            if path == "/analyse":
+            # relancer, c'est analyser : rôle d'analyste, comme une analyse
+            if path == "/analyse" or (
+                path.startswith("/contrats/") and path.endswith("/relance")
+            ):
                 return "analyser"
             if path.startswith("/contrats/") and path.endswith("/decision"):
                 return "trancher"
@@ -336,6 +339,11 @@ def create_app(
         if authentication is None:
             return True  # interface locale : un seul utilisateur, sur son poste
         return "relecteur" in getattr(request.state, "roles", set())
+
+    def can_analyse(request: Request) -> bool:
+        if authentication is None:
+            return True
+        return "analyste" in getattr(request.state, "roles", set())
 
     def actor(request: Request) -> Actor:
         """Qui agit : l'identité vérifiée derrière oauth2-proxy ; sinon l'interface
@@ -527,6 +535,7 @@ def create_app(
                 "allowed": service.config.human_policy.allowed_decisions,
                 "error": error,
                 "can_decide": can_decide(request),
+                "can_analyse": can_analyse(request),
             },
             status,
         )
@@ -575,6 +584,35 @@ def create_app(
         if refused:
             return dossier_page(request, thread_id, refused, 422)
         return RedirectResponse(presentation.contract_path(thread_id), status_code=303)
+
+    @app.post("/contrats/{thread_id}/relance")
+    def relance(request: Request, thread_id: str, form: CheckedForm) -> Response:
+        """Relance, sous la configuration actuelle, d'un contrat escaladé pour
+        changement de configuration : un nouveau contrat ; l'escaladé reste en attente."""
+        wanted = _text(form, "identifiant").strip() or None
+        try:
+            status = service.relaunch(
+                thread_id, actor=actor(request), contract_id=wanted
+            )
+        except ContractIdError as exc:
+            return dossier_page(request, thread_id, str(exc), 400)
+        except (ThreadError, ContractBusy) as exc:
+            return page(
+                request,
+                "erreur.html",
+                {"title": "Relance impossible", "message": str(exc)},
+                409,
+            )
+        except SettingsError as exc:
+            return page(
+                request,
+                "erreur.html",
+                {"title": "Relance impossible", "message": str(exc)},
+                503,
+            )
+        return RedirectResponse(
+            presentation.contract_path(status["thread_id"]), status_code=303
+        )
 
     @app.api_route(
         "/contrats/{thread_id}/rejeu", methods=PAGE_METHODS, response_class=HTMLResponse

@@ -11,6 +11,8 @@
   configuration d'analyse archivée.
 - Politique de revue : celle du processus qui scelle, sauf la levée d'un blocage dur,
   permise seulement si la configuration d'analyse et l'actuelle l'autorisent toutes deux.
+- Relance : nouvelle analyse du texte masqué, sous la configuration actuelle, nouveau
+  contrat ; le contrat escaladé reste en attente.
 - `config-check` ne compte pas ces contrats comme à trancher : il les liste à part.
 """
 
@@ -21,6 +23,7 @@ from contextlib import contextmanager
 import pytest
 from doubles import (
     ACTEUR_ANALYSTE,
+    ACTEUR_RELECTEUR,
     CONTRACT_TEXT,
     FakeCrag,
     FixedExtractor,
@@ -332,13 +335,14 @@ def test_marqueur_visible_dans_le_dossier_et_la_demande():
     assert dossier["status"]["demande"]["configuration_changee"] == marker
 
 
-def test_formulaire_de_revue_avertit():
+def test_formulaire_de_revue_avertit_et_propose_la_relance():
     from web_helpers import client
 
     service = escalated_contract().service(NEW)
     page = client(service).get("/contrats/c-coupe").text
     assert "Configuration changée pendant l'analyse" in page
     assert A in page and B in page
+    assert 'action="/contrats/c-coupe/relance"' in page
 
 
 def test_show_par_la_cli_montre_le_marqueur(monkeypatch, capsys):
@@ -347,6 +351,105 @@ def test_show_par_la_cli_montre_le_marqueur(monkeypatch, capsys):
     assert cli.main(["show", "c-coupe"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["status"]["configuration_changee"] == {"analyse": A, "reprise": B}
+
+
+def relance_par_l_interface(service, **fields):
+    from web_helpers import client, csrf
+
+    web = client(service)
+    token = csrf(web, "/contrats/c-coupe")
+    return web.post("/contrats/c-coupe/relance", data={"csrf": token, **fields})
+
+
+def test_relance_par_l_interface_redirige_vers_le_nouveau_contrat():
+    service = escalated_contract().service(NEW)
+    response = relance_par_l_interface(service, identifiant="c-web")
+    assert (response.status_code, response.headers["location"]) == (
+        303,
+        "/contrats/c-web",
+    )
+
+
+def test_relance_par_l_interface_identifiant_invalide_400():
+    service = escalated_contract().service(NEW)
+    response = relance_par_l_interface(service, identifiant="../hors")
+    assert response.status_code == 400
+
+
+def test_relance_par_l_interface_sans_cle_d_api_503(monkeypatch):
+    from cdg.settings import SettingsError
+
+    service = escalated_contract().service(NEW)
+
+    def missing(*args, **kwargs):
+        raise SettingsError("MISTRAL_API_KEY absente")
+
+    monkeypatch.setattr(type(service), "relaunch", missing)
+    response = relance_par_l_interface(service)
+    assert response.status_code == 503 and "MISTRAL_API_KEY" in response.text
+
+
+# --- relance sous la configuration actuelle ----------------------------------------------------
+
+
+def test_relance_nouveau_contrat_sous_la_configuration_actuelle():
+    processes = escalated_contract()
+    service = processes.service(NEW)
+    old = service.engine.values("c-coupe")
+    status = service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert status["thread_id"] == "c-coupe-relance"
+    values = service.engine.values("c-coupe-relance")
+    assert values["config_hash"] == B  # sous la configuration actuelle
+    assert values["raw_text"] == old["raw_text"]  # le texte masqué conservé
+    assert values["analysis_date"] == old["analysis_date"]
+    assert values["relance_de"] == "c-coupe"
+    assert values["analyse_par"] == ACTEUR_RELECTEUR  # quatre yeux pour la suite
+    # le contrat escaladé reste en attente, avec le lien vers sa relance
+    dossier = service.dossier("c-coupe")
+    assert dossier["etat"] == "en_attente" and dossier["relances"] == [
+        "c-coupe-relance"
+    ]
+
+
+def test_relance_sous_l_identifiant_choisi():
+    service = escalated_contract().service(NEW)
+    status = service.relaunch(
+        "c-coupe", actor=ACTEUR_RELECTEUR, contract_id="c-nouveau"
+    )
+    assert status["thread_id"] == "c-nouveau"
+
+
+def test_relance_refusee_hors_d_une_escalade_pour_changement_de_configuration():
+    from test_service import PENDING_TEXT
+
+    service = make_service()
+    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    with pytest.raises(ThreadError, match="changement de configuration"):
+        service.relaunch("c-attente", actor=ACTEUR_RELECTEUR)
+
+
+def test_relance_refusee_une_fois_le_contrat_tranche():
+    service = escalated_contract().service(NEW)
+    service.decide("c-coupe", answer("NO_GO", reason="revu"))
+    with pytest.raises(ThreadError, match="en attente"):
+        service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+
+
+def test_relance_par_la_cli(monkeypatch, capsys):
+    service = escalated_contract().service(NEW)
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    argv = [
+        "relaunch",
+        "c-coupe",
+        "--identifiant",
+        "c-cli",
+        "--operateur",
+        "lot-relance",
+    ]
+    assert cli.main(argv) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["thread_id"] == "c-cli"
+    assert service.engine.values("c-cli")["analyse_par"].operateur == "lot-relance"
 
 
 # --- config-check ------------------------------------------------------------------------------

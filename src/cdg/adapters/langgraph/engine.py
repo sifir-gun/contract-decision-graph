@@ -140,6 +140,7 @@ class LangGraphEngine:
         parties: Sequence[str],
         analysis_date: date,
         actor: Actor,
+        relaunch_of: str | None = None,
     ) -> dict[str, Any]:
         deps = self._deps.run()  # le fournisseur d'abord : clé absente, rien d'ouvert
         # verrou d'abord : un contrat en cours ailleurs est refusé sans rien ouvrir, et la
@@ -154,6 +155,7 @@ class LangGraphEngine:
                 config=self._config,
                 actor=actor,
                 code=deps.code_version,
+                relaunch_of=relaunch_of,
             )
 
     def resume(self, thread_id: str, answer: dict[str, Any]) -> dict[str, Any]:

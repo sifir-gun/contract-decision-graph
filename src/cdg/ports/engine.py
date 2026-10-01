@@ -24,9 +24,12 @@ class ContractEngine(Protocol):
         parties: Sequence[str],
         analysis_date: date,
         actor: Actor,
+        relaunch_of: str | None = None,
     ) -> dict[str, Any]:
         """Analyse un contrat, masqué avant le graphe ; statut du thread et masquage.
-        `actor` : qui lance l'analyse, posé dans l'état et scellé (quatre yeux)."""
+        `actor` : qui lance l'analyse, posé dans l'état et scellé (quatre yeux) ;
+        `relaunch_of` : contrat escaladé pour changement de configuration dont c'est la
+        relance, sous la configuration actuelle."""
         ...
 
     def resume(self, thread_id: str, answer: dict[str, Any]) -> dict[str, Any]:

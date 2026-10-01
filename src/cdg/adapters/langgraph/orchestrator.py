@@ -442,8 +442,9 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "chain_hash": values.get("chain_hash"),
         # constats du scellement (code modifié depuis l'analyse…), montrés au réviseur
         "sealing_findings": values.get("sealing_findings", []),
-        # reprise escaladée car la configuration avait changé
+        # reprise escaladée car la configuration avait changé ; relance d'un tel contrat
         "configuration_changee": values.get("configuration_changee"),
+        "relance_de": values.get("relance_de"),
         "human": human.model_dump(mode="json") if human else None,
         "analyse_par": values["analyse_par"].model_dump(mode="json")
         if values.get("analyse_par")
@@ -466,6 +467,7 @@ def run_contract(
     config: DecisionConfig,
     actor: Actor,
     code: CodeVersion,
+    relaunch_of: str | None = None,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
 
@@ -475,7 +477,8 @@ def run_contract(
     écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
     produit la décision, modèles et version du code) est posé dans l'état initial, avant
     tout nœud : c'est lui qui est scellé, comme l'acteur qui lance l'analyse (quatre
-    yeux).
+    yeux). `relaunch_of` : contrat escaladé pour changement de configuration dont
+    celui-ci est la relance, sous la configuration actuelle.
     """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
@@ -490,6 +493,7 @@ def run_contract(
             "analysis_date": analysis_date,
             **audit.analysis_context(config, code),
             "analyse_par": actor,
+            **({} if relaunch_of is None else {"relance_de": relaunch_of}),
         },
         _thread(contract_id),
         durability=DURABILITY,

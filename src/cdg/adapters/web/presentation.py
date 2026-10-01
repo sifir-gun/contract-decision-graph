@@ -16,7 +16,7 @@ from urllib.parse import quote as percent_encode
 
 from markupsafe import Markup, escape
 
-CONTRACT_ACTIONS = ("decision", "rejeu")
+CONTRACT_ACTIONS = ("decision", "rejeu", "relance")
 
 DECISION_LABELS = {
     "GO": "GO",

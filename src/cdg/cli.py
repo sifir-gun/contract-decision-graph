@@ -448,6 +448,15 @@ def _run(args: argparse.Namespace) -> dict:
     )
 
 
+def _relaunch(args: argparse.Namespace) -> dict:
+    """Relance, sous la configuration actuelle, un contrat escaladé pour changement de
+    configuration : une analyse (appels LLM payants), pas une décision."""
+    actor = _cli_actor(args, "relaunch", decides=False)
+    return build_service(load_config()).relaunch(
+        args.thread_id, actor=actor, contract_id=args.identifiant
+    )
+
+
 def _resume(args: argparse.Namespace) -> dict:
     actor = _cli_actor(args, "resume", decides=True)
     answer = {
@@ -886,6 +895,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="lève un blocage dur (motif obligatoire)",
     )
     resume.set_defaults(handler=_resume)
+
+    relaunch = sub.add_parser(
+        "relaunch",
+        help="relance, sous la configuration actuelle, l'analyse d'un contrat escaladé "
+        "pour changement de configuration (nouveau contrat, appels LLM payants) ; le "
+        "contrat escaladé reste en attente",
+    )
+    relaunch.add_argument("thread_id")
+    relaunch.add_argument(
+        "--identifiant",
+        help="identifiant du nouveau contrat (défaut : <thread_id>-relance)",
+    )
+    relaunch.add_argument("--operateur", required=True, help=OPERATOR_HELP)
+    relaunch.set_defaults(handler=_relaunch)
 
     history = sub.add_parser(
         "history", help="checkpoints d'un thread, du plus ancien au plus récent"

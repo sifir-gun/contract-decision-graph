@@ -42,7 +42,7 @@ from cdg.domain.identifiers import check_contract_id
 from cdg.domain.models import Clause, Usage
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
-from cdg.ports.engine import ContractEngine
+from cdg.ports.engine import ContractEngine, ThreadError
 
 # état d'un contrat, lu dans son statut
 WAITING, DONE, REJECTED, RUNNING = "en_attente", "termine", "rejete", "en_cours"
@@ -213,7 +213,44 @@ class ContractService:
             and self.config.human_policy.allow_block_override
             and policy.analysis_allows_override(values, self.config)
             and any(v["hard_block"] for v in request["verdicts"]),
+            # relances de ce contrat sous la configuration actuelle
+            "relances": [
+                s["thread_id"]
+                for s in self.engine.overview()
+                if s.get("relance_de") == thread_id
+            ],
         }
+
+    def relaunch(
+        self, thread_id: str, *, actor: Actor, contract_id: str | None = None
+    ) -> dict[str, Any]:
+        """Relance, sous la configuration actuelle, l'analyse d'un contrat escaladé pour
+        changement de configuration et encore en attente : un nouveau contrat (un thread
+        par contrat ; par défaut `<id>-relance`), sur le texte masqué conservé (l'original
+        ne l'est jamais), à la même date d'analyse. Le contrat escaladé reste en attente,
+        jusqu'à sa décision ou son expiration."""
+        status = self.engine.status(thread_id)
+        if not status.get("configuration_changee"):
+            raise ThreadError(
+                f"{thread_id} : relance réservée à un contrat escaladé pour changement "
+                "de configuration pendant son analyse"
+            )
+        if status["demande"] is None:
+            raise ThreadError(
+                f"{thread_id} : relance d'un contrat en attente seulement"
+            )
+        target = contract_id if contract_id is not None else f"{thread_id}-relance"
+        check_contract_id(target)
+        values = self.engine.values(thread_id)
+        with self._writes:
+            return self.engine.run(
+                target,
+                values["raw_text"],
+                (),
+                values["analysis_date"],
+                actor,
+                relaunch_of=thread_id,
+            )
 
     def history(self, thread_id: str) -> list[dict[str, Any]]:
         return self.engine.history(thread_id)
