@@ -1,6 +1,5 @@
 """Corpus : nettoyage des fichiers réels, versions, découpage, manifeste, fiches."""
 
-import copy
 import re
 from datetime import date
 from pathlib import Path
@@ -362,7 +361,9 @@ def test_texte_embarque_et_son_empreinte():
     assert a != corpus.embedded_hash("passage: ", "C. civ., art. 1171\nToute clause…")
 
 
-# --- en-têtes de contexte, écrits par le code (ADR 006, PR 2, technique 2) ----------------
+# --- intitulés officiels des articles Légifrance (ADR 006, PR 2) -------------------------
+# Lus sur la page de chaque article, avec son lien : provenance de chaque article. La
+# technique des en-têtes qui les reprenait a été mesurée puis abandonnée (journal).
 
 LEGIFRANCE_ARTICLE = re.compile(
     r"^https://www\.legifrance\.gouv\.fr/codes/article_lc/LEGIARTI\d{12}$"
@@ -390,101 +391,3 @@ def test_intitules_officiels_de_chaque_article_legifrance_presents():
             assert all(LEVEL.match(level) for level in entry["levels"]), number
             urls.append(entry["url"])
     assert len(urls) == len(set(urls)) == 9
-
-
-def test_article_legifrance_sans_hierarchie_erreur_explicite():
-    manifest = ingestion.load_manifest()
-    sources = copy.deepcopy(manifest.sources)
-    del sources["code-civil"]["hierarchy"]["1170"]
-    with pytest.raises(ValueError, match="hiérarchie.*1170"):
-        list(ingestion.articles(corpus.Manifest(sources=sources)))
-
-
-def test_marques_de_paragraphe_eurlex_et_legifrance():
-    assert corpus.paragraph_marks("1.   Texte.\n\na)\n\nb)\n\n2.   Suite.") == [
-        "1",
-        "2",
-    ]
-    assert corpus.paragraph_marks("I.-Sauf dispositions.\n\nII.-Les conditions.") == [
-        "I",
-        "II",
-    ]
-    assert corpus.paragraph_marks("I. - Engage la responsabilité.") == ["I"]
-    assert corpus.paragraph_marks("Toute clause qui prive de sa substance.") == []
-
-
-def test_en_tete_d_un_article_legifrance():
-    header = corpus.context_header(
-        "C. civ., art. 1170",
-        "Code civil",
-        hierarchy=("Livre III : A", "Sous-section 3 : Le contenu du contrat"),
-    )
-    assert header == (
-        "C. civ., art. 1170 — Code civil — Livre III : A > "
-        "Sous-section 3 : Le contenu du contrat"
-    )
-
-
-def test_en_tete_d_un_extrait_d_article_eurlex():
-    header = corpus.context_header(
-        "RGPD, art. 28",
-        "Règlement (UE) 2016/679",
-        heading="Sous-traitant",
-        paragraphs=("3", "4"),
-        index=1,
-        count=4,
-    )
-    assert header == (
-        "RGPD, art. 28 — Règlement (UE) 2016/679 — Sous-traitant — paragraphes 3 à 4 "
-        "— extrait 2 sur 4"
-    )
-    assert "paragraphe 2 —" in corpus.context_header(
-        "r", "s", paragraphs=("2",), index=0, count=2
-    )
-
-
-def test_en_tete_d_une_fiche():
-    assert corpus.context_header("Fiche projet : Titre", "", index=0, count=1) == (
-        "Fiche projet : Titre"
-    )
-    assert corpus.context_header("Fiche projet : Titre", "", index=1, count=2) == (
-        "Fiche projet : Titre — extrait 2 sur 2"
-    )
-
-
-def test_en_tetes_des_extraits_du_corpus():
-    headers = {
-        (meta["reference"], meta["chunk_index"]): meta["header"]
-        for meta, embedded, _ in ingestion.pending_chunks(CONFIG.corpus.chunk_max_words)
-        if embedded.startswith(meta["header"] + "\n")
-    }
-    assert len(headers) == len(ingestion.pending_chunks(CONFIG.corpus.chunk_max_words))
-    assert headers[("C. civ., art. 1170", 0)].endswith(
-        "Section 2 : La validité du contrat > Sous-section 3 : Le contenu du contrat"
-    )
-    assert headers[("C. civ., art. 1170", 0)].startswith(
-        "C. civ., art. 1170 — Code civil"
-    )
-    assert "Sous-traitant" in headers[("RGPD, art. 28", 1)]
-    assert "extrait 2 sur" in headers[("RGPD, art. 28", 1)]
-    assert headers[("C. com., art. L441-10", 0)].count("paragraphe") == 1
-    fiche = headers[("Fiche projet : Délais de paiement entre professionnels", 0)]
-    assert fiche.startswith("Fiche projet : Délais de paiement entre professionnels — ")
-    assert "extrait 1 sur" in fiche
-
-
-def test_en_tete_et_texte_tiennent_dans_le_decoupage():
-    """L'en-tête prend sa place dans le découpage : en-tête et texte tiennent ensemble
-    dans `chunk_max_words` mots, la borne qui garde un extrait sous le contexte du
-    modèle (512 tokens pour e5 ; l'adaptateur refuse en plus tout dépassement)."""
-    max_words = CONFIG.corpus.chunk_max_words
-    for meta, embedded, _ in ingestion.pending_chunks(max_words):
-        assert len(embedded.split()) <= max_words, (
-            meta["reference"],
-            meta["chunk_index"],
-        )
-
-
-def test_en_tete_trop_long_pour_le_decoupage_erreur_explicite():
-    with pytest.raises(ValueError, match="en-tête"):
-        ingestion.pending_chunks(10)

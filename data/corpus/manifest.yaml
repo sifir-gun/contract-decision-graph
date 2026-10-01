@@ -40,8 +40,9 @@ sources:
       "L441-10": [delai_paiement]
       "L442-1": [responsabilite_acheteur, responsabilite_fournisseur, preavis_resiliation]
     # Intitulés officiels de la hiérarchie de chaque article (du plus large au plus
-    # proche), lus le 2026-10-01 sur sa page Légifrance (url) ; repris dans l'en-tête de
-    # ses extraits, avant l'embedding (ADR 006). Vérifiés présents par les tests.
+    # proche), lus le 2026-10-01 sur sa page Légifrance (url) : provenance de l'article.
+    # Repris dans l'en-tête des extraits, ils n'ont pas amélioré la recherche selon le
+    # critère retenu ; en-tête abandonné (ADR 006). Vérifiés présents par les tests.
     hierarchy_verified_at: 2026-10-01
     hierarchy:
       "L441-10":
@@ -79,8 +80,9 @@ sources:
       "1210": [duree_engagement]
       "1211": [preavis_resiliation]
     # Intitulés officiels de la hiérarchie de chaque article (du plus large au plus
-    # proche), lus le 2026-10-01 sur sa page Légifrance (url) ; repris dans l'en-tête de
-    # ses extraits, avant l'embedding (ADR 006). Vérifiés présents par les tests.
+    # proche), lus le 2026-10-01 sur sa page Légifrance (url) : provenance de l'article.
+    # Repris dans l'en-tête des extraits, ils n'ont pas amélioré la recherche selon le
+    # critère retenu ; en-tête abandonné (ADR 006). Vérifiés présents par les tests.
     hierarchy_verified_at: 2026-10-01
     hierarchy:
       "1170":
@@ -146,8 +148,9 @@ sources:
     articles:
       "L112-2": [revision_prix]
     # Intitulés officiels de la hiérarchie de chaque article (du plus large au plus
-    # proche), lus le 2026-10-01 sur sa page Légifrance (url) ; repris dans l'en-tête de
-    # ses extraits, avant l'embedding (ADR 006). Vérifiés présents par les tests.
+    # proche), lus le 2026-10-01 sur sa page Légifrance (url) : provenance de l'article.
+    # Repris dans l'en-tête des extraits, ils n'ont pas amélioré la recherche selon le
+    # critère retenu ; en-tête abandonné (ADR 006). Vérifiés présents par les tests.
     hierarchy_verified_at: 2026-10-01
     hierarchy:
       "L112-2":

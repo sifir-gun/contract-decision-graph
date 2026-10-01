@@ -16,7 +16,7 @@ de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (
 
 import hashlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -97,8 +97,6 @@ class Article:
     source_id: str = ""
     reference: str = ""
     retrieved_at: date | None = None
-    source_title: str = ""  # nom de la source en toutes lettres (manifeste)
-    hierarchy: tuple[str, ...] = ()  # intitulés officiels, du plus large au plus proche
 
 
 def _lines_without_interface(raw: str) -> list[str]:
@@ -279,47 +277,6 @@ def citations(line: str) -> list[tuple[str, str]]:
 
 
 # --- Extrait à ingérer -------------------------------------------------------------------
-
-
-_PARAGRAPH = re.compile(r"^(?:(\d+)\.\s|([IVX]+)\.\s?-)")
-
-
-def paragraph_marks(text: str) -> list[str]:
-    """Numéros des paragraphes qui commencent dans le texte : « 1. » (EUR-Lex) ou
-    « I.- » et « I. - » (Légifrance), dans l'ordre, sans doublon."""
-    marks = (
-        match[1] or match[2]
-        for line in text.splitlines()
-        if (match := _PARAGRAPH.match(line.strip()))
-    )
-    return list(dict.fromkeys(marks))
-
-
-def context_header(
-    reference: str,
-    source_title: str,
-    *,
-    hierarchy: Sequence[str] = (),
-    heading: str | None = None,
-    paragraphs: Sequence[str] = (),
-    index: int = 0,
-    count: int = 1,
-) -> str:
-    """En-tête de contexte d'un extrait, écrit par le code, sans LLM (ADR 006) :
-    référence, source en toutes lettres, intitulés officiels de la hiérarchie, intitulé
-    de l'article, paragraphes qui y commencent, position de l'extrait dans l'article."""
-    parts = [reference, source_title]
-    if hierarchy:
-        parts.append(" > ".join(hierarchy))
-    if heading:
-        parts.append(heading)
-    if len(paragraphs) == 1:
-        parts.append(f"paragraphe {paragraphs[0]}")
-    elif paragraphs:
-        parts.append(f"paragraphes {paragraphs[0]} à {paragraphs[-1]}")
-    if count > 1:
-        parts.append(f"extrait {index + 1} sur {count}")
-    return " — ".join(part for part in parts if part)
 
 
 def embedded_text(header: str, text: str) -> str:

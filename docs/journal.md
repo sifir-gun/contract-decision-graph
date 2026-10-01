@@ -2738,3 +2738,21 @@ Cause directe du résultat clé de la PR 1 : une fiche ou un long article en plu
 - **La mesure refuse un index périmé** : elle compare aussi l'empreinte du texte embarqué à celle que donnent les fichiers et le code. Vérifié sur la base locale le 01/10 : refus juste après la migration (« 64 extrait(s) manquant(s), 64 en trop : relancer ingest »), puis `ingest` (67 lignes remplacées), puis mesure identique à celle de la technique 1, l'en-tête n'ayant pas changé.
 - **Dans le cluster**, la tâche d'ingestion (crochet `post-install,post-upgrade`) lance `ingest` à chaque mise à jour : test du chart ; procédure dans `docs/exploitation.md`.
 - **Premier réglage ajouté depuis l'archive des configurations** (30/09) : obligatoire, `crag.search` rendait non rejouable toute décision scellée avant lui (« configuration illisible par le code courant »). Corrigé : valeur par défaut du modèle égale au comportement d'avant (relecture de l'archive), mais `load_config` exige toujours chaque réglage dans le fichier du projet, à toute profondeur. Tests : configuration archivée d'avant le réglage, rejouée à l'identique ; rejeu identique sous chaque réglage de la recherche.
+
+### Technique 2 : en-têtes de contexte déterministes — abandonnée
+
+Mesurée au commit 8fa5c3c, abandonnée au suivant. En-tête écrit par le code, sans LLM, avant l'embedding : référence, source en toutes lettres, hiérarchie officielle (articles Légifrance, intitulés lus le 01/10 sur la page de chaque article, lien au manifeste), intitulé de l'article (EUR-Lex), paragraphes qui commencent dans l'extrait, position de l'extrait. Exemple : « C. civ., art. 1170 — Code civil — Livre III : … > Section 2 : La validité du contrat > Sous-section 3 : Le contenu du contrat ».
+
+| rappel@4 moyen (technique 1 gardée → avec les en-têtes) | avant | après |
+|---|---|---|
+| avec filtre, toutes | 89,3 % | 94,0 % |
+| avec filtre, articles seuls | 84,1 % | 91,3 % |
+| sans filtre, toutes | 72,2 % | 75,0 % |
+| sans filtre, articles seuls | 55,6 % | 59,5 % |
+
+- **Requête par requête** (rappel@4) : avec le filtre, 4 requêtes gagnent (2 : plafond à 50 %, 14, 16, 17 : transferts, où RGPD 44 et 45 entrent dans les quatre premiers), **1 perd (requête 1, responsabilité de l'acheteur illimitée : 100 → 75 %)** ; sans filtre, 2 gagnent (14, 21), aucune ne perd. Le critère validé exige qu'aucune requête ne perde avec le filtre : **technique abandonnée**, sous les deux lectures du critère.
+- **Cause de la perte** : 1170 et 1171 sont dans la même sous-section et portent le même en-tête officiel. Avec lui, ils s'échangent : 1170 entre dans les quatre premiers (requête 2 gagne), 1171 en sort (requête 1 perd). Le contexte de section ne départage pas deux articles voisins ; seul leur texte le fait.
+- **Sans filtre, le rappel@8 recule** (89,3 → 83,3 %), même si le critère porte sur le rang 4.
+- **Aucune variante essayée** : changer l'en-tête jusqu'à trouver celle qui passe, sur 21 requêtes, reviendrait à l'ajuster à la mesure.
+- **Ce qui reste de la technique** : les intitulés et liens Légifrance dans le manifeste, avec leur test de présence (provenance de chaque article) ; la garde contre la troncature dans l'adaptateur fastembed. Avec l'en-tête long, deux extraits dépassaient 512 tokens (L442-1 extrait 2 : 543 ; RGPD 83 extrait 2 : 519) et fastembed les aurait tronqués en silence. Un passage tronqué est désormais refusé, jamais embarqué. Avec l'en-tête d'origine, aucun extrait ne dépasse : vérifié par l'ingestion locale, qui passe la garde.
+- **Retour vérifié** : après l'abandon, `ingest` (65 remplacés, 2 inchangés) puis mesure identique, octet pour octet, à celle de la technique 1.
