@@ -235,9 +235,17 @@ class InterruptedConfig(_Strict):
     max_resumes: Annotated[int, Field(gt=0)]
 
 
+class SearchConfig(_Strict):
+    """Recherche dans le corpus (ADR 006), mesurée par `mesure-recherche`."""
+
+    # un seul extrait par référence parmi les top_k, le plus proche de la requête
+    distinct_references: bool
+
+
 class CragConfig(_Strict):
     top_k: Annotated[int, Field(gt=0)]  # extraits rendus par recherche, soumis au juge
     max_passes: Annotated[int, Field(gt=0)]  # recherches au plus, réécritures comprises
+    search: SearchConfig
 
 
 Tier = Literal["main", "light"]

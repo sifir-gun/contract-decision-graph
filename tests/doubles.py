@@ -301,6 +301,16 @@ class FakeRetriever:
                 unique.setdefault((p.reference, p.text), p)
         return list(unique.values())[:k]
 
+    def indexed(self) -> list[tuple[str, str]]:
+        """Port CorpusSearch : extraits (référence, texte), chacun une fois."""
+        return list(
+            dict.fromkeys(
+                (p.reference, p.text)
+                for passages in self.passages.values()
+                for p in passages
+            )
+        )
+
 
 # horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre
 FIXED_NOW = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)

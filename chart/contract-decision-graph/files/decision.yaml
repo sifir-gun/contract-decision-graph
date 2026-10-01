@@ -273,6 +273,12 @@ corpus:
 crag:
   top_k: 4          # extraits par requête (une requête par type de clause), soumis au juge
   max_passes: 2     # recherches au plus : la première, puis une réécriture
+  # Recherche dans le corpus (ADR 006) : chaque réglage n'est retenu que si la mesure de la
+  # recherche seule progresse (mesure-recherche, détail requête par requête au journal).
+  search:
+    # un seul extrait par référence parmi les top_k, le plus proche : sans lui, une fiche
+    # ou un long article en plusieurs extraits occupe plusieurs rangs
+    distinct_references: true
 
 # Reprise d'un analyste sur erreur transitoire (réseau, API), par la RetryPolicy de
 # LangGraph, avant que la garde ne transforme l'échec en `failures` (J3).

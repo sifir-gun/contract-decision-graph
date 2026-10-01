@@ -9,11 +9,15 @@ from doubles import HashEmbedder
 from pydantic import ValidationError
 
 from cdg.adapters.postgres import rag_store
+from cdg.domain.config import SearchConfig
 from cdg.domain.corpus import ChunkRow
 
 pytestmark = pytest.mark.pg
 
 EMBEDDER = HashEmbedder()
+# recherche vectorielle seule, chaque extrait à son rang ; puis un extrait par référence
+VECTOR = SearchConfig(distinct_references=False)
+DISTINCT = SearchConfig(distinct_references=True)
 SOURCE = "test-retrieval"
 ACCORD, DELAI = "accord_traitement_donnees", "delai_paiement"
 CHUNKS = [
@@ -80,9 +84,11 @@ def corpus(pg):
         conn.execute("DELETE FROM rag_chunks WHERE source_id = %s", (SOURCE,))
 
 
-def search(pg, domain, text, kind, k=5, model=EMBEDDER.model):
+def search(pg, domain, text, kind, k=5, model=EMBEDDER.model, settings=VECTOR):
     query = EMBEDDER.embed_query(text)
-    return rag_store.search(pg.app, domain, query, kind=kind, k=k, model=model)
+    return rag_store.search(
+        pg.app, domain, query, kind=kind, k=k, model=model, settings=settings
+    )
 
 
 def test_insertion_idempotente(pg, corpus):
@@ -161,7 +167,7 @@ def test_rattachement_hors_du_domaine_refuse():
 
 def test_adaptateur_du_port_retriever_requete_en_texte(pg, corpus):
     embedder = HashEmbedder()
-    retriever = rag_store.PgvectorRetriever(pg.app, embedder)
+    retriever = rag_store.PgvectorRetriever(pg.app, embedder, VECTOR)
     found = retriever.search(
         "conformite", "sous-traitant instruction documentée", kind=ACCORD, k=5
     )
@@ -175,18 +181,21 @@ def test_adaptateur_du_port_filtre_sur_son_modele(pg, corpus):
     class OtherModel(HashEmbedder):
         model = "autre-modele"
 
-    retriever = rag_store.PgvectorRetriever(pg.app, OtherModel())
+    retriever = rag_store.PgvectorRetriever(pg.app, OtherModel(), VECTOR)
     assert retriever.search("conformite", "sous-traitant", kind=ACCORD, k=5) == []
 
 
 # --- recherche sans filtre (mesure de la recherche seule, ADR 006) ----------------------
 
 
+DUPLICATED = "Déséquilibre significatif entre les droits et obligations des parties."
+
+
 @pytest.fixture
 def duplicated(pg, corpus):
     """Un même extrait indexé dans deux domaines (une ligne par domaine, comme
     l'ingestion d'une source rattachée à des clauses de deux domaines)."""
-    text = "Déséquilibre significatif entre les droits et obligations des parties."
+    text = DUPLICATED
     rows = [
         ChunkRow(
             domain=domain,
@@ -206,7 +215,7 @@ def duplicated(pg, corpus):
 
 
 def test_sans_filtre_tout_le_corpus_du_modele_chaque_extrait_une_fois(pg, duplicated):
-    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder())
+    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), VECTOR)
     found = retriever.search_unfiltered("sous-traitant instruction documentée", k=50)
     # autres domaines et autres clauses compris ; l'extrait des deux domaines, une fois
     assert sorted(p.reference for p in found) == sorted(
@@ -218,11 +227,73 @@ def test_sans_filtre_tout_le_corpus_du_modele_chaque_extrait_une_fois(pg, duplic
 
 
 def test_sans_filtre_k_resultats_au_plus_et_modele_courant_seul(pg, corpus):
-    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder())
+    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), VECTOR)
     assert len(retriever.search_unfiltered("sécurité", k=2)) == 2
 
     class OtherModel(HashEmbedder):
         model = "autre-modele"
 
-    other = rag_store.PgvectorRetriever(pg.app, OtherModel())
+    other = rag_store.PgvectorRetriever(pg.app, OtherModel(), VECTOR)
     assert other.search_unfiltered("sous-traitant", k=50) == []
+
+
+def test_lecture_des_extraits_indexes_chacun_une_fois(pg, duplicated):
+    """Extraits indexés du modèle (référence, texte), chacun une fois, quel que soit le
+    réglage de la recherche : la mesure les compare aux fichiers du corpus."""
+    expected = sorted(
+        [(r, t) for _, r, t, _ in CHUNKS] + [("C. com., art. L442-1", DUPLICATED)]
+    )
+    for settings in (VECTOR, DISTINCT):
+        retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), settings)
+        assert sorted(retriever.indexed()) == expected
+
+
+# --- un extrait par référence (ADR 006, PR 2, technique 1) ------------------------------
+
+
+@pytest.fixture
+def long_article(pg, corpus):
+    """Un second extrait de l'article 28, très proche de la requête : l'article occupe
+    alors deux rangs, sauf si la recherche ne garde qu'un extrait par référence."""
+    text = (
+        "Le sous-traitant agit sur instruction documentée, y compris pour un transfert."
+    )
+    row = ChunkRow(
+        domain="conformite",
+        source_id=SOURCE,
+        reference="RGPD, art. 28",
+        text=text,
+        kinds=[ACCORD],
+        embedding_model=EMBEDDER.model,
+        embedding=EMBEDDER.embed_passages([text])[0],
+        chunk_index=1,
+    )
+    assert rag_store.insert(pg.admin, [row]) == 1
+
+
+QUERY = "sous-traitant instruction documentée"
+
+
+def test_sans_reglage_une_reference_occupe_plusieurs_rangs(pg, long_article):
+    found = search(pg, "conformite", QUERY, ACCORD, k=2)
+    assert [p.reference for p in found] == ["RGPD, art. 28", "RGPD, art. 28"]
+
+
+def test_un_extrait_par_reference_le_plus_proche(pg, long_article):
+    found = search(pg, "conformite", QUERY, ACCORD, k=2, settings=DISTINCT)
+    assert [p.reference for p in found] == ["RGPD, art. 28", "RGPD, art. 32"]
+    closest = search(pg, "conformite", QUERY, ACCORD, k=1)[0]
+    assert found[0].id == closest.id  # l'extrait gardé est le plus proche
+    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), DISTINCT)
+    assert [
+        p.reference for p in retriever.search("conformite", QUERY, kind=ACCORD, k=5)
+    ] == ["RGPD, art. 28", "RGPD, art. 32"]
+
+
+def test_sans_filtre_un_extrait_par_reference(pg, long_article, duplicated):
+    vector = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), VECTOR)
+    distinct = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), DISTINCT)
+    every = [p.reference for p in vector.search_unfiltered(QUERY, k=50)]
+    once = [p.reference for p in distinct.search_unfiltered(QUERY, k=50)]
+    assert every.count("RGPD, art. 28") == 2
+    assert once == list(dict.fromkeys(every))

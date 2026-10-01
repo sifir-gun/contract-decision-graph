@@ -2709,3 +2709,25 @@ Nouveau chantier, à la demande explicite du propriétaire, inspiré de l'articl
 
 - **Un extrait par référence parmi les k premiers** (diversité) : une fiche ou un article en plusieurs extraits occupe plusieurs rangs du CRAG ; ne garder que le meilleur extrait de chaque référence laisserait la place aux articles. Technique nouvelle, non prévue au chantier.
 - **Rattachement déclaré à revoir pour les deux écarts** (1211 pour la durée d'engagement, RGPD 28 pour les transferts) : décision du propriétaire, hors de ce chantier.
+
+## 2026-10-01 · Qualité de la recherche, PR 2 : améliorations mesurées (branche `recherche-amelioree`)
+
+Dernière PR du chantier (décision du propriétaire, PR 1 fusionnée le 01/10). Trois techniques, dans cet ordre, chacune gardée seulement si la mesure progresse selon le critère validé ; pas de reranker. Chaque réglage vit dans `crag.search` de la configuration : le garder change l'empreinte de configuration. `config-check` le 01/10 avant tout changement : aucun contrat en attente dans la base locale (44 contrats, tous terminés).
+
+**Lecture du critère.** La formule validée (« au moins une requête gagne et aucune ne perd avec le filtre ») admet deux lectures : une requête qui gagne dans l'un ou l'autre mode, ou une requête qui gagne avec le filtre. Chaque technique est jugée sous les deux lectures, et sur les deux portées (toutes les références, articles seuls) ; si elles divergeaient, la décision reviendrait au propriétaire.
+
+### Technique 1 : un seul extrait par référence parmi les k premiers — gardée
+
+Cause directe du résultat clé de la PR 1 : une fiche ou un long article en plusieurs extraits occupait plusieurs des quatre rangs du CRAG. Réglage `crag.search.distinct_references` : la recherche garde, pour chaque référence, l'extrait le plus proche (`DISTINCT ON (reference)` avant l'ordre par distance, recherche toujours exacte), avec et sans filtre. Sans le réglage, la mesure redonne exactement la référence de la PR 1.
+
+| rappel@4 moyen | avant | après |
+|---|---|---|
+| avec filtre, toutes | 75,4 % | **89,3 %** |
+| avec filtre, articles seuls | 62,7 % | **84,1 %** |
+| sans filtre, toutes | 57,5 % | **72,2 %** |
+| sans filtre, articles seuls | 30,2 % | **55,6 %** |
+
+- **Requête par requête** (rappel@4, toutes les références) : avec le filtre, 7 requêtes gagnent (1 à 4 : plafonds de responsabilité, 13 : accord de traitement, 14 et 15 : transferts), aucune ne perd ; sans filtre, 8 gagnent (11 à 17, 20), aucune ne perd. Mêmes nombres pour les articles seuls. Critère rempli sous les deux lectures.
+- **Au rang du CRAG, le juge voit désormais l'article attendu dans 84,1 % des cas** (62,7 % avant) ; pour les plafonds de responsabilité, 1231-3 et, selon la requête, 1170 entrent dans les quatre premiers.
+- **La précision baisse**, comme attendu : quatre références distinctes au lieu de deux, dont plus de non attendues. Précision@4 avec filtre de 90,5 % à 83,3 % ; sans filtre, de 55,6 % à 45,2 %. Le juge de pertinence trie ces extraits ; le critère validé ne porte que sur le rappel.
+- **Reste hors des quatre premiers, avec le filtre** : 1170 pour les plafonds à 50 et 80 % (cinquième des cinq références rattachées, derrière 1171 non attendu) ; RGPD 45 pour un transfert sans garantie ; RGPD 44 pour les transferts à clauses ad hoc et types, où l'article 4 (définitions, non attendu) et l'article 40 prennent un rang ; et les deux écarts au rattachement (1211, RGPD 28), qu'aucun réglage de la recherche ne peut rendre.

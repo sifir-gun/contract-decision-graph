@@ -124,17 +124,14 @@ class EvaluationSetOutdated(Exception):
     démonstration : une requête sans références attendues ne serait pas mesurée."""
 
 
-def check_index(corpus: CorpusSearch, max_words: int, probe: str) -> int:
+def check_index(corpus: CorpusSearch, max_words: int) -> int:
     """Extraits indexés du modèle, comparés un à un (référence, texte) aux extraits que
     donnent les fichiers du corpus ; leur nombre, s'ils sont identiques."""
     wanted = {
         (meta["reference"], meta["text"])
         for meta, _, _ in ingestion.pending_chunks(max_words)
     }
-    found = [
-        (p.reference, p.text)
-        for p in corpus.search_unfiltered(probe, k=len(wanted) + 1)
-    ]
+    found = corpus.indexed()
     indexed = set(found)
     if len(found) != len(indexed) or indexed != wanted:
         raise IndexMismatch(
@@ -236,14 +233,16 @@ def run(
     corpus: CorpusSearch,
     ks: Sequence[int] = DEFAULT_KS,
 ) -> dict[str, Any]:
-    """Mesure de la recherche seule (commande `mesure-recherche`) : le jeu couvre-t-il
-    exactement les constats du jeu de démonstration, le corpus indexé est-il celui des
-    fichiers, puis la mesure. Tout écart est une erreur explicite."""
+    """Mesure de la recherche seule (commande `mesure-recherche`), avec les réglages de
+    recherche que l'appelant a donnés à l'adaptateur, ceux de la configuration : le jeu
+    couvre-t-il exactement les constats du jeu de démonstration, le corpus indexé est-il
+    celui des fichiers, puis la mesure. Tout écart est une erreur explicite."""
     queries = load_queries()
     _check_set(queries, config)
-    chunks = check_index(corpus, config.corpus.chunk_max_words, queries[0].query)
+    chunks = check_index(corpus, config.corpus.chunk_max_words)
     ranks = sorted(set(ks))
     return {
+        "recherche": config.crag.search.model_dump(),
         "extraits": chunks,
         "requetes": len(queries),
         "k": ranks,

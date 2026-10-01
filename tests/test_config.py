@@ -78,7 +78,11 @@ def test_configuration_du_projet_conforme_a_la_spec():
         "light": "claude-haiku-4-5-20251001",
     }
     assert cfg.llm.model("light") == "ministral-8b-2512"
-    assert cfg.crag.model_dump() == {"top_k": 4, "max_passes": 2}
+    assert cfg.crag.model_dump() == {
+        "top_k": 4,
+        "max_passes": 2,
+        "search": {"distinct_references": True},  # ADR 006
+    }
     assert cfg.analyst_retry.model_dump() == {
         "max_attempts": 3,
         "initial_interval_seconds": 1.0,
@@ -191,6 +195,9 @@ _DELETE = object()
         ("crag.top_k", 0),
         ("crag.max_passes", 0),
         ("crag.max_passes", 2.0),  # mode strict
+        ("crag.search", _DELETE),  # réglage explicite de la recherche (ADR 006)
+        ("crag.search.distinct_references", _DELETE),
+        ("crag.search.distinct_references", "oui"),  # mode strict
         ("analyst_retry", _DELETE),
         ("analyst_retry.max_attempts", 0),
         ("analyst_retry.initial_interval_seconds", -1.0),

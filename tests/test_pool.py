@@ -91,7 +91,7 @@ def test_journal_d_audit_par_le_pool(pool, journal):
 
 @pytest.mark.pg
 def test_recherche_par_le_pool(pool):
-    retriever = rag_store.PgvectorRetriever(pool, HashEmbedder())
+    retriever = rag_store.PgvectorRetriever(pool, HashEmbedder(), CONFIG.crag.search)
     assert isinstance(
         retriever.search("financier", "délai", kind="delai_paiement", k=1), list
     )

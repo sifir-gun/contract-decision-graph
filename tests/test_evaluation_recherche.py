@@ -254,7 +254,7 @@ def test_articles_seuls_les_fiches_occupent_leur_rang_sans_compter():
 
 
 def test_corpus_indexe_conforme_aux_fichiers():
-    assert evaluation.check_index(corpus_double(), MAX_WORDS, "requête") == len(
+    assert evaluation.check_index(corpus_double(), MAX_WORDS) == len(
         ingestion.pending_chunks(MAX_WORDS)
     )
 
@@ -270,7 +270,7 @@ def test_corpus_indexe_different_des_fichiers_erreur_explicite(double, detail):
     with pytest.raises(
         evaluation.IndexMismatch, match=re.escape(detail) + ".*relancer ingest"
     ):
-        evaluation.check_index(double, MAX_WORDS, "requête")
+        evaluation.check_index(double, MAX_WORDS)
 
 
 def test_jeu_en_retard_sur_le_jeu_de_demonstration_erreur_explicite(monkeypatch):
@@ -287,6 +287,8 @@ def test_run_verifie_puis_mesure():
     double = corpus_double()
     report = evaluation.run(CONFIG, double, double, ks=(1, 4))
     assert report["requetes"] == 21 and report["k"] == [1, 4]
+    # réglages de la recherche mesurée, ceux de la configuration
+    assert report["recherche"] == CONFIG.crag.search.model_dump()
     assert report["extraits"] == len(ingestion.pending_chunks(MAX_WORDS))
     assert len(report["par_requete"]) == 21
 
@@ -318,6 +320,7 @@ def test_commande_mesure_recherche_sur_le_corpus_indexe(
         code, out = run_cli(capsys, "mesure-recherche", "--k", "60,1,4,4")
         assert code == 0 and out["mesure_recherche"] == "ok"
         assert out["modele"] == "hash-test" and out["k"] == [1, 4, 60]
+        assert out["recherche"] == CONFIG.crag.search.model_dump()
         assert out["requetes"] == 21
         assert out["extraits"] == len(ingestion.pending_chunks(MAX_WORDS))
         rows = by_query(out)
