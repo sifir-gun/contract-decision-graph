@@ -72,6 +72,18 @@ def test_chaines_de_connexion_admin_et_app_role(clean_env, tmp_path):
     )
 
 
+def test_negociation_kerberos_desactivee_dans_toute_chaine_de_connexion(
+    clean_env, tmp_path
+):
+    """Le projet n'utilise pas Kerberos : libpq ne tente jamais de chiffrement GSSAPI
+    (gssencmode=disable). Le chemin de code de la copie d'OpenSSL 1.1.1k que la roue
+    arm64 de psycopg-binary embarque pour Kerberos n'est ainsi jamais pris (journal,
+    01/10/2026)."""
+    settings.load_env(_env_file(tmp_path, **FULL))
+    for chaine in (conninfo.admin_conninfo(), conninfo.app_conninfo()):
+        assert conninfo_to_dict(chaine)["gssencmode"] == "disable"
+
+
 @pytest.mark.parametrize(
     "missing", ["POSTGRES_PORT", "POSTGRES_PASSWORD", "APP_DB_PASSWORD"]
 )
