@@ -61,6 +61,15 @@ def test_references_ecartees_du_corpus_et_jamais_attendues():
             assert ref.reference not in expected, (q.query, ref.reference)
 
 
+def test_jeu_fige_le_2026_10_01():
+    """Jeu validé puis figé avant toute mesure : le modifier change la mesure. Toute
+    modification est motivée au journal, chiffres avant et après, et ce test suivi."""
+    expected = [r for q in QUERIES for r in q.expected]
+    assert len(expected) == 55
+    assert sum(r.type == "article" for r in expected) == 34
+    assert all(sum(r.type == "fiche" for r in q.expected) == 1 for q in QUERIES)
+
+
 @pytest.mark.parametrize("field", ["justification", "quote"])
 def test_justification_et_citation_jamais_vides(field):
     assert all(getattr(r, field).strip() for q in QUERIES for r in q.expected)

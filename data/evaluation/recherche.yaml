@@ -15,7 +15,9 @@
 # (tests/test_evaluation_recherche.py) ; les références proches écartées sont motivées
 # (rejected).
 #
-# Brouillon soumis à validation : figé après validation par le propriétaire du projet.
+# Établi et validé par des non-juristes, comme les fiches (ADR 006) : validé le
+# 2026-10-01 par le propriétaire du projet, avant toute mesure, puis figé. Le modifier
+# change la mesure : toute modification est motivée au journal, chiffres avant et après.
 
 queries:
   # --- juridique ---------------------------------------------------------------------
@@ -264,6 +266,10 @@ queries:
     contracts: [demo-02-go-nettoyage]
     expected:
       - *transfert_44
+      - reference: "RGPD, art. 28"
+        type: article
+        justification: le contrat 02 fait traiter des données par le prestataire pour le compte de l'acheteur, donc par un sous-traitant, dont le contrat prévoit des instructions documentées pour les transferts ; une localisation non précisée laisse ce point à vérifier
+        quote: "y compris en ce qui concerne les transferts de données à caractère personnel vers un pays tiers ou à une organisation internationale"
       - reference: "Fiche projet : Transferts de données hors de l'Union européenne"
         type: fiche
         justification: énonce la règle du constat
@@ -290,7 +296,7 @@ queries:
         quote: "Clauses contractuelles ad hoc sans mention d'autorisation : pénalité de score"
     rejected: &transfert_clauses_ecartees
       - reference: "RGPD, art. 28"
-        reason: piège lexical, ses clauses contractuelles types encadrent l'accord de sous-traitance, pas un transfert
+        reason: piège lexical, ses clauses contractuelles types encadrent l'accord de sous-traitance, pas un transfert ; son point 3 a) (instructions pour les transferts) ne dit rien de la garantie que juge le constat
       - reference: "RGPD, art. 45"
         reason: décision d'adéquation, un autre fondement que celui du contrat
 
