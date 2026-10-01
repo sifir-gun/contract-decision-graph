@@ -177,3 +177,52 @@ def test_adaptateur_du_port_filtre_sur_son_modele(pg, corpus):
 
     retriever = rag_store.PgvectorRetriever(pg.app, OtherModel())
     assert retriever.search("conformite", "sous-traitant", kind=ACCORD, k=5) == []
+
+
+# --- recherche sans filtre (mesure de la recherche seule, ADR 006) ----------------------
+
+
+@pytest.fixture
+def duplicated(pg, corpus):
+    """Un même extrait indexé dans deux domaines (une ligne par domaine, comme
+    l'ingestion d'une source rattachée à des clauses de deux domaines)."""
+    text = "Déséquilibre significatif entre les droits et obligations des parties."
+    rows = [
+        ChunkRow(
+            domain=domain,
+            source_id=SOURCE,
+            reference="C. com., art. L442-1",
+            text=text,
+            kinds=[kind],
+            embedding_model=EMBEDDER.model,
+            embedding=EMBEDDER.embed_passages([text])[0],
+        )
+        for domain, kind in [
+            ("juridique", "responsabilite_acheteur"),
+            ("operationnel", "preavis_resiliation"),
+        ]
+    ]
+    assert rag_store.insert(pg.admin, rows) == 2
+
+
+def test_sans_filtre_tout_le_corpus_du_modele_chaque_extrait_une_fois(pg, duplicated):
+    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder())
+    found = retriever.search_unfiltered("sous-traitant instruction documentée", k=50)
+    # autres domaines et autres clauses compris ; l'extrait des deux domaines, une fois
+    assert sorted(p.reference for p in found) == sorted(
+        [r for _, r, _, _ in CHUNKS] + ["C. com., art. L442-1"]
+    )
+    distances = [p.distance for p in found]
+    assert distances == sorted(distances)
+    assert found[0].text.startswith("Le sous-traitant agit sur instruction documentée")
+
+
+def test_sans_filtre_k_resultats_au_plus_et_modele_courant_seul(pg, corpus):
+    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder())
+    assert len(retriever.search_unfiltered("sécurité", k=2)) == 2
+
+    class OtherModel(HashEmbedder):
+        model = "autre-modele"
+
+    other = rag_store.PgvectorRetriever(pg.app, OtherModel())
+    assert other.search_unfiltered("sous-traitant", k=50) == []

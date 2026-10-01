@@ -277,18 +277,29 @@ def passage(
 
 
 class FakeRetriever:
-    """Doublure du port Retriever : extraits fixes par domaine, filtrés par clause comme
-    l'adaptateur ; requêtes et clauses enregistrées."""
+    """Doublure des ports Retriever et CorpusSearch : extraits fixes par domaine, filtrés
+    par clause comme l'adaptateur ; requêtes et clauses enregistrées."""
 
     def __init__(self, passages: dict | None = None):
         self.passages = passages or {}
         self.calls: list[tuple[str, str, int]] = []
         self.searched_kinds: list[str] = []
+        self.unfiltered_calls: list[tuple[str, int]] = []
 
     def search(self, domain, query: str, *, kind: str, k: int) -> list[Passage]:
         self.calls.append((domain, query, k))
         self.searched_kinds.append(kind)
         return [p for p in self.passages.get(domain, []) if kind in p.kinds][:k]
+
+    def search_unfiltered(self, query: str, *, k: int) -> list[Passage]:
+        """Port CorpusSearch : tous les extraits, chacun une fois (même référence, même
+        texte), dans l'ordre des domaines puis des extraits."""
+        self.unfiltered_calls.append((query, k))
+        unique: dict[tuple[str, str], Passage] = {}
+        for passages in self.passages.values():
+            for p in passages:
+                unique.setdefault((p.reference, p.text), p)
+        return list(unique.values())[:k]
 
 
 # horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre

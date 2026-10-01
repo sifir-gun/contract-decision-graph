@@ -42,7 +42,7 @@ from cdg.adapters.web import acces, sante
 from cdg.adapters.web import app as web_app
 from cdg.adapters.web import security as web_security
 from cdg.adapters.web import server as web_server
-from cdg.application import demo_set, ingestion
+from cdg.application import demo_set, evaluation, ingestion
 from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
@@ -282,6 +282,21 @@ def _ingest(args: argparse.Namespace) -> dict:
     rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
     summary = rag_store.sync(conninfo.admin_conninfo, rows, embedder.model)
     return {"ingest": "ok", "model": embedder.model, **summary}
+
+
+def _mesure_recherche(args: argparse.Namespace) -> dict:
+    """Mesure de la recherche seule, sans LLM (ADR 006) : modèle d'embedding local,
+    corpus indexé lu avec le rôle applicatif."""
+    config = load_config()
+    embedder = fastembed.FastembedEmbedder(
+        config.embedding,
+        settings.embedding_cache_dir(),
+        threads=EMBEDDER_THREADS["threads"],
+        batch_size=EMBEDDER_THREADS["batch_size"],
+    )
+    retriever = rag_store.PgvectorRetriever(app_pool(), embedder)
+    report = evaluation.run(config, retriever, retriever, args.k)
+    return {"mesure_recherche": "ok", "modele": embedder.model, **report}
 
 
 def _graph(config: DecisionConfig, deps: Deps):
@@ -792,6 +807,16 @@ def _positive(text: str) -> int:
     return value
 
 
+def _ranks(text: str) -> tuple[int, ...]:
+    """Rangs k de la mesure, séparés par des virgules."""
+    try:
+        return tuple(_positive(part) for part in text.split(","))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"rangs entiers ≥ 1 séparés par des virgules : {text!r}"
+        ) from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cdg", description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -840,6 +865,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="nettoie, découpe et indexe le corpus (data/corpus) dans rag_chunks, "
         "identifiants administrateur ; rejouable, supprime les extraits disparus",
     ).set_defaults(handler=_ingest)
+
+    mesure = sub.add_parser(
+        "mesure-recherche",
+        help="mesure la recherche seule, sans LLM : rappel et précision au rang k des "
+        "références attendues (data/evaluation/recherche.yaml), avec et sans le filtre "
+        "de rattachement ; corpus indexé par ingest, modèle d'embedding local (ADR 006)",
+    )
+    mesure.add_argument(
+        "--k",
+        type=_ranks,
+        default=evaluation.DEFAULT_KS,
+        help="rangs mesurés, séparés par des virgules (défaut : "
+        + ",".join(map(str, evaluation.DEFAULT_KS))
+        + ")",
+    )
+    mesure.set_defaults(handler=_mesure_recherche)
 
     OPERATOR_HELP = (
         "qui agit : identifiant d'opérateur non nominatif (minuscules, chiffres, "

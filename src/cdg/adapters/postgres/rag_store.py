@@ -1,5 +1,6 @@
 """Corpus RAG dans PostgreSQL (table rag_chunks) : contrôle de dimension, insertion,
-synchronisation et recherche exacte filtrée. Les migrations sont dans `migrations.py`."""
+synchronisation, recherche exacte filtrée (CRAG) et sans filtre (mesure de la recherche).
+Les migrations sont dans `migrations.py`."""
 
 import psycopg
 from pgvector import Vector
@@ -101,6 +102,32 @@ def search(
             " ORDER BY distance, id LIMIT %s",
             (Vector(query), domain, kind, model, k),
         ).fetchall()
+    return _passages(rows)
+
+
+def search_unfiltered(
+    source: Source, query: list[float], *, k: int, model: str
+) -> list[Passage]:
+    """Recherche exacte sans filtre de domaine ni de clause, sur le seul modèle : réservée
+    à la mesure de la recherche (ADR 006). Un extrait indexé dans plusieurs domaines (une
+    ligne par domaine) n'est rendu qu'une fois, par sa première ligne."""
+    with connection(source) as conn:
+        register_vector(conn)
+        cur = conn.cursor(row_factory=tuple_row)
+        rows = cur.execute(
+            "SELECT id, domain, source_id, reference, text, distance, valid_until, note,"
+            " kinds FROM ("
+            " SELECT DISTINCT ON (reference, content_hash) id, domain, source_id,"
+            " reference, text, embedding <=> %s AS distance, valid_until, note, kinds"
+            " FROM rag_chunks WHERE embedding_model = %s"
+            " ORDER BY reference, content_hash, id) AS uniques"
+            " ORDER BY distance, id LIMIT %s",
+            (Vector(query), model, k),
+        ).fetchall()
+    return _passages(rows)
+
+
+def _passages(rows: list[tuple]) -> list[Passage]:
     return [
         Passage(
             id=r[0],
@@ -118,8 +145,9 @@ def search(
 
 
 class PgvectorRetriever:
-    """Adaptateur du port Retriever : vecteur de la requête par l'Embedder, puis recherche
-    exacte filtrée sur le domaine, le type de clause et le modèle de cet Embedder."""
+    """Adaptateur des ports Retriever et CorpusSearch : vecteur de la requête par
+    l'Embedder, puis recherche exacte filtrée sur le domaine, le type de clause et le
+    modèle de cet Embedder (CRAG), ou sur le seul modèle (mesure de la recherche)."""
 
     def __init__(self, source: Source, embedder: Embedder):
         self._source = source
@@ -130,6 +158,11 @@ class PgvectorRetriever:
         return search(
             self._source, domain, vector, kind=kind, k=k, model=self._embedder.model
         )
+
+    def search_unfiltered(self, query: str, *, k: int) -> list[Passage]:
+        """Port CorpusSearch : mesure de la recherche seule, jamais le CRAG."""
+        vector = self._embedder.embed_query(query)
+        return search_unfiltered(self._source, vector, k=k, model=self._embedder.model)
 
 
 # métadonnées stockées avec le texte : si l'une change (fin de validité, note,
