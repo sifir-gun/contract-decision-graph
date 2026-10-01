@@ -1,0 +1,384 @@
+# Jeu d'évaluation de la recherche seule (chantier « qualité de la recherche », PR 1).
+#
+# Une entrée par requête du CRAG que donnent les constats du jeu de démonstration
+# (data/contracts/attendus.yaml) : 24 constats portés par une clause, 21 requêtes
+# distinctes. Seule la première requête est mesurée, écrite par le code
+# (crag.clause_query) ; la réécriture appelle le LLM.
+#
+# Références attendues : choisies à la lecture du texte de chaque article ou fiche, jamais
+# d'après le rattachement déclaré (manifest.yaml, en-tête « clauses » des fiches,
+# SOURCES.md), que la recherche filtrée utilise déjà. Critère : une référence est attendue
+# quand son texte énonce la règle qui porte sur l'objet de la clause et sur la situation
+# que décrit le constat. Une définition, une sanction ou une procédure voisine ne l'est
+# pas. Une fiche est jugée sur son corps, comme un article. Chaque choix est justifié par
+# un extrait mot pour mot (quote), vérifié dans le texte de la référence
+# (tests/test_evaluation_recherche.py) ; les références proches écartées sont motivées
+# (rejected).
+#
+# Brouillon soumis à validation : figé après validation par le propriétaire du projet.
+
+queries:
+  # --- juridique ---------------------------------------------------------------------
+
+  - domain: juridique
+    kind: responsabilite_acheteur
+    query: "responsabilité contractuelle des parties : plafonds de responsabilité ; plafond de responsabilité de l'acheteur : illimitée"
+    contracts: [demo-06-no-go-conseil]
+    expected:
+      - reference: "C. civ., art. 1171"
+        type: article
+        justification: une responsabilité illimitée de l'acheteur, face à celle plafonnée du fournisseur, est le déséquilibre significatif que l'article répute non écrit
+        quote: "toute clause non négociable, déterminée à l'avance par l'une des parties, qui crée un déséquilibre significatif entre les droits et obligations des parties au contrat est réputée non écrite"
+      - reference: "C. com., art. L442-1"
+        type: article
+        justification: même déséquilibre significatif, entre professionnels, qui engage la responsabilité de son auteur
+        quote: "De soumettre ou de tenter de soumettre l'autre partie à des obligations créant un déséquilibre significatif dans les droits et obligations des parties"
+      - reference: "C. civ., art. 1231-3"
+        type: article
+        justification: mesure légale des dommages et intérêts dus par le débiteur, seule borne d'une responsabilité sans plafond
+        quote: "Le débiteur n'est tenu que des dommages et intérêts qui ont été prévus ou qui pouvaient être prévus lors de la conclusion du contrat"
+      - reference: "Fiche projet : Plafonds et clauses de responsabilité"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Le projet bloque un contrat qui laisse illimitée la responsabilité de l'acheteur"
+    rejected:
+      - reference: "C. civ., art. 1170"
+        reason: protège l'obligation essentielle contre une clause qui la vide de sa substance ; une responsabilité sans plafond ne vide aucune obligation
+
+  - domain: juridique
+    kind: responsabilite_fournisseur
+    query: "responsabilité contractuelle des parties : plafonds de responsabilité ; plafond de responsabilité du fournisseur : 50 % du montant annuel"
+    contracts: [demo-03-go-logiciel]
+    expected: &plafond_fournisseur
+      - reference: "C. civ., art. 1170"
+        type: article
+        justification: un plafond très bas peut vider de sa substance l'obligation essentielle du fournisseur, clause que l'article répute non écrite
+        quote: "Toute clause qui prive de sa substance l'obligation essentielle du débiteur est réputée non écrite."
+      - reference: "C. civ., art. 1231-3"
+        type: article
+        justification: mesure légale des dommages et intérêts, à laquelle se compare un plafond conventionnel
+        quote: "Le débiteur n'est tenu que des dommages et intérêts qui ont été prévus ou qui pouvaient être prévus lors de la conclusion du contrat"
+      - reference: "Fiche projet : Plafonds et clauses de responsabilité"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "pénalise un plafond de responsabilité du fournisseur inférieur à 100 % du montant annuel du contrat"
+    rejected: &plafond_fournisseur_ecartees
+      - reference: "C. civ., art. 1171"
+        reason: le constat juge le niveau du plafond du fournisseur au regard d'un minimum, pas un déséquilibre entre les parties
+      - reference: "C. com., art. L442-1"
+        reason: même motif que l'article 1171 (déséquilibre significatif)
+
+  - domain: juridique
+    kind: responsabilite_fournisseur
+    query: "responsabilité contractuelle des parties : plafonds de responsabilité ; plafond de responsabilité du fournisseur : 60 % du montant annuel"
+    contracts: [demo-05-go-reserves-hebergement]
+    expected: *plafond_fournisseur
+    rejected: *plafond_fournisseur_ecartees
+
+  - domain: juridique
+    kind: responsabilite_fournisseur
+    query: "responsabilité contractuelle des parties : plafonds de responsabilité ; plafond de responsabilité du fournisseur : 80 % du montant annuel"
+    contracts: [demo-04-go-reserves-transport]
+    expected: *plafond_fournisseur
+    rejected: *plafond_fournisseur_ecartees
+
+  # --- financier ---------------------------------------------------------------------
+
+  - domain: financier
+    kind: revision_prix
+    query: "conditions financières du contrat : prix, paiement, pénalités ; révision du prix : non plafonnée"
+    contracts: [demo-11-piege-injection]
+    expected:
+      - reference: "C. mon. fin., art. L112-2"
+        type: article
+        justification: seul texte du corpus sur la révision des prix ; il encadre l'indice d'une révision, sans en fixer le plafond
+        quote: "est interdite toute clause prévoyant des indexations fondées sur le salaire minimum de croissance, sur le niveau général des prix ou des salaires"
+      - reference: "Fiche projet : Révision et indexation des prix"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Le projet bloque une révision de prix non plafonnée"
+
+  - domain: financier
+    kind: penalites_execution
+    query: "conditions financières du contrat : prix, paiement, pénalités ; pénalités d'exécution à la charge du fournisseur : 2 % du montant du contrat"
+    contracts: [demo-04-go-reserves-transport]
+    expected:
+      - reference: "C. civ., art. 1231-5"
+        type: article
+        justification: régime de la clause pénale ; une pénalité dérisoire peut être augmentée par le juge
+        quote: "le juge peut, même d'office, modérer ou augmenter la pénalité ainsi convenue si elle est manifestement excessive ou dérisoire"
+      - reference: "Fiche projet : Pénalités d'exécution (clause pénale)"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "absentes ou plafonnées plus bas, le domaine financier est pénalisé"
+    rejected: &penalites_ecartees
+      - reference: "C. com., art. L442-1"
+        reason: piège lexical, ses « pénalités logistiques » ne sont pas des pénalités d'exécution du fournisseur
+      - reference: "C. com., art. L441-10"
+        reason: piège lexical, ses pénalités de retard de paiement sont dues par l'acheteur
+      - reference: "Fiche projet : Délais de paiement entre professionnels"
+        reason: même piège ; elle distingue elle-même ces pénalités des pénalités d'exécution
+
+  - domain: financier
+    kind: penalites_execution
+    query: "conditions financières du contrat : prix, paiement, pénalités ; pénalités d'exécution à la charge du fournisseur : clause absente"
+    contracts: [demo-09-escalade-mobilier, demo-12-piege-fausses-pistes]
+    expected:
+      - reference: "C. civ., art. 1231-5"
+        type: article
+        justification: régime de la clause pénale, la clause dont le constat relève l'absence
+        quote: "Lorsque le contrat stipule que celui qui manquera de l'exécuter paiera une certaine somme à titre de dommages et intérêts"
+      - reference: "Fiche projet : Pénalités d'exécution (clause pénale)"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "absentes ou plafonnées plus bas, le domaine financier est pénalisé"
+    rejected: *penalites_ecartees
+
+  - domain: financier
+    kind: delai_paiement
+    query: "conditions financières du contrat : prix, paiement, pénalités ; délai de paiement par l'acheteur : 60 jours après une facture périodique"
+    contracts: [demo-07-no-go-centre-contacts]
+    expected:
+      - reference: "C. com., art. L441-10"
+        type: article
+        justification: délai maximal après une facture périodique
+        quote: "En cas de facture périodique au sens du 3 du I de l'article 289 du code général des impôts, le délai convenu entre les parties ne peut dépasser quarante-cinq jours"
+      - &fiche_delai_penalise
+        reference: "Fiche projet : Délais de paiement entre professionnels"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Le projet pénalise un délai de paiement supérieur à 60 jours après la date de facture, à 45 jours fin de mois ou à 45 jours après une facture périodique, ainsi qu'un délai stipulé mais non chiffré"
+    rejected: &delai_ecartees
+      - reference: "C. com., art. L442-1"
+        reason: piège lexical, son 4° vise des délais de paiement discriminatoires, pas leur durée
+
+  - domain: financier
+    kind: delai_paiement
+    query: "conditions financières du contrat : prix, paiement, pénalités ; délai de paiement par l'acheteur : 60 jours fin de mois"
+    contracts: [demo-05-go-reserves-hebergement]
+    expected:
+      - reference: "C. com., art. L441-10"
+        type: article
+        justification: délai maximal en fin de mois
+        quote: "un délai maximal de quarante-cinq jours fin de mois après la date d'émission de la facture peut être convenu entre les parties"
+      - *fiche_delai_penalise
+    rejected: *delai_ecartees
+
+  - domain: financier
+    kind: delai_paiement
+    query: "conditions financières du contrat : prix, paiement, pénalités ; délai de paiement par l'acheteur : 90 jours date de facture"
+    contracts: [demo-06-no-go-conseil]
+    expected:
+      - reference: "C. com., art. L441-10"
+        type: article
+        justification: délai maximal après la date de facture
+        quote: "Le délai convenu entre les parties pour régler les sommes dues ne peut dépasser soixante jours après la date d'émission de la facture."
+      - *fiche_delai_penalise
+    rejected: *delai_ecartees
+
+  - domain: financier
+    kind: delai_paiement
+    query: "conditions financières du contrat : prix, paiement, pénalités ; délai de paiement par l'acheteur : clause absente"
+    contracts: [demo-02-go-nettoyage]
+    expected:
+      - reference: "C. com., art. L441-10"
+        type: article
+        justification: délai qui s'applique quand le contrat n'en stipule aucun
+        quote: "Sauf dispositions contraires figurant aux conditions de vente ou convenues entre les parties, le délai de règlement des sommes dues ne peut dépasser trente jours"
+      - reference: "Fiche projet : Délais de paiement entre professionnels"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Un contrat qui ne stipule pas de délai de paiement n'est pas pénalisé ; le constat rappelle le délai de trente jours"
+    rejected: *delai_ecartees
+
+  - domain: financier
+    kind: delai_paiement
+    query: "conditions financières du contrat : prix, paiement, pénalités ; délai de paiement par l'acheteur : non chiffré"
+    contracts: [demo-09-escalade-mobilier]
+    expected:
+      - reference: "C. com., art. L441-10"
+        type: article
+        justification: délais maximaux auxquels un délai non chiffré ne peut pas être comparé
+        quote: "Le délai convenu entre les parties pour régler les sommes dues ne peut dépasser soixante jours après la date d'émission de la facture."
+      - *fiche_delai_penalise
+    rejected: *delai_ecartees
+
+  # --- conformite --------------------------------------------------------------------
+
+  - domain: conformite
+    kind: accord_traitement_donnees
+    query: "protection des données personnelles : sous-traitance, transferts hors de l'Union européenne ; accord de sous-traitance des données personnelles : clause absente"
+    contracts: [demo-07-no-go-centre-contacts]
+    expected:
+      - reference: "RGPD, art. 28"
+        type: article
+        justification: exige un contrat pour tout traitement par un sous-traitant
+        quote: "Le traitement par un sous-traitant est régi par un contrat ou un autre acte juridique"
+      - reference: "Fiche projet : Sous-traitance de données personnelles"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Le projet bloque un contrat qui fait traiter des données personnelles par le fournisseur sans accord de traitement des données"
+    rejected:
+      - reference: "RGPD, art. 4"
+        reason: définitions (dont celle du sous-traitant), pas l'exigence d'un accord
+      - reference: "RGPD, art. 32"
+        reason: obligation de sécurité que l'accord doit reprendre, pas l'exigence d'un accord
+      - reference: "RGPD, art. 82"
+        reason: responsabilité civile, conséquence d'une violation, pas la règle
+      - reference: "RGPD, art. 83"
+        reason: amendes, conséquence d'une violation, pas la règle
+
+  - domain: conformite
+    kind: transfert_hors_ue
+    query: "protection des données personnelles : sous-traitance, transferts hors de l'Union européenne ; transfert de données personnelles hors de l'Union européenne : aucune garantie"
+    contracts: [demo-08-no-go-application]
+    expected:
+      - &transfert_44
+        reference: "RGPD, art. 44"
+        type: article
+        justification: principe, tout transfert hors de l'Union exige les conditions du chapitre
+        quote: "ne peut avoir lieu que si, sous réserve des autres dispositions du présent règlement, les conditions définies dans le présent chapitre sont respectées par le responsable du traitement et le sous-traitant"
+      - reference: "RGPD, art. 45"
+        type: article
+        justification: premier fondement possible d'un transfert, absent ici
+        quote: "Un transfert de données à caractère personnel vers un pays tiers ou à une organisation internationale peut avoir lieu lorsque la Commission a constaté par voie de décision que le pays tiers"
+      - reference: "RGPD, art. 46"
+        type: article
+        justification: à défaut de décision d'adéquation, transfert subordonné à des garanties appropriées, absentes ici
+        quote: "ne peut transférer des données à caractère personnel vers un pays tiers ou à une organisation internationale que s'il a prévu des garanties appropriées"
+      - reference: "Fiche projet : Transferts de données hors de l'Union européenne"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Transfert annoncé sans garantie nommée, y compris sur le seul fondement d'une dérogation, dont le texte n'est pas dans le corpus : contrat bloqué"
+    rejected:
+      - reference: "RGPD, art. 40"
+        reason: code de conduite, une garantie parmi celles que l'article 46 énumère déjà
+      - reference: "RGPD, art. 42"
+        reason: certification, même motif
+      - reference: "RGPD, art. 83"
+        reason: amendes, conséquence d'une violation, pas la règle
+
+  - domain: conformite
+    kind: transfert_hors_ue
+    query: "protection des données personnelles : sous-traitance, transferts hors de l'Union européenne ; transfert de données personnelles hors de l'Union européenne : clause absente"
+    contracts: [demo-02-go-nettoyage]
+    expected:
+      - *transfert_44
+      - reference: "Fiche projet : Transferts de données hors de l'Union européenne"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Localisation des données non précisée alors que le fournisseur traite des données personnelles"
+    rejected:
+      - reference: "RGPD, art. 45"
+        reason: fondement d'un transfert dont l'existence reste à vérifier
+      - reference: "RGPD, art. 46"
+        reason: même motif
+
+  - domain: conformite
+    kind: transfert_hors_ue
+    query: "protection des données personnelles : sous-traitance, transferts hors de l'Union européenne ; transfert de données personnelles hors de l'Union européenne : clauses contractuelles ad hoc"
+    contracts: [demo-05-go-reserves-hebergement]
+    expected:
+      - *transfert_44
+      - reference: "RGPD, art. 46"
+        type: article
+        justification: des clauses contractuelles propres aux parties ne valent garantie que sous réserve d'autorisation
+        quote: "Sous réserve de l'autorisation de l'autorité de contrôle compétente, les garanties appropriées visées au paragraphe 1 peuvent aussi être fournies"
+      - reference: "Fiche projet : Transferts de données hors de l'Union européenne"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Clauses contractuelles ad hoc sans mention d'autorisation : pénalité de score"
+    rejected: &transfert_clauses_ecartees
+      - reference: "RGPD, art. 28"
+        reason: piège lexical, ses clauses contractuelles types encadrent l'accord de sous-traitance, pas un transfert
+      - reference: "RGPD, art. 45"
+        reason: décision d'adéquation, un autre fondement que celui du contrat
+
+  - domain: conformite
+    kind: transfert_hors_ue
+    query: "protection des données personnelles : sous-traitance, transferts hors de l'Union européenne ; transfert de données personnelles hors de l'Union européenne : clauses contractuelles types"
+    contracts: [demo-01-go-maintenance]
+    expected:
+      - *transfert_44
+      - reference: "RGPD, art. 46"
+        type: article
+        justification: les clauses types de la Commission sont une garantie appropriée, sans autorisation particulière
+        quote: "des clauses types de protection des données adoptées par la Commission"
+      - reference: "Fiche projet : Transferts de données hors de l'Union européenne"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Décision d'adéquation, clauses types, règles d'entreprise contraignantes, code de conduite, certification, ou clauses contractuelles ad hoc dont l'autorisation par l'autorité de contrôle est mentionnée : garantie reconnue, sans pénalité"
+    rejected: *transfert_clauses_ecartees
+
+  # --- operationnel ------------------------------------------------------------------
+
+  - domain: operationnel
+    kind: duree_engagement
+    query: "durée et fin du contrat : engagement, préavis de résiliation ; durée d'engagement : 48 mois"
+    contracts: [demo-03-go-logiciel]
+    expected:
+      - reference: "C. civ., art. 1210"
+        type: article
+        justification: seul texte du corpus qui borne la durée d'un engagement ; il ne fixe pas le seuil de 36 mois
+        quote: "Les engagements perpétuels sont prohibés."
+      - reference: "Fiche projet : Durée d'engagement et préavis de résiliation"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "Le projet pénalise un engagement de plus de 36 mois"
+    rejected:
+      - reference: "C. civ., art. 1211"
+        reason: contrat à durée indéterminée ; la durée est ici chiffrée
+
+  - domain: operationnel
+    kind: duree_engagement
+    query: "durée et fin du contrat : engagement, préavis de résiliation ; durée d'engagement : non chiffrée"
+    contracts: [demo-04-go-reserves-transport, demo-13-realiste-infogerance]
+    expected:
+      - reference: "C. civ., art. 1210"
+        type: article
+        justification: un engagement sans durée chiffrée relève des conditions du contrat à durée indéterminée
+        quote: "Chaque contractant peut y mettre fin dans les conditions prévues pour le contrat à durée indéterminée."
+      - reference: "C. civ., art. 1211"
+        type: article
+        justification: ces conditions, fin à tout moment sous réserve du préavis
+        quote: "Lorsque le contrat est conclu pour une durée indéterminée, chaque partie peut y mettre fin à tout moment"
+      - &fiche_non_chiffre
+        reference: "Fiche projet : Durée d'engagement et préavis de résiliation"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "ainsi qu'une durée ou un préavis stipulés mais non chiffrés"
+
+  - domain: operationnel
+    kind: preavis_resiliation
+    query: "durée et fin du contrat : engagement, préavis de résiliation ; préavis de résiliation : 9 mois"
+    contracts: [demo-05-go-reserves-hebergement]
+    expected:
+      - &preavis_1211
+        reference: "C. civ., art. 1211"
+        type: article
+        justification: règle du préavis de résiliation convenu par les parties
+        quote: "sous réserve de respecter le délai de préavis contractuellement prévu ou, à défaut, un délai raisonnable"
+      - reference: "C. com., art. L442-1"
+        type: article
+        justification: durée de préavis qui met l'auteur d'une rupture à l'abri
+        quote: "la responsabilité de l'auteur de la rupture ne peut être engagée du chef d'une durée insuffisante dès lors qu'il a respecté un préavis de dix-huit mois"
+      - reference: "Fiche projet : Durée d'engagement et préavis de résiliation"
+        type: fiche
+        justification: énonce la règle du constat
+        quote: "un préavis de résiliation de plus de 6 mois"
+    rejected: &preavis_ecartees
+      - reference: "C. civ., art. 1210"
+        reason: engagements perpétuels, la durée du contrat et non le préavis
+
+  - domain: operationnel
+    kind: preavis_resiliation
+    query: "durée et fin du contrat : engagement, préavis de résiliation ; préavis de résiliation : non chiffré"
+    contracts: [demo-02-go-nettoyage, demo-13-realiste-infogerance]
+    expected:
+      - *preavis_1211
+      - reference: "C. com., art. L442-1"
+        type: article
+        justification: exige un préavis écrit dont la durée tienne compte de la relation commerciale
+        quote: "en l'absence d'un préavis écrit qui tienne compte notamment de la durée de la relation commerciale"
+      - *fiche_non_chiffre
+    rejected: *preavis_ecartees
