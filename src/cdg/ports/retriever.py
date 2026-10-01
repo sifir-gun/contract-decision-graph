@@ -32,3 +32,11 @@ class Retriever(Protocol):
     def search(
         self, domain: Domain, query: str, *, kind: str, k: int
     ) -> list[Passage]: ...
+
+
+class CorpusSearch(Protocol):
+    """Recherche sans filtre de domaine ni de clause, dans tout le corpus du modèle
+    d'embedding, chaque extrait une fois : réservée à la mesure de la recherche seule
+    (`application/evaluation.py`, ADR 006). Le CRAG passe toujours par `Retriever`."""
+
+    def search_unfiltered(self, query: str, *, k: int) -> list[Passage]: ...

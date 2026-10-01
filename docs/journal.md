@@ -2634,3 +2634,78 @@ Conception validée par le propriétaire le 01/10, avec ses décisions : la repr
 - **Faux constat d'anomalie au rejeu d'une escalade de reprise, corrigé** (trouvé le 01/10 en documentant, sur un cas construit) : la reprise écrit l'escalade au nom du gate, qui ne tourne pas ; le rejeu le recalculait, et, avec un verdict gardé à blocage dur, proposait NO_GO au lieu de l'ESCALADE scellée. Corrigé sur décision du propriétaire : la cause de l'escalade est scellée (rang, maximum, empreintes), et le rejeu la vérifie au lieu de recalculer le gate ; sans cause valide, anomalie. Couvert sur les deux chemins et avec un budget dépassé, et par six altérations de la cause scellée.
 - **Relance : seule la configuration change** (confirmé par le propriétaire) : même texte masqué, même date d'analyse d'origine ; dit dans le formulaire, la sortie de `relaunch` et le dossier du nouveau contrat.
 - **OpenSSL dans l'image de l'application** : le scan bloqué le 01/10 sur la `libssl3t64` de distroless a été traité par la PR des exceptions datées (fusionnée, entrée « à revoir avant le 15/10 » ci-dessus), fusionnée dans cette branche avant de la pousser.
+
+## 2026-10-01 · Qualité de la recherche, PR 1 : évaluation (branche `evaluation-recherche`)
+
+Nouveau chantier, à la demande explicite du propriétaire, inspiré de l'article d'Anthropic « Introducing Contextual Retrieval » : deux PR au plus, périmètre figé ; toute idée nouvelle va ici comme piste ; chaque technique n'est gardée que si la mesure progresse, sinon elle est abandonnée et notée avec ses chiffres. Détail et choix : ADR 006.
+
+### Décisions du propriétaire (01/10)
+
+- **Critère de la PR 2**, fixé avant toute mesure : une technique est gardée si le rappel@4 sans filtre progresse, si le rappel@4 avec filtre ne recule pas, si au moins une requête gagne et si aucune ne perd avec le filtre. Avec 21 requêtes, une requête vaut environ 5 points : résultats toujours donnés requête par requête, en plus des moyennes.
+- **Fiches comptées comme références attendues**, jugées sur leur contenu ; type de chaque référence marqué dans le jeu (article de loi ou fiche), mesure donnée aussi pour les articles seuls.
+- **`mesure-recherche` sans écran web** : commande d'administration, comme `ingest`, hors du service des contrats.
+- **La PR 2 ne démarre que si la mesure sans filtre laisse une marge de progrès** ; sinon arrêt après la PR 1, constat documenté.
+- **Jeu d'évaluation** : liste proposée, relue et validée avant toute mesure, puis figée (21 requêtes, 55 références attendues, dont 34 articles et une fiche par requête). Quatre choix discutables tranchés : C. civ. 1211 gardé pour une durée non chiffrée ; 1171 et L442-1 écartés pour le plafond du fournisseur ; L112-2 et 1210 gardés (ils encadrent le sujet, le seuil vient de la fiche) ; RGPD 44 pour tous les transferts. RGPD 28 ajouté pour la localisation des données non précisée du contrat 02, après vérification : le point 3 a) figure dans l'extrait 1 de l'article tel qu'il est ingéré, et le prestataire y traite des données pour le compte de l'acheteur. Jeu établi et validé par des non-juristes, comme les fiches (ADR 006).
+
+### Faits et pièges
+
+- **Deux écarts avec le rattachement déclaré, pas un** : l'ajout de RGPD 28 en crée un second, que le test de la mesure avec filtre a révélé (l'article 28 n'est déclaré que pour l'accord de traitement). Avec le filtre, le rappel de ces deux requêtes plafonne à 2/3, quel que soit k.
+- **Aucune recherche lancée avant que le jeu soit figé** : sinon la liste aurait pu s'ajuster aux résultats.
+- **La mesure vérifie ses entrées** : le jeu doit couvrir exactement les requêtes des constats du jeu de démonstration, et le corpus indexé doit être celui des fichiers, extrait par extrait (référence et texte) ; sinon, erreur explicite (« relancer ingest »). Le 01/10, l'index local (indexé le 26/09) correspondait aux 64 extraits des fichiers.
+- **Défaut de la réindexation, relevé en préparant la PR 2** : `rag_store.sync` compare l'empreinte du texte stocké et les métadonnées, jamais le texte embarqué (en-tête et texte). Changer l'en-tête des extraits, ou le préfixe d'embedding, ne réindexerait donc rien : les vecteurs resteraient ceux de l'ancien texte, sans erreur. Sans effet aujourd'hui (l'en-tête n'a pas changé depuis l'ingestion) ; à corriger avant tout changement de l'en-tête.
+
+### Mesure de référence
+
+`mesure-recherche`, 01/10, commit f1b4fff (deux passages, sorties identiques), modèle `intfloat/multilingual-e5-large`, 64 extraits, 21 requêtes, première requête de chaque clause (écrite par le code), sans LLM. Rappel et précision au niveau de la référence, en %.
+
+**Moyennes, toutes les références** (rappel / précision)
+
+| mode | k = 1 | k = 2 | k = 4 | k = 8 | k = 20 |
+|---|---|---|---|---|---|
+| avec filtre | 40,5 / 100,0 | 47,6 / 100,0 | 75,4 / 90,5 | 92,5 / 82,6 | 96,8 / 77,7 |
+| sans filtre | 35,7 / 90,5 | 38,1 / 81,0 | 57,5 / 55,6 | 77,0 / 37,2 | 94,0 / 20,3 |
+
+**Moyennes, articles seuls** (rappel / précision)
+
+| mode | k = 1 | k = 2 | k = 4 | k = 8 | k = 20 |
+|---|---|---|---|---|---|
+| avec filtre | 0,0 / 0,0 | 14,3 / 14,3 | 62,7 / 76,2 | 88,9 / 77,4 | 95,2 / 73,9 |
+| sans filtre | 0,0 / 0,0 | 0,0 / 0,0 | 30,2 / 31,0 | 65,1 / 48,0 | 91,3 / 19,2 |
+
+**Requête par requête** : rappel@4 (toutes / articles), et rang sans filtre du premier extrait de chaque référence attendue (— : au-delà de 20 ; « F. » : fiche).
+
+| # | clause : situation | contrats | avec filtre | sans filtre | rangs sans filtre |
+|---|---|---|---|---|---|
+| 1 | responsabilite_acheteur : illimitée | 06 | 50,0 / 33,3 | 50,0 / 33,3 | 1171 —, L442-1 4, 1231-3 9, F. 1 |
+| 2 | responsabilite_fournisseur : 50 % | 03 | 33,3 / 0,0 | 33,3 / 0,0 | 1170 —, 1231-3 15, F. 1 |
+| 3 | responsabilite_fournisseur : 60 % | 05 | 33,3 / 0,0 | 33,3 / 0,0 | 1170 —, 1231-3 16, F. 1 |
+| 4 | responsabilite_fournisseur : 80 % | 04 | 33,3 / 0,0 | 33,3 / 0,0 | 1170 —, 1231-3 13, F. 1 |
+| 5 | revision_prix : non plafonnée | 11 | 100,0 / 100,0 | 50,0 / 0,0 | L112-2 8, F. 1 |
+| 6 | penalites_execution : 2 % | 04 | 100,0 / 100,0 | 50,0 / 0,0 | 1231-5 7, F. 1 |
+| 7 | penalites_execution : absente | 09, 12 | 100,0 / 100,0 | 50,0 / 0,0 | 1231-5 6, F. 1 |
+| 8 | delai_paiement : 60 j, facture périodique | 07 | 100,0 / 100,0 | 100,0 / 100,0 | L441-10 3, F. 1 |
+| 9 | delai_paiement : 60 j fin de mois | 05 | 100,0 / 100,0 | 100,0 / 100,0 | L441-10 3, F. 1 |
+| 10 | delai_paiement : 90 j, date de facture | 06 | 100,0 / 100,0 | 100,0 / 100,0 | L441-10 3, F. 1 |
+| 11 | delai_paiement : absent | 02 | 100,0 / 100,0 | 50,0 / 0,0 | L441-10 6, F. 3 |
+| 12 | delai_paiement : non chiffré | 09 | 100,0 / 100,0 | 50,0 / 0,0 | L441-10 5, F. 1 |
+| 13 | accord_traitement_donnees : absent | 07 | 50,0 / 0,0 | 50,0 / 0,0 | RGPD 28 9, F. 2 |
+| 14 | transfert_hors_ue : aucune garantie | 08 | 50,0 / 33,3 | 25,0 / 0,0 | RGPD 44 14, 45 15, 46 6, F. 1 |
+| 15 | transfert_hors_ue : localisation non précisée | 02 | 33,3 / 0,0 | 33,3 / 0,0 | RGPD 44 12, 28 10, F. 1 |
+| 16 | transfert_hors_ue : clauses ad hoc | 05 | 66,7 / 50,0 | 33,3 / 0,0 | RGPD 44 16, 46 6, F. 1 |
+| 17 | transfert_hors_ue : clauses types | 01 | 66,7 / 50,0 | 33,3 / 0,0 | RGPD 44 17, 46 7, F. 1 |
+| 18 | duree_engagement : 48 mois | 03 | 100,0 / 100,0 | 100,0 / 100,0 | 1210 4, F. 1 |
+| 19 | duree_engagement : non chiffrée | 04, 13 | 66,7 / 50,0 | 100,0 / 100,0 | 1210 4, 1211 3, F. 1 |
+| 20 | preavis_resiliation : 9 mois | 05 | 100,0 / 100,0 | 66,7 / 50,0 | 1211 3, L442-1 5, F. 1 |
+| 21 | preavis_resiliation : non chiffré | 02, 13 | 100,0 / 100,0 | 66,7 / 50,0 | 1211 3, L442-1 6, F. 1 |
+
+**Lecture.**
+
+- **La fiche sort au rang 1 pour les 21 requêtes, avec et sans filtre** : écrite dans le vocabulaire des requêtes (« plafond de responsabilité », « délai de paiement »), elle est la plus proche. Ses extraits, souvent deux, occupent les premiers rangs.
+- **Au rang du CRAG (k = 4, avec filtre), le juge ne voit l'article attendu que dans 62,7 % des cas** : pour les plafonds de responsabilité (requêtes 1 à 4), les deux extraits de la fiche et ceux de L442-1 passent avant 1170, 1171 et 1231-3, qui arrivent aux rangs 5 à 8. Le CRAG retient alors la fiche, jamais l'article.
+- **Les articles très courts sont les plus mal classés sans filtre** : 1170 et 1171 (une ou deux phrases) ne sortent jamais dans les 20 premiers, alors que leur en-tête actuel (« C. civ., art. 1170 ») ne dit rien de leur sujet.
+- **Marge de progrès sans filtre : nette.** Rappel@4 de 57,5 % (toutes) et de 30,2 % (articles seuls), contre 94,0 % et 91,3 % à k = 20 : les références attendues sont presque toutes dans le corpus proche, mais trop bas. La condition de la PR 2 est remplie.
+
+### Pistes (hors périmètre, notées sans code)
+
+- **Un extrait par référence parmi les k premiers** (diversité) : une fiche ou un article en plusieurs extraits occupe plusieurs rangs du CRAG ; ne garder que le meilleur extrait de chaque référence laisserait la place aux articles. Technique nouvelle, non prévue au chantier.
+- **Rattachement déclaré à revoir pour les deux écarts** (1211 pour la durée d'engagement, RGPD 28 pour les transferts) : décision du propriétaire, hors de ce chantier.

@@ -41,7 +41,7 @@ from cdg.ports.identity import IdentityVerifier
 from cdg.ports.llm import LLMProvider
 from cdg.ports.locks import ContractLocks
 from cdg.ports.resumes import ResumeCounter
-from cdg.ports.retriever import Retriever
+from cdg.ports.retriever import CorpusSearch, Retriever
 
 CONFIG = load_config()
 
@@ -56,6 +56,8 @@ IMPLEMENTATIONS = [
     (IdentityVerifier, FakeVerifier),
     (Retriever, lambda: PgvectorRetriever("", HashEmbedder())),
     (Retriever, FakeRetriever),
+    (CorpusSearch, lambda: PgvectorRetriever("", HashEmbedder())),
+    (CorpusSearch, FakeRetriever),
     (Extractor, lambda: LLMExtractor(FakeLLM())),
     (Extractor, lambda: FixedExtractor([])),
     (Crag, FakeCrag),
