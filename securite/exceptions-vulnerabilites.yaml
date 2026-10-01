@@ -74,3 +74,89 @@ exceptions:
       d'oauth2-proxy.
     decidee: 2026-09-30
     expire: 2026-10-30
+  # Image de l'application, 01/10/2026 : libssl3t64 de la base distroless cc-debian13, et
+  # copies d'OpenSSL réellement chargées, invisibles au scanner, dans la même plage
+  # vulnérable. Copies chargées, à surveiller (journal, « à revoir avant le 15/10 ») :
+  #   - OpenSSL 3.5.8 de psycopg-binary 3.3.6 (libpq ; psycopg_binary.libs), arm64 et amd64 ;
+  #   - OpenSSL 3.5.8 de Python (uv, python-build-standalone, lié statiquement) ;
+  #   - OpenSSL 1.1.1k FIPS de Kerberos (psycopg-binary, arm64 seulement), chargée avec
+  #     libpq ; gssencmode=disable empêche de l'appeler, sans la retirer de la mémoire.
+  # Corrections attendues : psycopg-binary sur OpenSSL 3.5.9 ou plus, Python sur 3.5.9 (uv),
+  # republication de distroless. Les images statiques (proxy de sortie, oauth2-proxy) n'ont
+  # pas de libssl : ces exceptions ne s'y appliquent pas (vérifié le 01/10/2026).
+  - vulnerabilite: CVE-2026-54873
+    paquet:
+      nom: libssl3t64
+      type: deb
+      version: 3.5.7-1~deb13u2
+    motif: >-
+      Cette faille : QUIC (métadonnées des fragments de flux), sévérité basse selon OpenSSL : l'application ne fait pas de QUIC. Avis officiel d'OpenSSL : de 3.5.0 à 3.5.9 exclu ;
+      les copies réellement chargées sont donc touchées elles aussi, par leur version :
+      OpenSSL 3.5.8 de psycopg-binary et de Python, et, sur arm64, la 1.1.1k FIPS de
+      Kerberos. La libssl3t64 de la base, elle, n'est chargée par aucun processus :
+      aucune bibliothèque ELF ne la déclare (DT_NEEDED), et ni le serveur ni un processus
+      qui utilise chaque dépendance native ne la projette en mémoire (/proc/<pid>/maps),
+      sur les images arm64 et amd64. Exposition, selon une lecture du code et non une
+      preuve : l'application est cliente TLS seulement (libpq vers PostgreSQL, httpx vers
+      Mistral et les clés du fournisseur d'identité) ; ni DTLS, ni QUIC, ni serveur TLS
+      (TLS terminé par Traefik, interface sur 127.0.0.1 en HTTP). À retirer quand
+      psycopg-binary, Python (uv) et distroless passent à OpenSSL 3.5.9 ou plus.
+    decidee: 2026-10-01
+    expire: 2026-10-15
+  - vulnerabilite: CVE-2026-72897
+    paquet:
+      nom: libssl3t64
+      type: deb
+      version: 3.5.7-1~deb13u2
+    motif: >-
+      Cette faille : serveur TLS qui change de SSL_CTX pendant la négociation, sévérité basse selon OpenSSL : l'application n'est pas un serveur TLS. Avis officiel d'OpenSSL : de 3.5.0 à 3.5.9 exclu ;
+      les copies réellement chargées sont donc touchées elles aussi, par leur version :
+      OpenSSL 3.5.8 de psycopg-binary et de Python, et, sur arm64, la 1.1.1k FIPS de
+      Kerberos. La libssl3t64 de la base, elle, n'est chargée par aucun processus :
+      aucune bibliothèque ELF ne la déclare (DT_NEEDED), et ni le serveur ni un processus
+      qui utilise chaque dépendance native ne la projette en mémoire (/proc/<pid>/maps),
+      sur les images arm64 et amd64. Exposition, selon une lecture du code et non une
+      preuve : l'application est cliente TLS seulement (libpq vers PostgreSQL, httpx vers
+      Mistral et les clés du fournisseur d'identité) ; ni DTLS, ni QUIC, ni serveur TLS
+      (TLS terminé par Traefik, interface sur 127.0.0.1 en HTTP). À retirer quand
+      psycopg-binary, Python (uv) et distroless passent à OpenSSL 3.5.9 ou plus.
+    decidee: 2026-10-01
+    expire: 2026-10-15
+  - vulnerabilite: CVE-2026-84782
+    paquet:
+      nom: libssl3t64
+      type: deb
+      version: 3.5.7-1~deb13u2
+    motif: >-
+      Cette faille : retransmission DTLS, sévérité haute selon OpenSSL, qui touche aussi la branche 1.1.1 : l'application ne fait pas de DTLS. Avis officiel d'OpenSSL : de 3.5.0 à 3.5.9 exclu ;
+      les copies réellement chargées sont donc touchées elles aussi, par leur version :
+      OpenSSL 3.5.8 de psycopg-binary et de Python, et, sur arm64, la 1.1.1k FIPS de
+      Kerberos. La libssl3t64 de la base, elle, n'est chargée par aucun processus :
+      aucune bibliothèque ELF ne la déclare (DT_NEEDED), et ni le serveur ni un processus
+      qui utilise chaque dépendance native ne la projette en mémoire (/proc/<pid>/maps),
+      sur les images arm64 et amd64. Exposition, selon une lecture du code et non une
+      preuve : l'application est cliente TLS seulement (libpq vers PostgreSQL, httpx vers
+      Mistral et les clés du fournisseur d'identité) ; ni DTLS, ni QUIC, ni serveur TLS
+      (TLS terminé par Traefik, interface sur 127.0.0.1 en HTTP). À retirer quand
+      psycopg-binary, Python (uv) et distroless passent à OpenSSL 3.5.9 ou plus.
+    decidee: 2026-10-01
+    expire: 2026-10-15
+  - vulnerabilite: CVE-2026-84784
+    paquet:
+      nom: libssl3t64
+      type: deb
+      version: 3.5.7-1~deb13u2
+    motif: >-
+      Cette faille : QUIC (file de RETIRE_CONNECTION_ID), sévérité basse selon OpenSSL : l'application ne fait pas de QUIC. Avis officiel d'OpenSSL : de 3.5.0 à 3.5.9 exclu ;
+      les copies réellement chargées sont donc touchées elles aussi, par leur version :
+      OpenSSL 3.5.8 de psycopg-binary et de Python, et, sur arm64, la 1.1.1k FIPS de
+      Kerberos. La libssl3t64 de la base, elle, n'est chargée par aucun processus :
+      aucune bibliothèque ELF ne la déclare (DT_NEEDED), et ni le serveur ni un processus
+      qui utilise chaque dépendance native ne la projette en mémoire (/proc/<pid>/maps),
+      sur les images arm64 et amd64. Exposition, selon une lecture du code et non une
+      preuve : l'application est cliente TLS seulement (libpq vers PostgreSQL, httpx vers
+      Mistral et les clés du fournisseur d'identité) ; ni DTLS, ni QUIC, ni serveur TLS
+      (TLS terminé par Traefik, interface sur 127.0.0.1 en HTTP). À retirer quand
+      psycopg-binary, Python (uv) et distroless passent à OpenSSL 3.5.9 ou plus.
+    decidee: 2026-10-01
+    expire: 2026-10-15

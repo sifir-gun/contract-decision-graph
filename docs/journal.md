@@ -2604,6 +2604,24 @@ Conception validée par le propriétaire le 30/09, avec ses précisions : `check
 - **Garde de `check.sh`** : le critère est celui de `scripts/chaine.py revision` (fichiers non commités dans le contexte de construction de l'image), pas tout l'arbre de travail : un brouillon de documentation ne change pas le commit de l'image. Testé en exécutant le script avec des doublures de uv et docker.
 - **Vrai journal relu en lecture seule** (avant de pousser) : 5 enregistrements, tous v1, aucun v2 sans configuration archivée, archive vide ; vérification conforme ; les 5 restent non rejouables (configuration non archivée, et empreinte différente de la courante).
 
+## 2026-10-01 · À revoir avant le 15/10 : OpenSSL dans l'image de l'application
+
+Le scan de l'image de l'application a échoué le 01/10 sur quatre failles (CVE-2026-54873, CVE-2026-72897, CVE-2026-84782, CVE-2026-84784) de `libssl3t64` 3.5.7-1~deb13u2, dans la base `gcr.io/distroless/cc-debian13:nonroot`. Debian a publié son correctif (3.5.7-1~deb13u3), que distroless n'a pas encore republié (empreinte inchangée le 01/10).
+
+- **La libssl de la base n'est chargée par aucun processus** (lecture seule, images arm64 et amd64 construites comme en CI) : aucune bibliothèque ELF de Python ni du venv ne la déclare ; ni le serveur (PID 1) ni un processus qui importe et utilise chaque dépendance native ne la projette en mémoire.
+- **Les copies réellement chargées sont touchées elles aussi** (avis officiels d'OpenSSL, 29/09 : les quatre failles, et neuf autres de basse sévérité, de 3.5.0 à 3.5.9 exclu) ; le scanner ne les voit pas :
+  - OpenSSL 3.5.8 de psycopg-binary 3.3.6 (libpq), arm64 et amd64 ;
+  - OpenSSL 3.5.8 de Python (uv, lié statiquement) ;
+  - sur arm64 seulement, OpenSSL 1.1.1k FIPS de Kerberos, embarquée par psycopg-binary, d'un système de type AlmaLinux 8 ; touchée par sa version par toutes les failles corrigées depuis 2021, dont deux hautes de 2026 (CVE-2026-84782, CVE-2026-45447) ; les correctifs reportés par RHEL ne se vérifient pas sur un binaire copié.
+- **Exposition, selon une lecture du code, pas une preuve** : l'application est cliente TLS seulement (libpq, httpx) ; ni DTLS, ni QUIC, ni serveur TLS (TLS terminé par Traefik).
+- **Durcissement** : `gssencmode=disable` dans toute chaîne de connexion ; libpq ne négocie plus jamais Kerberos. La copie 1.1.1k reste chargée avec libpq (dépendances déclarées), vérifié dans le conteneur, mais son code n'est plus appelé.
+- **Exceptions datées** (`securite/exceptions-vulnerabilites.yaml`), sur décision du propriétaire, qui couvrent la base et, par leur justification, les copies chargées ; elles expirent le 15/10, et le job `image` du lundi le rappellera. Elles ne concernent que l'image de l'application : celles du proxy de sortie et d'oauth2-proxy (Go statique sur `static-debian13`) n'ont pas de libssl, et leur scan passe sans elles.
+- **Liste de surveillance, corrections attendues avant le 15/10** :
+  1. psycopg-binary sur OpenSSL 3.5.9 ou plus (3.3.6, du 18/09, est la dernière le 01/10) ;
+  2. Python sur OpenSSL 3.5.9, par une version de uv qui le fournit ;
+  3. republication de distroless avec libssl3t64 3.5.7-1~deb13u3 (empreinte de la base mise à jour, signature vérifiée par `scripts/chaine.py bases`).
+  Chacune retire une partie du risque ; les exceptions tombent quand les trois sont faites, sinon elles sont revues et, au besoin, prolongées avec justification.
+
 ## 2026-10-01 · Reprise sous une autre configuration : escalade, tranchée sous l'actuelle (branche `reprise-configuration-modifiee`)
 
 Conception validée par le propriétaire le 01/10, avec ses décisions : la reprise est comptée avant l'escalade, et un cumul avec le maximum de reprises cite les deux causes ; le relecteur tranche sous la configuration actuelle (revue bloquée jusqu'à expiration : refusée), `resume` ne l'accepte que dans ce cas ; levée d'un blocage dur seulement si les deux configurations l'autorisent (jamais d'assouplissement rétroactif d'un contrôle de sécurité) ; relance possible, comme un nouveau contrat ; `config-check` liste ces contrats à part. Détail : ADR 005.
@@ -2615,4 +2633,4 @@ Conception validée par le propriétaire le 01/10, avec ses décisions : la repr
 - **Relance sur le texte masqué** : l'original n'est jamais conservé ; l'analyse d'origine portait déjà sur le texte masqué, la relance aussi.
 - **Faux constat d'anomalie au rejeu d'une escalade de reprise, corrigé** (trouvé le 01/10 en documentant, sur un cas construit) : la reprise écrit l'escalade au nom du gate, qui ne tourne pas ; le rejeu le recalculait, et, avec un verdict gardé à blocage dur, proposait NO_GO au lieu de l'ESCALADE scellée. Corrigé sur décision du propriétaire : la cause de l'escalade est scellée (rang, maximum, empreintes), et le rejeu la vérifie au lieu de recalculer le gate ; sans cause valide, anomalie. Couvert sur les deux chemins et avec un budget dépassé, et par six altérations de la cause scellée.
 - **Relance : seule la configuration change** (confirmé par le propriétaire) : même texte masqué, même date d'analyse d'origine ; dit dans le formulaire, la sortie de `relaunch` et le dossier du nouveau contrat.
-- **`libssl3t64` de distroless** : quatre failles hautes ont bloqué le scan de l'image le 01/10. Preuve, en lecture seule sur les images arm64 et amd64, que l'application ne charge pas cette bibliothèque ; exception datée préparée sur une branche à part (`exception-libssl-distroless`), soumise au propriétaire.
+- **OpenSSL dans l'image de l'application** : le scan bloqué le 01/10 sur la `libssl3t64` de distroless a été traité par la PR des exceptions datées (fusionnée, entrée « à revoir avant le 15/10 » ci-dessus), fusionnée dans cette branche avant de la pousser.

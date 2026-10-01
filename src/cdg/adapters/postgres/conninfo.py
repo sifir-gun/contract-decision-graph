@@ -1,6 +1,10 @@
 """Chaînes de connexion PostgreSQL : adresse dans l'environnement (.env), utilisateur
 administrateur et mots de passe par `settings.require_secret` (fichier monté, sinon
-variable d'environnement)."""
+variable d'environnement).
+
+Jamais de négociation Kerberos (`gssencmode=disable`) : le projet n'utilise pas Kerberos,
+et la roue arm64 de psycopg-binary embarque pour lui une copie d'OpenSSL 1.1.1k, dont le
+chemin de code n'est ainsi jamais pris (journal, 01/10/2026)."""
 
 import os
 
@@ -16,6 +20,7 @@ def _conninfo(user: str, password_var: str) -> str:
         dbname=require("POSTGRES_DB"),
         user=user,
         password=require_secret(password_var),
+        gssencmode="disable",
     )
 
 

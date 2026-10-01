@@ -65,6 +65,21 @@ def pool(pg):
 
 
 @pytest.mark.pg
+def test_connexion_reelle_sans_gssapi(pg):
+    """gssencmode=disable dans toute chaîne de connexion : jamais de chiffrement GSSAPI
+    (le projet n'utilise pas Kerberos). Seule une libpq construite avec GSSAPI (roue
+    Linux arm64 de psycopg-binary) le tenterait sans l'option ; ailleurs, disable est
+    déjà sa valeur par défaut : la garde est le test des chaînes (test_settings.py)."""
+    for chaine in (pg.admin, pg.app):
+        with psycopg.connect(chaine) as conn:
+            # toutes les options de la connexion, valeurs par défaut comprises (libpq
+            # construite sans GSSAPI : disable y est déjà la valeur par défaut)
+            options = {o.keyword: o.val for o in conn.pgconn.info}
+            assert options[b"gssencmode"] == b"disable"
+            assert conn.pgconn.used_gssapi is False
+
+
+@pytest.mark.pg
 def test_journal_d_audit_par_le_pool(pool, journal):
     store = PostgresAuditStore(pool, table=journal)
     first = store.append(Sealer(record("c-1")), ARCHIVED)
