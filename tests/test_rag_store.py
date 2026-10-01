@@ -73,3 +73,16 @@ def test_migration_003_metadonnees_de_version(pg):
         "note",
         "retrieved_at",
     } <= columns
+
+
+def test_migration_008_en_tete_et_empreinte_du_texte_embarque(pg):
+    with psycopg.connect(pg.admin) as conn:
+        columns = {
+            r[0]
+            for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'rag_chunks'"
+            )
+        }
+    assert {"header", "embedded_hash"} <= columns
+    assert grants(pg, "rag_chunks") == {"SELECT"}

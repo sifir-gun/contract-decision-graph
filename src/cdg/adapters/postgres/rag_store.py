@@ -52,8 +52,9 @@ def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
             cursor = conn.execute(
                 "INSERT INTO rag_chunks (domain, source_id, reference, text, content_hash,"
                 " embedding_model, embedding, article, chunk_index, valid_from, valid_until,"
-                " amendment, note, retrieved_at, kinds)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " amendment, note, retrieved_at, kinds, header, embedded_hash)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,"
+                " %s)"
                 " ON CONFLICT (domain, content_hash, embedding_model) DO NOTHING",
                 (
                     row.domain,
@@ -71,6 +72,8 @@ def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
                     row.note,
                     row.retrieved_at,
                     row.kinds,
+                    row.header,
+                    row.embedded_hash,
                 ),
             )
             inserted += cursor.rowcount
@@ -167,16 +170,19 @@ def search_unfiltered(
         )
 
 
-def indexed(source: Source, model: str) -> list[tuple[str, str]]:
-    """Extraits indexés du modèle (référence, texte), chacun une fois."""
+def indexed(source: Source, model: str) -> list[tuple[str, str, str | None]]:
+    """Extraits indexés du modèle (référence, texte, empreinte du texte embarqué),
+    chacun une fois ; deux lignes d'un même extrait qui divergeraient sur l'empreinte
+    sont rendues toutes deux."""
     with connection(source) as conn:
-        rows = conn.cursor(row_factory=tuple_row).execute(
-            "SELECT DISTINCT ON (reference, content_hash) reference, text"
+        cur = conn.cursor(row_factory=tuple_row)
+        rows = cur.execute(
+            "SELECT DISTINCT reference, text, embedded_hash"
             " FROM rag_chunks WHERE embedding_model = %s"
-            " ORDER BY reference, content_hash",
+            " ORDER BY reference, text, embedded_hash",
             (model,),
         ).fetchall()
-    return [(r[0], r[1]) for r in rows]
+    return [(r[0], r[1], r[2]) for r in rows]
 
 
 def _passages(rows: list[tuple]) -> list[Passage]:
@@ -230,15 +236,18 @@ class PgvectorRetriever:
             settings=self._settings,
         )
 
-    def indexed(self) -> list[tuple[str, str]]:
+    def indexed(self) -> list[tuple[str, str, str | None]]:
         return indexed(self._source, self._embedder.model)
 
 
 # métadonnées stockées avec le texte : si l'une change (fin de validité, note,
-# rattachement…), l'extrait est remplacé, même quand le texte, donc son empreinte, est
-# identique
+# rattachement, texte embarqué…), l'extrait est remplacé, même quand le texte, donc son
+# empreinte, est identique ; l'empreinte du texte embarqué (migration 008) réindexe le
+# vecteur quand l'en-tête ou le préfixe change
 _METADATA = (
     "kinds",
+    "header",
+    "embedded_hash",
     "reference",
     "article",
     "chunk_index",

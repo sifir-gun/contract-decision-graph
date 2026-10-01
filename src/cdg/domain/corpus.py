@@ -279,6 +279,17 @@ def citations(line: str) -> list[tuple[str, str]]:
 # --- Extrait à ingérer -------------------------------------------------------------------
 
 
+def embedded_text(header: str, text: str) -> str:
+    """Texte embarqué : l'en-tête écrit par le code, puis le texte de la source."""
+    return f"{header}\n{text}"
+
+
+def embedded_hash(passage_prefix: str, embedded: str) -> str:
+    """Empreinte de ce qui détermine le vecteur, à modèle égal : préfixe de passage du
+    modèle et texte embarqué. Elle change, l'extrait est réindexé (`sync`)."""
+    return hashlib.sha256(f"{passage_prefix}{embedded}".encode()).hexdigest()
+
+
 class ChunkRow(BaseModel):
     """Extrait à ingérer (administrateur), rattaché aux types de clause de son domaine que
     sa source peut justifier."""
@@ -290,6 +301,8 @@ class ChunkRow(BaseModel):
     kinds: list[str]
     embedding_model: str
     embedding: list[float]
+    header: str  # en-tête écrit par le code, embarqué avant le texte (ADR 006)
+    embedded_hash: str  # empreinte du texte embarqué et du préfixe (`embedded_hash`)
     article: str | None = None
     chunk_index: int | None = None
     valid_from: date | None = None

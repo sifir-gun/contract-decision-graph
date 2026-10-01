@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from cdg.application import demo_set, ingestion
 from cdg.application.crag import clause_query
 from cdg.domain.config import DecisionConfig
+from cdg.domain.corpus import embedded_hash
 from cdg.domain.evaluation import first_ranks, mean, scores, top_references
 from cdg.domain.models import DOMAINS, Clause, Domain
 from cdg.domain.numeric import rounded
@@ -124,12 +125,14 @@ class EvaluationSetOutdated(Exception):
     démonstration : une requête sans références attendues ne serait pas mesurée."""
 
 
-def check_index(corpus: CorpusSearch, max_words: int) -> int:
-    """Extraits indexés du modèle, comparés un à un (référence, texte) aux extraits que
-    donnent les fichiers du corpus ; leur nombre, s'ils sont identiques."""
+def check_index(corpus: CorpusSearch, max_words: int, passage_prefix: str) -> int:
+    """Extraits indexés du modèle, comparés un à un (référence, texte, empreinte du
+    texte embarqué) aux extraits que donnent les fichiers du corpus et le code de
+    l'en-tête ; leur nombre, s'ils sont identiques. Un en-tête changé sans réindexer
+    laisse des vecteurs périmés : jamais mesurés."""
     wanted = {
-        (meta["reference"], meta["text"])
-        for meta, _, _ in ingestion.pending_chunks(max_words)
+        (meta["reference"], meta["text"], embedded_hash(passage_prefix, embedded))
+        for meta, embedded, _ in ingestion.pending_chunks(max_words)
     }
     found = corpus.indexed()
     indexed = set(found)
@@ -239,7 +242,9 @@ def run(
     celui des fichiers, puis la mesure. Tout écart est une erreur explicite."""
     queries = load_queries()
     _check_set(queries, config)
-    chunks = check_index(corpus, config.corpus.chunk_max_words)
+    chunks = check_index(
+        corpus, config.corpus.chunk_max_words, config.embedding.passage_prefix
+    )
     ranks = sorted(set(ks))
     return {
         "recherche": config.crag.search.model_dump(),

@@ -9,6 +9,7 @@ from doubles import HashEmbedder
 from pydantic import ValidationError
 
 from cdg.adapters.postgres import rag_store
+from cdg.domain import corpus as corpus_text
 from cdg.domain.config import SearchConfig
 from cdg.domain.corpus import ChunkRow
 
@@ -59,6 +60,16 @@ VALID_UNTIL = date(2027, 1, 1)
 NOTE = "Conformément à l'article 3 de la loi de test."
 
 
+def embedded(reference: str, text: str) -> dict:
+    """En-tête et empreinte du texte embarqué, comme à l'ingestion (référence seule)."""
+    return {
+        "header": reference,
+        "embedded_hash": corpus_text.embedded_hash(
+            "", corpus_text.embedded_text(reference, text)
+        ),
+    }
+
+
 def rows():
     return [
         ChunkRow(
@@ -69,6 +80,7 @@ def rows():
             kinds=k,
             embedding_model=EMBEDDER.model,
             embedding=EMBEDDER.embed_passages([t])[0],
+            **embedded(r, t),
         )
         for d, r, t, k in CHUNKS
     ]
@@ -152,6 +164,7 @@ def test_rattachement_hors_du_domaine_refuse():
             kinds=[DELAI],
             embedding_model=EMBEDDER.model,
             embedding=[0.0],
+            **embedded("r", "t"),
         )
     with pytest.raises(ValidationError, match="aucun type"):
         ChunkRow(
@@ -162,6 +175,7 @@ def test_rattachement_hors_du_domaine_refuse():
             kinds=[],
             embedding_model=EMBEDDER.model,
             embedding=[0.0],
+            **embedded("r", "t"),
         )
 
 
@@ -205,6 +219,7 @@ def duplicated(pg, corpus):
             kinds=[kind],
             embedding_model=EMBEDDER.model,
             embedding=EMBEDDER.embed_passages([text])[0],
+            **embedded("C. com., art. L442-1", text),
         )
         for domain, kind in [
             ("juridique", "responsabilite_acheteur"),
@@ -238,10 +253,13 @@ def test_sans_filtre_k_resultats_au_plus_et_modele_courant_seul(pg, corpus):
 
 
 def test_lecture_des_extraits_indexes_chacun_une_fois(pg, duplicated):
-    """Extraits indexés du modèle (référence, texte), chacun une fois, quel que soit le
-    réglage de la recherche : la mesure les compare aux fichiers du corpus."""
+    """Extraits indexés du modèle (référence, texte, empreinte du texte embarqué),
+    chacun une fois, quel que soit le réglage de la recherche : la mesure les compare
+    aux fichiers du corpus."""
     expected = sorted(
-        [(r, t) for _, r, t, _ in CHUNKS] + [("C. com., art. L442-1", DUPLICATED)]
+        (r, t, embedded(r, t)["embedded_hash"])
+        for r, t in [(r, t) for _, r, t, _ in CHUNKS]
+        + [("C. com., art. L442-1", DUPLICATED)]
     )
     for settings in (VECTOR, DISTINCT):
         retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), settings)
@@ -267,6 +285,7 @@ def long_article(pg, corpus):
         embedding_model=EMBEDDER.model,
         embedding=EMBEDDER.embed_passages([text])[0],
         chunk_index=1,
+        **embedded("RGPD, art. 28", text),
     )
     assert rag_store.insert(pg.admin, [row]) == 1
 

@@ -234,7 +234,9 @@ def test_sections_d_une_fiche():
 
 def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     # la fiche paraphrase L441-10 : quand la version expire, la paraphrase aussi
-    rows = ingestion.rows(HashEmbedder(), CONFIG.corpus.chunk_max_words)
+    rows = ingestion.rows(
+        HashEmbedder(), CONFIG.corpus.chunk_max_words, CONFIG.embedding.passage_prefix
+    )
     validity = {}
     for row in rows:
         validity.setdefault(row.source_id, set()).add(row.valid_until)
@@ -344,3 +346,15 @@ def test_sources_md_donne_les_memes_rattachements_que_le_manifeste_et_les_fiches
     expected = {(a.source_id, a.article): k for a, k in ingestion.articles()}
     expected |= {f.id: f.kinds for f in ingestion.load_fiches()}
     assert documented == expected
+
+
+def test_texte_embarque_et_son_empreinte():
+    """Texte embarqué : l'en-tête écrit par le code, puis le texte ; son empreinte couvre
+    aussi le préfixe de passage du modèle, tout ce qui détermine le vecteur."""
+    assert corpus.embedded_text("C. civ., art. 1170", "Toute clause…") == (
+        "C. civ., art. 1170\nToute clause…"
+    )
+    a = corpus.embedded_hash("passage: ", "C. civ., art. 1170\nToute clause…")
+    assert len(a) == 64
+    assert a != corpus.embedded_hash("", "C. civ., art. 1170\nToute clause…")
+    assert a != corpus.embedded_hash("passage: ", "C. civ., art. 1171\nToute clause…")

@@ -441,6 +441,18 @@ def test_fils_de_l_embedder_egaux_a_la_limite_cpu(reel):
 
 
 @pytest.mark.chart
+def test_reindexation_du_corpus_a_chaque_mise_a_jour(reel):
+    """ADR 006 : `ingest` réindexe tout extrait dont le texte embarqué a changé (en-tête,
+    préfixe). La tâche d'ingestion le lance après chaque installation et chaque mise à
+    jour, une fois les migrations passées (dont la 008) : une image qui change l'en-tête
+    réindexe le corpus d'elle-même."""
+    job = named(reel, "Job", "-ingestion")
+    hook = job["metadata"]["annotations"]["helm.sh/hook"]
+    assert set(hook.split(",")) == {"post-install", "post-upgrade"}
+    assert job["spec"]["template"]["spec"]["containers"][0]["args"][-1] == "ingest"
+
+
+@pytest.mark.chart
 def test_changement_de_configuration_relance_les_pods(reel):
     before = of_kind(reel, "Deployment")[0]["spec"]["template"]["metadata"]
     other = render("--set", "configuration.decision=min_margin: 0.06")

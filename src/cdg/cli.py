@@ -281,7 +281,9 @@ def _ingest(args: argparse.Namespace) -> dict:
         threads=EMBEDDER_THREADS["threads"],
         batch_size=EMBEDDER_THREADS["batch_size"],
     )
-    rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
+    rows = ingestion.rows(
+        embedder, config.corpus.chunk_max_words, config.embedding.passage_prefix
+    )
     summary = rag_store.sync(conninfo.admin_conninfo, rows, embedder.model)
     return {"ingest": "ok", "model": embedder.model, **summary}
 

@@ -280,8 +280,12 @@ class FakeRetriever:
     """Doublure des ports Retriever et CorpusSearch : extraits fixes par domaine, filtrés
     par clause comme l'adaptateur ; requêtes et clauses enregistrées."""
 
-    def __init__(self, passages: dict | None = None):
+    def __init__(
+        self, passages: dict | None = None, embedded_hashes: dict | None = None
+    ):
         self.passages = passages or {}
+        # (référence, texte) -> empreinte du texte embarqué, pour `indexed`
+        self.embedded_hashes = embedded_hashes or {}
         self.calls: list[tuple[str, str, int]] = []
         self.searched_kinds: list[str] = []
         self.unfiltered_calls: list[tuple[str, int]] = []
@@ -301,15 +305,15 @@ class FakeRetriever:
                 unique.setdefault((p.reference, p.text), p)
         return list(unique.values())[:k]
 
-    def indexed(self) -> list[tuple[str, str]]:
-        """Port CorpusSearch : extraits (référence, texte), chacun une fois."""
-        return list(
-            dict.fromkeys(
-                (p.reference, p.text)
-                for passages in self.passages.values()
-                for p in passages
-            )
+    def indexed(self) -> list[tuple[str, str, str | None]]:
+        """Port CorpusSearch : extraits (référence, texte, empreinte du texte embarqué),
+        chacun une fois."""
+        unique = dict.fromkeys(
+            (p.reference, p.text)
+            for passages in self.passages.values()
+            for p in passages
         )
+        return [(r, t, self.embedded_hashes.get((r, t))) for r, t in unique]
 
 
 # horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre
