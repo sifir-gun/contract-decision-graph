@@ -236,16 +236,21 @@ class InterruptedConfig(_Strict):
 
 
 class SearchConfig(_Strict):
-    """Recherche dans le corpus (ADR 006), mesurée par `mesure-recherche`."""
+    """Recherche dans le corpus (ADR 006), mesurée par `mesure-recherche`.
+
+    Réglages apparus après l'archive des configurations : leur valeur par défaut est le
+    comportement d'avant, pour qu'une configuration archivée sans eux se relise telle
+    qu'elle était (rejeu). Le fichier du projet les règle explicitement (`load_config`).
+    """
 
     # un seul extrait par référence parmi les top_k, le plus proche de la requête
-    distinct_references: bool
+    distinct_references: bool = False
 
 
 class CragConfig(_Strict):
     top_k: Annotated[int, Field(gt=0)]  # extraits rendus par recherche, soumis au juge
     max_passes: Annotated[int, Field(gt=0)]  # recherches au plus, réécritures comprises
-    search: SearchConfig
+    search: SearchConfig = Field(default_factory=SearchConfig)  # voir SearchConfig
 
 
 Tier = Literal["main", "light"]
@@ -330,6 +335,30 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> DecisionConfig:
     if not isinstance(data, dict):
         raise ConfigError(f"{path} doit contenir un dictionnaire YAML")
     try:
-        return DecisionConfig.model_validate(data)
+        config = DecisionConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(f"configuration invalide dans {path} :\n{exc}") from exc
+    missing = _unset(config)
+    if missing:
+        raise ConfigError(
+            f"réglages absents de {path} : {', '.join(missing)} ; tout se règle "
+            "explicitement, les valeurs par défaut du modèle ne servent qu'à relire les "
+            "configurations archivées"
+        )
+    return config
+
+
+def _unset(model: BaseModel, prefix: str = "") -> list[str]:
+    """Champs du modèle, à toute profondeur, que le fichier ne règle pas lui-même."""
+    missing = []
+    for name in type(model).model_fields:
+        path = f"{prefix}{name}"
+        if name not in model.model_fields_set:
+            missing.append(path)
+            continue
+        value = getattr(model, name)
+        nested = value.items() if isinstance(value, dict) else [("", value)]
+        for key, item in nested:
+            if isinstance(item, BaseModel):
+                missing += _unset(item, f"{path}.{key}." if key else f"{path}.")
+    return missing

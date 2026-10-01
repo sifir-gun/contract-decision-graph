@@ -212,6 +212,26 @@ def test_configuration_invalide_refusee(tmp_path, raw, path, value):
         load_config(_write(tmp_path, _mutate(raw, path, value)))
 
 
+def test_valeur_par_defaut_reservee_aux_configurations_archivees(raw):
+    """Un réglage ajouté après l'archive prend, dans le modèle, la valeur du comportement
+    d'avant (relecture d'une configuration archivée) ; le fichier du projet doit pourtant
+    le régler explicitement, comme tout le reste."""
+    data = _mutate(raw, "crag.search", _DELETE)
+    assert DecisionConfig.model_validate(data).crag.search.distinct_references is False
+
+
+@pytest.mark.parametrize(
+    ("path", "named"),
+    [
+        ("crag.search", "crag.search"),
+        ("crag.search.distinct_references", "crag.search"),
+    ],
+)
+def test_reglage_absent_du_fichier_nomme(tmp_path, raw, path, named):
+    with pytest.raises(ConfigError, match=f"réglages absents.*{named}"):
+        load_config(_write(tmp_path, _mutate(raw, path, _DELETE)))
+
+
 def test_fichier_absent(tmp_path):
     with pytest.raises(ConfigError, match="introuvable"):
         load_config(tmp_path / "absent.yaml")
