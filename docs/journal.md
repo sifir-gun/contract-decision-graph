@@ -2586,7 +2586,7 @@ Conception validée par le propriétaire le 30/09, avec ses décisions : interfa
 
 ## 2026-09-30 · Défaut connu : analyse interrompue reprise sous une autre configuration
 
-À corriger dans la PR qui suivra l'archivage des configurations (décision du propriétaire, 30/09).
+À corriger dans la PR qui suivra l'archivage des configurations (décision du propriétaire, 30/09). **Corrigé le 01/10** (branche `reprise-configuration-modifiee`, entrée ci-dessous).
 
 - **Constat** (relevé en concevant l'archivage) : `resume_interrupted` reprend une analyse interrompue avec le graphe du processus qui reprend, donc avec sa configuration, même si elle a changé depuis le début de l'analyse. L'état garde l'empreinte de configuration posée par `run_contract` au départ : règles et décision peuvent alors être calculées sous une configuration autre que celle que l'enregistrement déclare dans sa partie décision.
 - **Déjà visible, pas encore empêché** : le scellement porte le constat « configuration modifiée entre l'analyse et le scellement », et un rejeu fidèle, sur la configuration archivée de l'analyse, verra la différence comme une anomalie.
@@ -2603,3 +2603,14 @@ Conception validée par le propriétaire le 30/09, avec ses précisions : `check
 - **Nom de la table** : `audit_decisions_configurations` (`<journal>_configurations`) au lieu de `config_archive` proposé, pour que chaque journal jetable des tests ait son archive jetable sans cas particulier.
 - **Garde de `check.sh`** : le critère est celui de `scripts/chaine.py revision` (fichiers non commités dans le contexte de construction de l'image), pas tout l'arbre de travail : un brouillon de documentation ne change pas le commit de l'image. Testé en exécutant le script avec des doublures de uv et docker.
 - **Vrai journal relu en lecture seule** (avant de pousser) : 5 enregistrements, tous v1, aucun v2 sans configuration archivée, archive vide ; vérification conforme ; les 5 restent non rejouables (configuration non archivée, et empreinte différente de la courante).
+
+## 2026-10-01 · Reprise sous une autre configuration : escalade, tranchée sous l'actuelle (branche `reprise-configuration-modifiee`)
+
+Conception validée par le propriétaire le 01/10, avec ses décisions : la reprise est comptée avant l'escalade, et un cumul avec le maximum de reprises cite les deux causes ; le relecteur tranche sous la configuration actuelle (revue bloquée jusqu'à expiration : refusée), `resume` ne l'accepte que dans ce cas ; levée d'un blocage dur seulement si les deux configurations l'autorisent (jamais d'assouplissement rétroactif d'un contrôle de sécurité) ; relance possible, comme un nouveau contrat ; `config-check` liste ces contrats à part. Détail : ADR 005.
+
+### Faits et pièges
+
+- **Deux générations de processus dans un test** : `memory_opener` construit son graphe sous la configuration qu'on lui donne ; pour qu'un processus reprenne sous une autre, les tests partagent un checkpointer en mémoire entre deux ouvreurs, chacun sous sa configuration.
+- **Une file partagée avec un processus fils doit rester en vie** (mode spawn) : passée en temporaire, elle disparaît sous le fils, qui n'atteint jamais l'extraction. Déjà noté dans `test_verrous.py`, retrouvé en écrivant le test PostgreSQL.
+- **Relance sur le texte masqué** : l'original n'est jamais conservé ; l'analyse d'origine portait déjà sur le texte masqué, la relance aussi.
+- **Défaut trouvé, non corrigé dans cette PR** (vérifié le 01/10, cas construit) : une escalade de reprise est écrite au nom de `decision_gate` sans que le gate ne tourne ; le rejeu recalcule le gate. Avec un verdict gardé portant un blocage dur, le rejeu propose NO_GO au lieu de l'ESCALADE scellée, et un rejeu fidèle conclut à tort à une anomalie (code 1). Sur les deux chemins d'escalade, dont celui du maximum de reprises, antérieur à cette PR. Signalé au propriétaire.
