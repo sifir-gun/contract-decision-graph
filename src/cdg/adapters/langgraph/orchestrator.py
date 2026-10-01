@@ -139,6 +139,18 @@ def build_crag_graph(
     return builder.compile(checkpointer=False)
 
 
+# Le CRAG tourne comme un graphe racine, sans rien hériter de l'exécution du parent.
+# Invoqué dans un analyste, il recevrait sinon la configuration ambiante du parent, dont
+# sa durabilité (DURABILITY, « sync ») ; compilé sans checkpointer, il attendait alors en
+# fin d'étape une écriture jamais lancée (`_put_checkpoint_fut`, `pregel/main.py`), et
+# chaque analyste échouait (défaut du 28/09, journal du 01/10). LangGraph 1.2.12
+# (`_internal/_config.py`, `ensure_config`) abandonne la configuration ambiante quand
+# l'appel fournit son propre fil : sans checkpointer, rien ne s'écrit sous ce fil. Passer
+# `durability` explicitement ferait aussi l'affaire, mais LangGraph avertirait alors à
+# chaque appel (« no effect when no checkpointer »), hors des journaux JSON.
+CRAG_ROOT: RunnableConfig = {"configurable": {"thread_id": "crag"}}
+
+
 def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) -> Crag:
     """CRAG injecté dans les analystes : le sous-graphe compilé, une fois par type de clause."""
     graph = build_crag_graph(retriever, llm, config)
@@ -147,7 +159,10 @@ def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) 
         domain: Domain, clauses: list[Clause], analysis_date: date
     ) -> RetrievalResult:
         return crag.per_clause(
-            domain, clauses, analysis_date, lambda state: graph.invoke(state)["result"]
+            domain,
+            clauses,
+            analysis_date,
+            lambda state: graph.invoke(state, CRAG_ROOT)["result"],
         )
 
     return run

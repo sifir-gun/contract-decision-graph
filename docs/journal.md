@@ -2709,3 +2709,13 @@ Nouveau chantier, à la demande explicite du propriétaire, inspiré de l'articl
 
 - **Un extrait par référence parmi les k premiers** (diversité) : une fiche ou un article en plusieurs extraits occupe plusieurs rangs du CRAG ; ne garder que le meilleur extrait de chaque référence laisserait la place aux articles. Technique nouvelle, non prévue au chantier.
 - **Rattachement déclaré à revoir pour les deux écarts** (1211 pour la durée d'engagement, RGPD 28 pour les transferts) : décision du propriétaire, hors de ce chantier.
+
+## 2026-10-01 · Correctif : le CRAG imbriqué échouait depuis le 28/09 (branche `correctif-crag-durabilite`)
+
+Trouvé en lançant les séries réelles de la PR 2 du chantier « qualité de la recherche » (critère 3 en échec 5 fois sur 5 ; tous les contrats de la série en `ESCALADE`, contrat 01 compris ; séries arrêtées, 0,0072 $). Correctif à part, sur décision du propriétaire.
+
+- **Cause** : depuis le commit 66ab3dc du 28/09, chaque appel au graphe passe `durability="sync"`. LangGraph 1.2.12 transmet la configuration d'exécution du parent au sous-graphe du CRAG, invoqué dans l'analyste ; compilé sans checkpointer (décision du 25/09), celui-ci héritait de « sync » et attendait en fin d'étape le futur d'une écriture jamais lancée (`loop._put_checkpoint_fut`, `pregel/main.py`) : `AttributeError` dans chaque analyste dont le CRAG tourne, trois tentatives, puis escalade.
+- **Portée** : toute analyse réelle dont une clause porte un constat escaladait, dans le sens prudent (jamais plus favorable) ; le système ne décidait plus seul. Aucune analyse réelle scellée depuis dans le journal local.
+- **Pourquoi aucun test ne l'a vu** : les tests non payants du critère 3 font tourner le vrai CRAG dans le graphe, mais par `graph.invoke(...)` sans durabilité, donc en « async » ; ailleurs, une doublure remplace le CRAG. Le chemin réel (`run_contract`, « sync ») ne tournait que dans les tests payants, non relancés depuis le 26/09, et dans l'application.
+- **Correctif** : le CRAG est invoqué comme un graphe racine, avec son propre fil (`CRAG_ROOT`) ; LangGraph abandonne alors la configuration ambiante du parent (`_internal/_config.py`, `ensure_config`), durabilité comprise. Sans checkpointer, rien ne s'écrit sous ce fil. Écartée : passer `durability="async"` explicitement, qui corrige aussi, mais LangGraph avertit alors à chaque appel (« `durability` has no effect when no checkpointer is present »), en texte brut hors des journaux JSON.
+- **Tests** : les tests non payants du critère 3 passent désormais la durabilité de la production ; un nouveau test fait tourner le vrai CRAG dans chaque analyste par `run_contract`, sans échec ni avertissement de LangGraph. Les trois échouaient avant le correctif.
