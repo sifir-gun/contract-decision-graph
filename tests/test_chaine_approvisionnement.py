@@ -350,7 +350,19 @@ def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
     ):
         assert rules[name]["package"] == package
         assert "govulncheck" in rules[name]["reason"]
-    assert len(rules) == 5
+    # distroless cc-debian13 (01/10/2026) : libssl3t64 de l'image de base, présente mais
+    # chargée par aucun processus (DT_NEEDED, /proc/<pid>/maps), correctif pas encore
+    # republié par distroless
+    libssl = {"name": "libssl3t64", "type": "deb", "version": "3.5.7-1~deb13u2"}
+    for name in (
+        "CVE-2026-54873",
+        "CVE-2026-72897",
+        "CVE-2026-84782",
+        "CVE-2026-84784",
+    ):
+        assert rules[name]["package"] == libssl
+        assert "DT_NEEDED" in rules[name]["reason"] and "maps" in rules[name]["reason"]
+    assert len(rules) == 9
 
 
 def exceptions(tmp_path, **changes) -> Path:

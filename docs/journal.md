@@ -2603,3 +2603,21 @@ Conception validée par le propriétaire le 30/09, avec ses précisions : `check
 - **Nom de la table** : `audit_decisions_configurations` (`<journal>_configurations`) au lieu de `config_archive` proposé, pour que chaque journal jetable des tests ait son archive jetable sans cas particulier.
 - **Garde de `check.sh`** : le critère est celui de `scripts/chaine.py revision` (fichiers non commités dans le contexte de construction de l'image), pas tout l'arbre de travail : un brouillon de documentation ne change pas le commit de l'image. Testé en exécutant le script avec des doublures de uv et docker.
 - **Vrai journal relu en lecture seule** (avant de pousser) : 5 enregistrements, tous v1, aucun v2 sans configuration archivée, archive vide ; vérification conforme ; les 5 restent non rejouables (configuration non archivée, et empreinte différente de la courante).
+
+## 2026-10-01 · À revoir avant le 15/10 : OpenSSL dans l'image de l'application
+
+Le scan de l'image de l'application a échoué le 01/10 sur quatre failles (CVE-2026-54873, CVE-2026-72897, CVE-2026-84782, CVE-2026-84784) de `libssl3t64` 3.5.7-1~deb13u2, dans la base `gcr.io/distroless/cc-debian13:nonroot`. Debian a publié son correctif (3.5.7-1~deb13u3), que distroless n'a pas encore republié (empreinte inchangée le 01/10).
+
+- **La libssl de la base n'est chargée par aucun processus** (lecture seule, images arm64 et amd64 construites comme en CI) : aucune bibliothèque ELF de Python ni du venv ne la déclare ; ni le serveur (PID 1) ni un processus qui importe et utilise chaque dépendance native ne la projette en mémoire.
+- **Les copies réellement chargées sont touchées elles aussi** (avis officiels d'OpenSSL, 29/09 : les quatre failles, et neuf autres de basse sévérité, de 3.5.0 à 3.5.9 exclu) ; le scanner ne les voit pas :
+  - OpenSSL 3.5.8 de psycopg-binary 3.3.6 (libpq), arm64 et amd64 ;
+  - OpenSSL 3.5.8 de Python (uv, lié statiquement) ;
+  - sur arm64 seulement, OpenSSL 1.1.1k FIPS de Kerberos, embarquée par psycopg-binary, d'un système de type AlmaLinux 8 ; touchée par sa version par toutes les failles corrigées depuis 2021, dont deux hautes de 2026 (CVE-2026-84782, CVE-2026-45447) ; les correctifs reportés par RHEL ne se vérifient pas sur un binaire copié.
+- **Exposition, selon une lecture du code, pas une preuve** : l'application est cliente TLS seulement (libpq, httpx) ; ni DTLS, ni QUIC, ni serveur TLS (TLS terminé par Traefik).
+- **Durcissement** : `gssencmode=disable` dans toute chaîne de connexion ; libpq ne négocie plus jamais Kerberos. La copie 1.1.1k reste chargée avec libpq (dépendances déclarées), vérifié dans le conteneur, mais son code n'est plus appelé.
+- **Exceptions datées** (`securite/exceptions-vulnerabilites.yaml`), sur décision du propriétaire, qui couvrent la base et, par leur justification, les copies chargées ; elles expirent le 15/10, et le job `image` du lundi le rappellera. Elles ne concernent que l'image de l'application : celles du proxy de sortie et d'oauth2-proxy (Go statique sur `static-debian13`) n'ont pas de libssl, et leur scan passe sans elles.
+- **Liste de surveillance, corrections attendues avant le 15/10** :
+  1. psycopg-binary sur OpenSSL 3.5.9 ou plus (3.3.6, du 18/09, est la dernière le 01/10) ;
+  2. Python sur OpenSSL 3.5.9, par une version de uv qui le fournit ;
+  3. republication de distroless avec libssl3t64 3.5.7-1~deb13u3 (empreinte de la base mise à jour, signature vérifiée par `scripts/chaine.py bases`).
+  Chacune retire une partie du risque ; les exceptions tombent quand les trois sont faites, sinon elles sont revues et, au besoin, prolongées avec justification.
