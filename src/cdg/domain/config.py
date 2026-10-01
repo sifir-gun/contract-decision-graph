@@ -245,6 +245,16 @@ class SearchConfig(_Strict):
 
     # un seul extrait par référence parmi les top_k, le plus proche de la requête
     distinct_references: bool = False
+    # vector : vecteurs seuls ; hybrid : plein texte français (accents ignorés) et
+    # vecteurs, fusionnés par rangs réciproques (RRF)
+    mode: Literal["vector", "hybrid"] = "vector"
+    rrf_k: Annotated[int, Field(gt=0)] = 60  # constante de la fusion (Cormack, 2009)
+    candidates: Annotated[int, Field(gt=0)] = (
+        20  # extraits par liste avant fusion (≥ k)
+    )
+    # normalisation de ts_rank par la longueur : 0 aucune, 1 par 1 + log(longueur),
+    # 2 par la longueur
+    text_normalization: Literal[0, 1, 2] = 1
 
 
 class CragConfig(_Strict):

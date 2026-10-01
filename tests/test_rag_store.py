@@ -86,3 +86,34 @@ def test_migration_008_en_tete_et_empreinte_du_texte_embarque(pg):
         }
     assert {"header", "embedded_hash"} <= columns
     assert grants(pg, "rag_chunks") == {"SELECT"}
+
+
+def test_migration_009_plein_texte_francais_accents_ignores(pg):
+    """Configuration plein texte du projet : français, accents ignorés (unaccent, puis
+    racinisation) ; colonne de lexèmes générée (en-tête et texte), index GIN ; app_role
+    la lit et l'interroge, sans écrire."""
+    migrations.apply(pg.admin)  # rejouable
+    with psycopg.connect(pg.admin) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM pg_extension WHERE extname = 'unaccent'"
+        ).fetchone()
+        generated = conn.execute(
+            "SELECT is_generated FROM information_schema.columns "
+            "WHERE table_name = 'rag_chunks' AND column_name = 'lexemes'"
+        ).fetchone()
+        assert generated == ("ALWAYS",)
+        assert conn.execute(
+            "SELECT 1 FROM pg_indexes WHERE tablename = 'rag_chunks' "
+            "AND indexname = 'rag_chunks_lexemes_idx'"
+        ).fetchone()
+    with psycopg.connect(pg.app) as conn:
+        [(match,)] = conn.execute(
+            "SELECT to_tsvector('cdg_francais', 'Les pénalités d''exécution') "
+            "@@ to_tsquery('cdg_francais', 'penalite & EXECUTION')"
+        ).fetchall()
+        assert match is True
+        conn.execute(
+            "SELECT count(*) FROM rag_chunks "
+            "WHERE lexemes @@ to_tsquery('cdg_francais', 'penalite')"
+        ).fetchone()
+    assert grants(pg, "rag_chunks") == {"SELECT"}

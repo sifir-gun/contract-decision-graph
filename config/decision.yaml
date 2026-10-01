@@ -279,6 +279,12 @@ crag:
     # un seul extrait par référence parmi les top_k, le plus proche : sans lui, une fiche
     # ou un long article en plusieurs extraits occupe plusieurs rangs
     distinct_references: true
+    # vector : vecteurs seuls ; hybrid : plein texte français, accents ignorés
+    # (PostgreSQL, migration 009), et vecteurs, fusionnés par rangs réciproques (RRF)
+    mode: vector
+    rrf_k: 60                 # constante de la fusion, valeur de l'article d'origine
+    candidates: 20            # extraits par liste avant la fusion (au moins top_k)
+    text_normalization: 1     # ts_rank divisé par 1 + log(longueur) : proche de BM25
 
 # Reprise d'un analyste sur erreur transitoire (réseau, API), par la RetryPolicy de
 # LangGraph, avant que la garde ne transforme l'échec en `failures` (J3).

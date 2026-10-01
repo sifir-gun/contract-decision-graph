@@ -185,7 +185,7 @@ def _catalog(conninfo: str) -> dict:
 @pytest.mark.pg
 def test_base_vide_toutes_les_migrations_dans_l_ordre_puis_rien(empty_database):
     names = [p.name for p in sorted((ROOT / "migrations").glob("0*.sql"))]
-    assert names[0] == "001_audit.sql" and names[-1] == "008_rag_texte_embarque.sql"
+    assert names[0] == "001_audit.sql" and names[-1] == "009_rag_plein_texte.sql"
     assert migrations.apply(empty_database) == names
     before = _catalog(empty_database)
     assert ("app_role", "audit_decisions", "INSERT") in before["droits"]

@@ -302,13 +302,18 @@ def test_configuration_archivee_d_avant_les_reglages_de_recherche_rejouable():
     assert audit.replay(record(state).model_dump(mode="json"), old).identical
 
 
-@pytest.mark.parametrize("distinct", [False, True])
-def test_rejeu_independant_des_reglages_de_recherche(distinct):
+@pytest.mark.parametrize(
+    "search",
+    [
+        SearchConfig(distinct_references=False),
+        SearchConfig(distinct_references=True),
+        SearchConfig(distinct_references=True, mode="hybrid"),
+    ],
+)
+def test_rejeu_independant_des_reglages_de_recherche(search):
     """Le rejeu ne cherche rien dans le corpus : sous chaque réglage de la recherche,
     une décision scellée se rejoue à l'identique sur sa configuration archivée."""
-    settings = CONFIG.crag.model_copy(
-        update={"search": SearchConfig(distinct_references=distinct)}
-    )
+    settings = CONFIG.crag.model_copy(update={"search": search})
     sealed_under = CONFIG.model_copy(update={"crag": settings}).model_dump(mode="json")
     state = reviewed() | {"config_hash": audit.configuration_hash(sealed_under)}
     del state["analysis_config"]

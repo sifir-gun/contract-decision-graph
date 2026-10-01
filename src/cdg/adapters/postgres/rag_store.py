@@ -2,6 +2,8 @@
 synchronisation, recherche exacte filtrée (CRAG) et sans filtre (mesure de la recherche).
 Les migrations sont dans `migrations.py`."""
 
+from collections.abc import Callable
+
 import psycopg
 from pgvector import Vector
 from pgvector.psycopg import register_vector
@@ -10,6 +12,7 @@ from psycopg.rows import tuple_row
 from cdg.adapters.postgres.connexions import Conninfo, Source, connection, resolve
 from cdg.domain.config import SearchConfig
 from cdg.domain.corpus import ChunkRow
+from cdg.domain.fusion import reciprocal_rank_fusion
 from cdg.domain.models import Domain
 from cdg.ports.embedder import Embedder
 from cdg.ports.retriever import Passage
@@ -80,50 +83,128 @@ def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
     return inserted
 
 
-# extrait gardé par groupe, avant l'ordre par distance (texte SQL fixe, jamais une entrée) :
-# chaque extrait ; chaque extrait une fois (un extrait indexé dans plusieurs domaines a une
-# ligne par domaine) ; le plus proche de chaque référence (ADR 006)
+# extrait gardé par groupe, avant l'ordre de chaque liste (texte SQL fixe, jamais une
+# entrée) : chaque extrait ; chaque extrait une fois (un extrait indexé dans plusieurs
+# domaines a une ligne par domaine) ; le meilleur de chaque référence (ADR 006)
 _EACH, _ONCE, _PER_REFERENCE = "id", "reference, content_hash", "reference"
+_KEYS: dict[str, Callable[[Passage], str]] = {
+    _EACH: lambda p: str(p.id),
+    _ONCE: lambda p: f"{p.reference}\x00{p.text}",
+    _PER_REFERENCE: lambda p: p.reference,
+}
+_COLUMNS = (
+    "id, domain, source_id, reference, text, embedding <=> %s AS distance, valid_until,"
+    " note, kinds"
+)
+
+
+def _by_vector(
+    cur: psycopg.Cursor,
+    vector: list[float],
+    where: str,
+    params: tuple,
+    *,
+    unique: str,
+    n: int,
+) -> list[Passage]:
+    """Recherche exacte : filtre `where`, un extrait par groupe `unique` (le plus proche),
+    puis les n plus proches, à distance égale par identifiant."""
+    rows = cur.execute(
+        "SELECT id, domain, source_id, reference, text, distance, valid_until, note,"
+        f" kinds FROM (SELECT DISTINCT ON ({unique}) {_COLUMNS}"
+        f" FROM rag_chunks WHERE {where}"
+        f" ORDER BY {unique}, distance, id) AS candidates"
+        " ORDER BY distance, id LIMIT %s",
+        (Vector(vector), *params, n),
+    ).fetchall()
+    return _passages(rows)
+
+
+def _by_text(
+    cur: psycopg.Cursor,
+    vector: list[float],
+    text: str,
+    where: str,
+    params: tuple,
+    *,
+    unique: str,
+    n: int,
+    normalization: int,
+) -> list[Passage]:
+    """Plein texte français, accents ignorés (configuration `cdg_francais`, migration
+    009) : les mots de la requête en OU (plainto_tsquery les exige tous, et une requête
+    du CRAG en compte une vingtaine), extraits classés par ts_rank, un par groupe
+    `unique` (le mieux classé), puis les n premiers, à rang égal par identifiant. Une
+    requête sans mot plein ne trouve rien."""
+    rows = cur.execute(
+        "SELECT id, domain, source_id, reference, text, distance, valid_until, note,"
+        f" kinds FROM (SELECT DISTINCT ON ({unique}) {_COLUMNS},"
+        " ts_rank(lexemes, terms.q, %s) AS score"
+        " FROM rag_chunks, (SELECT replace(plainto_tsquery('cdg_francais', %s)::text,"
+        " ' & ', ' | ')::tsquery AS q) AS terms"
+        f" WHERE {where} AND lexemes @@ terms.q"
+        f" ORDER BY {unique}, score DESC, id) AS candidates"
+        " ORDER BY score DESC, id LIMIT %s",
+        (Vector(vector), normalization, text, *params, n),
+    ).fetchall()
+    return _passages(rows)
 
 
 def _ranked(
     cur: psycopg.Cursor,
-    query: list[float],
+    vector: list[float],
+    text: str,
     where: str,
     params: tuple,
     *,
     unique: str,
     k: int,
+    settings: SearchConfig,
 ) -> list[Passage]:
-    """Recherche exacte : filtre `where`, un extrait par groupe `unique` (le plus proche),
-    puis les k plus proches, à distance égale par identifiant."""
-    rows = cur.execute(
-        "SELECT id, domain, source_id, reference, text, distance, valid_until, note,"
-        " kinds FROM ("
-        f" SELECT DISTINCT ON ({unique}) id, domain, source_id, reference, text,"
-        " embedding <=> %s AS distance, valid_until, note, kinds"
-        f" FROM rag_chunks WHERE {where}"
-        f" ORDER BY {unique}, distance, id) AS candidates"
-        " ORDER BY distance, id LIMIT %s",
-        (Vector(query), *params, k),
-    ).fetchall()
-    return _passages(rows)
+    """Les k premiers extraits : par distance seule (vector), ou par fusion des rangs
+    (hybrid) des deux listes de `candidates` extraits, plein texte et vecteurs ; un
+    extrait des deux listes garde la ligne de la liste des vecteurs."""
+    if settings.mode == "vector":
+        return _by_vector(cur, vector, where, params, unique=unique, n=k)
+    n = max(k, settings.candidates)
+    lists = [
+        _by_vector(cur, vector, where, params, unique=unique, n=n),
+        _by_text(
+            cur,
+            vector,
+            text,
+            where,
+            params,
+            unique=unique,
+            n=n,
+            normalization=settings.text_normalization,
+        ),
+    ]
+    key = _KEYS[unique]
+    passages: dict[str, Passage] = {}
+    for passage in lists[0] + lists[1]:
+        passages.setdefault(key(passage), passage)
+    fused = reciprocal_rank_fusion(
+        [[key(p) for p in found] for found in lists], settings.rrf_k
+    )
+    return [passages[k_] for k_ in fused[:k]]
 
 
 def search(
     source: Source,
     domain: Domain,
-    query: list[float],
+    vector: list[float],
     *,
+    text: str,
     kind: str,
     k: int,
     model: str,
     settings: SearchConfig,
 ) -> list[Passage]:
-    """Recherche exacte : filtre (domaine, type de clause, modèle) AVANT l'ordre par
-    distance cosinus ; un extrait par référence si la configuration le demande. Des
-    extraits du modèle sans rattachement (indexés avant la migration 005) sont une erreur
-    explicite : ils ne sont jamais ignorés en silence."""
+    """Recherche exacte : filtre (domaine, type de clause, modèle) AVANT tout classement,
+    vecteurs seuls ou hybride ; un extrait par référence si la configuration le demande.
+    Des extraits du modèle sans rattachement (indexés avant la migration 005) sont une
+    erreur explicite : ils ne sont jamais ignorés en silence."""
     with connection(source) as conn:
         register_vector(conn)
         cur = conn.cursor(row_factory=tuple_row)
@@ -138,18 +219,21 @@ def search(
             )
         return _ranked(
             cur,
-            query,
+            vector,
+            text,
             "domain = %s AND %s = ANY(kinds) AND embedding_model = %s",
             (domain, kind, model),
             unique=_PER_REFERENCE if settings.distinct_references else _EACH,
             k=k,
+            settings=settings,
         )
 
 
 def search_unfiltered(
     source: Source,
-    query: list[float],
+    vector: list[float],
     *,
+    text: str,
     k: int,
     model: str,
     settings: SearchConfig,
@@ -162,11 +246,13 @@ def search_unfiltered(
         cur = conn.cursor(row_factory=tuple_row)
         return _ranked(
             cur,
-            query,
+            vector,
+            text,
             "embedding_model = %s",
             (model,),
             unique=_PER_REFERENCE if settings.distinct_references else _ONCE,
             k=k,
+            settings=settings,
         )
 
 
@@ -219,6 +305,7 @@ class PgvectorRetriever:
             self._source,
             domain,
             vector,
+            text=query,
             kind=kind,
             k=k,
             model=self._embedder.model,
@@ -231,6 +318,7 @@ class PgvectorRetriever:
         return search_unfiltered(
             self._source,
             vector,
+            text=query,
             k=k,
             model=self._embedder.model,
             settings=self._settings,
