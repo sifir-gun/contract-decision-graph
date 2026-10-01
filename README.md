@@ -230,6 +230,21 @@ Les critères testés avec le vrai modèle passent aussi, 5 fois sur 5 : un cons
 
 **Ce que ces résultats ne prouvent pas.** Cinq essais à température 0, un fournisseur, un poste : une vérification de régression, pas une mesure statistique. Un seul contrat réaliste ; les autres sont rédigés sans ambiguïté, pour tester la logique du graphe. La concordance mesure l'accord avec des attendus écrits par le projet, pas la justesse juridique.
 
+## Qualité de la recherche
+
+Le CRAG justifie chaque constat par une référence du corpus : encore faut-il que la recherche la lui montre. Un jeu d'évaluation la mesure seule, sans LLM : pour les 21 requêtes que donnent les constats du jeu de démonstration, 55 références attendues, choisies à la lecture des textes et jamais d'après le rattachement que la recherche utilise déjà, puis validées et figées avant toute mesure (`uv run python -m cdg.cli mesure-recherche`). Chaque technique n'est gardée que si la mesure progresse sans qu'aucune requête ne perde avec le filtre ([ADR 006](docs/adr-006-recherche.md), détail requête par requête dans le [journal](docs/journal.md)).
+
+| rappel@4 (rang du CRAG) | avant (01/10) | après | lecture |
+| --- | --- | --- | --- |
+| avec le filtre du CRAG, toutes les références | 75,4 % | **89,3 %** | |
+| avec le filtre, articles de loi seuls | 62,7 % | **84,1 %** | le juge voit l'article attendu |
+| sans filtre (corpus entier), toutes | 57,5 % | **72,2 %** | |
+| sans filtre, articles seuls | 30,2 % | **55,6 %** | |
+
+- **Résultat clé** : la fiche du projet sortait au rang 1 pour les 21 requêtes et, en plusieurs extraits, repoussait les articles de loi hors des quatre premiers. **Gardé : un seul extrait par référence** parmi les quatre premiers.
+- **Abandonnés, chiffres à l'appui** : les en-têtes de contexte écrits par le code (moyennes en hausse, mais une requête perd : deux articles de la même section portent le même en-tête) et la recherche hybride plein texte et vecteurs (recul : l'intitulé du domaine, commun à toutes les requêtes, domine le plein texte).
+- **Pourquoi une recherche pour 15 000 tokens de corpus** : chaque référence retenue est rattachée à la clause, datée et scellée ; tout le corpus dans le prompt ferait perdre la trace de ce qui a été cherché, et pour quelle clause. L'architecture vise des corpus clients bien plus grands ([ADR 006](docs/adr-006-recherche.md)).
+
 ## Limites connues
 
 - **Périmètre** : dix types de clauses ; un transfert est jugé sur la garantie que nomme le contrat, jamais sur une liste de pays ; le corpus ne suit pas les renvois de second degré ([SOURCES.md](data/corpus/SOURCES.md)).
@@ -250,7 +265,7 @@ Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règl
 - [ADR 003 : LangGraph Studio écarté](docs/adr-003-studio-ecarte.md). En usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot : ce qui a été observé le 27/09/2026, avec les versions, et ce qui n'a pas été mesuré.
 - [ADR 004 : interface web](docs/adr-004-interface-web.md). Rendu côté serveur avec HTMX plutôt qu'une application séparée ; aucune ressource externe ; sécurité ; pas d'authentification avant l'étape Kubernetes ; mode démonstration et ses limites.
 - [ADR 005 : déploiement Kubernetes](docs/adr-005-kubernetes.md). k3s et Helm, plusieurs réplicas, chaîne d'approvisionnement, cluster de test et scénarios, authentification et entrée réseau, avec leur modèle de menaces (STRIDE), autorisation et traçabilité, base légale et conservation proposées ; sources vérifiées et datées de chaque choix, bonnes pratiques écartées justifiées ; ce qui reste hors du projet pour une vraie production.
-- [ADR 006 : qualité de la recherche](docs/adr-006-recherche.md). Jeu d'évaluation de la recherche seule, établi sans le rattachement déclaré et validé par des non-juristes ; mesure sans LLM (`mesure-recherche`) : au rang 4 du CRAG, l'article de loi attendu n'est vu que dans 62,7 % des cas ; pourquoi un RAG pour un corpus de 15 000 tokens.
+- [ADR 006 : qualité de la recherche](docs/adr-006-recherche.md). Jeu d'évaluation de la recherche seule, établi sans le rattachement déclaré et validé par des non-juristes ; mesure sans LLM (`mesure-recherche`) ; un extrait par référence gardé (l'article de loi attendu vu par le juge dans 84,1 % des cas, contre 62,7 %), en-têtes de contexte et recherche hybride abandonnés, chiffres à l'appui ; pourquoi un RAG pour un corpus de 15 000 tokens.
 - [Spécification de la phase 1](docs/spec-phase1.md), source de vérité ; [journal](docs/journal.md) des décisions, des séries réelles et des pièges ; [exploitation](docs/exploitation.md).
 
 ## Feuille de route
