@@ -102,6 +102,7 @@ def test_journal_puis_replay(
         "configuration": "archivee",
         "sens": "reevaluation",
         "motif_du_sens": "commit inconnu au scellement",
+        "defaut": None,
         "anomalie": False,
     }
 

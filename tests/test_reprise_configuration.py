@@ -14,6 +14,9 @@
 - Relance : nouvelle analyse du texte masqué, sous la configuration actuelle, nouveau
   contrat ; le contrat escaladé reste en attente.
 - `config-check` ne compte pas ces contrats comme à trancher : il les liste à part.
+- Rejeu d'une escalade écrite par la reprise : le gate n'a pas tourné, il n'est pas
+  recalculé ; la cause enregistrée (rang de reprise, maximum, empreintes) est vérifiée,
+  cohérente avec le rapport et la décision. Sans cause valide : anomalie.
 """
 
 import json
@@ -521,3 +524,142 @@ def test_processus_tue_repris_sous_une_autre_configuration_escalade(
     )
     assert escalated["configuration_changee"] == {"analyse": A, "reprise": B}
     assert extractor.calls == 0 and sealed(pg, journal) == []
+
+
+# --- rejeu d'une escalade écrite par la reprise : cause vérifiée, gate non recalculé --------
+
+BLOCKING = clauses(responsabilite_acheteur=None)  # blocage dur, juridique
+
+
+def sealed_escalation(*, changed: bool, tokens: int = 0, review: bool = True):
+    """Contrat dont deux analystes meurent à chaque fois, après que le juridique (blocage
+    dur) et le financier ont rendu leur verdict ; escaladé par la reprise, après le
+    maximum de reprises (même configuration) ou pour changement de configuration, puis
+    tranché NO_GO. Rend le service qui a tranché et l'enregistrement scellé."""
+    processes = Processes(
+        FixedExtractor(BLOCKING, tokens_in=tokens), CrashingAnalysts()
+    )
+    old = with_override(CONFIG, True, review=review)
+    interrupted(processes, "c-escalade", config=old)
+    if changed:
+        current = with_override(NEW, True, review=review)
+    else:
+        current = old
+        for _ in range(LIMIT):
+            with pytest.raises(Death):
+                processes.service(old).resume_interrupted()
+    service = processes.service(current)
+    [escalated] = service.resume_interrupted()
+    assert ("juridique", True) in [
+        (v["domain"], v["hard_block"]) for v in escalated["verdicts"]
+    ]
+    service.decide("c-escalade", answer("NO_GO", reason="revu"))
+    [entry] = processes.store.entries()
+    return service, entry.record, processes.store.configurations()[entry.config_hash]
+
+
+@pytest.mark.parametrize("changed", [False, True], ids=["maximum", "configuration"])
+def test_rejeu_fidele_d_une_escalade_de_reprise_avec_blocage_dur_garde(changed):
+    """Avant la correction : le rejeu recalculait le gate, proposait NO_GO (le blocage
+    établi suffit) au lieu de l'ESCALADE scellée, et concluait à tort à une anomalie."""
+    service, _record, _ = sealed_escalation(changed=changed)
+    replayed = service.replay("c-escalade")
+    assert (replayed["sens"], replayed["identique"], replayed["anomalie"]) == (
+        "fidele",
+        True,
+        False,
+    )
+    assert replayed["defaut"] is None and replayed["recalcule"]  # verdicts recalculés
+
+
+@pytest.mark.parametrize("changed", [False, True], ids=["maximum", "configuration"])
+def test_rejeu_d_une_escalade_de_reprise_avec_budget_depasse(changed):
+    service, record, _ = sealed_escalation(changed=changed, tokens=70_000)
+    assert (
+        sum(u["tokens_in"] for u in record["usage"])
+        > CONFIG.budget.max_tokens_per_contract
+    )
+    replayed = service.replay("c-escalade")
+    assert replayed["identique"] and not replayed["anomalie"]
+
+
+@pytest.mark.parametrize(
+    ("changed", "reprises"),
+    [(False, LIMIT + 1), (True, 1)],
+    ids=["maximum", "configuration"],
+)
+def test_escalade_de_reprise_scellee_avec_sa_cause(changed, reprises):
+    _, record, _ = sealed_escalation(changed=changed)
+    old = audit.config_hash(with_override(CONFIG, True, review=True))
+    new = audit.config_hash(with_override(NEW, True, review=True))
+    assert record["resume_escalation"] == {
+        "reprises": reprises,
+        "maximum": LIMIT,
+        "analyse": old,
+        "reprise": new if changed else old,
+    }
+    assert record["decision"]["config_hash"] == old
+
+
+def tampered(record: dict, **changes) -> dict:
+    data = json.loads(json.dumps(record))
+    if changes.pop("remove", False):
+        data["resume_escalation"] = None
+    data["resume_escalation"] = (
+        (data["resume_escalation"] or {}) | changes
+        if changes
+        else data["resume_escalation"]
+    )
+    return data
+
+
+@pytest.mark.parametrize(
+    ("changed", "changes", "reason"),
+    [
+        (False, {"remove": True}, "sans cause enregistrée"),
+        (False, {"reprises": LIMIT}, "sans cause valide"),
+        (
+            False,
+            {"maximum": LIMIT + 5, "reprises": LIMIT + 6},
+            "maximum de reprises enregistré",
+        ),
+        (True, {"analyse": "e" * 64}, "configuration d'analyse enregistrée"),
+        (True, {"reprise": None}, "mal formée"),
+        (False, {"reprises": LIMIT + 2}, "rang de reprise"),
+    ],
+    ids=[
+        "absente",
+        "maximum-non-atteint",
+        "autre-maximum",
+        "autre-analyse",
+        "mal-formee",
+        "autre-rang",
+    ],
+)
+def test_escalade_de_reprise_sans_cause_valide_reste_une_anomalie(
+    changed, changes, reason
+):
+    _, record, configuration = sealed_escalation(changed=changed)
+    report = audit.replay(tampered(record, **changes), configuration)
+    assert not report.identical and reason in report.fault
+
+
+def test_causes_du_rapport_incoherentes_avec_la_reprise_enregistree():
+    """Le rapport cite un changement de configuration, la cause enregistrée non."""
+    _, record, configuration = sealed_escalation(changed=False)
+    data = json.loads(json.dumps(record))
+    data["decision"]["failure_report"]["failures"][-1]["error"] = (
+        "ConfigurationModifiee"
+    )
+    report = audit.replay(data, configuration)
+    assert not report.identical and "incohérentes" in report.fault
+
+
+def test_anomalie_de_cause_signalee_par_la_cli(monkeypatch, capsys):
+    service, _record, _ = sealed_escalation(changed=False)
+    processes_store = service.audit_store()
+    processes_store.stored[0].record["resume_escalation"] = None  # journal altéré
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    assert cli.main(["replay", "c-escalade"]) == 1
+    error = json.loads(capsys.readouterr().err)
+    assert error["erreur"] == "RejeuAnomalie" and "sans cause" in error["defaut"]

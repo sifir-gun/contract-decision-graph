@@ -1,5 +1,7 @@
 {% if error %}
 <p class="error" role="alert">Rejeu impossible : {{ error }}</p>
+{% elif report.anomalie and report.defaut %}
+<p class="error" role="alert"><strong>Anomalie</strong> : {{ report.defaut }} ; journal altéré.</p>
 {% elif report.anomalie %}
 <p class="error" role="alert"><strong>Anomalie</strong> : rejeu fidèle (même code, même configuration) différent de la décision scellée ; journal altéré ou calcul non déterministe.</p>
 {% elif report.identique and report.sens == "fidele" %}

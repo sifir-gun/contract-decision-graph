@@ -61,6 +61,8 @@ class ContractState(TypedDict, total=False):
     # analyse interrompue escaladée car sa configuration avait changé : empreintes de
     # l'analyse et de la reprise ; seul cas où resume accepte une autre configuration
     configuration_changee: dict[str, str | None]
+    # cause d'une escalade écrite par la reprise (ResumeEscalation en JSON), scellée
+    escalade_reprise: dict[str, Any]
     relance_de: str  # contrat escaladé dont cette analyse est la relance
 
 

@@ -353,6 +353,11 @@ class ContractService:
             "sens": sense,
             "motif_du_sens": why,
             "configuration": source,
-            # rejeu fidèle différent : anomalie ; réévaluation différente : signalée
-            "anomalie": sense == audit.FAITHFUL and not report.identical,
+            # escalade de reprise sans cause valide : défaut du journal, quel que soit
+            # le sens du rejeu
+            "defaut": report.fault,
+            # rejeu fidèle différent, ou défaut : anomalie ; réévaluation différente :
+            # signalée
+            "anomalie": report.fault is not None
+            or (sense == audit.FAITHFUL and not report.identical),
         }

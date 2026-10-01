@@ -57,7 +57,13 @@ def v1_record() -> dict:
     """Enregistrement au format d'avant la PR D2 : sans version, sans acteur de
     l'analyse, relecteur nommé ; synthétique."""
     data = record(reviewed()).model_dump(mode="json")
-    for v2_only in ("version", "analyse_par", "code_version", "sealing_code_version"):
+    for v2_only in (
+        "version",
+        "analyse_par",
+        "code_version",
+        "sealing_code_version",
+        "resume_escalation",
+    ):
         data.pop(v2_only)
     human = data["decision"]["human"]
     data["decision"]["human"] = HumanDecision(

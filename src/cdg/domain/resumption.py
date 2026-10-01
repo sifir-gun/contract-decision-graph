@@ -10,12 +10,29 @@ l'autre : ESCALADE aussi ; les deux causes, cumulées, sont citées toutes deux.
 Fonctions pures ; le compteur durable est un port (`ports/resumes.py`).
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from cdg.domain.models import NodeFailure
 
 INTERRUPTED = "AnalyseInterrompue"
 CONFIG_CHANGED = "ConfigurationModifiee"
+RESUME_ERRORS = (CONFIG_CHANGED, INTERRUPTED)  # causes d'une escalade de reprise
+
+
+class ResumeEscalation(BaseModel):
+    """Cause d'une escalade écrite par la reprise, posée dans l'état puis scellée : rang
+    de la reprise, maximum en vigueur, empreintes de la configuration du début de
+    l'analyse et de celle du processus qui reprenait. Le rejeu la vérifie."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reprises: int
+    maximum: int
+    analyse: str | None
+    reprise: str
 
 
 def exhausted(resume: int, limit: int) -> bool:
@@ -86,3 +103,62 @@ def escalation_failures(
     if exhausted(resume, limit):
         found.append(failure(nodes, resume, limit))
     return found
+
+
+def escalation_record(
+    resume: int, limit: int, analysed_with: str | None, current: str
+) -> dict[str, Any]:
+    """Cause de l'escalade, en JSON, posée dans l'état et scellée."""
+    return ResumeEscalation(
+        reprises=resume, maximum=limit, analyse=analysed_with, reprise=current
+    ).model_dump(mode="json")
+
+
+def escalation_fault(
+    failures: Sequence[Mapping[str, Any]],
+    recorded: Mapping[str, Any] | None,
+    decision_config_hash: str,
+    analysis_max_resumes: int,
+) -> str | None:
+    """Défaut d'une escalade écrite par la reprise, ou None si elle porte une cause
+    valide : enregistrée, cohérente avec le rapport d'échec (`failures`, ceux de cause de
+    reprise), avec l'empreinte de configuration de la décision et, sans changement de
+    configuration, avec le maximum de reprises de cette configuration. Une escalade de
+    reprise sans cause valide reste une anomalie."""
+    if recorded is None:
+        return "escalade de reprise sans cause enregistrée"
+    try:
+        cause = ResumeEscalation.model_validate(recorded)
+        is_exhausted = exhausted(cause.reprises, cause.maximum)
+    except (ValidationError, ValueError):
+        return "cause de l'escalade de reprise mal formée"
+    changed = cause.analyse != cause.reprise
+    expected = set()
+    if changed:
+        if cause.analyse != decision_config_hash:
+            return (
+                f"configuration d'analyse enregistrée ({cause.analyse}) différente de "
+                f"celle de la décision ({decision_config_hash})"
+            )
+        expected.add(CONFIG_CHANGED)
+    if is_exhausted:
+        if not changed and cause.maximum != analysis_max_resumes:
+            return (
+                f"maximum de reprises enregistré ({cause.maximum}) différent de celui de "
+                f"la configuration de l'analyse ({analysis_max_resumes})"
+            )
+        expected.add(INTERRUPTED)
+    if not expected:
+        return (
+            f"escalade de reprise sans cause valide : reprise {cause.reprises}, maximum "
+            f"{cause.maximum}, même configuration"
+        )
+    found = {f["error"] for f in failures}
+    if found != expected:
+        return (
+            f"causes du rapport ({', '.join(sorted(found))}) incohérentes avec la "
+            f"reprise enregistrée ({', '.join(sorted(expected))})"
+        )
+    if any(f.get("attempts") != cause.reprises for f in failures):
+        return "rang de reprise du rapport différent de celui enregistré"
+    return None

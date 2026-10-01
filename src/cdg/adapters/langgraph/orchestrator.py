@@ -679,8 +679,15 @@ def resume_interrupted(
                     snapshot.next, attempt, limit, analysed_with, current
                 )
                 if failures:
-                    marker = resumption.config_change(analysed_with, current)
-                    _escalate_interrupted(graph, thread_id, failures, marker)
+                    _escalate_interrupted(
+                        graph,
+                        thread_id,
+                        failures,
+                        resumption.config_change(analysed_with, current),
+                        resumption.escalation_record(
+                            attempt, limit, analysed_with, current
+                        ),
+                    )
                 else:
                     log.info(
                         "reprise %d de l'analyse interrompue %s", attempt, thread_id
@@ -697,10 +704,12 @@ def _escalate_interrupted(
     thread_id: str,
     failures: list[NodeFailure],
     config_change: dict[str, str | None] | None,
+    cause: dict[str, Any],
 ) -> None:
     """Plus de reprise : l'analyse part en revue humaine, proposée ESCALADE, avec un
-    rapport d'échec qui en cite chaque cause (maximum de reprises, configuration modifiée)
-    et, si la configuration a changé, le marqueur `configuration_changee`. En deux mises à
+    rapport d'échec qui en cite chaque cause (maximum de reprises, configuration modifiée),
+    la cause enregistrée (`escalade_reprise`, scellée, vérifiée par le rejeu) et, si la
+    configuration a changé, le marqueur `configuration_changee`. En deux mises à
     jour de l'état (LangGraph 1.2.12, `bulk_update_state`) :
     1. `END` sans valeur vide les tâches en attente, en gardant les écritures des tâches
        déjà finies (verdicts des analystes rendus, sous la configuration de l'analyse) ;
@@ -720,6 +729,7 @@ def _escalate_interrupted(
     update = {
         "failures": failures,
         **escalate([*snapshot.values.get("failures", []), *failures]),
+        "escalade_reprise": cause,
         **({} if config_change is None else {"configuration_changee": config_change}),
     }
     graph.bulk_update_state(
