@@ -58,6 +58,9 @@ class ContractState(TypedDict, total=False):
     decision_hash: str
     chain_hash: str
     sealing_findings: list[str]  # constats du scellement, écrits par audit_seal
+    # analyse interrompue escaladée car sa configuration avait changé : empreintes de
+    # l'analyse et de la reprise ; seul cas où resume accepte une autre configuration
+    configuration_changee: dict[str, str | None]
 
 
 class AnalystInput(TypedDict):  # état privé reçu via Send

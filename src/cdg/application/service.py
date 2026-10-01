@@ -35,7 +35,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from cdg.application import ingestion
-from cdg.domain import audit, authorization
+from cdg.domain import audit, authorization, policy
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.identifiers import check_contract_id
@@ -207,9 +207,11 @@ class ContractService:
                 history, status["failure_report"]
             ),
             # la politique refuse de toute façon une levée non permise ; l'interface
-            # ne propose la case que si elle est recevable
+            # ne propose la case que si elle est recevable (après un changement de
+            # configuration, celle de l'analyse doit l'autoriser aussi)
             "levee_possible": request is not None
             and self.config.human_policy.allow_block_override
+            and policy.analysis_allows_override(values, self.config)
             and any(v["hard_block"] for v in request["verdicts"]),
         }
 
@@ -228,16 +230,27 @@ class ContractService:
         courante : `resume` les refuse. À trancher ou à expirer avant de changer de
         configuration, ou à relancer après (ADR 005, « Changement de configuration »)."""
         current = audit.config_hash(self.config)
-        stale = [
-            {
+        waiting = [
+            status
+            for status in self.engine.overview()
+            if state_label(status) == WAITING and status["config_hash"] != current
+        ]
+
+        def row(status: Mapping[str, Any]) -> dict[str, Any]:
+            return {
                 "thread_id": status["thread_id"],
                 "config_hash": status["config_hash"],
                 "analysis_date": status["analysis_date"],
             }
-            for status in self.engine.overview()
-            if state_label(status) == WAITING and status["config_hash"] != current
-        ]
-        return {"configuration": current, "a_trancher": stale}
+
+        return {
+            "configuration": current,
+            "a_trancher": [row(s) for s in waiting if not s["configuration_changee"]],
+            # escaladés car la configuration avait changé : resume les accepte
+            "escalades_configuration": [
+                row(s) for s in waiting if s["configuration_changee"]
+            ],
+        }
 
     def resume_interrupted(self) -> list[dict[str, Any]]:
         """Reprise des analyses interrompues : une modification, sous le verrou du

@@ -195,6 +195,7 @@ class LangGraphEngine:
                 hold=self._locks.hold,
                 record=self._resumes.record,
                 limit=self._config.interrupted.max_resumes,
+                config=self._config,
             )
 
 

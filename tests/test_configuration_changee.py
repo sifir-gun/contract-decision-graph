@@ -60,7 +60,11 @@ def test_commande_reussit_sans_contrat_a_trancher(monkeypatch, capsys):
     monkeypatch.setattr(cli, "build_service", lambda config: new)
     assert cli.main(["config-check"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out == {"configuration": audit.config_hash(CONFIG), "a_trancher": []}
+    assert out == {
+        "configuration": audit.config_hash(CONFIG),
+        "a_trancher": [],
+        "escalades_configuration": [],
+    }
 
 
 def test_commande_echoue_avec_les_contrats_a_trancher(monkeypatch, capsys):

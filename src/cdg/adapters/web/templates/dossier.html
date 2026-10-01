@@ -25,6 +25,12 @@
   {% endif %}
 </header>
 
+{% if s.demande and s.configuration_changee %}
+<div class="warning" role="status">
+  <strong>Configuration changée pendant l'analyse</strong> : analysée sous la configuration <code>{{ s.configuration_changee.analyse or "inconnue" }}</code>, interrompue, puis escaladée par la reprise automatique sous la configuration <code>{{ s.configuration_changee.reprise }}</code>, sans reprise sous celle-ci. Le relecteur peut trancher sous la configuration actuelle : les deux empreintes seront scellées. La levée d'un blocage dur exige que les deux configurations la permettent.
+</div>
+{% endif %}
+
 {% if s.demande and can_decide %}
 <section id="revue" class="panel review" aria-labelledby="revue-titre">
   <h2 id="revue-titre">Revue humaine</h2>

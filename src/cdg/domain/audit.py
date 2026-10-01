@@ -54,6 +54,8 @@ from cdg.domain.version import CodeVersion
 GENESIS = "0" * 64  # prev_hash du premier maillon
 CONFIG_CHANGED = "configuration modifiée entre l'analyse et le scellement"
 CODE_CHANGED = "code modifié entre l'analyse et le scellement"
+# analyse interrompue, escaladée par la reprise car sa configuration avait changé
+CONFIG_CHANGED_DURING_ANALYSIS = "configuration changée pendant l'analyse"
 _HASH = re.compile(r"[0-9a-f]{64}")
 
 # nœuds exécutés après decision_gate : leur consommation et leurs échecs n'ont pas pesé
@@ -319,6 +321,8 @@ def build_record(
     analysed_by = state.get("code_version")
     code = None if analysed_by is None else CodeVersion.model_validate(analysed_by)
     findings = [] if sealing_config_hash == analysed_with else [CONFIG_CHANGED]
+    if state.get("configuration_changee"):
+        findings.append(CONFIG_CHANGED_DURING_ANALYSIS)
     if code is not None and code != sealing_code_version:
         findings.append(CODE_CHANGED)
     return AuditRecord(

@@ -93,6 +93,7 @@ def resume_and_die(conninfo, journal, thread_id) -> None:
                 hold=PostgresContractLocks(lambda: conninfo).hold,
                 record=PostgresResumeCounter(lambda: conninfo).record,
                 limit=config.interrupted.max_resumes,
+                config=config,
                 thread_ids={thread_id},
             )
     raise TimeoutError("reprise jamais tentée : verrou jamais relâché")

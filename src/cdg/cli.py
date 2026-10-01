@@ -709,7 +709,8 @@ class ConfigChangeBlocked(Exception):
         super().__init__(
             f"contrats en attente sous une autre configuration : {names} ; les trancher "
             "(resume, sous leur configuration) ou les expirer (expire) avant le "
-            "changement, ou garder l'ancienne configuration"
+            "changement, ou garder l'ancienne configuration (les contrats escaladés "
+            "pour changement de configuration, eux, se tranchent sous l'actuelle)"
         )
         self.payload = check
 
