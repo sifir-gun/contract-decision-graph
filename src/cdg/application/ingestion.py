@@ -23,8 +23,10 @@ from cdg.domain.corpus import (
     chunk,
     citations,
     claim_lines,
+    context_header,
     embedded_hash,
     embedded_text,
+    paragraph_marks,
     parse_eurlex,
     parse_legifrance,
 )
@@ -49,10 +51,20 @@ def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[s
             raise ValueError(
                 f"{path} : titre « Article {article.article} », attendu {number}"
             )
+        # intitulés officiels de la hiérarchie (Légifrance, lus sur la page de l'article) ;
+        # EUR-Lex donne l'intitulé de l'article dans le fichier
+        levels = source.get("hierarchy", {}).get(number, {}).get("levels", [])
+        if source["format"] == "legifrance" and not levels:
+            raise ValueError(
+                f"{source_id} : hiérarchie officielle absente du manifeste pour "
+                f"l'article {number} (ADR 006)"
+            )
         yield (
             replace(
                 article,
                 source_id=source_id,
+                source_title=source["title"],
+                hierarchy=tuple(levels),
                 reference=f"{source['citation']}, art. {number}",
                 # date propre à l'article (ajouté plus tard), sinon celle de la source
                 retrieved_at=source.get("retrieved_at_overrides", {}).get(
@@ -114,15 +126,34 @@ def pending_chunks(max_words: int) -> Pending:
     pending: Pending = []
     validity = _article_validity()
     for article, kinds in articles():
-        header = article.reference + (
-            f" — {article.heading}" if article.heading else ""
-        )
         amendment = (
             f"{article.amendment[0]} : {article.amendment[1]}"
             if article.amendment
             else None
         )
-        for index, text in enumerate(chunk(article.text, max_words)):
+        texts = chunk(
+            article.text,
+            _room(
+                max_words,
+                context_header(
+                    article.reference,
+                    article.source_title,
+                    hierarchy=article.hierarchy,
+                    heading=article.heading,
+                    **_LONGEST_POSITION,
+                ),
+            ),
+        )
+        for index, text in enumerate(texts):
+            header = context_header(
+                article.reference,
+                article.source_title,
+                hierarchy=article.hierarchy,
+                heading=article.heading,
+                paragraphs=paragraph_marks(text),
+                index=index,
+                count=len(texts),
+            )
             meta = {
                 "source_id": article.source_id,
                 "reference": article.reference,
@@ -139,17 +170,40 @@ def pending_chunks(max_words: int) -> Pending:
             pending.append((meta, embedded_text(header, text), kinds))
     for fiche in load_fiches():
         reference = fiche_reference(fiche)
-        for index, text in enumerate(chunk(fiche.body, max_words)):
+        texts = chunk(
+            fiche.body,
+            _room(max_words, context_header(reference, "", **_LONGEST_POSITION)),
+        )
+        for index, text in enumerate(texts):
+            header = context_header(reference, "", index=index, count=len(texts))
             meta = {
                 "source_id": fiche.id,
                 "reference": reference,
                 "text": text,
-                "header": reference,
+                "header": header,
                 "chunk_index": index,
                 "valid_until": _fiche_validity(fiche, validity),
             }
-            pending.append((meta, embedded_text(reference, text), fiche.kinds))
+            pending.append((meta, embedded_text(header, text), fiche.kinds))
     return pending
+
+
+# position la plus longue en mots dans un en-tête : « paragraphes … à … » (seuls le
+# premier et le dernier sont nommés) et « extrait … sur … »
+_LONGEST_POSITION: dict[str, Any] = {"paragraphs": ("0", "0"), "index": 0, "count": 2}
+
+
+def _room(max_words: int, header: str) -> int:
+    """Mots laissés au texte d'un extrait : l'en-tête et le texte embarqués ensemble
+    tiennent dans `max_words`, la borne qui garde un extrait sous le contexte du
+    modèle."""
+    room = max_words - len(header.split())
+    if room < 1:
+        raise ValueError(
+            f"en-tête de {len(header.split())} mots, plus long que le découpage "
+            f"({max_words} mots) : {header!r}"
+        )
+    return room
 
 
 def _article_validity() -> dict[tuple[str, str], date | None]:

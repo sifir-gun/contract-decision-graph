@@ -150,7 +150,25 @@ class FastembedEmbedder:
         return vectors
 
     def embed_passages(self, texts: list[str]) -> list[list[float]]:
-        return self._embed([self._config.passage_prefix + t for t in texts])
+        prefixed = [self._config.passage_prefix + t for t in texts]
+        self._fits(prefixed)
+        return self._embed(prefixed)
+
+    def _fits(self, texts: list[str]) -> None:
+        """fastembed tronque en silence au contexte du modèle (512 tokens pour e5) : la
+        fin d'un extrait trop long ne serait pas embarquée. Le tokenizer du modèle
+        (`TextEmbedding.model.tokenize`, fastembed 0.8.1) marque un texte tronqué d'un
+        reste (`overflowing`) : un tel texte est refusé, jamais embarqué (ADR 006)."""
+        encodings = self._model.model.tokenize(texts)
+        too_long = [
+            text for text, enc in zip(texts, encodings, strict=True) if enc.overflowing
+        ]
+        if too_long:
+            raise EmbeddingError(
+                f"{len(too_long)} texte(s) au-delà du contexte de {self.model}, que "
+                "fastembed tronquerait : réduire corpus.chunk_max_words ; premier : "
+                f"{too_long[0][:80]!r}"
+            )
 
     def embed_query(self, text: str) -> list[float]:
         return self._embed([self._config.query_prefix + text])[0]

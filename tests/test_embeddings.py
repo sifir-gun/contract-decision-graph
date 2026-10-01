@@ -21,14 +21,44 @@ CONFIG = load_config().embedding
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class Tokenizing:
+    """Modèle de fastembed (`TextEmbedding.model`) : `tokenize` rend un encodage par
+    texte ; `overflowing` non vide, le texte dépasse le contexte et serait tronqué."""
+
+    def __init__(self, limit: int | None = None):
+        self.limit = limit  # mots au plus avant troncature ; None : jamais
+
+    def tokenize(self, documents):
+        return [
+            types.SimpleNamespace(
+                overflowing=[object()]
+                if self.limit is not None and len(d.split()) > self.limit
+                else []
+            )
+            for d in documents
+        ]
+
+
 class FakeModel:
-    def __init__(self, dimension=1024):
+    def __init__(self, dimension=1024, limit=None):
         self.dimension, self.seen = dimension, []
+        self.model = Tokenizing(limit)
 
     def embed(self, texts):
         texts = list(texts)
         self.seen.extend(texts)
         return [[0.5] * self.dimension for _ in texts]
+
+
+def test_passage_au_dela_du_contexte_du_modele_refuse_jamais_tronque():
+    """fastembed tronque en silence au contexte du modèle (512 tokens pour e5) : la fin
+    d'un extrait trop long ne serait pas embarquée. Erreur explicite (ADR 006)."""
+    model = FakeModel(limit=3)
+    embedder = fastembed.FastembedEmbedder(CONFIG, model=model)
+    with pytest.raises(fastembed.EmbeddingError, match="1 texte.*tronqu"):
+        embedder.embed_passages(["court", "un texte bien trop long"])
+    assert model.seen == []  # rien n'est embarqué
+    embedder.embed_passages(["court"])
 
 
 def test_prefixes_e5_ajoutes():
@@ -374,6 +404,7 @@ class Recorded:
 
     def __init__(self):
         self.calls = []
+        self.model = Tokenizing()
 
     def embed(self, texts, **kwargs):
         self.calls.append(kwargs)

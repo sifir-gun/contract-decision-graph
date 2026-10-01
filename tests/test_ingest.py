@@ -186,15 +186,17 @@ def test_en_tete_et_empreinte_du_texte_embarque_stockes(pg, ingested):
             PREFIX, corpus.embedded_text(row.header, row.text)
         )
         assert stored[(row.reference, row.domain, row.chunk_index)] == row.embedded_hash
-    [(header,)] = set(
-        query(
+    headers = {
+        index: header
+        for index, header in query(
             pg,
-            "SELECT header FROM rag_chunks WHERE embedding_model = %s "
-            "AND reference = 'RGPD, art. 28'",
+            "SELECT DISTINCT chunk_index, header FROM rag_chunks "
+            "WHERE embedding_model = %s AND reference = 'RGPD, art. 28'",
             EMBEDDER.model,
         )
-    )
-    assert header.startswith("RGPD, art. 28")
+    }
+    assert headers[0].startswith("RGPD, art. 28 — Règlement (UE) 2016/679")
+    assert headers[1].endswith(f"extrait 2 sur {len(headers)}")
 
 
 def test_en_tete_change_texte_stocke_identique_extrait_reindexe(pg, ingested):
