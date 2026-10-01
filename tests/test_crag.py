@@ -4,12 +4,15 @@ generate, combine), sous-graphe compilé, critère 3.
 Le retriever et le juge sont des doublures des ports `Retriever` et `LLMProvider`.
 """
 
+import warnings
 from datetime import date
 
 import pytest
 from doubles import (
     ABSENT,
+    ACTEUR_ANALYSTE,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     PENALIZED,
     FakeLLM,
@@ -430,6 +433,9 @@ def _graph(retriever, llm, found=None):
 
 
 def _invoke(graph, contract_id):
+    """Graphe lancé avec la durabilité de la production : LangGraph la transmet au
+    sous-graphe du CRAG (défaut du 28/09 : un appel sans durabilité, en « async », ne
+    voyait pas l'échec du CRAG imbriqué en « sync »)."""
     thread = {"configurable": {"thread_id": contract_id}}
     graph.invoke(
         {
@@ -439,8 +445,42 @@ def _invoke(graph, contract_id):
             **context(),
         },
         thread,
+        durability=orchestrator.DURABILITY,
     )
     return graph.get_state(thread).values
+
+
+def test_crag_reel_imbrique_lance_par_run_contract():
+    """Chemin de l'application réelle : `run_contract` (durabilité « sync », écrite
+    avant l'étape suivante), le vrai sous-graphe du CRAG dans chaque analyste. Défaut du
+    28/09 : le CRAG héritait de « sync » sans checkpointer, LangGraph 1.2.12 attendait
+    une écriture jamais lancée, chaque analyste échouait et le contrat escaladait."""
+    assert orchestrator.DURABILITY == "sync"
+    llm = FakeLLM({f"crag_grade:{d}": {"relevant": [1]} for d in DOMAINS})
+    references = {
+        "juridique": [passage("C. civ., art. 1231-3", domain="juridique")],
+        "financier": [passage(L441)],
+        "conformite": [passage("RGPD, art. 44", domain="conformite")],
+        "operationnel": [passage("C. civ., art. 1211", domain="operationnel")],
+    }
+    graph = _graph(FakeRetriever(references), llm)
+    with warnings.catch_warnings(record=True) as seen:
+        warnings.simplefilter("always")
+        orchestrator.run_contract(
+            graph,
+            "c-crag-reel",
+            CONTRACT_TEXT,
+            analysis_date=ANALYSIS_DATE,
+            config=CONFIG,
+            actor=ACTEUR_ANALYSTE,
+            code=CODE,
+        )
+    # aucun avertissement de LangGraph : il sortirait en texte, hors des journaux JSON
+    assert [str(w.message) for w in seen if "langgraph" in w.filename] == []
+    values = graph.get_state({"configurable": {"thread_id": "c-crag-reel"}}).values
+    assert values.get("failures", []) == []
+    assert {v.retrieval_status for v in values["verdicts"]} == {"OK"}
+    assert {c["node"].split(":")[0] for c in llm.calls} == {"crag_grade"}
 
 
 FLAGGED = {  # clause à justifier par domaine, avec PENALIZED
