@@ -209,13 +209,13 @@ def test_v1_relu_par_ses_modeles_a_l_identique():
 
 def test_v1_et_v2_rejoues_a_l_identique():
     for data in (v1_record(), record(reviewed()).model_dump(mode="json")):
-        report = audit.replay(data, CONFIG)
+        report = audit.replay(data, CONFIG.model_dump(mode="json"))
         assert report.identical and report.recomputed
 
 
 def test_version_inconnue_refusee():
     data = record(reviewed()).model_dump(mode="json") | {"version": 3}
     with pytest.raises(audit.ReplayError, match="version"):
-        audit.replay(data, CONFIG)
+        audit.replay(data, CONFIG.model_dump(mode="json"))
     with pytest.raises(audit.ReplayError, match="version"):
         audit.record_version(data)

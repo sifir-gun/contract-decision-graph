@@ -4,11 +4,14 @@
 transaction, sous un verrou consultatif de transaction : app_role n'a que SELECT et INSERT,
 qui ne permettent ni verrou de table exclusif ni SELECT ... FOR UPDATE (PostgreSQL 16,
 LOCK). Les index uniques de la migration 004 (thread_id, prev_hash) garantissent en base un
-enregistrement par thread et une chaîne sans fourche.
+enregistrement par thread et une chaîne sans fourche. Les configurations de la décision
+sont archivées dans la même transaction (migration 007, table `<journal>_configurations` :
+un journal jetable des tests a ainsi son archive jetable).
 """
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from psycopg import sql
 from psycopg.rows import tuple_row
@@ -47,11 +50,16 @@ class PostgresAuditStore:
     def __init__(self, source: Source, *, table: str = TABLE) -> None:
         self._source, self._table = source, table
         self._ident = sql.Identifier(table)
+        self._archive = sql.Identifier(f"{table}_configurations")
         self._select = sql.SQL("SELECT {} FROM {}").format(
             sql.SQL(", ").join(map(sql.Identifier, _COLUMNS)), self._ident
         )
 
-    def append(self, seal: Callable[[str | None], AuditEntry]) -> StoredAuditEntry:
+    def append(
+        self,
+        seal: Callable[[str | None], AuditEntry],
+        configurations: Mapping[str, Mapping[str, Any]],
+    ) -> StoredAuditEntry:
         # une transaction, validée à la fin ; lignes en tuples
         with connection(self._source) as conn, conn.transaction():
             cur = conn.cursor(row_factory=tuple_row)
@@ -73,6 +81,14 @@ class PostgresAuditStore:
                         f"({stored.decision_hash}, reçu {entry.decision_hash})"
                     )
                 return stored
+            for key, config in configurations.items():  # ajout seul, sans doublon
+                cur.execute(
+                    sql.SQL(
+                        "INSERT INTO {} (config_hash, config) VALUES (%s, %s) "
+                        "ON CONFLICT (config_hash) DO NOTHING"
+                    ).format(self._archive),
+                    (key, Jsonb(dict(config))),
+                )
             row = cur.execute(
                 sql.SQL(
                     "INSERT INTO {} (contract_id, thread_id, record, config_hash, "
@@ -98,6 +114,14 @@ class PostgresAuditStore:
             cur = conn.cursor(row_factory=tuple_row)
             rows = cur.execute(self._select + sql.SQL(" ORDER BY id")).fetchall()
         return [_stored(r) for r in rows]
+
+    def configurations(self) -> dict[str, dict[str, Any]]:
+        with connection(self._source) as conn:
+            cur = conn.cursor(row_factory=tuple_row)
+            rows = cur.execute(
+                sql.SQL("SELECT config_hash, config FROM {}").format(self._archive)
+            ).fetchall()
+        return {key: config for key, config in rows}
 
 
 def _stored(row: tuple) -> StoredAuditEntry:

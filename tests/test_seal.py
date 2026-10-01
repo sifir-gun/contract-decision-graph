@@ -194,7 +194,7 @@ def test_6_memes_clauses_meme_decision_hash_puis_rejeu_identique():
     assert first.chain_hash != second.chain_hash
     assert second.prev_hash == first.chain_hash
     for entry in (first, second):
-        report = audit.replay(entry.record, CONFIG)
+        report = audit.replay(entry.record, CONFIG.model_dump(mode="json"))
         assert report.recomputed and report.identical
 
 
@@ -357,6 +357,6 @@ def test_expire_continue_et_scelle_les_deux_empreintes_avec_le_constat():
     assert entry.record["sealing_config_hash"] == audit.config_hash(other)
     assert entry.record["sealing_findings"] == [audit.CONFIG_CHANGED]
     # le rejeu utilise l'empreinte d'analyse
-    assert audit.replay(entry.record, CONFIG).identical
+    assert audit.replay(entry.record, CONFIG.model_dump(mode="json")).identical
     with pytest.raises(audit.ReplayError):
-        audit.replay(entry.record, other)
+        audit.replay(entry.record, other.model_dump(mode="json"))

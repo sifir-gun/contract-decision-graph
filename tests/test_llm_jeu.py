@@ -175,7 +175,7 @@ def measure(llm, crag, pace, store, contract, run) -> dict:
     assert status["statut"] == "termine", line
     [entry] = store.entries()
     assert entry.contract_id == thread
-    assert audit.replay(entry.record, CONFIG).identical
+    assert audit.replay(entry.record, CONFIG.model_dump(mode="json")).identical
     return line
 
 

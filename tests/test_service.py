@@ -11,6 +11,7 @@ from doubles import (
     ACTEUR_ANALYSTE,
     ACTEUR_RELECTEUR,
     ANALYSIS_DATE,
+    CODE,
     CONTRACT_TEXT,
     FIXED_NOW,
     FakeCrag,
@@ -74,6 +75,7 @@ def make_service(
         config=config,
         today=lambda: ANALYSIS_DATE,
         now=now,
+        code_version=CODE,
     )
 
 

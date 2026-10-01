@@ -249,6 +249,10 @@ def _setup_db(args: argparse.Namespace) -> dict:
         "migrations": applied,
         "corpus": {"table": "rag_chunks", "droits": ["SELECT"]},
         "journal": {"table": "audit_decisions", "droits": ["SELECT", "INSERT"]},
+        "archive": {
+            "table": "audit_decisions_configurations",
+            "droits": ["SELECT", "INSERT"],
+        },
         "reprises": {
             "table": "contract_resumes",
             "droits": ["SELECT", "INSERT", "UPDATE"],
@@ -308,6 +312,7 @@ def build_service(config: DecisionConfig) -> ContractService:
         config=config,
         today=lambda: today(),
         now=lambda: now(),
+        code_version=code,
     )
 
 
@@ -352,6 +357,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
         config=config,
         today=lambda: expected_on,
         now=lambda: now(),
+        code_version=code,
     )
 
 
@@ -466,20 +472,49 @@ class ChaineRompue(Exception):
         }
 
 
+class ArchiveNonConforme(ChaineRompue):
+    """Archive des configurations non conforme (configuration d'un enregistrement v2
+    absente, ou configuration archivée altérée) : code 1, avec le rapport."""
+
+
 def _verify(args: argparse.Namespace) -> dict:
-    """Vérifie la chaîne du journal d'audit (rôle applicatif, lecture seule)."""
+    """Vérifie la chaîne du journal d'audit, puis l'archive des configurations (rôle
+    applicatif, lecture seule)."""
     report = build_service(load_config()).verify(args.expect_head)
     if not report.ok:
-        raise ChaineRompue(report)
-    return {"verify": "ok", "enregistrements": report.count, "tete": report.head}
+        raise (ArchiveNonConforme if report.archive_fault else ChaineRompue)(report)
+    return {
+        "verify": "ok",
+        "enregistrements": report.count,
+        "tete": report.head,
+        "configurations_archivees": report.archived,
+        "v1_sans_archive": report.v1_exempted,
+    }
 
 
 def _journal(args: argparse.Namespace) -> dict:
     return {"enregistrements": build_service(load_config()).journal()}
 
 
+class RejeuAnomalie(Exception):
+    """Rejeu fidèle (même code, même configuration) différent de la décision scellée :
+    anomalie, code 1, avec le rapport du rejeu."""
+
+    def __init__(self, result: dict):
+        super().__init__(
+            "rejeu fidèle différent de la décision scellée : journal altéré ou calcul "
+            "non déterministe"
+        )
+        self.payload = result
+
+
 def _replay(args: argparse.Namespace) -> dict:
-    return build_service(load_config()).replay(args.thread_id)
+    """Rejoue une décision scellée : une différence est une anomalie en rejeu fidèle
+    (code 1), signalée sans erreur en réévaluation."""
+    result = build_service(load_config()).replay(args.thread_id)
+    if result["anomalie"]:
+        raise RejeuAnomalie(result)
+    return result
 
 
 def _list(args: argparse.Namespace) -> dict:

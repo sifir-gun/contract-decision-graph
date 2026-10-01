@@ -14,7 +14,7 @@ from doubles import (
     make_deps,
 )
 from psycopg.rows import dict_row
-from test_audit_store import Sealer, record
+from test_audit_store import ARCHIVED, Sealer, record
 from web_helpers import BASE_URL, memory_service
 
 from cdg import cli
@@ -67,10 +67,11 @@ def pool(pg):
 @pytest.mark.pg
 def test_journal_d_audit_par_le_pool(pool, journal):
     store = PostgresAuditStore(pool, table=journal)
-    first = store.append(Sealer(record("c-1")))
-    second = store.append(Sealer(record("c-2")))
+    first = store.append(Sealer(record("c-1")), ARCHIVED)
+    second = store.append(Sealer(record("c-2")), ARCHIVED)
     assert second.prev_hash == first.chain_hash
     assert [e.thread_id for e in store.entries()] == ["c-1", "c-2"]
+    assert list(store.configurations()) == list(ARCHIVED)
 
 
 @pytest.mark.pg

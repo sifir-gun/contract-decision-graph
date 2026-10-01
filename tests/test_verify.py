@@ -70,7 +70,13 @@ def test_verify_journal_vide(audit_journal, capsys):
     code, out = verify(capsys)
     assert (code, out) == (
         0,
-        {"verify": "ok", "enregistrements": 0, "tete": audit.GENESIS},
+        {
+            "verify": "ok",
+            "enregistrements": 0,
+            "tete": audit.GENESIS,
+            "configurations_archivees": 0,
+            "v1_sans_archive": 0,
+        },
     )
 
 
@@ -78,6 +84,33 @@ def test_verify_chaine_intacte(sealed, capsys):
     code, out = verify(capsys)
     assert (code, out["verify"], out["enregistrements"]) == (0, "ok", 2)
     assert out["tete"] == sealed[-1].chain_hash
+    assert (out["configurations_archivees"], out["v1_sans_archive"]) == (1, 0)
+
+
+def test_configuration_retiree_de_l_archive_journal_non_conforme(
+    pg, sealed, journal, capsys
+):
+    admin_execute(pg, f"{journal}_configurations", "DELETE FROM {}")
+    code, err = verify(capsys)
+    assert (code, err["erreur"], err["maillon_fautif"]) == (
+        1,
+        "ArchiveNonConforme",
+        sealed[0].id,
+    )
+    assert "non archivée" in err["raison"]
+
+
+def test_configuration_archivee_alteree_journal_non_conforme(
+    pg, sealed, journal, capsys
+):
+    admin_execute(
+        pg,
+        f"{journal}_configurations",
+        "UPDATE {} SET config = jsonb_set(config, '{{min_margin}}', '0.5')",
+    )
+    code, err = verify(capsys)
+    assert (code, err["erreur"]) == (1, "ArchiveNonConforme")
+    assert "altérée" in err["raison"]
 
 
 def test_8_modifier_la_decision_en_base_casse_la_chaine(pg, sealed, journal, capsys):

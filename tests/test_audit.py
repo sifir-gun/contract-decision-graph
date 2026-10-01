@@ -234,9 +234,9 @@ def test_contexte_d_analyse_absent_refuse(missing):
 
 def test_rejeu_sur_l_empreinte_d_analyse():
     data = dumped(analysed(), config=other_config())  # scellé sous une autre config
-    assert audit.replay(data, CONFIG).identical
+    assert audit.replay(data, CONFIG.model_dump(mode="json")).identical
     with pytest.raises(audit.ReplayError, match="configuration"):
-        audit.replay(data, other_config())
+        audit.replay(data, other_config().model_dump(mode="json"))
 
 
 # --- config_hash : configuration validée, sous forme canonique -------------------------
@@ -368,7 +368,7 @@ def test_enregistrement_mal_forme_signale_pas_ignore():
 
 
 def replay(state, **kwargs):
-    return audit.replay(dumped(state, **kwargs), CONFIG)
+    return audit.replay(dumped(state, **kwargs), CONFIG.model_dump(mode="json"))
 
 
 @pytest.mark.parametrize(
@@ -413,7 +413,7 @@ def test_rejeu_constats_du_crag_repris_du_resume():
 def test_rejeu_detecte_un_verdict_falsifie():
     data = dumped(analysed())
     data["decision"]["verdicts"][0]["score"] = 0.1
-    report = audit.replay(data, CONFIG)
+    report = audit.replay(data, CONFIG.model_dump(mode="json"))
     assert report.recomputed and not report.identical
 
 
@@ -421,7 +421,10 @@ def test_rejeu_avec_une_autre_configuration_refuse():
     data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
     data["min_margin"] = 0.06
     with pytest.raises(audit.ReplayError, match="configuration"):
-        audit.replay(dumped(analysed()), DecisionConfig.model_validate(data))
+        audit.replay(
+            dumped(analysed()),
+            DecisionConfig.model_validate(data).model_dump(mode="json"),
+        )
 
 
 def test_rejeu_decision_humaine_reprise_telle_quelle():
@@ -491,7 +494,7 @@ def test_rejeu_sans_resume_du_crag_refuse():
     data = dumped(analysed())
     data["decision"]["verdicts"][0]["retrieval"] = None
     with pytest.raises(audit.ReplayError, match="sans résumé du CRAG"):
-        audit.replay(data, CONFIG)
+        audit.replay(data, CONFIG.model_dump(mode="json"))
 
 
 # --- Partie décision : le fait, pas la mesure ; échecs rangés par domaine ------------------

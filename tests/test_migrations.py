@@ -1,5 +1,5 @@
 """Amorçage d'une base par setup-db (ADR 005, PR C3) : sur une base vide, toutes les
-migrations dans l'ordre (001 à 006) ; rien ne change sur une base existante ; relancé, il
+migrations dans l'ordre (001 à 007) ; rien ne change sur une base existante ; relancé, il
 ne fait rien. Le rôle applicatif, s'il faut le créer, reçoit un mot de passe déjà haché
 côté client (SCRAM-SHA-256, bibliothèque standard) : le mot de passe n'atteint jamais le
 serveur, ni aucun journal. Dans le cluster, CloudNativePG gère ce rôle (chart cdg-postgres).
@@ -185,7 +185,7 @@ def _catalog(conninfo: str) -> dict:
 @pytest.mark.pg
 def test_base_vide_toutes_les_migrations_dans_l_ordre_puis_rien(empty_database):
     names = [p.name for p in sorted((ROOT / "migrations").glob("0*.sql"))]
-    assert names[0] == "001_audit.sql" and names[-1] == "006_reprises.sql"
+    assert names[0] == "001_audit.sql" and names[-1] == "007_archive_configurations.sql"
     assert migrations.apply(empty_database) == names
     before = _catalog(empty_database)
     assert ("app_role", "audit_decisions", "INSERT") in before["droits"]

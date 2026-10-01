@@ -1,12 +1,18 @@
 {% if error %}
 <p class="error" role="alert">Rejeu impossible : {{ error }}</p>
+{% elif report.anomalie %}
+<p class="error" role="alert"><strong>Anomalie</strong> : rejeu fidèle (même code, même configuration) différent de la décision scellée ; journal altéré ou calcul non déterministe.</p>
+{% elif report.identique and report.sens == "fidele" %}
+<p class="ok" role="status"><strong>Rejeu fidèle identique</strong> : avec le même code et la même configuration, règles, justification et décision recalculées à partir de l'enregistrement scellé, sans LLM ni corpus, donnent la même empreinte.</p>
 {% elif report.identique %}
-<p class="ok" role="status"><strong>Rejeu identique</strong> : règles, justification et décision recalculées à partir de l'enregistrement scellé, sans LLM ni corpus, donnent la même empreinte.</p>
+<p class="ok" role="status"><strong>Réévaluation identique</strong> : recalculée avec le code courant ({{ report.motif_du_sens }}), la décision donne la même empreinte.</p>
 {% else %}
-<p class="error" role="alert"><strong>Rejeu différent</strong> : l'empreinte recalculée diffère de l'empreinte scellée.</p>
+<div class="warning" role="status"><strong>Réévaluation différente</strong> : recalculée avec le code courant ({{ report.motif_du_sens }}), la décision diffère de la décision scellée. Différence signalée, pas une erreur : une règle a pu changer depuis.</div>
 {% endif %}
 {% if report %}
 <dl class="facts hashes">
+  <dt>Sens</dt><dd>{{ "rejeu fidèle" if report.sens == "fidele" else "réévaluation avec le code courant" }} : {{ report.motif_du_sens }}</dd>
+  <dt>Configuration</dt><dd>{{ "archivée" if report.configuration == "archivee" else "courante, de même empreinte que la configuration scellée" }}</dd>
   <dt>Empreinte scellée</dt><dd><code>{{ report.empreinte_scellee }}</code></dd>
   <dt>Empreinte rejouée</dt><dd><code>{{ report.empreinte_rejouee }}</code></dd>
   <dt>Recalcul</dt><dd>{{ "règles, justification et décision" if report.recalcule else "rien à recalculer (rejet, ou escalade avant la décision)" }}</dd>

@@ -153,24 +153,34 @@ def journal(pg) -> str:
     qu'`audit_decisions`. Les tests ne touchent jamais au vrai journal, qu'on ne peut pas
     purger sans casser la chaîne."""
     name = f"audit_test_{uuid.uuid4().hex[:12]}"
-    table, role = sql.Identifier(name), sql.Identifier(settings.APP_ROLE)
+    role = sql.Identifier(settings.APP_ROLE)
+    # le journal et son archive des configurations (même structure, mêmes droits)
+    tables = [
+        (sql.Identifier(name), sql.Identifier("audit_decisions")),
+        (
+            sql.Identifier(f"{name}_configurations"),
+            sql.Identifier("audit_decisions_configurations"),
+        ),
+    ]
     with psycopg.connect(pg.admin, autocommit=True) as conn:
-        conn.execute(
-            sql.SQL("CREATE TABLE {} (LIKE audit_decisions INCLUDING ALL)").format(
-                table
+        for table, model in tables:
+            conn.execute(
+                sql.SQL("CREATE TABLE {} (LIKE {} INCLUDING ALL)").format(table, model)
             )
-        )
-        conn.execute(sql.SQL("GRANT SELECT, INSERT ON {} TO {}").format(table, role))
+            conn.execute(
+                sql.SQL("GRANT SELECT, INSERT ON {} TO {}").format(table, role)
+            )
     yield name
     with psycopg.connect(pg.admin, autocommit=True) as conn:
-        conn.execute(sql.SQL("DROP TABLE {}").format(table))
+        for table, _ in tables:
+            conn.execute(sql.SQL("DROP TABLE {}").format(table))
 
 
 class ForbiddenAuditStore:
     """Journal réel de la CLI pendant les tests : toute écriture ou lecture échoue. Un
     test qui scelle par la CLI demande la fixture `audit_journal` (journal jetable)."""
 
-    def append(self, seal):
+    def append(self, seal, configurations):
         raise AssertionError(
             "un test ne scelle jamais dans le vrai journal : fixture audit_journal"
         )
@@ -178,6 +188,11 @@ class ForbiddenAuditStore:
     def entries(self):
         raise AssertionError(
             "un test ne lit jamais le vrai journal : fixture audit_journal"
+        )
+
+    def configurations(self):
+        raise AssertionError(
+            "un test ne lit jamais la vraie archive : fixture audit_journal"
         )
 
 

@@ -2583,3 +2583,23 @@ Conception validée par le propriétaire le 30/09, avec ses décisions : interfa
 - **Seuil de couverture contourné par un arrondi** : la D2 a fait passer la couverture de 98,05 % (fusion de la D1) à 97,77 %, en CI comme sur le poste. Le résumé de pytest-cov affichait « FAIL Required test coverage of 98.0% not reached », mais le job restait vert : pytest-cov 7.1.0 fait échouer la session par `should_fail_under` de coverage.py, qui compare le total arrondi à `precision` décimales, 0 par défaut (code installé). Le seuil réel était donc 97,5 %. Seuil désormais appliqué au centième (`precision = 2`, testé) ; les chemins de la D2 non couverts ont leurs tests : 98,20 %.
 - **Collision de nom dans un fichier de test** : une constante `IDENTITY` ajoutée pour les commandes git masquait celle de l'identité de publication, déjà définie plus haut ; le test de publication l'a vu. Renommée.
 
+
+## 2026-09-30 · Défaut connu : analyse interrompue reprise sous une autre configuration
+
+À corriger dans la PR qui suivra l'archivage des configurations (décision du propriétaire, 30/09).
+
+- **Constat** (relevé en concevant l'archivage) : `resume_interrupted` reprend une analyse interrompue avec le graphe du processus qui reprend, donc avec sa configuration, même si elle a changé depuis le début de l'analyse. L'état garde l'empreinte de configuration posée par `run_contract` au départ : règles et décision peuvent alors être calculées sous une configuration autre que celle que l'enregistrement déclare dans sa partie décision.
+- **Déjà visible, pas encore empêché** : le scellement porte le constat « configuration modifiée entre l'analyse et le scellement », et un rejeu fidèle, sur la configuration archivée de l'analyse, verra la différence comme une anomalie.
+- **Correction envisagée** : comme `resume` refuse une configuration modifiée, une analyse interrompue dont la configuration a changé part en revue humaine (ESCALADE, rapport d'échec qui le dit), au lieu d'être reprise sous l'autre configuration. Tests d'abord.
+
+## 2026-09-30 · Archive des configurations (branche `archivage-configurations`)
+
+Conception validée par le propriétaire le 30/09, avec ses précisions : `check.sh` avec le cluster arrêté d'emblée si l'image porterait un commit « inconnu » ; empreinte des configurations archivées toujours recalculée par la forme canonique, jamais sur le texte relu (JSONB) ; un v2 sans configuration archivée fait échouer `verify` ; rejeu fidèle ou réévaluation, et un v1 toujours en réévaluation. Détail : ADR 005.
+
+### Faits et pièges
+
+- **La configuration de l'analyse n'est pas celle du processus qui scelle** dans un cas réel : `expire` continue après un changement de configuration. Le JSON validé est donc posé dans l'état par `run_contract`, et archivé au scellement, dans la transaction de l'enregistrement.
+- **JSONB réordonne les clés** (par longueur, puis octets) : le texte relu diffère de celui écrit ; l'empreinte se recalcule par la forme canonique. Testé sur le texte relu en base.
+- **Nom de la table** : `audit_decisions_configurations` (`<journal>_configurations`) au lieu de `config_archive` proposé, pour que chaque journal jetable des tests ait son archive jetable sans cas particulier.
+- **Garde de `check.sh`** : le critère est celui de `scripts/chaine.py revision` (fichiers non commités dans le contexte de construction de l'image), pas tout l'arbre de travail : un brouillon de documentation ne change pas le commit de l'image. Testé en exécutant le script avec des doublures de uv et docker.
+- **Vrai journal relu en lecture seule** (avant de pousser) : 5 enregistrements, tous v1, aucun v2 sans configuration archivée, archive vide ; vérification conforme ; les 5 restent non rejouables (configuration non archivée, et empreinte différente de la courante).

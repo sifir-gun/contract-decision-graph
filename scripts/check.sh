@@ -16,6 +16,9 @@
 # - `--sans-cluster` saute le cluster, en l'annonçant : le profil local monte à 7 Go sur
 #   les 8 de la VM Docker du poste, qui a redémarré le 29/09 pendant une installation ;
 #   seul le job cluster de la CI le vérifie alors ;
+# - avec le cluster, arrêt d'emblée si le contexte de construction de l'image diffère du
+#   commit (commit « inconnu », refusé au démarrage dans le cluster) ; la CI part toujours
+#   d'une copie propre ;
 # - l'image est construite pour l'architecture du poste (arm64 sur un Mac récent), celle
 #   de la CI pour amd64 : les bases figées sont des index multi-architecture.
 # Payant : non (tests llm exclus). Réseau : pip-audit interroge la base de failles de PyPI ;
@@ -41,6 +44,17 @@ fi
 
 echo "==> dépendances, strictement depuis uv.lock (tous groupes)"
 uv sync --locked --all-groups
+
+# avec le cluster : l'image porte le commit de sa construction, et le cluster refuse de
+# démarrer une image au commit « inconnu » (fichiers non commités dans le contexte de
+# construction) ; arrêt d'emblée, plutôt qu'une installation vouée à l'échec
+if [[ "$SANS_CLUSTER" == false ]]; then
+    revision="$(uv run --no-sync python scripts/chaine.py revision)"
+    if [[ "$revision" == inconnu ]]; then
+        echo "check.sh : arrêt avant la construction de l'image. Son commit serait « inconnu » (fichiers non commités dans le contexte de construction, ci-dessus), et le cluster refuse de démarrer une telle image. Commiter ces fichiers (ou les remiser), ou lancer ./scripts/check.sh --sans-cluster." >&2
+        exit 1
+    fi
+fi
 
 echo "==> lint (ruff)"
 uv run --no-sync ruff format --check

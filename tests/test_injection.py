@@ -106,7 +106,7 @@ def test_9_version_piegee_en_revue_obligatoire_jamais_plus_favorable():
     assert RANK[final] <= RANK[clean.status["final_decision"]]
     [sealed] = injected.store.entries()
     assert sealed.record["decision"]["input_findings"] == shown
-    assert audit.replay(sealed.record, CONFIG).identical
+    assert audit.replay(sealed.record, CONFIG.model_dump(mode="json")).identical
 
 
 def test_9_consigne_seulement_dans_le_bloc_delimite_de_l_extraction():
