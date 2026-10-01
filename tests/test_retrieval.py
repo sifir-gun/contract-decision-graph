@@ -99,14 +99,7 @@ def corpus(pg):
 def search(pg, domain, text, kind, k=5, model=EMBEDDER.model, settings=VECTOR):
     query = EMBEDDER.embed_query(text)
     return rag_store.search(
-        pg.app,
-        domain,
-        query,
-        text=text,
-        kind=kind,
-        k=k,
-        model=model,
-        settings=settings,
+        pg.app, domain, query, kind=kind, k=k, model=model, settings=settings
     )
 
 
@@ -323,73 +316,3 @@ def test_sans_filtre_un_extrait_par_reference(pg, long_article, duplicated):
     once = [p.reference for p in distinct.search_unfiltered(QUERY, k=50)]
     assert every.count("RGPD, art. 28") == 2
     assert once == list(dict.fromkeys(every))
-
-
-# --- recherche hybride : plein texte français et vecteurs, fusion RRF (technique 3) -----
-
-HYBRID = SearchConfig(
-    distinct_references=False,
-    mode="hybrid",
-    rrf_k=60,
-    candidates=20,
-    text_normalization=1,
-)
-ACCENTS = "Les pénalités d'exécution sont plafonnées."
-# sans accents : seul l'extrait accentué la satisfait en plein texte (« execu »,
-# « plafonne ») ; la doublure d'embedding n'y voit aucun mot commun
-SANS_ACCENTS = "execution plafonnees"
-
-
-@pytest.fixture
-def accents(pg, corpus):
-    """Un extrait accentué : la doublure d'embedding (sac de mots) ne le rapproche pas
-    d'une requête sans accents ; le plein texte, accents ignorés et racinisé, si."""
-    row = ChunkRow(
-        domain="financier",
-        source_id=SOURCE,
-        reference="C. civ., art. 1231-5",
-        text=ACCENTS,
-        kinds=[DELAI],
-        embedding_model=EMBEDDER.model,
-        embedding=EMBEDDER.embed_passages([ACCENTS])[0],
-        **embedded("C. civ., art. 1231-5", ACCENTS),
-    )
-    assert rag_store.insert(pg.admin, [row]) == 1
-
-
-def test_vecteurs_seuls_l_extrait_accentue_n_est_pas_premier(pg, accents):
-    found = search(pg, "financier", SANS_ACCENTS, DELAI, k=1)
-    assert found[0].reference != "C. civ., art. 1231-5"
-
-
-def test_hybride_plein_texte_accents_ignores_premier(pg, accents):
-    found = search(pg, "financier", SANS_ACCENTS, DELAI, k=2, settings=HYBRID)
-    assert found[0].reference == "C. civ., art. 1231-5"
-    assert found[0].text == ACCENTS
-    # toujours filtrée : domaine et rattachement déclaré
-    assert {p.reference for p in found} <= {
-        "C. com., art. L441-10",
-        "piège",
-        "C. civ., art. 1231-5",
-    }
-    assert all(DELAI in p.kinds and p.domain == "financier" for p in found)
-
-
-def test_hybride_sans_filtre_et_un_extrait_par_reference(pg, accents, long_article):
-    retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), HYBRID)
-    assert retriever.search_unfiltered(SANS_ACCENTS, k=1)[0].text == ACCENTS
-    distinct = rag_store.PgvectorRetriever(
-        pg.app,
-        HashEmbedder(),
-        HYBRID.model_copy(update={"distinct_references": True}),
-    )
-    found = [p.reference for p in distinct.search_unfiltered(QUERY, k=50)]
-    assert found.count("RGPD, art. 28") == 1
-
-
-def test_hybride_requete_sans_mot_plein_vecteurs_seuls(pg, corpus):
-    """Requête faite de mots vides : aucun lexème, liste plein texte vide ; la fusion
-    rend la liste des vecteurs, sans erreur."""
-    hybrid = search(pg, "conformite", "le la les", ACCORD, k=5, settings=HYBRID)
-    vector = search(pg, "conformite", "le la les", ACCORD, k=5)
-    assert [p.id for p in hybrid] == [p.id for p in vector]

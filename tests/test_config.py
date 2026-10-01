@@ -81,13 +81,7 @@ def test_configuration_du_projet_conforme_a_la_spec():
     assert cfg.crag.model_dump() == {
         "top_k": 4,
         "max_passes": 2,
-        "search": {
-            "distinct_references": True,
-            "mode": "vector",
-            "rrf_k": 60,
-            "candidates": 20,
-            "text_normalization": 1,
-        },  # ADR 006
+        "search": {"distinct_references": True},  # ADR 006
     }
     assert cfg.analyst_retry.model_dump() == {
         "max_attempts": 3,
@@ -204,15 +198,6 @@ _DELETE = object()
         ("crag.search", _DELETE),  # réglage explicite de la recherche (ADR 006)
         ("crag.search.distinct_references", _DELETE),
         ("crag.search.distinct_references", "oui"),  # mode strict
-        ("crag.search.mode", "bm25"),  # vecteurs ou hybride seulement
-        ("crag.search.mode", _DELETE),
-        ("crag.search.rrf_k", 0),
-        ("crag.search.rrf_k", _DELETE),
-        ("crag.search.candidates", 0),
-        ("crag.search.candidates", _DELETE),
-        ("crag.search.text_normalization", -1),
-        ("crag.search.text_normalization", 3),  # ts_rank : 0, 1 ou 2 ici
-        ("crag.search.text_normalization", _DELETE),
         ("analyst_retry", _DELETE),
         ("analyst_retry.max_attempts", 0),
         ("analyst_retry.initial_interval_seconds", -1.0),
@@ -232,8 +217,7 @@ def test_valeur_par_defaut_reservee_aux_configurations_archivees(raw):
     d'avant (relecture d'une configuration archivée) ; le fichier du projet doit pourtant
     le régler explicitement, comme tout le reste."""
     data = _mutate(raw, "crag.search", _DELETE)
-    search = DecisionConfig.model_validate(data).crag.search
-    assert search.distinct_references is False and search.mode == "vector"
+    assert DecisionConfig.model_validate(data).crag.search.distinct_references is False
 
 
 @pytest.mark.parametrize(

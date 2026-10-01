@@ -2756,3 +2756,28 @@ Mesurée au commit 8fa5c3c, abandonnée au suivant. En-tête écrit par le code,
 - **Aucune variante essayée** : changer l'en-tête jusqu'à trouver celle qui passe, sur 21 requêtes, reviendrait à l'ajuster à la mesure.
 - **Ce qui reste de la technique** : les intitulés et liens Légifrance dans le manifeste, avec leur test de présence (provenance de chaque article) ; la garde contre la troncature dans l'adaptateur fastembed. Avec l'en-tête long, deux extraits dépassaient 512 tokens (L442-1 extrait 2 : 543 ; RGPD 83 extrait 2 : 519) et fastembed les aurait tronqués en silence. Un passage tronqué est désormais refusé, jamais embarqué. Avec l'en-tête d'origine, aucun extrait ne dépasse : vérifié par l'ingestion locale, qui passe la garde.
 - **Retour vérifié** : après l'abandon, `ingest` (65 remplacés, 2 inchangés) puis mesure identique, octet pour octet, à celle de la technique 1.
+
+### Technique 3 : recherche hybride, plein texte français et vecteurs, fusion RRF — abandonnée
+
+Mesurée au commit 067c0c0, abandonnée au suivant (retour du code). Migration 009 : `unaccent` (module contrib de PostgreSQL, présent en local, extension « trusted » ; dans l'image de CloudNativePG, le paquet PGDG `postgresql-16` qui l'apporte, d'après sa recette officielle), configuration `cdg_francais` (unaccent puis `french_stem`), colonne de lexèmes générée (en-tête et texte), index GIN, `app_role` en lecture seule (testé). Liste plein texte : mots de la requête en OU (`plainto_tsquery` les exige tous), `ts_rank` normalisé par 1 + log(longueur) ; liste des vecteurs ; 20 candidats chacune, fusion par rangs réciproques (k = 60, calcul exact), un extrait par référence conservé. Réglages fixés une fois, sans essai d'autres valeurs.
+
+| rappel@4 moyen (technique 1 gardée → hybride) | avant | après |
+|---|---|---|
+| avec filtre, toutes | 89,3 % | 87,7 % |
+| avec filtre, articles seuls | 84,1 % | 81,7 % |
+| sans filtre, toutes | 72,2 % | 68,7 % |
+| sans filtre, articles seuls | 55,6 % | 49,2 % |
+
+- **Requête par requête** (rappel@4) : avec le filtre, aucune ne gagne, 1 perd (requête 3, plafond à 60 % : 1170 remplacé par 1171) ; sans filtre, 2 gagnent (6 : pénalités à 2 %, 21 : préavis non chiffré), 4 perdent (12 : délai non chiffré ; 13 : accord de traitement ; 14 et 15 : transferts). **Technique abandonnée** : aucun des trois volets du critère n'est rempli.
+- **Cause** : les requêtes écrites par le code commencent par l'intitulé du domaine (« protection des données personnelles : sous-traitance, transferts hors de l'Union européenne »), commun à toutes les requêtes d'un domaine. En plein texte, ces mots génériques pèsent autant que la situation propre à la clause : ils font monter les fiches et l'article 4 du RGPD (définitions, très dense en « données à caractère personnel »), qui chassent RGPD 28 ou 46. Le plein texte apporte ce que l'article d'Anthropic attend de BM25, les termes exacts (« Error code TS-999 ») ; nos requêtes n'en ont pas, et notre corpus n'a pas le vocabulaire rare qui le justifierait.
+- **Retour vérifié** : code d'avant la technique restauré, migration 009 retirée du dépôt ; dans la base locale, colonne, index, configuration et extension supprimés à la main ; mesure identique, octet pour octet, à celle de la technique 1. La migration n'a jamais tourné ailleurs (branche non fusionnée).
+
+### Bilan de la PR 2 et pistes
+
+**Gardé : un extrait par référence (technique 1).** Rappel@4 de 75,4 à 89,3 % avec le filtre (articles seuls : 62,7 à 84,1 %), de 57,5 à 72,2 % sans filtre (30,2 à 55,6 %). Abandonnés, chiffres ci-dessus : en-têtes de contexte, recherche hybride. Gardés en plus : la correction de la réindexation, la garde contre la troncature, les intitulés et liens Légifrance du manifeste, la relecture des configurations archivées d'avant `crag.search`.
+
+Pistes, hors périmètre (le chantier s'arrête à cette PR) :
+- **Reranker** (troisième technique de l'article) : écarté de ce chantier. Gain restant à aller chercher : rappel@4 de 89,3 % avec le filtre et de 72,2 % sans, contre 96,8 % et 95,2 % à k = 20 : les références attendues sont dans les vingt premiers, mal ordonnées. C'est le cas que vise un reranker (l'article reclasse les 150 premiers pour en garder 20).
+- **Requête sans l'intitulé du domaine pour le plein texte** : la recherche hybride pourrait être remesurée avec une requête réduite à la clause et à sa situation, ou sur un corpus client au vocabulaire rare (références, numéros de clause), où le plein texte a sa raison d'être.
+- **Chapitres du RGPD dans l'en-tête** (« Chapitre V : Transferts de données à caractère personnel vers des pays tiers… ») : non mesuré ; l'en-tête des articles Légifrance n'a pas passé le critère.
+- **Rattachement déclaré à revoir pour les deux écarts du jeu** (1211 pour la durée d'engagement, RGPD 28 pour les transferts) : décision du propriétaire, non changé dans ce chantier pour que la mesure reste comparable.
