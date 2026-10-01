@@ -47,6 +47,7 @@ from cdg.domain.models import (
     Usage,
 )
 from cdg.domain.numeric import rounded
+from cdg.domain.resumption import RESUME_ERRORS, ResumeEscalation, escalation_fault
 from cdg.domain.rules import RULES
 from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
 from cdg.domain.version import CodeVersion
@@ -54,6 +55,8 @@ from cdg.domain.version import CodeVersion
 GENESIS = "0" * 64  # prev_hash du premier maillon
 CONFIG_CHANGED = "configuration modifiée entre l'analyse et le scellement"
 CODE_CHANGED = "code modifié entre l'analyse et le scellement"
+# analyse interrompue, escaladée par la reprise car sa configuration avait changé
+CONFIG_CHANGED_DURING_ANALYSIS = "configuration changée pendant l'analyse"
 _HASH = re.compile(r"[0-9a-f]{64}")
 
 # nœuds exécutés après decision_gate : leur consommation et leurs échecs n'ont pas pesé
@@ -279,6 +282,9 @@ class AuditRecord(_RecordPart):
     # None : analyse antérieure au scellement de la version du code
     code_version: CodeVersion | None
     sealing_code_version: CodeVersion  # processus qui scelle
+    # cause d'une escalade écrite par la reprise (le gate n'a pas tourné), vérifiée par
+    # le rejeu ; None : décision du gate, ou d'avant l'enregistrement de cette cause
+    resume_escalation: ResumeEscalation | None = None
     decision: DecisionRecord  # config_hash : celui de l'analyse
 
 
@@ -319,6 +325,8 @@ def build_record(
     analysed_by = state.get("code_version")
     code = None if analysed_by is None else CodeVersion.model_validate(analysed_by)
     findings = [] if sealing_config_hash == analysed_with else [CONFIG_CHANGED]
+    if state.get("configuration_changee"):
+        findings.append(CONFIG_CHANGED_DURING_ANALYSIS)
     if code is not None and code != sealing_code_version:
         findings.append(CODE_CHANGED)
     return AuditRecord(
@@ -327,6 +335,7 @@ def build_record(
         analyse_par=state.get("analyse_par"),
         code_version=code,
         sealing_code_version=sealing_code_version,
+        resume_escalation=state.get("escalade_reprise"),
         decision=DecisionRecord(
             analysis_date=state.get("analysis_date"),
             clauses=state.get("clauses", []),
@@ -516,10 +525,11 @@ class ReplayReport:
     sealed_hash: str
     replayed_hash: str
     recomputed: bool  # False : rien à recalculer (rejet, escalade avant le gate)
+    fault: str | None = None  # escalade de reprise sans cause valide : anomalie
 
     @property
     def identical(self) -> bool:
-        return self.sealed_hash == self.replayed_hash
+        return self.sealed_hash == self.replayed_hash and self.fault is None
 
 
 def _after_gate(node: str) -> bool:
@@ -551,6 +561,28 @@ def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> Repla
             f"configuration {given} illisible par le code courant ({exc.error_count()} "
             "erreur(s) de validation) : rejeu impossible"
         ) from None
+    resumed = [
+        f
+        for f in (sealed.failure_report or {}).get("failures", [])
+        if f.get("error") in RESUME_ERRORS
+    ]
+    if resumed:
+        # escalade écrite par la reprise au nom du gate, qui n'a pas tourné : pas de
+        # gate à recalculer, mais une cause à vérifier, et les verdicts gardés, si
+        # l'analyse en avait rendu, recalculés
+        fault = escalation_fault(
+            resumed,
+            record.get("resume_escalation"),
+            sealed.config_hash,
+            config.interrupted.max_resumes,
+        )
+        replayed = sealed.model_copy(update={"verdicts": _rejustified(sealed, config)})
+        return ReplayReport(
+            sealed_hash=decision_hash(record),
+            replayed_hash=_sha256(canonical(replayed.model_dump(mode="json"))),
+            recomputed=bool(sealed.verdicts),
+            fault=fault,
+        )
     failures = [
         NodeFailure.model_validate(f)
         for f in record["failures"]
@@ -565,15 +597,7 @@ def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> Repla
             for u in record["usage"]
             if not _after_gate(u["node"])
         ]
-        verdicts = []
-        for v in sealed.verdicts:
-            if v.retrieval is None:
-                raise ReplayError(
-                    f"verdict {v.domain} sans résumé du CRAG : non rejouable"
-                )
-            verdicts.append(
-                justify(RULES[v.domain](sealed.clauses, config), v.retrieval)
-            )
+        verdicts = _rejustified(sealed, config)
         outcome = decide(
             verdicts, failures, usage, config, input_findings=sealed.input_findings
         )
@@ -593,6 +617,19 @@ def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> Repla
         replayed_hash=_sha256(canonical(replayed.model_dump(mode="json"))),
         recomputed=recomputed,
     )
+
+
+def _rejustified(
+    sealed: DecisionRecordV1 | DecisionRecord, config: DecisionConfig
+) -> list[AgentVerdict]:
+    """Verdicts recalculés : règles sur les clauses scellées, justification sur les
+    références figées (résumés du CRAG)."""
+    verdicts = []
+    for v in sealed.verdicts:
+        if v.retrieval is None:
+            raise ReplayError(f"verdict {v.domain} sans résumé du CRAG : non rejouable")
+        verdicts.append(justify(RULES[v.domain](sealed.clauses, config), v.retrieval))
+    return verdicts
 
 
 FAITHFUL, REEVALUATION = "fidele", "reevaluation"

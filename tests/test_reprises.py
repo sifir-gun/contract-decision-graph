@@ -320,6 +320,7 @@ def test_processus_tue_a_chaque_reprise_contrat_escalade_sans_nouvel_appel(
         "hold": PostgresContractLocks(lambda: pg.app).hold,
         "record": PostgresResumeCounter(lambda: pg.app).record,
         "limit": LIMIT,
+        "config": CONFIG,
         "thread_ids": {thread_id},
     }
     with orchestrator.open_graph(CONFIG, deps, pg.app) as graph:

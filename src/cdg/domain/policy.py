@@ -37,7 +37,24 @@ def build_request(state: Mapping[str, Any], config: DecisionConfig) -> dict[str,
             for v in state.get("verdicts", [])
         ],
         "allowed_decisions": list(config.human_policy.allowed_decisions),
+        # configuration changée pendant l'analyse (reprise escaladée) : montré au
+        # relecteur, qui peut trancher sous la configuration actuelle
+        "configuration_changee": state.get("configuration_changee"),
     }
+
+
+def analysis_allows_override(state: Mapping[str, Any], config: DecisionConfig) -> bool:
+    """La configuration de l'analyse permet-elle la levée d'un blocage dur ? Sans
+    changement de configuration pendant l'analyse, c'est la configuration courante (même
+    empreinte : `resume` refuse sinon). Après un changement, celle de l'analyse doit
+    l'autoriser aussi : un changement de configuration n'assouplit jamais rétroactivement
+    un contrôle de sécurité ; inconnue, elle ne l'autorise pas."""
+    if not state.get("configuration_changee"):
+        return config.human_policy.allow_block_override
+    analysed = state.get("analysis_config")
+    if analysed is None:
+        return False
+    return bool(analysed["human_policy"]["allow_block_override"])
 
 
 def check(
@@ -45,6 +62,8 @@ def check(
     verdicts: list[AgentVerdict],
     config: DecisionConfig,
     analyst: Actor | None,
+    *,
+    analysis_allows_override: bool,
 ) -> str | None:
     """None si la décision est recevable, sinon le motif du refus. Quatre yeux : second
     contrôle, après celui de l'interface, et seul contrôle pour la CLI ; une décision
@@ -62,6 +81,12 @@ def check(
     lifts_block = bool(blocked) and human.decision != "NO_GO"
     if lifts_block and not rules.allow_block_override:
         return f"levée de blocage dur interdite par la configuration ({', '.join(blocked)})"
+    if lifts_block and not analysis_allows_override:
+        return (
+            f"levée de blocage dur ({', '.join(blocked)}) interdite par la configuration "
+            "d'analyse : un changement de configuration n'assouplit jamais un contrôle "
+            "de sécurité"
+        )
     if lifts_block and not human.overrides_block:
         return f"blocage dur ({', '.join(blocked)}) : overrides_block requis pour {human.decision}"
     if human.overrides_block and not lifts_block:
@@ -74,6 +99,8 @@ def review(
     verdicts: list[AgentVerdict],
     config: DecisionConfig,
     analyst: Actor | None,
+    *,
+    analysis_allows_override: bool,
 ) -> tuple[HumanReview | None, str | None]:
     """Valide la réponse brute reçue à la reprise, puis applique la politique."""
     try:
@@ -84,5 +111,11 @@ def review(
             for e in exc.errors()
         )
         return None, f"réponse invalide : {details}"
-    error = check(human, verdicts, config, analyst)
+    error = check(
+        human,
+        verdicts,
+        config,
+        analyst,
+        analysis_allows_override=analysis_allows_override,
+    )
     return (None, error) if error else (human, None)

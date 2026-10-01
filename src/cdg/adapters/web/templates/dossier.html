@@ -25,6 +25,26 @@
   {% endif %}
 </header>
 
+{% if s.demande and s.configuration_changee %}
+<div class="warning" role="status">
+  <strong>Configuration changée pendant l'analyse</strong> : analysée sous la configuration <code>{{ s.configuration_changee.analyse or "inconnue" }}</code>, interrompue, puis escaladée par la reprise automatique sous la configuration <code>{{ s.configuration_changee.reprise }}</code>, sans reprise sous celle-ci. Le relecteur peut trancher sous la configuration actuelle : les deux empreintes seront scellées. La levée d'un blocage dur exige que les deux configurations la permettent.
+  {% if can_analyse %}
+  <form method="post" action="{{ contract_path(d.thread_id, 'relance') }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <p><label for="relance-identifiant">Ou relancer l'analyse sous la configuration actuelle, comme un nouveau contrat : même texte masqué, même date d'analyse d'origine ({{ s.analysis_date }}) ; seule la configuration change</label>
+    <input id="relance-identifiant" name="identifiant" value="{{ d.thread_id }}-relance" maxlength="100">
+    <button type="submit">Relancer l'analyse</button></p>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+{% if d.relances %}
+<p class="meta">Relancé sous : {% for r in d.relances %}<a href="{{ contract_path(r) }}">{{ r }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% endif %}
+{% if s.relance_de %}
+<p class="meta">Relance du contrat <a href="{{ contract_path(s.relance_de) }}">{{ s.relance_de }}</a>, escaladé pour changement de configuration : même texte masqué, même date d'analyse ({{ s.analysis_date }}) ; seule la configuration a changé.</p>
+{% endif %}
+
 {% if s.demande and can_decide %}
 <section id="revue" class="panel review" aria-labelledby="revue-titre">
   <h2 id="revue-titre">Revue humaine</h2>

@@ -103,6 +103,9 @@ def human_review(state: ContractState, decision_config: DecisionConfig) -> dict:
             state.get("verdicts", []),
             decision_config,
             state.get("analyse_par"),
+            analysis_allows_override=policy.analysis_allows_override(
+                state, decision_config
+            ),
         )
         # acceptée : policy.review ne rend alors aucun motif de refus
         if human is not None:
@@ -439,6 +442,9 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
         "chain_hash": values.get("chain_hash"),
         # constats du scellement (code modifié depuis l'analyse…), montrés au réviseur
         "sealing_findings": values.get("sealing_findings", []),
+        # reprise escaladée car la configuration avait changé ; relance d'un tel contrat
+        "configuration_changee": values.get("configuration_changee"),
+        "relance_de": values.get("relance_de"),
         "human": human.model_dump(mode="json") if human else None,
         "analyse_par": values["analyse_par"].model_dump(mode="json")
         if values.get("analyse_par")
@@ -461,6 +467,7 @@ def run_contract(
     config: DecisionConfig,
     actor: Actor,
     code: CodeVersion,
+    relaunch_of: str | None = None,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
 
@@ -470,7 +477,8 @@ def run_contract(
     écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
     produit la décision, modèles et version du code) est posé dans l'état initial, avant
     tout nœud : c'est lui qui est scellé, comme l'acteur qui lance l'analyse (quatre
-    yeux).
+    yeux). `relaunch_of` : contrat escaladé pour changement de configuration dont
+    celui-ci est la relance, sous la configuration actuelle.
     """
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
@@ -485,6 +493,7 @@ def run_contract(
             "analysis_date": analysis_date,
             **audit.analysis_context(config, code),
             "analyse_par": actor,
+            **({} if relaunch_of is None else {"relance_de": relaunch_of}),
         },
         _thread(contract_id),
         durability=DURABILITY,
@@ -497,13 +506,16 @@ def resume_thread(
 ) -> dict:
     """Reprise humaine par Command(resume=...) d'un thread en attente. Refusée avant toute
     reprise si la configuration courante n'est pas celle de l'analyse : la décision a été
-    produite par l'autre."""
+    produite par l'autre. Seule exception : un contrat escaladé par la reprise
+    automatique parce que sa configuration avait changé (`configuration_changee`) ; le
+    relecteur le tranche sous la configuration actuelle, et les deux empreintes sont
+    scellées."""
     snapshot = _awaiting(graph, thread_id)
     analysed_with, current = (
         snapshot.values.get("config_hash"),
         audit.config_hash(config),
     )
-    if analysed_with != current:
+    if analysed_with != current and not snapshot.values.get("configuration_changee"):
         raise ThreadError(
             f"configuration modifiée depuis l'analyse du thread {thread_id} "
             f"(analyse : {analysed_with}, courante : {current}) : reprise refusée. "
@@ -631,6 +643,7 @@ def resume_interrupted(
     hold: Callable[[str], AbstractContextManager[None]],
     record: Callable[[str], int],
     limit: int,
+    config: DecisionConfig,
     thread_ids: set[str] | None = None,
 ) -> list[dict]:
     """Reprend depuis leur dernier checkpoint les threads restés en cours (un processus
@@ -639,11 +652,15 @@ def resume_interrupted(
     doublon (`audit_seal` rejoué, index uniques du journal).
 
     Chaque reprise est comptée (`record`, durable) avant d'être faite : une reprise qui
-    tue le processus est comptée quand même. Au-delà de `limit`, plus de reprise :
-    ESCALADE vers la revue humaine (`_escalate_interrupted`), et un avertissement.
+    tue le processus est comptée quand même. Plus de reprise, mais une ESCALADE vers la
+    revue humaine (`_escalate_interrupted`), avec un avertissement, au-delà de `limit`,
+    ou si la configuration du processus (`config`) n'est pas celle du début de l'analyse :
+    une analyse n'est jamais reprise sous une autre configuration. Les deux causes,
+    cumulées, sont citées toutes deux.
 
     `thread_ids` restreint la reprise, comme pour l'expiration : les tests ne touchent
     jamais aux autres threads de la base. La CLI et l'interface n'en passent pas."""
+    current = audit.config_hash(config)
     found = set(list_threads(graph))
     if thread_ids is not None:
         found &= thread_ids
@@ -656,8 +673,21 @@ def resume_interrupted(
                 if not _in_progress(graph, thread_id):
                     continue  # fini entre-temps
                 attempt = record(thread_id)
-                if resumption.exhausted(attempt, limit):
-                    _escalate_interrupted(graph, thread_id, attempt, limit)
+                snapshot = graph.get_state(_thread(thread_id))
+                analysed_with = snapshot.values.get("config_hash")
+                failures = resumption.escalation_failures(
+                    snapshot.next, attempt, limit, analysed_with, current
+                )
+                if failures:
+                    _escalate_interrupted(
+                        graph,
+                        thread_id,
+                        failures,
+                        resumption.config_change(analysed_with, current),
+                        resumption.escalation_record(
+                            attempt, limit, analysed_with, current
+                        ),
+                    )
                 else:
                     log.info(
                         "reprise %d de l'analyse interrompue %s", attempt, thread_id
@@ -670,30 +700,37 @@ def resume_interrupted(
 
 
 def _escalate_interrupted(
-    graph: CompiledStateGraph, thread_id: str, attempt: int, limit: int
+    graph: CompiledStateGraph,
+    thread_id: str,
+    failures: list[NodeFailure],
+    config_change: dict[str, str | None] | None,
+    cause: dict[str, Any],
 ) -> None:
     """Plus de reprise : l'analyse part en revue humaine, proposée ESCALADE, avec un
-    rapport d'échec qui cite le nombre de reprises. En deux mises à jour de l'état
-    (LangGraph 1.2.12, `bulk_update_state`) :
+    rapport d'échec qui en cite chaque cause (maximum de reprises, configuration modifiée),
+    la cause enregistrée (`escalade_reprise`, scellée, vérifiée par le rejeu) et, si la
+    configuration a changé, le marqueur `configuration_changee`. En deux mises à
+    jour de l'état (LangGraph 1.2.12, `bulk_update_state`) :
     1. `END` sans valeur vide les tâches en attente, en gardant les écritures des tâches
-       déjà finies (verdicts des analystes rendus) ;
+       déjà finies (verdicts des analystes rendus, sous la configuration de l'analyse) ;
     2. l'escalade est écrite au nom de `decision_gate`, dont l'arête lit `route` : la
        revue humaine suit, comme après tout échec de nœud escaladé.
     Puis l'exécution va jusqu'à l'interruption de `human_review` : le contrat attend un
     humain, et n'est plus jamais repris."""
     config = _thread(thread_id)
     snapshot = graph.get_state(config)
-    failure = resumption.failure(snapshot.next, attempt, limit)
-    log.warning(
-        "analyse %s interrompue %d fois : plus de reprise au-delà de %d, ESCALADE "
-        "vers la revue humaine",
-        thread_id,
-        attempt,
-        limit,
-    )
+    for failure in failures:
+        log.warning(
+            "analyse %s : plus de reprise automatique, ESCALADE vers la revue humaine "
+            "(%s)",
+            thread_id,
+            failure.message,
+        )
     update = {
-        "failures": [failure],
-        **escalate([*snapshot.values.get("failures", []), failure]),
+        "failures": failures,
+        **escalate([*snapshot.values.get("failures", []), *failures]),
+        "escalade_reprise": cause,
+        **({} if config_change is None else {"configuration_changee": config_change}),
     }
     graph.bulk_update_state(
         config, [[StateUpdate(None, END)], [StateUpdate(update, "decision_gate")]]

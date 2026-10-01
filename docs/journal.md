@@ -2586,7 +2586,7 @@ Conception validée par le propriétaire le 30/09, avec ses décisions : interfa
 
 ## 2026-09-30 · Défaut connu : analyse interrompue reprise sous une autre configuration
 
-À corriger dans la PR qui suivra l'archivage des configurations (décision du propriétaire, 30/09).
+À corriger dans la PR qui suivra l'archivage des configurations (décision du propriétaire, 30/09). **Corrigé le 01/10** (branche `reprise-configuration-modifiee`, entrée ci-dessous).
 
 - **Constat** (relevé en concevant l'archivage) : `resume_interrupted` reprend une analyse interrompue avec le graphe du processus qui reprend, donc avec sa configuration, même si elle a changé depuis le début de l'analyse. L'état garde l'empreinte de configuration posée par `run_contract` au départ : règles et décision peuvent alors être calculées sous une configuration autre que celle que l'enregistrement déclare dans sa partie décision.
 - **Déjà visible, pas encore empêché** : le scellement porte le constat « configuration modifiée entre l'analyse et le scellement », et un rejeu fidèle, sur la configuration archivée de l'analyse, verra la différence comme une anomalie.
@@ -2621,3 +2621,16 @@ Le scan de l'image de l'application a échoué le 01/10 sur quatre failles (CVE-
   2. Python sur OpenSSL 3.5.9, par une version de uv qui le fournit ;
   3. republication de distroless avec libssl3t64 3.5.7-1~deb13u3 (empreinte de la base mise à jour, signature vérifiée par `scripts/chaine.py bases`).
   Chacune retire une partie du risque ; les exceptions tombent quand les trois sont faites, sinon elles sont revues et, au besoin, prolongées avec justification.
+
+## 2026-10-01 · Reprise sous une autre configuration : escalade, tranchée sous l'actuelle (branche `reprise-configuration-modifiee`)
+
+Conception validée par le propriétaire le 01/10, avec ses décisions : la reprise est comptée avant l'escalade, et un cumul avec le maximum de reprises cite les deux causes ; le relecteur tranche sous la configuration actuelle (revue bloquée jusqu'à expiration : refusée), `resume` ne l'accepte que dans ce cas ; levée d'un blocage dur seulement si les deux configurations l'autorisent (jamais d'assouplissement rétroactif d'un contrôle de sécurité) ; relance possible, comme un nouveau contrat ; `config-check` liste ces contrats à part. Détail : ADR 005.
+
+### Faits et pièges
+
+- **Deux générations de processus dans un test** : `memory_opener` construit son graphe sous la configuration qu'on lui donne ; pour qu'un processus reprenne sous une autre, les tests partagent un checkpointer en mémoire entre deux ouvreurs, chacun sous sa configuration.
+- **Une file partagée avec un processus fils doit rester en vie** (mode spawn) : passée en temporaire, elle disparaît sous le fils, qui n'atteint jamais l'extraction. Déjà noté dans `test_verrous.py`, retrouvé en écrivant le test PostgreSQL.
+- **Relance sur le texte masqué** : l'original n'est jamais conservé ; l'analyse d'origine portait déjà sur le texte masqué, la relance aussi.
+- **Faux constat d'anomalie au rejeu d'une escalade de reprise, corrigé** (trouvé le 01/10 en documentant, sur un cas construit) : la reprise écrit l'escalade au nom du gate, qui ne tourne pas ; le rejeu le recalculait, et, avec un verdict gardé à blocage dur, proposait NO_GO au lieu de l'ESCALADE scellée. Corrigé sur décision du propriétaire : la cause de l'escalade est scellée (rang, maximum, empreintes), et le rejeu la vérifie au lieu de recalculer le gate ; sans cause valide, anomalie. Couvert sur les deux chemins et avec un budget dépassé, et par six altérations de la cause scellée.
+- **Relance : seule la configuration change** (confirmé par le propriétaire) : même texte masqué, même date d'analyse d'origine ; dit dans le formulaire, la sortie de `relaunch` et le dossier du nouveau contrat.
+- **OpenSSL dans l'image de l'application** : le scan bloqué le 01/10 sur la `libssl3t64` de distroless a été traité par la PR des exceptions datées (fusionnée, entrée « à revoir avant le 15/10 » ci-dessus), fusionnée dans cette branche avant de la pousser.

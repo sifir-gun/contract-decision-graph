@@ -29,6 +29,28 @@ def human(
     )
 
 
+def check(h, verdicts, config, analyst):
+    """Sans changement de configuration pendant l'analyse : la courante seule décide de
+    la levée d'un blocage dur (cas du changement : tests/test_reprise_configuration.py)."""
+    return policy.check(
+        h,
+        verdicts,
+        config,
+        analyst,
+        analysis_allows_override=policy.analysis_allows_override({}, config),
+    )
+
+
+def review(payload, verdicts, config, analyst):
+    return policy.review(
+        payload,
+        verdicts,
+        config,
+        analyst,
+        analysis_allows_override=policy.analysis_allows_override({}, config),
+    )
+
+
 # --- Demande exposée à l'humain ---------------------------------------------------------
 
 
@@ -76,39 +98,37 @@ def test_demande_arrondit_les_scores():
 
 @pytest.mark.parametrize("decision", ["GO", "GO_RESERVES", "NO_GO"])
 def test_decision_autorisee_acceptee_sans_blocage(decision):
-    assert policy.check(human(decision), CLEAN, CONFIG, ACTEUR_ANALYSTE) is None
+    assert check(human(decision), CLEAN, CONFIG, ACTEUR_ANALYSTE) is None
 
 
 def test_escalade_refusee_l_humain_doit_trancher():
-    assert "ESCALADE" in policy.check(human("ESCALADE"), CLEAN, CONFIG, ACTEUR_ANALYSTE)
+    assert "ESCALADE" in check(human("ESCALADE"), CLEAN, CONFIG, ACTEUR_ANALYSTE)
 
 
 def test_motif_obligatoire():
-    assert "reason" in policy.check(human(reason="   "), CLEAN, CONFIG, ACTEUR_ANALYSTE)
+    assert "reason" in check(human(reason="   "), CLEAN, CONFIG, ACTEUR_ANALYSTE)
 
 
 # critère n° 12 : levée de blocage dur
 @pytest.mark.parametrize("decision", ["GO", "GO_RESERVES"])
 def test_12_levee_de_blocage_sans_overrides_block_refusee(decision):
-    assert "overrides_block" in policy.check(
-        human(decision), BLOCKED, CONFIG, ACTEUR_ANALYSTE
-    )
+    assert "overrides_block" in check(human(decision), BLOCKED, CONFIG, ACTEUR_ANALYSTE)
 
 
 def test_12_levee_de_blocage_avec_overrides_block_et_motif_acceptee():
     h = human("GO", reason="plafond négocié par avenant", overrides_block=True)
-    assert policy.check(h, BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
+    assert check(h, BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
 
 
 def test_no_go_sur_blocage_accepte_sans_levee():
-    assert policy.check(human("NO_GO"), BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
+    assert check(human("NO_GO"), BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
 
 
 def test_overrides_block_sans_blocage_a_lever_refuse():
-    assert "overrides_block" in policy.check(
+    assert "overrides_block" in check(
         human("GO", overrides_block=True), CLEAN, CONFIG, ACTEUR_ANALYSTE
     )
-    assert "overrides_block" in policy.check(
+    assert "overrides_block" in check(
         human("NO_GO", overrides_block=True), BLOCKED, CONFIG, ACTEUR_ANALYSTE
     )
 
@@ -122,8 +142,8 @@ def test_levee_interdite_par_la_configuration():
         }
     )
     h = human("GO", overrides_block=True)
-    assert "interdite" in policy.check(h, BLOCKED, cfg, ACTEUR_ANALYSTE)
-    assert policy.check(human("NO_GO"), BLOCKED, cfg, ACTEUR_ANALYSTE) is None
+    assert "interdite" in check(h, BLOCKED, cfg, ACTEUR_ANALYSTE)
+    assert check(human("NO_GO"), BLOCKED, cfg, ACTEUR_ANALYSTE) is None
 
 
 # --- Réponse brute reçue à la reprise ---------------------------------------------------
@@ -131,7 +151,7 @@ def test_levee_interdite_par_la_configuration():
 
 def test_review_accepte_une_reponse_valide():
     payload = answer("NO_GO", "risque trop élevé")
-    decision, error = policy.review(payload, CLEAN, CONFIG, ACTEUR_ANALYSTE)
+    decision, error = review(payload, CLEAN, CONFIG, ACTEUR_ANALYSTE)
     assert error is None and decision == HumanReview(**payload)
 
 
@@ -146,13 +166,13 @@ def test_review_accepte_une_reponse_valide():
     ],
 )
 def test_review_signale_une_reponse_mal_formee_sans_lever(payload):
-    decision, error = policy.review(payload, CLEAN, CONFIG, ACTEUR_ANALYSTE)
+    decision, error = review(payload, CLEAN, CONFIG, ACTEUR_ANALYSTE)
     assert decision is None and error.startswith("réponse invalide")
 
 
 def test_review_applique_la_politique():
     payload = answer("GO", "m")
-    decision, error = policy.review(payload, BLOCKED, CONFIG, ACTEUR_ANALYSTE)
+    decision, error = review(payload, BLOCKED, CONFIG, ACTEUR_ANALYSTE)
     assert decision is None and "overrides_block" in error
 
 
@@ -160,7 +180,7 @@ def test_decision_systeme_d_expiration_acceptee_meme_sur_blocage():
     h = HumanReview(
         decision="NO_GO", acteur=ACTEUR_ANALYSTE, reason="timeout", source="systeme"
     )
-    assert policy.check(h, BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
+    assert check(h, BLOCKED, CONFIG, ACTEUR_ANALYSTE) is None
 
 
 # --- quatre yeux, second contrôle (le premier est dans l'interface) ------------------------
@@ -168,21 +188,20 @@ def test_decision_systeme_d_expiration_acceptee_meme_sur_blocage():
 
 def test_quatre_yeux_le_relecteur_qui_a_lance_l_analyse_est_redemande():
     h = human("NO_GO", acteur=ACTEUR_ANALYSTE)
-    assert "a lancé l'analyse" in policy.check(h, CLEAN, CONFIG, ACTEUR_ANALYSTE)
+    assert "a lancé l'analyse" in check(h, CLEAN, CONFIG, ACTEUR_ANALYSTE)
 
 
 def test_quatre_yeux_contournement_par_la_cli_refuse_sauf_en_urgence():
     assert "autre canal" not in (
-        policy.check(human("NO_GO", acteur=OPERATEUR), CLEAN, CONFIG, ACTEUR_ANALYSTE)
-        or ""
+        check(human("NO_GO", acteur=OPERATEUR), CLEAN, CONFIG, ACTEUR_ANALYSTE) or ""
     )  # CLI hors du cluster : non authentifiée, aucune identité à comparer
     analyse_cli = Actor(canal="cli", authentifie=False, operateur="lot-nocturne")
-    refused = policy.check(human("NO_GO"), CLEAN, CONFIG, analyse_cli)
+    refused = check(human("NO_GO"), CLEAN, CONFIG, analyse_cli)
     assert "autre canal" in refused
     urgence = Actor(
         canal="cli", authentifie=False, operateur="astreinte-1", urgence=True
     )
-    assert policy.check(human("NO_GO", acteur=urgence), CLEAN, CONFIG, None) is None
+    assert check(human("NO_GO", acteur=urgence), CLEAN, CONFIG, None) is None
 
 
 def test_decision_systeme_hors_quatre_yeux():
@@ -190,4 +209,4 @@ def test_decision_systeme_hors_quatre_yeux():
     h = HumanReview(
         decision="NO_GO", acteur=ACTEUR_ANALYSTE, reason="timeout", source="systeme"
     )
-    assert policy.check(h, CLEAN, CONFIG, ACTEUR_ANALYSTE) is None
+    assert check(h, CLEAN, CONFIG, ACTEUR_ANALYSTE) is None

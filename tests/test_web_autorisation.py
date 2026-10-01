@@ -151,6 +151,26 @@ def test_relecteur_tranche_l_analyse_d_un_autre_mais_n_analyse_pas():
     assert decide(web, "relecteur").status_code == 303
 
 
+def test_relance_reservee_au_role_d_analyste(caplog):
+    web = interface()
+    analyse(web, "analyste")
+    token = form_token(web, "relecteur", "/contrats/c-attente")
+    refused = web.post(
+        "/contrats/c-attente/relance", data={"csrf": token}, headers=bearer("relecteur")
+    )
+    assert refused.status_code == 403
+    [event] = [e for e in events(caplog) if e["evenement"] == "acces_interdit"]
+    assert (event["role"], event["chemin"]) == (
+        "analyste",
+        "/contrats/c-attente/relance",
+    )
+    token = form_token(web, "analyste", "/contrats/c-attente")
+    allowed = web.post(
+        "/contrats/c-attente/relance", data={"csrf": token}, headers=bearer("analyste")
+    )
+    assert allowed.status_code == 409  # rôle admis ; contrat non escaladé pour ce motif
+
+
 def test_lecture_ouverte_aux_deux_roles():
     web = interface()
     analyse(web, "analyste")

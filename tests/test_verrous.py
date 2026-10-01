@@ -196,6 +196,7 @@ def test_analyse_d_un_processus_tue_reprise_par_un_autre_scellee_une_fois(
         "hold": PostgresContractLocks(lambda: pg.app).hold,
         "record": PostgresResumeCounter(lambda: pg.app).record,
         "limit": config.interrupted.max_resumes,
+        "config": config,
         "thread_ids": {thread_id},  # jamais les autres threads de la base
     }
     with orchestrator.open_graph(config, deps, pg.app) as graph:

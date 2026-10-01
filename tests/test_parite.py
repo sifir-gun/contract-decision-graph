@@ -22,6 +22,7 @@ METHODS = {
     "verify",
     "replay",
     "config_check",
+    "relaunch",
 }
 # action de l'interface -> commande de la CLI
 WEB_TO_CLI = {
@@ -34,6 +35,7 @@ WEB_TO_CLI = {
     "GET /journal/verification": "verify",
     "GET /contrats/{id}/rejeu": "replay",
     "GET /administration": "config-check",
+    "POST /contrats/{id}/relance": "relaunch",
 }
 
 
@@ -85,11 +87,17 @@ def cli_calls(tmp_path, monkeypatch, capsys) -> dict[str, set[str]]:
         "replay": ["replay", "c-attente"],
         "expire": ["expire", "--older-than", "24h", "--operateur", "relecteur-parite"],
         "config-check": ["config-check"],
+        # aucun contrat escaladé pour changement de configuration : refusée, mais par
+        # la même méthode du service
+        "relaunch": ["relaunch", "c-attente", "--operateur", "lot-parite"],
     }
     calls = {}
     for name, argv in commands.items():
         code, out = run_cli(capsys, *argv)
-        assert code == 0, (name, out)
+        if name == "relaunch":
+            assert (code, out["erreur"]) == (1, "ThreadError"), out
+        else:
+            assert code == 0, (name, out)
         calls[name] = recorder.take()
     return calls
 
@@ -125,6 +133,9 @@ def web_calls() -> dict[str, set[str]]:
         data={"csrf": token, "heures": "24", "confirme": "oui"},
     )
     calls["POST /administration/expiration (confirmée)"] = recorder.take()
+    refused = web.post(f"/contrats/{thread}/relance", data={"csrf": token})
+    assert refused.status_code == 409  # aucun contrat escaladé pour ce motif
+    calls["POST /contrats/{id}/relance"] = recorder.take()
     return calls
 
 
