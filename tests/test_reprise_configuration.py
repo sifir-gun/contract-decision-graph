@@ -19,6 +19,7 @@
   cohérente avec le rapport et la décision. Sans cause valide : anomalie.
 """
 
+import html
 import json
 import logging
 from contextlib import contextmanager
@@ -452,6 +453,7 @@ def test_relance_par_la_cli(monkeypatch, capsys):
     assert cli.main(argv) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["thread_id"] == "c-cli"
+    assert out["relance"]["note"].endswith("seule la configuration change")
     assert service.engine.values("c-cli")["analyse_par"].operateur == "lot-relance"
 
 
@@ -663,3 +665,33 @@ def test_anomalie_de_cause_signalee_par_la_cli(monkeypatch, capsys):
     assert cli.main(["replay", "c-escalade"]) == 1
     error = json.loads(capsys.readouterr().err)
     assert error["erreur"] == "RejeuAnomalie" and "sans cause" in error["defaut"]
+
+
+# --- relance : seule la configuration change ---------------------------------------------------
+
+
+def test_relance_dit_que_seule_la_configuration_change():
+    processes = escalated_contract()
+    service = processes.service(NEW)
+    date = service.engine.values("c-coupe")["analysis_date"]
+    status = service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert status["relance"] == {
+        "de": "c-coupe",
+        "date_analyse": date.isoformat(),
+        "configuration": B,
+        "note": "même texte masqué, même date d'analyse : seule la configuration change",
+    }
+
+
+def test_formulaire_et_dossier_de_relance_disent_la_date_d_origine():
+    from web_helpers import client
+
+    processes = escalated_contract()
+    service = processes.service(NEW)
+    date = service.engine.values("c-coupe")["analysis_date"].isoformat()
+    web = client(service)
+    form = html.unescape(web.get("/contrats/c-coupe").text)
+    assert f"date d'analyse d'origine ({date})" in form
+    service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    relaunched = html.unescape(web.get("/contrats/c-coupe-relance").text)
+    assert "seule la configuration a changé" in relaunched and date in relaunched

@@ -31,7 +31,7 @@
   {% if can_analyse %}
   <form method="post" action="{{ contract_path(d.thread_id, 'relance') }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <p><label for="relance-identifiant">Ou relancer l'analyse sous la configuration actuelle, comme un nouveau contrat</label>
+    <p><label for="relance-identifiant">Ou relancer l'analyse sous la configuration actuelle, comme un nouveau contrat : même texte masqué, même date d'analyse d'origine ({{ s.analysis_date }}) ; seule la configuration change</label>
     <input id="relance-identifiant" name="identifiant" value="{{ d.thread_id }}-relance" maxlength="100">
     <button type="submit">Relancer l'analyse</button></p>
   </form>
@@ -42,7 +42,7 @@
 <p class="meta">Relancé sous : {% for r in d.relances %}<a href="{{ contract_path(r) }}">{{ r }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
 {% endif %}
 {% if s.relance_de %}
-<p class="meta">Relance du contrat <a href="{{ contract_path(s.relance_de) }}">{{ s.relance_de }}</a>, escaladé pour changement de configuration.</p>
+<p class="meta">Relance du contrat <a href="{{ contract_path(s.relance_de) }}">{{ s.relance_de }}</a>, escaladé pour changement de configuration : même texte masqué, même date d'analyse ({{ s.analysis_date }}) ; seule la configuration a changé.</p>
 {% endif %}
 
 {% if s.demande and can_decide %}

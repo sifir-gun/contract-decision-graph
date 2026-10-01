@@ -243,7 +243,7 @@ class ContractService:
         check_contract_id(target)
         values = self.engine.values(thread_id)
         with self._writes:
-            return self.engine.run(
+            status = self.engine.run(
                 target,
                 values["raw_text"],
                 (),
@@ -251,6 +251,17 @@ class ContractService:
                 actor,
                 relaunch_of=thread_id,
             )
+        return {
+            **status,
+            # pour le relecteur : seule la configuration a changé
+            "relance": {
+                "de": thread_id,
+                "date_analyse": values["analysis_date"].isoformat(),
+                "configuration": audit.config_hash(self.config),
+                "note": "même texte masqué, même date d'analyse : seule la "
+                "configuration change",
+            },
+        }
 
     def history(self, thread_id: str) -> list[dict[str, Any]]:
         return self.engine.history(thread_id)
