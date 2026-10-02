@@ -63,6 +63,14 @@ dev = [
     "ruff>=0.16.8",
     "types-pyyaml>=6.0.12.20260906",
 ]
+# serveur MCP en stdio, local (ADR 007) : installé par défaut sur le poste et en CI,
+# jamais dans l'image (Dockerfile, --no-default-groups), qu'il refuse
+mcp = [
+    "mcp>=2.2.0",
+]
+
+[tool.uv]
+default-groups = ["dev", "mcp"]
 
 # Vérification des types (mypy) : strict sur domain/, ports/ et application/, mode de base
 # sur adapters/ et cli.py. `strict` ne se règle que globalement : ses options sont reprises

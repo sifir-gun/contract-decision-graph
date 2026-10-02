@@ -37,11 +37,12 @@ RUN uv python install --no-bin "${PYTHON_VERSION}" \
 WORKDIR /app
 
 # dépendances d'abord (couche réutilisée tant que uv.lock ne change pas) ; le projet n'est
-# pas installé : son code est lu depuis /app/src (PYTHONPATH), sans construire de paquet
+# pas installé : son code est lu depuis /app/src (PYTHONPATH), sans construire de paquet ;
+# aucun groupe, ni dev ni mcp (le serveur MCP, local, n'existe pas dans le cluster)
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-dev --no-build --no-install-project
+    uv sync --locked --no-default-groups --no-build --no-install-project
 
 COPY LICENSE /app/LICENSE
 # licences tierces absentes des roues et de Python (licences/PROVENANCE.md)

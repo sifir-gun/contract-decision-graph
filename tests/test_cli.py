@@ -1,5 +1,7 @@
 """CLI : sorties JSON, erreurs structurées, dépendances réelles remplacées par des doublures."""
 
+import subprocess
+import sys
 from contextlib import contextmanager
 from datetime import date
 
@@ -662,3 +664,17 @@ def test_tests_sans_cle_d_api_par_defaut():
     import os
 
     assert os.environ["MISTRAL_API_KEY"] == os.environ["ANTHROPIC_API_KEY"] == ""
+
+
+def test_cli_importable_sans_le_sdk_mcp():
+    """La CLI n'importe l'adaptateur MCP que dans la commande `mcp` : l'image, sans le
+    SDK, la charge quand même."""
+    code = "import sys, cdg.cli; sys.exit('mcp' in sys.modules)"
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
