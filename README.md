@@ -184,7 +184,7 @@ claude mcp add --scope local cdg -- uv run --directory /chemin/vers/contract-dec
 }
 ```
 
-Une règle de refus ne couvre que la façon habituelle d'écrire la commande, pas une autre (documentation de Claude Code) : ce n'est pas une frontière de sécurité. Ne pas autoriser d'avance la CLI à un assistant qui lit des contrats.
+Une règle de refus ne couvre que la façon habituelle d'écrire la commande, pas une autre (documentation de Claude Code) : ce n'est pas une frontière de sécurité. Ne pas autoriser d'avance la CLI à un assistant qui lit des contrats. La frontière de sécurité est le cluster : une décision par la CLI n'y est admise qu'en accès d'urgence, tracé et scellé, et le serveur MCP n'y existe pas ; sur le poste, l'opérateur répond de ce que ses outils peuvent lancer.
 
 Sans `--demo`, l'analyse appelle le fournisseur LLM de la configuration (payant, clé dans `.env`), comme `run`. Les journaux du serveur vont sur sa sortie d'erreur ; Claude Desktop les range dans `~/Library/Logs/Claude/mcp-server-cdg.log`. Exploitation : [docs/exploitation.md](docs/exploitation.md#serveur-mcp).
 
@@ -309,7 +309,7 @@ Le CRAG justifie chaque constat par une référence du corpus : encore faut-il q
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 284 tests automatisés, joués par la CI : à chaque pull request, 2 123 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 286 tests automatisés, joués par la CI : à chaque pull request, 2 125 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.

@@ -2881,11 +2881,11 @@ Relecteur neuf sur toute la branche, en priorité sur la sécurité. Aucune fuit
   - une citation d'une extraction refusée sort avec l'origine `llm`, non vérifiée ;
   - le motif de `verifier_journal` sort enveloppé (origine `journal`) ;
   - commentaires, ADR et docstring des journaux sont rendus exacts.
-- **Défaut signalé, non corrigé ici (préexistant)** : lancée par `python -m cdg.cli`, comme dans l'image et dans le README, la CLI journalise sous le nom `__main__`, hors du journal `cdg`. En `--journaux json`, la racine, réglée en WARNING, jette donc ses messages d'information. Sont perdus l'annonce de `web` (adresse de l'interface, dans le cluster comme sur le poste) et celle de `mcp`. Les tests passent parce qu'ils appellent `cli.main`, où le nom est `cdg.cli`. Correction proposée : `logging.getLogger("cdg.cli")`, et un test en sous-processus. Elle change la sortie de `web` dans le cluster : à décider par le propriétaire.
+- **Défaut signalé, non corrigé ici (préexistant)**, corrigé ensuite dans une PR à part (entrée suivante) : lancée par `python -m cdg.cli`, comme dans l'image et dans le README, la CLI journalise sous le nom `__main__`, hors du journal `cdg`. En `--journaux json`, la racine, réglée en WARNING, jette donc ses messages d'information. Sont perdus l'annonce de `web` (adresse de l'interface, dans le cluster comme sur le poste) et celle de `mcp`. Les tests passent parce qu'ils appellent `cli.main`, où le nom est `cdg.cli`. Correction proposée : `logging.getLogger("cdg.cli")`, et un test en sous-processus. Elle change la sortie de `web` dans le cluster : à décider par le propriétaire.
 
 ### Pistes (hors périmètre, notées sans code)
 
-- **Confirmation d'une décision par la CLI** : hors du cluster, `resume` et `expire` ne demandent rien, et un assistant doté d'un shell pourrait les lancer. Une confirmation interactive, ou un refus quand l'entrée n'est pas un terminal, changerait le comportement de la CLI.
+- **Confirmation d'une décision par la CLI** : hors du cluster, `resume` et `expire` ne demandent rien, et un assistant doté d'un shell pourrait les lancer. Une confirmation interactive, ou un refus quand l'entrée n'est pas un terminal, changerait le comportement de la CLI. Décision du propriétaire (02/10) : reste une piste ; la frontière de sécurité est le cluster (ADR 007, Limites).
 - **Exposition réseau du serveur MCP (transport HTTP).** Écartée : en stdio, le serveur n'a pas d'identité à vérifier ; il est lancé par l'assistant, sur le poste.
   - La spécification MCP (2026-07-28, section « Authorization », « Protocol Requirements ») rend l'autorisation optionnelle (« Authorization is OPTIONAL for MCP implementations »).
   - En HTTP, une implémentation « SHOULD conform to this specification » : l'autorisation OAuth y est recommandée, pas exigée.
@@ -2897,3 +2897,19 @@ Relecteur neuf sur toute la branche, en priorité sur la sécurité. Aucune fuit
 - **Refus des arguments inconnus sans le middleware provisoire**, quand le SDK publiera un schéma d'entrée fermé (`additionalProperties: false`).
 - **Confinement de `mcp_types`** : le paquet des types du SDK, distinct de `mcp`, n'est importé qu'à travers `mcp.types`, mais `tests/test_isolation.py` ne le confine pas encore.
 - **Série réelle par MCP** : le jeu de démonstration analysé par le serveur MCP sur le modèle réel, comme les séries de la CLI.
+
+## 2026-10-02 · Correctif : annonces de `web` et de `mcp` en `--journaux json` (branche `correctif-journaux-cli`)
+
+PR de correctif à part, après la fusion du serveur MCP (PR #31).
+
+### Décisions du propriétaire (02/10)
+
+- **Corriger le défaut des journaux** dans une petite PR à part, tests d'abord, avec un test qui vérifie que l'annonce de `web` et celle de `mcp` sortent bien en `--journaux json`.
+- **Pas de confirmation pour décider par la CLI** : reste une piste. La frontière de sécurité est le cluster, où une décision par la CLI n'est admise qu'en accès d'urgence, tracé et scellé ; documenté comme tel (ADR 007, README).
+- Après la fusion : étiquette `v1.2` sur `main`, avec une release courte ; chantier MCP terminé ensuite.
+
+### Faits et pièges
+
+- **Cause** : `log = logging.getLogger(__name__)` dans `cli.py`. Lancée par `python -m cdg.cli` (image, README), la CLI s'appelle `__main__`, hors du journal `cdg` (INFO) ; la racine est en WARNING. En `--journaux json`, ses messages d'information se perdaient donc : l'annonce de `web` (adresse de l'interface, dans le cluster aussi), celle de `mcp`, et le nombre d'analyses interrompues reprises. En texte, `_tell` écrit l'annonce directement : rien ne manquait au terminal.
+- **Pourquoi les tests ne le voyaient pas** : ils appellent `cli.main`, où le module s'appelle `cdg.cli`. Correction : journal nommé `cdg.cli` ; deux tests lancent la CLI en sous-processus, comme l'image, et lisent l'annonce de `web` et de `mcp` en JSON. Sans la correction, ils échouent tous deux.
+- **Observé en écrivant le test, non changé** : après un arrêt propre sur SIGTERM, uvicorn 0.54 relance le signal capturé (`Server.capture_signals`). Hors d'un conteneur, `web` se termine donc sur SIGTERM (code -15), avant d'écrire son résultat final. Dans l'image, en PID 1, le signal relancé est ignoré, le résultat s'écrit et le code vaut 0 (`tests/test_image.py`). Le test le constate.
