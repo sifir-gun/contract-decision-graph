@@ -2832,3 +2832,53 @@ Trouvé en lançant les séries réelles de la PR 2 du chantier « qualité de l
 - **Comparaison avec la série 8 (26/09, avant le défaut du 28/09)** : 63 issues conformes contre 64, refus d'extraction 21 sur 15 essais contre 22 sur 16, mêmes motifs. Le seul écart nouveau vient du juge du CRAG (contrat 03) ; la recherche lui montre désormais un extrait par référence, sans qu'on puisse imputer l'écart à cela sur un essai.
 - **Coût** : jeu **0,0841 $** pour 65 essais (258 905 tokens du modèle principal, 138 495 du petit modèle), environ 0,0014 $ par analyse en moyenne, 0,00121 $ en médiane ; durée médiane 6,4 s (extraction 2,9 s, explication 1,7 s). Le petit modèle consomme 34 % de tokens de moins qu'à la série 8 (209 734) : cohérent avec moins de réécritures, le juge trouvant plus souvent une référence au premier passage, mais non mesuré essai par essai.
 - **Dépense réelle du chantier**, séries comprises : 0,0072 $ (séries arrêtées sur le défaut), 0,0012 $ et quelques millièmes (vérification du correctif : essai préalable, critère 3), 0,0853 $ et quelques millièmes (série 9 : jeu, essai préalable, critère 3) : environ 0,10 $, sous les 0,15 $ annoncés.
+
+## 2026-10-02 · Serveur MCP, troisième porte en stdio local (branche `serveur-mcp`)
+
+Chantier ouvert à la demande explicite du propriétaire, après la v1.1 : une seule PR, périmètre figé, toute idée nouvelle notée ici comme piste. Choix et sécurité : [ADR 007](adr-007-serveur-mcp.md).
+
+### Décisions du propriétaire (02/10)
+
+- **SDK officiel du protocole**, vérifié avant l'ajout (version, licence, avis de sécurité, maintenance), confiné à son adaptateur ; ajouté par le propriétaire (`uv add --group mcp "mcp>=2.2.0"`).
+- **stdio seulement, en local** ; l'exposition réseau, notée en piste, avec la formulation exacte de la spécification (ci-dessous).
+- **Troisième porte, sans logique métier**, test de parité ; commande `mcp` dans la CLI ; quatre outils, annotations explicites ; mode démonstration.
+- **Jamais de décision par MCP** ; canal `mcp` scellé ; quatre yeux comme ailleurs.
+- **Injection indirecte** : données structurées par défaut ; citation délimitée et signalée comme non fiable ; tests avec le contrat piégé du jeu.
+- **Plan validé** avec ses points : le format v2 du journal gagne la valeur de canal `mcp` sans nouvelle version ; la saisie d'un contrat passe de l'interface à l'application, et les tests de l'interface passent sans modification, preuve que son comportement ne change pas ; toute exception d'un outil est interceptée (le type seul d'une imprévue) ; stdio non standard refusé ; pas de `.mcp.json` dans le dépôt.
+- **Exécution** : tâche par tâche dans la session, puis un relecteur neuf sur toute la branche avant la PR, en priorité sur la sécurité (injection indirecte, absence de tout outil de décision, aucun texte masqué ni citation hors de l'enveloppe).
+
+### Faits et pièges
+
+- **Le SDK est en 2.x** (2.2.0, 07/09/2026), qui casse l'API de la 1.x : `FastMCP` devient `MCPServer`, les attributs passent en snake_case, le client de test est `Client(server)`. Neuf paquets s'ajoutent au verrou, dont `pywin32`, limité à Windows par un marqueur.
+- **Avis de sécurité** : les quatre avis publiés du 28 au 30/09 n'étaient pas encore, le 02/10, dans OSV ni dans la base PyPA : pip-audit ne les voit pas. Ils sont corrigés en 2.2.0, d'où le plancher `>=2.2.0`.
+- **Client en mémoire** : en mode `auto`, par défaut, il appelle le serveur directement, sans JSON-RPC ; en mode `legacy`, il passe par JSON-RPC et la poignée de main `initialize`, comme Claude Code avec un serveur stdio. Les tests prennent `legacy`.
+- **stdio** : pendant le service, le SDK fait pointer le descripteur 1 vers la sortie d'erreur ; mais si `sys.stdout` n'est pas le descripteur 1, il sert sur place, sans rien dire. La commande le vérifie et refuse.
+- **Journaux du SDK** :
+  - `logging.basicConfig` à la construction, sans `force` : sans effet, la configuration du projet est posée avant ;
+  - une `ToolError` journalisée en INFO avec son message ;
+  - une exception imprévue journalisée avec toute sa trace.
+
+  Chaque outil intercepte donc tout, et ne donne d'une erreur imprévue que son type.
+- **Argument inconnu** : le SDK l'ignore sans rien dire. Il est refusé et nommé par un middleware du SDK, une API « provisoire » en 2.x, que les tests surveillent.
+- **Arguments invalides** : le texte de l'erreur pydantic, qui contient la valeur reçue, revient au client qui l'a envoyée ; le journal du SDK n'en garde que les noms de champs.
+- **Télémétrie** : le SDK ouvre des traces OpenTelemetry, mais seule l'API est installée, sans exportateur. Rien ne sort.
+- **Outils synchrones** : le SDK les exécute dans un fil à part (`anyio.to_thread`) ; le service fait passer les modifications l'une après l'autre.
+- **Ce qui ne peut pas sortir tel quel du dossier** :
+  - un constat d'instruction contient le passage du contrat : `instructions.passage`, l'inverse exact de `findings`, l'en sépare pour l'envelopper ;
+  - le rapport d'échec « noeuds » porte les messages d'exception : seuls le nœud, le type et les essais sortent ;
+  - une décision humaine au format v1 porte un nom : son acteur sort vide.
+- **Nombre de tests** : la suite principale passe de 1 991 à 2 111, l'image de 19 à 20, le total de 2 151 à 2 272.
+
+### Pistes (hors périmètre, notées sans code)
+
+- **Exposition réseau du serveur MCP (transport HTTP).** Écartée : en stdio, le serveur n'a pas d'identité à vérifier ; il est lancé par l'assistant, sur le poste.
+  - La spécification MCP (2026-07-28, section « Authorization », « Protocol Requirements ») rend l'autorisation optionnelle (« Authorization is OPTIONAL for MCP implementations »).
+  - En HTTP, une implémentation « SHOULD conform to this specification » : l'autorisation OAuth y est recommandée, pas exigée.
+  - En stdio, elle « SHOULD NOT follow this specification » et prend ses identifiants dans l'environnement.
+  - Dans ce projet, où tout accès réseau passe par une identité vérifiée (OIDC, ADR 005), elle serait nécessaire : serveur de ressources OAuth 2.1 (brouillon `draft-ietf-oauth-v2-1-13`), jetons vérifiés pour leur audience (RFC 8707), métadonnées de ressource protégée (RFC 9728), rôles et quatre yeux. Le SDK a eu plusieurs avis sur son transport HTTP, tous corrigés en 2.2.0.
+- **Analyses longues** : notifications de progression, et annulation d'une analyse quand le client abandonne.
+- **Rejeu et historique par MCP**, en lecture seule ; la relance, qui est une analyse.
+- **Dossier en ressource MCP**, plutôt qu'en outil.
+- **Refus des arguments inconnus sans le middleware provisoire**, quand le SDK publiera un schéma d'entrée fermé (`additionalProperties: false`).
+- **Confinement de `mcp_types`** : le paquet des types du SDK, distinct de `mcp`, n'est importé qu'à travers `mcp.types`, mais `tests/test_isolation.py` ne le confine pas encore.
+- **Série réelle par MCP** : le jeu de démonstration analysé par le serveur MCP sur le modèle réel, comme les séries de la CLI.

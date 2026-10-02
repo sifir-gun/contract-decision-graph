@@ -18,7 +18,7 @@ Série 9, sur le modèle réel (Mistral), 13 contrats synthétiques × 5 essais 
 
 > **In English.** A LangGraph pipeline that returns an auditable GO / GO_RESERVES / NO_GO / ESCALADE verdict on supplier contracts. LLMs only extract clauses, judge retrieved legal passages and explain; the verdict comes from deterministic Python rules, and every LLM output is checked by code before use. Doubt goes to a human reviewer (LangGraph `interrupt`), and every decision is sealed in a hash-chained, replayable audit log. Measured on 13 synthetic contracts × 5 real runs (Mistral): no automatic decision was ever more favourable than expected, at about $0.0014 and 6 s per contract. It runs as a local web interface and deploys on Kubernetes: three Helm charts (the application, PostgreSQL managed by CloudNativePG with backups whose restore is verified, an egress proxy that only reaches the Mistral API), installed on every pull request on a three-node k3s cluster and exercised by twenty-seven operational scenarios. The interface sits behind a TLS ingress (Traefik, size and per-client rate limits) and OIDC authentication (oauth2-proxy), and the application verifies the signed ID token on every request. Container images are built for amd64 and arm64, scanned, signed, with provenance and SBOM attestations. Analyst and reviewer roles come from the token's groups; a reviewer can never approve an analysis they launched (four-eyes, checked twice), and the audit log seals who acted by their identity provider's stable identifier, never a name. Documentation is in French; code identifiers are in English.
 
-Projet de R&D personnel. Fait et testé : le graphe de décision (phase 1), une interface web, et le déploiement sur Kubernetes avec son authentification et son entrée réseau, éprouvé à chaque pull request sur un cluster k3s de trois nœuds. Avec les rôles analyste et relecteur, le principe des quatre yeux et un journal d'audit qui scelle l'identité de qui agit, jamais son nom. Données uniquement synthétiques ou publiques.
+Projet de R&D personnel. Fait et testé : le graphe de décision (phase 1), une interface web, un serveur MCP local pour un assistant IA, et le déploiement sur Kubernetes avec son authentification et son entrée réseau, éprouvé à chaque pull request sur un cluster k3s de trois nœuds. Avec les rôles analyste et relecteur, le principe des quatre yeux et un journal d'audit qui scelle l'identité de qui agit, jamais son nom. Données uniquement synthétiques ou publiques.
 
 ## Ce que fait le système
 
@@ -138,6 +138,43 @@ Puis ouvrir http://127.0.0.1:8000. En démonstration, l'extraction est simulée 
 | ![Revue humaine du contrat piégé : décision proposée, blocage, tentatives d'instruction détectées, formulaire avec motif obligatoire](docs/images/interface-revue.png) | ![Journal d'audit : enregistrements scellés et vérification de la chaîne](docs/images/interface-journal.png) |
 
 *Captures en mode démonstration. Le 27/09/2026, une analyse réelle de bout en bout par l'interface (contrat piégé, revue humaine, vérification de la chaîne) a coûté 0,00107 $.*
+
+## Serveur MCP
+
+Un assistant IA (Claude Code, Claude Desktop) peut aussi appeler le système, par le protocole MCP : lancer une analyse (contrat du jeu ou texte fourni, masqué comme ailleurs), lister les contrats, consulter un dossier, vérifier le journal d'audit. Troisième porte sur le même service, sans logique métier : chaque outil appelle la même fonction que sa commande de la CLI, et un test le vérifie. **L'assistant ne décide rien** : le serveur n'a aucun outil de revue humaine, de levée de blocage ni d'expiration ; une analyse lancée par MCP est scellée avec son canal (`mcp`), et les quatre yeux s'appliquent comme ailleurs ([ADR 007](docs/adr-007-serveur-mcp.md)).
+
+Le texte d'un contrat est une donnée hostile pour l'assistant : le serveur ne renvoie que des données structurées (décision, constats, références, explication). Les citations, et la consigne cachée dans le contrat piégé du jeu, n'en sortent que sur demande, chacune dans une enveloppe délimitée par un jeton aléatoire et signalée comme contenu non fiable. Stdio seulement, en local : refusé dans le cluster, et absent de l'image.
+
+```bash
+uv run python -m cdg.cli mcp --demo --operateur poste-1   # démonstration : sans clé, sans coût, sans base
+uv run python -m cdg.cli mcp --operateur poste-1          # réel : base, corpus indexé et clé dans .env
+```
+
+`--operateur` : un identifiant non nominatif (minuscules, chiffres, tirets), scellé avec chaque analyse. Le serveur parle sur son entrée et sa sortie standard ; c'est l'assistant qui le lance.
+
+**Claude Code**, en portée locale (le projet ne fournit pas de `.mcp.json`, que Claude Code chargerait sans approbation avec `claude -p`) :
+
+```bash
+claude mcp add --scope local cdg -- uv run --directory /chemin/vers/contract-decision-graph python -m cdg.cli mcp --demo --operateur poste-1
+```
+
+**Claude Desktop** : Réglages, onglet Développeur, « Edit Config », qui ouvre `~/Library/Application Support/Claude/claude_desktop_config.json` sur macOS. Chemins absolus, celui de `uv` compris (`which uv`), puis quitter et relancer l'application :
+
+```json
+{
+  "mcpServers": {
+    "cdg": {
+      "command": "/chemin/absolu/vers/uv",
+      "args": [
+        "run", "--directory", "/chemin/vers/contract-decision-graph",
+        "python", "-m", "cdg.cli", "mcp", "--demo", "--operateur", "poste-1"
+      ]
+    }
+  }
+}
+```
+
+Sans `--demo`, l'analyse appelle le fournisseur LLM de la configuration (payant, clé dans `.env`), comme `run`. Les journaux du serveur vont sur sa sortie d'erreur ; Claude Desktop les range dans `~/Library/Logs/Claude/mcp-server-cdg.log`. Exploitation : [docs/exploitation.md](docs/exploitation.md#serveur-mcp).
 
 ## Déploiement Kubernetes
 
@@ -260,7 +297,7 @@ Le CRAG justifie chaque constat par une référence du corpus : encore faut-il q
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web), `cli.py` pour l'assemblage. La CLI et l'interface web passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 151 tests automatisés, joués par la CI : à chaque pull request, 1 991 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 19 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 272 tests automatisés, joués par la CI : à chaque pull request, 2 111 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
@@ -268,12 +305,13 @@ Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règl
 - [ADR 004 : interface web](docs/adr-004-interface-web.md). Rendu côté serveur avec HTMX plutôt qu'une application séparée ; aucune ressource externe ; sécurité ; pas d'authentification avant l'étape Kubernetes ; mode démonstration et ses limites.
 - [ADR 005 : déploiement Kubernetes](docs/adr-005-kubernetes.md). k3s et Helm, plusieurs réplicas, chaîne d'approvisionnement, cluster de test et scénarios, authentification et entrée réseau, avec leur modèle de menaces (STRIDE), autorisation et traçabilité, base légale et conservation proposées ; sources vérifiées et datées de chaque choix, bonnes pratiques écartées justifiées ; ce qui reste hors du projet pour une vraie production.
 - [ADR 006 : qualité de la recherche](docs/adr-006-recherche.md). Jeu d'évaluation de la recherche seule, établi sans le rattachement déclaré et validé par des non-juristes ; mesure sans LLM (`mesure-recherche`) ; un extrait par référence gardé (l'article de loi attendu vu par le juge dans 84,1 % des cas, contre 62,7 %), en-têtes de contexte et recherche hybride abandonnés, chiffres à l'appui ; pourquoi un RAG pour un corpus de 15 000 tokens.
+- [ADR 007 : serveur MCP](docs/adr-007-serveur-mcp.md). Troisième porte, en stdio local : SDK officiel vérifié (version, licence, avis, maintenance) et absent de l'image ; quatre outils, aucun de décision ; canal scellé, quatre yeux ; injection indirecte : données structurées par défaut, citations enveloppées et signalées comme non fiables ; pourquoi pas d'exposition réseau.
 - [Spécification de la phase 1](docs/spec-phase1.md), source de vérité ; [journal](docs/journal.md) des décisions, des séries réelles et des pièges ; [exploitation](docs/exploitation.md).
 
 ## Feuille de route
 
 - **Phase 2** : le déploiement sur Kubernetes est fait (k3s, Helm, testé à chaque pull request), avec l'authentification (OIDC, jeton vérifié par l'application), l'entrée réseau (Traefik, TLS), les rôles, le principe des quatre yeux et le journal d'audit scellé par identité. Prochaine étape : un rapport HTML par contrat ; puis l'API (FastAPI). L'écran de revue humaine est fait, en avance : c'est l'interface web locale.
-- **Phase 3** : observabilité (Langfuse auto-hébergé ; les journaux sont déjà structurés, en JSON) ; serveur MCP ; évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
+- **Phase 3** : le serveur MCP est fait, en stdio local (ADR 007). Restent l'observabilité (Langfuse auto-hébergé ; les journaux sont déjà structurés, en JSON) ; l'évaluation en CI ; et les évolutions notées pendant la phase 1 : signaler les clauses d'un type non couvert ; signal « clause ambiguë » menant à la revue humaine ; lire quelle quantité d'une citation est celle de la clause, et normaliser les unités de durée ; un juge du CRAG plus fort ; ancrage externe de la tête du journal d'audit (horodatage certifié) ; base de test séparée ; test d'absence d'appel réseau en CI.
 - **Phase 4, optionnelle** : Cloud Run et Terraform.
 
 Liste de contrôle de la mise en production (déploiement et durée, phases 2 et 3) : [docs/mise-en-production.md](docs/mise-en-production.md).
