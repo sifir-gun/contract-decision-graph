@@ -5,7 +5,8 @@ d'analyse. La CLI lit un fichier et nomme son contrat d'après lui : elle ne pas
 ici.
 
 Rien n'est masqué ici : le texte part tel quel au service, qui le masque avant le graphe
-(`orchestrator.run_contract`). Les messages d'erreur ne citent jamais le texte reçu.
+(`orchestrator.run_contract`). Les messages d'erreur ne citent jamais le texte du contrat
+(un identifiant refusé, oui).
 """
 
 import re

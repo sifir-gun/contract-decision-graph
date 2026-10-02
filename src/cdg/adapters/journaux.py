@@ -1,5 +1,6 @@
 """Journaux du processus : en texte sur le poste (défaut), en JSON dans Kubernetes
-(`--journaux json` ou `CDG_JOURNAUX=json`), toujours sur la sortie standard.
+(`--journaux json` ou `CDG_JOURNAUX=json`), sur la sortie standard ; sur la sortie
+d'erreur pour le serveur MCP, dont la sortie standard est réservée au protocole.
 
 Jamais le texte d'un contrat ni un secret :
 - une exception n'y laisse que son type et les lignes de code traversées, jamais son

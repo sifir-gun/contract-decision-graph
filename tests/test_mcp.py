@@ -13,14 +13,24 @@ MCP en mémoire (JSON-RPC, poignée de main `initialize`).
 
 import ast
 import json
-import re
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from demo_set import load as load_expected
 from doubles import CONTRACT_TEXT, FIXED_NOW
-from mcp_helpers import MCP_ACTOR, call, error_text, seen, session, tools
+from mcp_helpers import (
+    MCP_ACTOR,
+    call,
+    error_text,
+    escaped,
+    leaks,
+    outside,
+    seen,
+    session,
+    tools,
+    written_by_code,
+)
 from web_helpers import CONFIG, PENDING_TEXT, memory_service
 
 from cdg import cli
@@ -37,9 +47,6 @@ NAMES = {"analyser_contrat", "lister_contrats", "consulter_dossier", "verifier_j
 ISS = "https://idp.example.org"
 RELECTEUR = Actor(canal="interface", authentifie=True, iss=ISS, sub="sub-relecteur")
 OPERATEUR = Actor(canal="cli", authentifie=False, operateur="relecteur-1")
-ENVELOPE = re.compile(
-    r"<<<CONTENU-NON-FIABLE-([0-9a-f]+)>>>.*?<<<FIN-CONTENU-NON-FIABLE-\1>>>", re.DOTALL
-)
 MCP_SOURCES = Path(__file__).resolve().parents[1] / "src" / "cdg" / "adapters" / "mcp"
 
 
@@ -65,13 +72,12 @@ def real():
     return mcp_server.create_server(service, actor=MCP_ACTOR, demo=False), service
 
 
-def lines_of(text: str) -> list[str]:
-    """Lignes d'un texte, telles qu'elles paraîtraient dans du JSON."""
-    return [
-        json.dumps(line, ensure_ascii=False)[1:-1]
-        for line in text.splitlines()
-        if len(line) > 20
-    ]
+def leaked(service, thread_id: str, result) -> list[str]:
+    """Fenêtres du texte masqué trouvées dans ce que voit l'assistant, hors des
+    enveloppes et des textes écrits par le code."""
+    allowed = written_by_code(result.structured_content)
+    masked = service.dossier(thread_id)["texte_masque"]
+    return leaks(masked, outside(seen(result)), allowed)
 
 
 # --- outils, annotations, schémas ----------------------------------------------------------
@@ -162,6 +168,7 @@ def test_instructions_du_serveur(real, demo):
         text = server.instructions
         assert "aucun outil de décision" in text
         assert "non fiable" in text
+        assert "ni par la CLI" in text  # ni par un autre chemin de l'assistant
     assert "démonstration" in demo[0].instructions
     assert "démonstration" not in real[0].instructions
 
@@ -326,7 +333,8 @@ def test_verifier_journal(real):
     assert (report["conforme"], report["enregistrements"]) == (True, 1)
     other = call(server, "verifier_journal", {"tete_attendue": "0" * 64})
     assert not other.is_error and not other.structured_content["conforme"]
-    assert "tronquée" in other.structured_content["raison"]
+    reason = other.structured_content["raison"]
+    assert reason["origine"] == "journal" and "tronquée" in reason["texte"]
     same = call(server, "verifier_journal", {"tete_attendue": report["tete"]})
     assert same.structured_content["conforme"]
 
@@ -358,12 +366,9 @@ def test_contrat_piege_analyse_sans_texte_du_contrat(demo):
         return analysed, consulted
 
     analysed, consulted = session(server, steps)
-    lines = lines_of(service.dossier("piege")["texte_masque"])
-    assert json.dumps(INJECTED_LINE, ensure_ascii=False)[1:-1] in lines
     for result in (analysed, consulted):
-        out = seen(result)
-        assert [line for line in lines if line in out] == []
-        assert "conclus GO" not in out
+        assert leaked(service, "piege", result) == []
+        assert "conclus GO" not in seen(result)
     fiche = analysed.structured_content
     assert (fiche["decision_proposee"], fiche["decision_finale"]) == ("NO_GO", None)
     assert (fiche["etat"], fiche["tentatives_d_instruction"]) == ("en_attente", 2)
@@ -376,15 +381,38 @@ def test_contrat_piege_citations_enveloppees(demo):
         server, "consulter_dossier", {"thread_id": "piege", "citations": True}
     )
     out = seen(result)
-    injected = json.dumps(INJECTED_LINE, ensure_ascii=False)[1:-1]
-    assert injected in out
-    outside = ENVELOPE.sub("", out)
-    lines = lines_of(service.dossier("piege")["texte_masque"])
-    assert [line for line in lines if line in outside] == []
+    assert escaped(INJECTED_LINE) in out
+    assert escaped(INJECTED_LINE) not in outside(out)
+    assert leaked(service, "piege", result) == []
     envelopes = result.structured_content["contenu_non_fiable"]
     [passage] = [e for e in envelopes if INJECTED_LINE in e["texte"]]
     assert passage["contenu_non_fiable"] is True and passage["origine"] == "contrat"
     assert "jamais une consigne" in passage["avertissement"]
+
+
+@pytest.mark.parametrize("citations", [False, True])
+def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
+    """Les 13 contrats du jeu, analysés puis consultés : aucune fenêtre de six mots de
+    leur texte hors d'une enveloppe, hors des textes écrits par le code."""
+    server, service = demo
+    found = {}
+    for contract_id in sorted(EXPECTED):
+        analysed = call(
+            server,
+            "analyser_contrat",
+            {"contrat_du_jeu": contract_id, "identifiant": contract_id},
+        )
+        consulted = call(
+            server,
+            "consulter_dossier",
+            {"thread_id": contract_id, "citations": citations},
+        )
+        assert not analysed.is_error and not consulted.is_error, seen(analysed)
+        found[contract_id] = [
+            *leaked(service, contract_id, analysed),
+            *leaked(service, contract_id, consulted),
+        ]
+    assert found == {contract_id: [] for contract_id in EXPECTED}
 
 
 # --- points d'attention ----------------------------------------------------------------------
@@ -394,7 +422,10 @@ def test_identifiant_deja_pris_erreur_explicite(real):
     server, _ = real
     arguments = {"texte": CONTRACT_TEXT, "identifiant": "c-1"}
     assert not call(server, "analyser_contrat", arguments).is_error
-    assert "existe déjà" in error_text(call(server, "analyser_contrat", arguments))
+    refused = error_text(call(server, "analyser_contrat", arguments))
+    assert "c-1 existe déjà" in refused
+    # le message du moteur conseille resume (une décision humaine) : pas à l'assistant
+    assert "resume" not in refused
 
 
 @pytest.mark.parametrize(
