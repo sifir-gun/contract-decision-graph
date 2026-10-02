@@ -166,6 +166,18 @@ def test_quatre_yeux_analyse_par_mcp():
     assert authz.four_eyes(MCP, OPERATEUR) is None
 
 
+def test_le_canal_mcp_ne_decide_jamais():
+    """Défense en profondeur (ADR 007) : le serveur MCP n'a aucun outil de décision, et
+    le domaine refuse de toute façon une décision ou une expiration de ce canal."""
+    refused = authz.decision_refused(MCP)
+    assert refused and "jamais de décision" in refused
+    assert authz.four_eyes(ANALYSTE, MCP) == refused
+    assert authz.four_eyes(MCP, MCP) == refused
+    assert authz.four_eyes(None, MCP) == refused
+    for actor in (ANALYSTE, LOCALE, OPERATEUR, URGENCE):
+        assert authz.decision_refused(actor) is None
+
+
 def test_acteur_mcp_non_authentifie_avec_operateur():
     assert MCP.model_dump() == {
         "canal": "mcp",

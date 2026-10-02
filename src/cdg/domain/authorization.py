@@ -10,7 +10,7 @@
   la lecture est ouverte aux deux.
 - Quatre yeux : la revue est refusée à qui a lancé l'analyse, et à tout autre canal que
   celui de l'analyse (changer de porte ne change pas de personne), sauf en accès
-  d'urgence, tracé et scellé. Les outils locaux, sans identité, n'existent pas dans le
+  d'urgence, tracé et scellé. Le canal mcp ne décide jamais : ni revue, ni expiration. Les outils locaux, sans identité, n'existent pas dans le
   cluster (démarrage et rendu refusés).
 - Second facteur, réglable pour le relecteur : une valeur amr ou acr acceptée.
 """
@@ -114,8 +114,24 @@ def permitted(granted: set[str], action: str) -> bool:
 # --- quatre yeux ---------------------------------------------------------------------------
 
 
+def decision_refused(actor: Actor) -> str | None:
+    """Canal qui ne décide jamais : le serveur MCP (ADR 007) n'a aucun outil de décision,
+    et le domaine refuse de toute façon sa revue humaine ou son expiration (défense en
+    profondeur). None pour les autres canaux."""
+    if actor.canal == "mcp":
+        return (
+            "serveur MCP : jamais de décision humaine ni d'expiration ; la revue revient "
+            "à une personne, dans l'interface ou par la CLI (ADR 007)"
+        )
+    return None
+
+
 def four_eyes(analyst: Actor | None, reviewer: Actor) -> str | None:
-    """None si la revue est admise, sinon le motif du refus."""
+    """None si la revue est admise, sinon le motif du refus. Un relecteur du canal mcp
+    est toujours refusé (`decision_refused`)."""
+    refused = decision_refused(reviewer)
+    if refused:
+        return refused
     if reviewer.urgence:
         return None  # accès d'urgence : admis, tracé au journal des accès et scellé
     if not reviewer.authentifie:

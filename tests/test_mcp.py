@@ -14,11 +14,12 @@ MCP en mémoire (JSON-RPC, poignée de main `initialize`).
 import ast
 import json
 import re
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from demo_set import load as load_expected
-from doubles import CONTRACT_TEXT
+from doubles import CONTRACT_TEXT, FIXED_NOW
 from mcp_helpers import MCP_ACTOR, call, error_text, seen, session, tools
 from web_helpers import CONFIG, PENDING_TEXT, memory_service
 
@@ -262,6 +263,27 @@ def test_analyse_mcp_scellee_avec_son_canal(real):
     )
     assert service.verify().ok
     assert service.replay("c-attente")["identique"]
+
+
+def test_ni_decision_ni_expiration_par_le_canal_mcp_meme_hors_outils(real):
+    """Défense en profondeur : même sans outil, le service refuse une décision ou une
+    expiration du canal mcp, avant le graphe ; le contrat reste en attente."""
+    server, service = real
+    call(server, "analyser_contrat", {"texte": PENDING_TEXT, "identifiant": "c-mcp"})
+    with pytest.raises(FourEyesRefused, match="jamais de décision"):
+        service.decide("c-mcp", answer(MCP_ACTOR))
+    with pytest.raises(FourEyesRefused, match="jamais de décision"):
+        service.expire(timedelta(0), MCP_ACTOR)
+    assert service.contracts(pending_only=True)[0]["thread_id"] == "c-mcp"
+    assert service.journal() == []
+    # second contrôle, dans le graphe : la réponse est refusée et redemandée
+    later = FIXED_NOW + timedelta(days=30)
+    [expired] = service.engine.expire(timedelta(0), later, MCP_ACTOR)
+    resumed = service.engine.resume("c-mcp", answer(MCP_ACTOR))
+    for status in (expired, resumed):
+        assert status["statut"] == "suspendu" and status["final_decision"] is None
+        assert "jamais de décision" in status["demande"]["error"]
+    assert service.journal() == []
 
 
 # --- lister, consulter, vérifier ----------------------------------------------------------------

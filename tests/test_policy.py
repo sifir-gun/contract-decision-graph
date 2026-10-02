@@ -204,6 +204,17 @@ def test_quatre_yeux_contournement_par_la_cli_refuse_sauf_en_urgence():
     assert check(human("NO_GO", acteur=urgence), CLEAN, CONFIG, None) is None
 
 
+def test_canal_mcp_jamais_de_decision_ni_d_expiration():
+    """Second contrôle (ADR 007) : ni revue humaine ni expiration par le canal mcp, même
+    sur une analyse lancée par MCP ; une décision système y est soumise aussi."""
+    mcp = Actor(canal="mcp", authentifie=False, operateur="assistant-1")
+    assert "jamais de décision" in check(human("NO_GO", acteur=mcp), CLEAN, CONFIG, mcp)
+    expiration = HumanReview(
+        decision="NO_GO", acteur=mcp, reason="timeout", source="systeme"
+    )
+    assert "jamais de décision" in check(expiration, CLEAN, CONFIG, ACTEUR_ANALYSTE)
+
+
 def test_decision_systeme_hors_quatre_yeux():
     """L'expiration (NO_GO système) n'est pas une revue : pas de quatre yeux."""
     h = HumanReview(

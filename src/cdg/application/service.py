@@ -109,8 +109,9 @@ def _retained(verdicts: Sequence[Mapping[str, Any]]) -> list[str]:
 
 
 class FourEyesRefused(Exception):
-    """Revue refusée par les quatre yeux, avant le graphe (premier contrôle ; la
-    politique du graphe fait le second)."""
+    """Revue refusée par les quatre yeux, ou décision et expiration refusées à un canal
+    qui ne décide jamais (serveur MCP), avant le graphe (premier contrôle ; la politique
+    du graphe fait le second)."""
 
 
 @dataclass(frozen=True)
@@ -271,6 +272,9 @@ class ContractService:
     def expire(
         self, older_than: timedelta, actor: Actor
     ) -> tuple[datetime, list[dict[str, Any]]]:
+        refused = authorization.decision_refused(actor)  # premier contrôle
+        if refused:
+            raise FourEyesRefused(refused)
         with self._writes:
             now = self.now()  # après l'attente du verrou : l'heure de l'expiration
             return now, self.engine.expire(older_than, now, actor)
