@@ -93,7 +93,7 @@ def test_commandes_d_administration_passent_la_fonction(monkeypatch):
     for name, source in received.items():
         assert source is conninfo.admin_conninfo, name
     monkeypatch.setattr(cli.rag_store, "sync", spy("sync", {}))
-    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words: [])
+    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words, prefix: [])
     monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", _Embedder)
     monkeypatch.setenv("EMBEDDING_CACHE_DIR", "/tmp")
     cli._ingest(SimpleNamespace())

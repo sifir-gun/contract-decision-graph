@@ -338,7 +338,7 @@ def test_ingestion_avec_les_lots_de_l_option(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", Loaded)
     monkeypatch.setattr(cli.settings, "embedding_cache_dir", lambda: tmp_path)
-    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words: [])
+    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words, prefix: [])
     monkeypatch.setattr(cli.rag_store, "sync", lambda conninfo, rows, model: {})
     monkeypatch.setattr(cli.conninfo, "admin_conninfo", lambda: "base-de-test")
     assert cli.main(["--lot-embedding", "16", "ingest"]) == 0
@@ -367,7 +367,7 @@ def test_ingestion_avec_les_fils_de_l_option(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", Loaded)
     monkeypatch.setattr(cli.settings, "embedding_cache_dir", lambda: tmp_path)
-    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words: [])
+    monkeypatch.setattr(cli.ingestion, "rows", lambda embedder, words, prefix: [])
     monkeypatch.setattr(cli.rag_store, "sync", lambda conninfo, rows, model: {})
     monkeypatch.setattr(cli.conninfo, "admin_conninfo", lambda: "base-de-test")
     assert cli.main(["--fils-embedding", "2", "ingest"]) == 0
