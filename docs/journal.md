@@ -2867,10 +2867,25 @@ Chantier ouvert à la demande explicite du propriétaire, après la v1.1 : une s
   - un constat d'instruction contient le passage du contrat : `instructions.passage`, l'inverse exact de `findings`, l'en sépare pour l'envelopper ;
   - le rapport d'échec « noeuds » porte les messages d'exception : seuls le nœud, le type et les essais sortent ;
   - une décision humaine au format v1 porte un nom : son acteur sort vide.
-- **Nombre de tests** : la suite principale passe de 1 991 à 2 111, l'image de 19 à 20, le total de 2 151 à 2 272.
+- **Nombre de tests** : la suite principale passe de 1 991 à 2 123 (relecture comprise), l'image de 19 à 20, le total de 2 151 à 2 284.
+
+### Relecture de la branche avant la PR (02/10)
+
+Relecteur neuf sur toute la branche, en priorité sur la sécurité. Aucune fuite de texte de contrat hors d'une enveloppe avec les extracteurs réels, aucun outil de décision. Constats et suites :
+
+- **Le domaine acceptait une décision humaine du canal `mcp`** (constat moyen, reproduit) : l'absence d'outil était la seule défense. Corrigé : `authorization.decision_refused`, appliqué dans le service (décision et expiration) puis dans la politique du graphe, décision système comprise.
+- **Un assistant qui a aussi un shell** (Claude Code) pourrait lancer `resume` ou `expire` par la CLI, où les quatre yeux ne s'appliquent pas entre outils locaux (constat moyen, plausible). Le message « existe déjà : utiliser resume » n'est plus renvoyé à l'assistant. Les instructions du serveur précisent qu'une décision ne lui revient jamais, ni par la CLI. Le README recommande des règles de refus dans les permissions de Claude Code, avec leur limite (pas une frontière de sécurité, selon sa documentation). Exiger une confirmation pour une décision par la CLI changerait la CLI : décision du propriétaire, en piste ci-dessous.
+- **Détecteurs de fuite des tests trop faibles** (constat moyen, prouvé par mutation) : ils ne cherchaient que des lignes entières, et retiraient toute la liste des enveloppes, métadonnées comprises. Corrigé : fenêtres de six mots, hors des balises, hors des textes écrits par le code ; les 13 contrats du jeu, avec et sans citations. Le modèle de l'enveloppe exige ses deux balises.
+- **Constats bas, corrigés** :
+  - un type de clause inconnu n'est plus jamais rendu en clair ;
+  - une citation d'une extraction refusée sort avec l'origine `llm`, non vérifiée ;
+  - le motif de `verifier_journal` sort enveloppé (origine `journal`) ;
+  - commentaires, ADR et docstring des journaux sont rendus exacts.
+- **Défaut signalé, non corrigé ici (préexistant)** : lancée par `python -m cdg.cli`, comme dans l'image et dans le README, la CLI journalise sous le nom `__main__`, hors du journal `cdg`. En `--journaux json`, la racine, réglée en WARNING, jette donc ses messages d'information. Sont perdus l'annonce de `web` (adresse de l'interface, dans le cluster comme sur le poste) et celle de `mcp`. Les tests passent parce qu'ils appellent `cli.main`, où le nom est `cdg.cli`. Correction proposée : `logging.getLogger("cdg.cli")`, et un test en sous-processus. Elle change la sortie de `web` dans le cluster : à décider par le propriétaire.
 
 ### Pistes (hors périmètre, notées sans code)
 
+- **Confirmation d'une décision par la CLI** : hors du cluster, `resume` et `expire` ne demandent rien, et un assistant doté d'un shell pourrait les lancer. Une confirmation interactive, ou un refus quand l'entrée n'est pas un terminal, changerait le comportement de la CLI.
 - **Exposition réseau du serveur MCP (transport HTTP).** Écartée : en stdio, le serveur n'a pas d'identité à vérifier ; il est lancé par l'assistant, sur le poste.
   - La spécification MCP (2026-07-28, section « Authorization », « Protocol Requirements ») rend l'autorisation optionnelle (« Authorization is OPTIONAL for MCP implementations »).
   - En HTTP, une implémentation « SHOULD conform to this specification » : l'autorisation OAuth y est recommandée, pas exigée.

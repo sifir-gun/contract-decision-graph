@@ -141,7 +141,7 @@ Puis ouvrir http://127.0.0.1:8000. En démonstration, l'extraction est simulée 
 
 ## Serveur MCP
 
-Un assistant IA (Claude Code, Claude Desktop) peut aussi appeler le système, par le protocole MCP : lancer une analyse (contrat du jeu ou texte fourni, masqué comme ailleurs), lister les contrats, consulter un dossier, vérifier le journal d'audit. Troisième porte sur le même service, sans logique métier : chaque outil appelle la même fonction que sa commande de la CLI, et un test le vérifie. **L'assistant ne décide rien** : le serveur n'a aucun outil de revue humaine, de levée de blocage ni d'expiration ; une analyse lancée par MCP est scellée avec son canal (`mcp`), et les quatre yeux s'appliquent comme ailleurs ([ADR 007](docs/adr-007-serveur-mcp.md)).
+Un assistant IA (Claude Code, Claude Desktop) peut aussi appeler le système, par le protocole MCP : lancer une analyse (contrat du jeu ou texte fourni, masqué comme ailleurs), lister les contrats, consulter un dossier, vérifier le journal d'audit. Troisième porte sur le même service, sans logique métier : chaque outil appelle la même fonction que sa commande de la CLI, et un test le vérifie. **Le serveur ne laisse rien décider à l'assistant** : aucun outil de revue humaine, de levée de blocage ni d'expiration, et le domaine refuse de toute façon une décision ou une expiration du canal `mcp`. Une analyse lancée par MCP est scellée avec ce canal, et les quatre yeux s'appliquent comme ailleurs ([ADR 007](docs/adr-007-serveur-mcp.md)).
 
 Le texte d'un contrat est une donnée hostile pour l'assistant : le serveur ne renvoie que des données structurées (décision, constats, références, explication). Les citations, et la consigne cachée dans le contrat piégé du jeu, n'en sortent que sur demande, chacune dans une enveloppe délimitée par un jeton aléatoire et signalée comme contenu non fiable. Stdio seulement, en local : refusé dans le cluster, et absent de l'image.
 
@@ -173,6 +173,18 @@ claude mcp add --scope local cdg -- uv run --directory /chemin/vers/contract-dec
   }
 }
 ```
+
+**Un assistant qui a aussi un shell** (Claude Code) pourrait lancer lui-même une décision par la CLI (`resume`, `expire`) : entre outils locaux non authentifiés, les quatre yeux ne s'appliquent pas. Les instructions du serveur le lui interdisent ; pour le lui refuser, ajouter des règles de refus aux permissions de Claude Code (fichier `.claude/settings.local.json` du projet, ou `~/.claude/settings.json`) :
+
+```json
+{
+  "permissions": {
+    "deny": ["Bash(*cdg.cli*resume*)", "Bash(*cdg.cli*expire*)", "Bash(*cdg.cli*relaunch*)"]
+  }
+}
+```
+
+Une règle de refus ne couvre que la façon habituelle d'écrire la commande, pas une autre (documentation de Claude Code) : ce n'est pas une frontière de sécurité. Ne pas autoriser d'avance la CLI à un assistant qui lit des contrats.
 
 Sans `--demo`, l'analyse appelle le fournisseur LLM de la configuration (payant, clé dans `.env`), comme `run`. Les journaux du serveur vont sur sa sortie d'erreur ; Claude Desktop les range dans `~/Library/Logs/Claude/mcp-server-cdg.log`. Exploitation : [docs/exploitation.md](docs/exploitation.md#serveur-mcp).
 
@@ -297,7 +309,7 @@ Le CRAG justifie chaque constat par une référence du corpus : encore faut-il q
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 272 tests automatisés, joués par la CI : à chaque pull request, 2 111 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 284 tests automatisés, joués par la CI : à chaque pull request, 2 123 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
