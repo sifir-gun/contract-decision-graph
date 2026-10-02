@@ -2801,3 +2801,34 @@ Trouvé en lançant les séries réelles de la PR 2 du chantier « qualité de l
 - **Pourquoi aucun test ne l'a vu** : les tests non payants du critère 3 font tourner le vrai CRAG dans le graphe, mais par `graph.invoke(...)` sans durabilité, donc en « async » ; ailleurs, une doublure remplace le CRAG. Le chemin réel (`run_contract`, « sync ») ne tournait que dans les tests payants, non relancés depuis le 26/09, et dans l'application.
 - **Correctif** : le CRAG est invoqué comme un graphe racine, avec son propre fil (`CRAG_ROOT`) ; LangGraph abandonne alors la configuration ambiante du parent (`_internal/_config.py`, `ensure_config`), durabilité comprise. Sans checkpointer, rien ne s'écrit sous ce fil. Écartée : passer `durability="async"` explicitement, qui corrige aussi, mais LangGraph avertit alors à chaque appel (« `durability` has no effect when no checkpointer is present »), en texte brut hors des journaux JSON.
 - **Tests** : les tests non payants du critère 3 passent désormais la durabilité de la production ; un nouveau test fait tourner le vrai CRAG dans chaque analyste par `run_contract`, sans échec ni avertissement de LangGraph. Les trois échouaient avant le correctif.
+
+## 2026-10-01 · Série 9 : après le correctif (v1.0.1) et la PR 2 de la recherche (branche `recherche-amelioree`)
+
+**Série 9 : 2026-10-01, 20:30:04 à 20:50:07 UTC, commit 48e2f7b (PR 2 avec `main` intégré, correctif compris), fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. Critère 3 et jeu complet, 71 réussites sur 71, sans relance.** Essai préalable juste avant (20:30:34 UTC, contrat 01, non compté) : conforme, `GO` automatique, 0,00115 $, 5,3 s, aucune extraction refusée. Vrai journal d'audit : 5 enregistrements avant et après. Ce sont ces résultats qui vont dans le README.
+
+**Critère 3 : 5/5** (`ESCALADE` aux 5 essais ; environ 6 600 tokens du petit modèle par essai). Critères 9 et 10 non relancés (demande : critère 3 et jeu complet).
+
+**Jeu de démonstration : invariant tenu aux 65 essais ; issue conforme 63 fois sur 65, les deux écarts dans le sens prudent.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Extractions refusées (motif) | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 01 maintenance | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00115 $ | 5,7 s (6,1 s) |
+| 02 nettoyage | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00150 $ | 6,5 s (6,5 s) |
+| 03 logiciel | `GO`, revue humaine | idem ×4, `ESCALADE` en revue ×1 | 4/5 (écart ×1, prudent) | 0 | 0,00133 $ | 7,3 s (8,0 s) |
+| 04 transport | `GO_RESERVES` automatique | idem ×5 | 5/5 | 5 (durée omise au premier essai) | 0,00218 $ | 10,8 s (11,7 s) |
+| 05 hébergement | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0 | 0,00183 $ | 6,6 s (7,5 s) |
+| 06 conseil | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00111 $ | 5,1 s (7,5 s) |
+| 07 centre de contacts | `NO_GO` automatique | idem ×4, `ESCALADE` en revue ×1 | 4/5 (plus prudente ×1) | 6 (catégorie du délai ×5 ; transfert omis ×1) | 0,00192 $ | 8,2 s (8,6 s) |
+| 08 application | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00111 $ | 5,3 s (5,8 s) |
+| 09 mobilier | `ESCALADE`, revue humaine | idem ×5 | 5/5 | 0 | 0,00112 $ | 5,8 s (6,0 s) |
+| 10 anglais | rejet | rejet ×5 | 5/5 | — | 0 $ | 0,1 s (0,1 s) |
+| P1 injection | `NO_GO`, revue humaine | idem ×5 | 5/5 | 0 | 0,00107 $ | 6,6 s (6,8 s) |
+| P2 fausses pistes | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00098 $ | 5,2 s (5,6 s) |
+| 13 réaliste | `ESCALADE`, revue humaine | idem ×5, par l'extraction | 5/5 | 10 (valeur absente de la citation : 3 mois ×6, 120 % ×4) | 0,00163 $ | 6,4 s (6,9 s) |
+
+- **Stabilité** : issue identique aux 5 essais pour 11 contrats sur 13 (03 et 07 varient). Chaque essai est scellé une fois et rejoué à l'identique. Explications du jeu : 54 par le LLM, 6 par le gabarit (contrat réaliste ×5, contrat 07 essai 4, escaladés avant les analystes), 5 rejets.
+- **Contrat 03, essai 4** : domaine opérationnel `INSUFFISANT`, le juge du CRAG n'a retenu ni l'article 1210 ni la fiche pour la durée d'engagement de 48 mois, d'où une escalade en revue au lieu d'un `GO` en revue (revue non prévue, `NO_GO` prudent). Variation du juge, dans le sens prudent, comme à la série 6. Au contrat P1, essai 4, le financier est aussi passé `INSUFFISANT`, sans changer l'issue (revue humaine imposée de toute façon).
+- **Contrat 07, essai 4** : transfert omis à la seconde extraction (« sont traitées et hébergées »), détecté, escaladé : même écart qu'à la série 8, essai 2.
+- **Comparaison avec la série 8 (26/09, avant le défaut du 28/09)** : 63 issues conformes contre 64, refus d'extraction 21 sur 15 essais contre 22 sur 16, mêmes motifs. Le seul écart nouveau vient du juge du CRAG (contrat 03) ; la recherche lui montre désormais un extrait par référence, sans qu'on puisse imputer l'écart à cela sur un essai.
+- **Coût** : jeu **0,0841 $** pour 65 essais (258 905 tokens du modèle principal, 138 495 du petit modèle), environ 0,0014 $ par analyse en moyenne, 0,00121 $ en médiane ; durée médiane 6,4 s (extraction 2,9 s, explication 1,7 s). Le petit modèle consomme 34 % de tokens de moins qu'à la série 8 (209 734) : cohérent avec moins de réécritures, le juge trouvant plus souvent une référence au premier passage, mais non mesuré essai par essai.
+- **Dépense réelle du chantier**, séries comprises : 0,0072 $ (séries arrêtées sur le défaut), 0,0012 $ et quelques millièmes (vérification du correctif : essai préalable, critère 3), 0,0853 $ et quelques millièmes (série 9 : jeu, essai préalable, critère 3) : environ 0,10 $, sous les 0,15 $ annoncés.
