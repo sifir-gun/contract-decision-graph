@@ -102,6 +102,19 @@ def test_ancienne_decision_humaine_dans_l_etat_refusee_au_scellement():
         record(state)
 
 
+def test_analyse_mcp_scellee_et_relue():
+    """Analyse lancée par le serveur MCP : son canal et son opérateur sont scellés, la
+    chaîne se vérifie et le rejeu est identique (format v2, sans nouvelle version)."""
+    mcp = Actor(canal="mcp", authentifie=False, operateur="assistant-poste-1")
+    data = record(reviewed(analyse_par=mcp)).model_dump(mode="json")
+    assert data["version"] == 2
+    assert data["analyse_par"] == mcp.model_dump(mode="json")
+    report = audit.verify_chain([entry(data, audit.GENESIS)])
+    assert report.ok and report.count == 1
+    replayed = audit.replay(data, CONFIG.model_dump(mode="json"))
+    assert replayed.identical and replayed.recomputed
+
+
 def test_analyse_sans_acteur_scellee_sans_acteur():
     """Analyse antérieure aux rôles, tranchée en accès d'urgence : scellée telle quelle."""
     state = reviewed()

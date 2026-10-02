@@ -71,6 +71,10 @@ def check(
     rules = config.human_policy
     if human.decision not in rules.allowed_decisions:
         return f"décision {human.decision} non autorisée : attendu {rules.allowed_decisions}"
+    # canal qui ne décide jamais (serveur MCP), même pour une décision système
+    channel = authorization.decision_refused(human.acteur)
+    if channel:
+        return channel
     if human.source == "humain":
         refused = authorization.four_eyes(analyst, human.acteur)
         if refused:

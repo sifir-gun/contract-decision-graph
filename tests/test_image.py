@@ -17,6 +17,7 @@ import re
 import shlex
 import subprocess
 import time
+import tomllib
 import urllib.request
 from pathlib import Path
 
@@ -148,10 +149,25 @@ def test_installation_stricte_depuis_uv_lock_sans_rien_construire():
     assert syncs, "aucun uv sync dans l'étape de construction"
     for command in syncs:
         options = set(command.split("uv sync", 1)[1].split())
-        # --locked : uv.lock tel quel ; --no-dev : sans le groupe dev ; --no-build : aucun
-        # paquet construit depuis ses sources ; --no-install-project : le projet n'est
-        # pas construit non plus (hatchling ne serait pas figé par uv.lock)
-        assert {"--locked", "--no-dev", "--no-build", "--no-install-project"} <= options
+        # --locked : uv.lock tel quel ; --no-default-groups : aucun groupe, ni dev ni mcp
+        # (le serveur MCP n'existe pas dans le cluster) ; --no-build : aucun paquet
+        # construit depuis ses sources ; --no-install-project : le projet n'est pas
+        # construit non plus (hatchling ne serait pas figé par uv.lock)
+        assert {
+            "--locked",
+            "--no-default-groups",
+            "--no-build",
+            "--no-install-project",
+        } <= options
+
+
+def test_groupe_mcp_par_defaut_hors_de_l_image():
+    """Le SDK MCP est dans un groupe installé par défaut (poste, CI) et jamais dans
+    l'image : le serveur MCP, local, refuse de démarrer dans le cluster (ADR 007)."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert [d.split(">")[0] for d in project["dependency-groups"]["mcp"]] == ["mcp"]
+    assert project["tool"]["uv"]["default-groups"] == ["dev", "mcp"]
+    assert not [d for d in project["project"]["dependencies"] if d.startswith("mcp")]
 
 
 def test_image_finale_non_root_numerique_et_lancement_direct():
@@ -293,6 +309,22 @@ def test_serveur_factice_de_mistral_absent_de_l_image(image):
         "         if f.startswith('mistral_factice') and not d.startswith(('/proc', '/sys'))]\n"
         "print(module, files)\n"
         "sys.exit(1 if module or files else 0)\n"
+    )
+    result = python_in(image, code)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.image
+def test_sdk_mcp_absent_de_l_image(image):
+    """Le serveur MCP est local (stdio) et refuse le cluster : ni son SDK ni ses
+    dépendances propres dans l'image (ADR 007) ; la CLI s'y importe sans lui."""
+    code = (
+        "import importlib.util, sys\n"
+        "present = [m for m in ('mcp', 'mcp_types', 'sse_starlette', 'jsonschema')\n"
+        "           if importlib.util.find_spec(m)]\n"
+        "import cdg.cli\n"
+        "print(present)\n"
+        "sys.exit(1 if present or 'mcp' in sys.modules else 0)\n"
     )
     result = python_in(image, code)
     assert result.returncode == 0, result.stdout + result.stderr

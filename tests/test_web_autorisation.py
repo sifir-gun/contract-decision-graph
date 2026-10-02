@@ -270,6 +270,10 @@ def test_second_facteur_non_exige_par_defaut():
             Actor(canal="locale", authentifie=False),
             "interface locale, non authentifiée",
         ),
+        (
+            Actor(canal="mcp", authentifie=False, operateur="assistant-poste-1"),
+            "opérateur assistant-poste-1 (MCP)",
+        ),
     ],
 )
 def test_acteur_lisible_par_son_pseudonyme_ou_son_operateur(actor, label):

@@ -20,11 +20,9 @@ concurrentes.
 """
 
 import logging
-import re
-import secrets
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
@@ -38,11 +36,12 @@ from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 
 from cdg.adapters.web import acces, presentation, security
-from cdg.application import demo_set
+from cdg.application import demo_set, saisie
+from cdg.application.saisie import InputError  # formulaire refusé : 400, message
 from cdg.application.service import ContractService, FourEyesRefused
 from cdg.domain import audit, authorization
 from cdg.domain.authorization import Actor
-from cdg.domain.identifiers import ContractIdError, check_contract_id
+from cdg.domain.identifiers import ContractIdError
 from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
 from cdg.ports.identity import IdentityRejected, IdentityVerifier, ProviderUnavailable
@@ -52,13 +51,7 @@ from cdg.settings import SettingsError
 WEB_ROOT = Path(__file__).parent
 # RFC 9110 : HEAD accepté là où GET l'est (FastAPI ne l'ajoute pas de lui-même)
 PAGE_METHODS = ["GET", "HEAD"]
-# caractères de contrôle hors tabulation et fins de ligne : pas du texte brut
-CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 log = logging.getLogger(__name__)
-
-
-class InputError(Exception):
-    """Formulaire refusé : message montré à l'utilisateur, code 400."""
 
 
 class Forbidden(Exception):
@@ -492,17 +485,19 @@ def create_app(
     @app.post("/analyse")
     def analyse(request: Request, form: CheckedForm) -> Response:
         try:
-            text, parties, base = _contract_input(form, demo)
-            contract_id = _identifier(form, base, service)
-            on = _analysis_date(form)
+            entry = _contract_input(form, demo)
+            contract_id = saisie.contract_id(
+                _text(form, "identifiant"), entry.base, service.now()
+            )
+            on = saisie.analysis_date(_text(form, "date"))
         except InputError as exc:
             return analysis_page(request, str(exc), 400)
         try:
             service.analyse(
-                text,
+                entry.text,
                 contract_id=contract_id,
                 actor=actor(request),
-                parties=parties,
+                parties=entry.parties,
                 analysis_date=on,
             )
         except (ThreadError, ContractBusy) as exc:
@@ -702,36 +697,20 @@ def _text(form: FormData, name: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _contract_input(form: FormData, demo: bool) -> tuple[str, list[str], str]:
-    """Texte du contrat, parties à masquer, base de l'identifiant par défaut."""
-    parties = [p.strip() for p in _text(form, "parties").splitlines() if p.strip()]
+def _contract_input(form: FormData, demo: bool) -> saisie.ContractInput:
+    """Texte du contrat, parties à masquer, base de l'identifiant par défaut : la saisie
+    commune avec le serveur MCP (`application/saisie.py`)."""
+    parties = _text(form, "parties").splitlines()
     source = _text(form, "source")
     if source == "jeu":
-        _, contracts = demo_set.load()
-        chosen = contracts.get(_text(form, "contrat"))
-        if chosen is None:
-            raise InputError("contrat inconnu du jeu de démonstration")
-        # démonstration : les parties déclarées, dont dépend l'extraction simulée
-        declared = list(chosen.parties)
-        return chosen.text(), declared if demo else parties or declared, chosen.id
-    if source in ("texte", "fichier") and demo:
-        raise InputError(
-            "démonstration : l'extraction est simulée pour les contrats du jeu "
-            "seulement ; choisissez-en un"
-        )
+        return saisie.from_demo_set(_text(form, "contrat"), parties, demo=demo)
     if source == "texte":
-        text = _text(form, "texte")
-    elif source == "fichier":
-        text = _uploaded_text(form.get("fichier"))
-    else:
-        raise InputError("source inconnue : contrat du jeu, texte collé ou fichier")
-    if not text.strip():
-        raise InputError("le texte du contrat est vide")
-    if CONTROL.search(text):
-        raise InputError(
-            "le texte contient un caractère de contrôle : ce n'est pas du texte brut"
+        return saisie.from_text(lambda: _text(form, "texte"), parties, demo=demo)
+    if source == "fichier":
+        return saisie.from_text(
+            lambda: _uploaded_text(form.get("fichier")), parties, demo=demo
         )
-    return text, parties, "contrat"
+    raise InputError("source inconnue : contrat du jeu, texte collé ou fichier")
 
 
 def _uploaded_text(upload: object) -> str:
@@ -746,23 +725,3 @@ def _uploaded_text(upload: object) -> str:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise InputError("le fichier n'est pas du texte encodé en UTF-8") from exc
-
-
-def _identifier(form: FormData, base: str, service: ContractService) -> str:
-    wanted = _text(form, "identifiant").strip()
-    if not wanted:
-        return f"{base}-{service.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
-    try:
-        return check_contract_id(wanted)  # la règle du domaine, commune avec la CLI
-    except ContractIdError as exc:
-        raise InputError(str(exc)) from exc
-
-
-def _analysis_date(form: FormData) -> date | None:
-    raw = _text(form, "date").strip()
-    if not raw:
-        return None
-    try:
-        return date.fromisoformat(raw)
-    except ValueError as exc:
-        raise InputError("date invalide : AAAA-MM-JJ attendu") from exc

@@ -1,5 +1,6 @@
 """Journaux du processus : en texte sur le poste (défaut), en JSON dans Kubernetes
-(`--journaux json` ou `CDG_JOURNAUX=json`), toujours sur la sortie standard.
+(`--journaux json` ou `CDG_JOURNAUX=json`), sur la sortie standard ; sur la sortie
+d'erreur pour le serveur MCP, dont la sortie standard est réservée au protocole.
 
 Jamais le texte d'un contrat ni un secret :
 - une exception n'y laisse que son type et les lignes de code traversées, jamais son
@@ -108,13 +109,15 @@ FORMATTERS: dict[str, type[logging.Formatter]] = {
 }
 
 
-def config(fmt: str) -> dict[str, Any]:
-    """Configuration de `logging.config.dictConfig`, pour la CLI et pour uvicorn."""
+def config(fmt: str, stream: str = "ext://sys.stdout") -> dict[str, Any]:
+    """Configuration de `logging.config.dictConfig`, pour la CLI et pour uvicorn ;
+    `stream` : la sortie standard par défaut, la sortie d'erreur pour le serveur MCP,
+    dont la sortie standard est réservée au protocole."""
     if fmt not in FORMATTERS:
         raise ValueError(f"format de journal inconnu : {fmt!r} (texte ou json)")
     handler = {
         "class": "logging.StreamHandler",
-        "stream": "ext://sys.stdout",
+        "stream": stream,
         "formatter": fmt,
     }
     ours = {"handlers": ["sortie"], "level": "INFO", "propagate": False}

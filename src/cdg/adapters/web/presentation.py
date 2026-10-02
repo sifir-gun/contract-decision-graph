@@ -121,6 +121,8 @@ def actor_label(actor: Mapping[str, Any] | None) -> str:
     if actor["canal"] == "cli":
         urgency = ", accès d'urgence" if actor.get("urgence") else ""
         return f"opérateur {actor['operateur']} (CLI{urgency})"
+    if actor["canal"] == "mcp":
+        return f"opérateur {actor['operateur']} (MCP)"
     return "interface locale, non authentifiée"
 
 

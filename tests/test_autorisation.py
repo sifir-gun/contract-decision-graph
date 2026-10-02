@@ -22,6 +22,7 @@ RELECTEUR = Actor(canal="interface", authentifie=True, iss=ISS, sub="sub-relecte
 LOCALE = Actor(canal="locale", authentifie=False)
 OPERATEUR = Actor(canal="cli", authentifie=False, operateur="astreinte-1")
 URGENCE = Actor(canal="cli", authentifie=False, operateur="astreinte-1", urgence=True)
+MCP = Actor(canal="mcp", authentifie=False, operateur="assistant-poste-1")
 MAPPING = {"analyste": ("cdg-analystes",), "relecteur": ("cdg-relecteurs",)}
 
 
@@ -45,6 +46,17 @@ def identity(groups=(), amr=(), acr=None) -> Identity:
         {"canal": "cli", "authentifie": True, "operateur": "astreinte-1"},
         {"canal": "cli", "authentifie": False, "operateur": "camille@example.org"},
         {"canal": "cli", "authentifie": False, "operateur": "Camille Martin"},
+        {"canal": "mcp", "authentifie": False},  # sans opérateur
+        {"canal": "mcp", "authentifie": True, "operateur": "assistant-1"},
+        {"canal": "mcp", "authentifie": False, "operateur": "assistant-1", "sub": "s"},
+        {
+            "canal": "mcp",
+            "authentifie": False,
+            "operateur": "assistant-1",
+            "urgence": True,
+        },
+        {"canal": "mcp", "authentifie": False, "operateur": "Camille Martin"},
+        {"canal": "mcp", "authentifie": False, "operateur": "camille@example.org"},
         {
             "canal": "interface",
             "authentifie": True,
@@ -142,6 +154,39 @@ def test_contournement_par_changement_de_canal_refuse():
     analyse_cli = Actor(canal="cli", authentifie=False, operateur="lot-nocturne")
     assert "autre canal" in authz.four_eyes(analyse_cli, RELECTEUR)
     assert authz.four_eyes(ANALYSTE, URGENCE) is None
+
+
+def test_quatre_yeux_analyse_par_mcp():
+    """Analyse lancée par le serveur MCP (local, non authentifié) : revue refusée dans
+    l'interface authentifiée (autre canal), sauf en accès d'urgence ; admise par les
+    outils locaux, hors du cluster, comme pour la CLI."""
+    assert "autre canal (mcp)" in authz.four_eyes(MCP, RELECTEUR)
+    assert authz.four_eyes(MCP, URGENCE) is None
+    assert authz.four_eyes(MCP, LOCALE) is None
+    assert authz.four_eyes(MCP, OPERATEUR) is None
+
+
+def test_le_canal_mcp_ne_decide_jamais():
+    """Défense en profondeur (ADR 007) : le serveur MCP n'a aucun outil de décision, et
+    le domaine refuse de toute façon une décision ou une expiration de ce canal."""
+    refused = authz.decision_refused(MCP)
+    assert refused and "jamais de décision" in refused
+    assert authz.four_eyes(ANALYSTE, MCP) == refused
+    assert authz.four_eyes(MCP, MCP) == refused
+    assert authz.four_eyes(None, MCP) == refused
+    for actor in (ANALYSTE, LOCALE, OPERATEUR, URGENCE):
+        assert authz.decision_refused(actor) is None
+
+
+def test_acteur_mcp_non_authentifie_avec_operateur():
+    assert MCP.model_dump() == {
+        "canal": "mcp",
+        "authentifie": False,
+        "iss": None,
+        "sub": None,
+        "operateur": "assistant-poste-1",
+        "urgence": False,
+    }
 
 
 def test_analyste_inconnu_revue_refusee_sauf_en_urgence():

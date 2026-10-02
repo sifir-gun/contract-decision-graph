@@ -2,15 +2,15 @@
 
 - Acteur : qui agit, et par quel canal. Interface authentifiée : l'émetteur et
   l'identifiant stable (sub) du jeton vérifié. Interface locale (poste, sans
-  authentification) et CLI : non authentifiées ; la CLI nomme un opérateur non
-  nominatif, et marque l'accès d'urgence. Jamais de nom ni d'e-mail : l'acteur est
-  scellé.
+  authentification), CLI et serveur MCP (stdio, local) : non authentifiés ; la CLI et le
+  serveur MCP nomment un opérateur non nominatif, la CLI seule marque l'accès d'urgence.
+  Jamais de nom ni d'e-mail : l'acteur est scellé.
 - Rôles : tirés des groupes du jeton vérifié, par une correspondance réglable. L'analyste
   lance une analyse ; le relecteur tranche une revue et expire les contrats en attente ;
   la lecture est ouverte aux deux.
 - Quatre yeux : la revue est refusée à qui a lancé l'analyse, et à tout autre canal que
   celui de l'analyse (changer de porte ne change pas de personne), sauf en accès
-  d'urgence, tracé et scellé. Les outils locaux, sans identité, n'existent pas dans le
+  d'urgence, tracé et scellé. Le canal mcp ne décide jamais : ni revue, ni expiration. Les outils locaux, sans identité, n'existent pas dans le
   cluster (démarrage et rendu refusés).
 - Second facteur, réglable pour le relecteur : une valeur amr ou acr acceptée.
 """
@@ -45,7 +45,8 @@ class Actor(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    canal: Literal["interface", "locale", "cli"]
+    # mcp : serveur MCP en stdio, pour un assistant local ; jamais de décision humaine
+    canal: Literal["interface", "locale", "cli", "mcp"]
     authentifie: bool
     iss: str | None = None
     sub: str | None = None
@@ -64,10 +65,15 @@ class Actor(BaseModel):
             raise ValueError(f"{self.canal} : non authentifié, sans iss ni sub")
         if self.canal == "locale" and (self.operateur or self.urgence):
             raise ValueError("interface locale : ni opérateur ni accès d'urgence")
-        if self.canal == "cli" and not OPERATOR.fullmatch(self.operateur or ""):
+        if self.canal in ("cli", "mcp") and not OPERATOR.fullmatch(
+            self.operateur or ""
+        ):
+            door = "CLI" if self.canal == "cli" else "serveur MCP"
             raise ValueError(
-                "CLI : un opérateur non nominatif (minuscules, chiffres, tirets)"
+                f"{door} : un opérateur non nominatif (minuscules, chiffres, tirets)"
             )
+        if self.canal == "mcp" and self.urgence:
+            raise ValueError("serveur MCP : jamais d'accès d'urgence")
         return self
 
 
@@ -108,8 +114,24 @@ def permitted(granted: set[str], action: str) -> bool:
 # --- quatre yeux ---------------------------------------------------------------------------
 
 
+def decision_refused(actor: Actor) -> str | None:
+    """Canal qui ne décide jamais : le serveur MCP (ADR 007) n'a aucun outil de décision,
+    et le domaine refuse de toute façon sa revue humaine ou son expiration (défense en
+    profondeur). None pour les autres canaux."""
+    if actor.canal == "mcp":
+        return (
+            "serveur MCP : jamais de décision humaine ni d'expiration ; la revue revient "
+            "à une personne, dans l'interface ou par la CLI (ADR 007)"
+        )
+    return None
+
+
 def four_eyes(analyst: Actor | None, reviewer: Actor) -> str | None:
-    """None si la revue est admise, sinon le motif du refus."""
+    """None si la revue est admise, sinon le motif du refus. Un relecteur du canal mcp
+    est toujours refusé (`decision_refused`)."""
+    refused = decision_refused(reviewer)
+    if refused:
+        return refused
     if reviewer.urgence:
         return None  # accès d'urgence : admis, tracé au journal des accès et scellé
     if not reviewer.authentifie:

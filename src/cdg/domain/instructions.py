@@ -15,6 +15,8 @@ from functools import cache
 from cdg.domain.text import normalize
 
 FINDING = "tentative d'instruction détectée"
+# un constat : FINDING, puis le passage entre guillemets (`findings`, `passage`)
+_OPEN, _CLOSE = f"{FINDING} : « ", " »"
 
 
 @cache
@@ -40,4 +42,20 @@ def passages(text: str, patterns: Sequence[str]) -> list[str]:
 
 def findings(text: str, patterns: Sequence[str]) -> list[str]:
     """Constats du contrat : un par passage détecté, avec le passage."""
-    return [f"{FINDING} : « {passage} »" for passage in passages(text, patterns)]
+    return [f"{_OPEN}{passage}{_CLOSE}" for passage in passages(text, patterns)]
+
+
+def passage(finding: str) -> str:
+    """Passage d'un constat de `findings`, son inverse exact : le serveur MCP sépare le
+    constat, écrit par le code, du passage, texte du contrat qu'il ne renvoie
+    qu'enveloppé comme contenu non fiable."""
+    if not (
+        finding.startswith(_OPEN)
+        and finding.endswith(_CLOSE)
+        and len(finding) >= len(_OPEN) + len(_CLOSE)
+    ):
+        raise ValueError(
+            f"constat sans la forme « {FINDING} : « passage » » : {len(finding)} "
+            "caractères"
+        )
+    return finding[len(_OPEN) : len(finding) - len(_CLOSE)]

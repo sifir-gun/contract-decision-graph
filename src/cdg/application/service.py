@@ -1,29 +1,31 @@
-"""Service des contrats : ce que font la CLI et l'interface web, par les mêmes fonctions.
+"""Service des contrats : ce que font la CLI, l'interface web et le serveur MCP, par les
+mêmes fonctions.
 
-Chaque méthode correspond à une commande de la CLI et à une action de l'interface ; un
-test vérifie que les deux portes appellent la même (`tests/test_parite.py`) :
+Chaque méthode correspond à une commande de la CLI, à une action de l'interface et, pour
+quatre d'entre elles, à un outil du serveur MCP ; un test vérifie que les portes appellent
+la même (`tests/test_parite.py`). Le serveur MCP n'a aucun outil de décision (ADR 007) :
 
-| Méthode        | CLI            | Interface web                         |
-| -------------- | -------------- | ------------------------------------- |
-| `analyse`      | `run`          | nouvelle analyse                      |
-| `decide`       | `resume`       | revue humaine                         |
-| `contracts`    | `list`         | liste des contrats                    |
-| `dossier`      | `show`         | dossier d'un contrat                  |
-| `history`      | `history`      | parcours, dans le dossier             |
-| `expire`       | `expire`       | administration                        |
-| `journal`      | `journal`      | journal d'audit                       |
-| `verify`       | `verify`       | vérifier la chaîne                    |
-| `replay`       | `replay`       | rejouer, dans le dossier              |
-| `config_check` | `config-check` | administration                        |
+| Méthode        | CLI            | Interface web             | Serveur MCP         |
+| -------------- | -------------- | ------------------------- | ------------------- |
+| `analyse`      | `run`          | nouvelle analyse          | `analyser_contrat`  |
+| `decide`       | `resume`       | revue humaine             | jamais              |
+| `contracts`    | `list`         | liste des contrats        | `lister_contrats`   |
+| `dossier`      | `show`         | dossier d'un contrat      | `consulter_dossier` |
+| `history`      | `history`      | parcours, dans le dossier |                     |
+| `expire`       | `expire`       | administration            | jamais              |
+| `journal`      | `journal`      | journal d'audit           |                     |
+| `verify`       | `verify`       | vérifier la chaîne        | `verifier_journal`  |
+| `replay`       | `replay`       | rejouer, dans le dossier  |                     |
+| `config_check` | `config-check` | administration            |                     |
 
 Le service ne décide rien : le graphe (port `ContractEngine`) rend les verdicts et
 applique la politique de revue ; le domaine vérifie la chaîne et rejoue. Le texte d'un
 contrat est masqué avant le graphe (`run_contract`) : le service ne le garde pas.
 
 Les actions qui modifient un état (`analyse`, `decide`, `expire`) passent l'une après
-l'autre, sous un verrou unique : l'interface web sert ses requêtes dans des threads, et
-`run_contract` vérifie qu'un thread n'existe pas avant de le créer. Les lectures restent
-concurrentes. Le verrou ne vaut que pour un processus (`docs/adr-004-interface-web.md`).
+l'autre, sous un verrou unique : l'interface web sert ses requêtes dans des threads, le
+serveur MCP ses outils aussi, et `run_contract` vérifie qu'un thread n'existe pas avant
+de le créer. Les lectures restent concurrentes. Le verrou ne vaut que pour un processus (`docs/adr-004-interface-web.md`).
 """
 
 import threading
@@ -107,8 +109,9 @@ def _retained(verdicts: Sequence[Mapping[str, Any]]) -> list[str]:
 
 
 class FourEyesRefused(Exception):
-    """Revue refusée par les quatre yeux, avant le graphe (premier contrôle ; la
-    politique du graphe fait le second)."""
+    """Revue refusée par les quatre yeux, ou décision et expiration refusées à un canal
+    qui ne décide jamais (serveur MCP), avant le graphe (premier contrôle ; la politique
+    du graphe fait le second)."""
 
 
 @dataclass(frozen=True)
@@ -269,6 +272,9 @@ class ContractService:
     def expire(
         self, older_than: timedelta, actor: Actor
     ) -> tuple[datetime, list[dict[str, Any]]]:
+        refused = authorization.decision_refused(actor)  # premier contrôle
+        if refused:
+            raise FourEyesRefused(refused)
         with self._writes:
             now = self.now()  # après l'attente du verrou : l'heure de l'expiration
             return now, self.engine.expire(older_than, now, actor)
