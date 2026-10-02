@@ -108,13 +108,15 @@ FORMATTERS: dict[str, type[logging.Formatter]] = {
 }
 
 
-def config(fmt: str) -> dict[str, Any]:
-    """Configuration de `logging.config.dictConfig`, pour la CLI et pour uvicorn."""
+def config(fmt: str, stream: str = "ext://sys.stdout") -> dict[str, Any]:
+    """Configuration de `logging.config.dictConfig`, pour la CLI et pour uvicorn ;
+    `stream` : la sortie standard par défaut, la sortie d'erreur pour le serveur MCP,
+    dont la sortie standard est réservée au protocole."""
     if fmt not in FORMATTERS:
         raise ValueError(f"format de journal inconnu : {fmt!r} (texte ou json)")
     handler = {
         "class": "logging.StreamHandler",
-        "stream": "ext://sys.stdout",
+        "stream": stream,
         "formatter": fmt,
     }
     ours = {"handlers": ["sortie"], "level": "INFO", "propagate": False}

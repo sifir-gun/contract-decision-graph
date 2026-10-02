@@ -26,6 +26,7 @@ service fait passer les modifications l'une après l'autre.
 
 import inspect
 import logging
+import sys
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 
@@ -78,6 +79,31 @@ READ_ONLY = ToolAnnotations(
     open_world_hint=False,
 )
 log = logging.getLogger(__name__)
+
+
+class StdioError(Exception):
+    """Entrée ou sortie standard qui ne sont pas les descripteurs 0 et 1 : le serveur ne
+    démarre pas."""
+
+
+def run_stdio(server: MCPServer) -> None:
+    """Sert en stdio jusqu'à la fin de l'entrée. Le SDK réserve la sortie standard au
+    protocole : pendant le service, il fait pointer le descripteur 1 vers la sortie
+    d'erreur et parle par une copie privée ; une écriture parasite (un print, une
+    bibliothèque native) ne corrompt donc pas le protocole. Il ne le fait que si
+    sys.stdin et sys.stdout sont les descripteurs 0 et 1, et sert sur place sinon, sans
+    rien dire : vérifié ici, refus explicite."""
+    for stream, expected in ((sys.stdin, 0), (sys.stdout, 1)):
+        try:
+            fd = stream.fileno()
+        except (AttributeError, OSError, ValueError):  # flux sans descripteur
+            fd = None
+        if fd != expected:
+            raise StdioError(
+                "serveur MCP : l'entrée et la sortie standard doivent être les "
+                f"descripteurs 0 et 1 (descripteur {fd} au lieu de {expected})"
+            )
+    server.run(transport="stdio")
 
 
 def _guarded[T](tool: str, call: Callable[[], T]) -> T:

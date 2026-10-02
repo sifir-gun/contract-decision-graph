@@ -729,6 +729,40 @@ def _web(args: argparse.Namespace) -> dict:
     return {"web": "arrêtée"}
 
 
+def _mcp(args: argparse.Namespace) -> dict:
+    """Serveur MCP en stdio, pour un assistant local (ADR 007) : analyser, lister,
+    consulter, vérifier ; jamais de décision humaine. Sans authentification, comme
+    l'interface locale : refusé dans le cluster. Sortie standard réservée au protocole
+    (`main` écrit journaux et résultat sur la sortie d'erreur) ; s'arrête à la fin de
+    l'entrée."""
+    if in_cluster():
+        raise AccesRefuse(
+            "mcp : serveur local (stdio), sans authentification : jamais dans le "
+            "cluster ; la voie normale y est l'interface authentifiée"
+        )
+    try:
+        actor = Actor(canal="mcp", authentifie=False, operateur=args.operateur)
+    except ValidationError:
+        raise AccesRefuse(
+            "--operateur : identifiant non nominatif (minuscules, chiffres, tirets), "
+            "jamais un nom ni une adresse"
+        ) from None
+    # le SDK n'est pas dans l'image (le cluster refuse ce serveur) : importé ici seulement
+    from cdg.adapters.mcp import server as mcp_server
+
+    config = load_config()
+    service = demo_service(config) if args.demo else build_service(config)
+    mode = "démonstration, en mémoire" if args.demo else "réel"
+    _tell(
+        args,
+        logging.INFO,
+        f"Serveur MCP ({mode}) : stdio, opérateur {args.operateur} ; s'arrête à la "
+        "fin de l'entrée.",
+    )
+    mcp_server.run_stdio(mcp_server.create_server(service, actor=actor, demo=args.demo))
+    return {"mcp": "arrêté"}
+
+
 class ConfigChangeBlocked(Exception):
     """Des contrats en attente ont été analysés sous une autre configuration."""
 
@@ -1121,6 +1155,21 @@ def build_parser() -> argparse.ArgumentParser:
         "une fin de session (end_session_endpoint)",
     )
     web.set_defaults(handler=_web)
+
+    mcp = sub.add_parser(
+        "mcp",
+        help="serveur MCP en stdio, pour un assistant local (Claude Code, Claude "
+        "Desktop) : analyser, lister, consulter, vérifier ; jamais de décision humaine ; "
+        "sortie standard réservée au protocole, refusé dans le cluster",
+    )
+    mcp.add_argument(
+        "--demo",
+        action="store_true",
+        help="démonstration : sans clé d'API, sans coût, sans base ; contrats du jeu "
+        "seulement, rien n'est scellé dans le vrai journal",
+    )
+    mcp.add_argument("--operateur", required=True, help=OPERATOR_HELP)
+    mcp.set_defaults(handler=_mcp)
     return parser
 
 
@@ -1131,9 +1180,13 @@ def main(argv: list[str] | None = None) -> int:
     POOL["size"] = args.connexions
     EMBEDDER_THREADS["threads"] = args.fils_embedding
     EMBEDDER_THREADS["batch_size"] = args.lot_embedding
+    # serveur MCP : sa sortie standard est réservée au protocole ; journaux et résultat
+    # de la commande vont sur la sortie d'erreur
+    out = sys.stderr if args.command == "mcp" else sys.stdout
+    stream = "ext://sys.stderr" if args.command == "mcp" else "ext://sys.stdout"
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
-        logging.config.dictConfig(journaux.config(args.journaux))
+        logging.config.dictConfig(journaux.config(args.journaux, stream))
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
@@ -1145,7 +1198,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     # en json, le résultat tient sur une ligne, comme chaque entrée du journal
     indent = None if args.journaux == "json" else 2
-    print(json.dumps(result, ensure_ascii=False, indent=indent, default=str))
+    print(json.dumps(result, ensure_ascii=False, indent=indent, default=str), file=out)
     return 0
 
 
