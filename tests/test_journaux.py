@@ -7,10 +7,15 @@ et le code, sans l'adresse du client."""
 
 import json
 import logging
+import os
+import queue
+import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -200,3 +205,89 @@ def test_serveur_reel_journaux_json_sans_texte_du_contrat_ni_message(capsys):
     assert any(
         e.get("exception", {}).get("type", "").endswith("RuntimeError") for e in entries
     )
+
+
+# --- CLI lancée par python -m cdg.cli (image, README) ----------------------------------------
+
+ROOT = Path(__file__).resolve().parents[1]
+ANNOUNCE_WAIT = 60  # secondes : imports, puis port à l'écoute
+
+
+def cli_process(*argv: str, **options) -> subprocess.Popen:
+    """La CLI comme l'image et le README la lancent : `python -m cdg.cli`, où le module
+    s'appelle `__main__` (le défaut du 02/10 venait de là : `cli.main`, appelé par les
+    autres tests, s'appelle `cdg.cli`)."""
+    env = {k: v for k, v in os.environ.items() if k != "KUBERNETES_SERVICE_HOST"}
+    return subprocess.Popen(
+        [sys.executable, "-m", "cdg.cli", "--journaux", "json", *argv],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        **options,
+    )
+
+
+def test_annonce_de_mcp_en_json_sous_python_m():
+    process = cli_process(
+        "mcp",
+        "--demo",
+        "--operateur",
+        "essai",
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    out, err = process.communicate(timeout=ANNOUNCE_WAIT)
+    assert (process.returncode, out) == (0, "")  # sortie standard : le protocole seul
+    lines = [json.loads(line) for line in err.splitlines()]
+    [announce] = [e for e in lines if e.get("journal") == "cdg.cli"]
+    assert announce["niveau"] == "INFO"
+    assert announce["message"].startswith("Serveur MCP (démonstration, en mémoire)")
+    assert lines[-1] == {"mcp": "arrêté"}
+
+
+def test_annonce_de_web_en_json_sous_python_m():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    process = cli_process(
+        "web",
+        "--demo",
+        "--port",
+        str(port),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def read() -> None:
+        for line in process.stdout:
+            lines.put(line)
+        lines.put(None)
+
+    threading.Thread(target=read, daemon=True).start()
+    seen = []
+    try:
+        while True:
+            line = lines.get(timeout=ANNOUNCE_WAIT)
+            assert line is not None, f"processus arrêté sans annonce : {seen}"
+            seen.append(json.loads(line))  # en json, chaque ligne est du JSON
+            if seen[-1].get("journal") == "cdg.cli":
+                break
+        assert seen[-1]["niveau"] == "INFO"
+        assert seen[-1]["message"] == (
+            f"Interface (démonstration, en mémoire) : http://127.0.0.1:{port} ; "
+            "Ctrl+C pour l'arrêter."
+        )
+        process.send_signal(signal.SIGTERM)
+        # arrêt propre, puis uvicorn 0.54 relance le signal capturé
+        # (`Server.capture_signals`) : hors d'un conteneur, le processus s'arrête sur
+        # SIGTERM ; en PID 1 dans l'image, il est ignoré et le code vaut 0 (test_image)
+        assert process.wait(timeout=ANNOUNCE_WAIT) == -signal.SIGTERM
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        process.stdout.close()

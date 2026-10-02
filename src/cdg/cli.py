@@ -88,7 +88,10 @@ DEFAULT_GRACE_SECONDS = 60
 DEFAULT_RESUME_SECONDS = 60
 _EMBEDDERS: dict[str, fastembed.FastembedEmbedder] = {}
 _EMBEDDERS_GUARD = threading.Lock()
-log = logging.getLogger(__name__)
+# nom fixe : lancée par `python -m cdg.cli` (image, README), le module s'appelle
+# `__main__`, hors du journal `cdg` ; ses messages d'information (annonces de `web` et de
+# `mcp`, reprises) se perdaient en --journaux json, la racine étant en WARNING
+log = logging.getLogger("cdg.cli")
 
 
 def process_embedder(config: DecisionConfig) -> fastembed.FastembedEmbedder:
