@@ -78,7 +78,11 @@ def test_configuration_du_projet_conforme_a_la_spec():
         "light": "claude-haiku-4-5-20251001",
     }
     assert cfg.llm.model("light") == "ministral-8b-2512"
-    assert cfg.crag.model_dump() == {"top_k": 4, "max_passes": 2}
+    assert cfg.crag.model_dump() == {
+        "top_k": 4,
+        "max_passes": 2,
+        "search": {"distinct_references": True},  # ADR 006
+    }
     assert cfg.analyst_retry.model_dump() == {
         "max_attempts": 3,
         "initial_interval_seconds": 1.0,
@@ -191,6 +195,9 @@ _DELETE = object()
         ("crag.top_k", 0),
         ("crag.max_passes", 0),
         ("crag.max_passes", 2.0),  # mode strict
+        ("crag.search", _DELETE),  # réglage explicite de la recherche (ADR 006)
+        ("crag.search.distinct_references", _DELETE),
+        ("crag.search.distinct_references", "oui"),  # mode strict
         ("analyst_retry", _DELETE),
         ("analyst_retry.max_attempts", 0),
         ("analyst_retry.initial_interval_seconds", -1.0),
@@ -203,6 +210,26 @@ _DELETE = object()
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):
     with pytest.raises(ConfigError):
         load_config(_write(tmp_path, _mutate(raw, path, value)))
+
+
+def test_valeur_par_defaut_reservee_aux_configurations_archivees(raw):
+    """Un réglage ajouté après l'archive prend, dans le modèle, la valeur du comportement
+    d'avant (relecture d'une configuration archivée) ; le fichier du projet doit pourtant
+    le régler explicitement, comme tout le reste."""
+    data = _mutate(raw, "crag.search", _DELETE)
+    assert DecisionConfig.model_validate(data).crag.search.distinct_references is False
+
+
+@pytest.mark.parametrize(
+    ("path", "named"),
+    [
+        ("crag.search", "crag.search"),
+        ("crag.search.distinct_references", "crag.search"),
+    ],
+)
+def test_reglage_absent_du_fichier_nomme(tmp_path, raw, path, named):
+    with pytest.raises(ConfigError, match=f"réglages absents.*{named}"):
+        load_config(_write(tmp_path, _mutate(raw, path, _DELETE)))
 
 
 def test_fichier_absent(tmp_path):

@@ -73,7 +73,9 @@ def real_crag(llm):
     embedder = fastembed.FastembedEmbedder(
         CONFIG.embedding, settings.embedding_cache_dir()
     )
-    retriever = rag_store.PgvectorRetriever(conninfo.app_conninfo(), embedder)
+    retriever = rag_store.PgvectorRetriever(
+        conninfo.app_conninfo(), embedder, CONFIG.crag.search
+    )
     return orchestrator.crag_runner(retriever, llm, CONFIG)
 
 

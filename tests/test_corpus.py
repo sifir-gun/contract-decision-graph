@@ -1,5 +1,6 @@
 """Corpus : nettoyage des fichiers réels, versions, découpage, manifeste, fiches."""
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -234,7 +235,9 @@ def test_sections_d_une_fiche():
 
 def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     # la fiche paraphrase L441-10 : quand la version expire, la paraphrase aussi
-    rows = ingestion.rows(HashEmbedder(), CONFIG.corpus.chunk_max_words)
+    rows = ingestion.rows(
+        HashEmbedder(), CONFIG.corpus.chunk_max_words, CONFIG.embedding.passage_prefix
+    )
     validity = {}
     for row in rows:
         validity.setdefault(row.source_id, set()).add(row.valid_until)
@@ -344,3 +347,47 @@ def test_sources_md_donne_les_memes_rattachements_que_le_manifeste_et_les_fiches
     expected = {(a.source_id, a.article): k for a, k in ingestion.articles()}
     expected |= {f.id: f.kinds for f in ingestion.load_fiches()}
     assert documented == expected
+
+
+def test_texte_embarque_et_son_empreinte():
+    """Texte embarqué : l'en-tête écrit par le code, puis le texte ; son empreinte couvre
+    aussi le préfixe de passage du modèle, tout ce qui détermine le vecteur."""
+    assert corpus.embedded_text("C. civ., art. 1170", "Toute clause…") == (
+        "C. civ., art. 1170\nToute clause…"
+    )
+    a = corpus.embedded_hash("passage: ", "C. civ., art. 1170\nToute clause…")
+    assert len(a) == 64
+    assert a != corpus.embedded_hash("", "C. civ., art. 1170\nToute clause…")
+    assert a != corpus.embedded_hash("passage: ", "C. civ., art. 1171\nToute clause…")
+
+
+# --- intitulés officiels des articles Légifrance (ADR 006, PR 2) -------------------------
+# Lus sur la page de chaque article, avec son lien : provenance de chaque article. La
+# technique des en-têtes qui les reprenait a été mesurée puis abandonnée (journal).
+
+LEGIFRANCE_ARTICLE = re.compile(
+    r"^https://www\.legifrance\.gouv\.fr/codes/article_lc/LEGIARTI\d{12}$"
+)
+LEVEL = re.compile(
+    r"^(Partie|LIVRE|Livre|TITRE|Titre|Sous-titre|Chapitre|Section|Sous-section) "
+)
+
+
+def test_intitules_officiels_de_chaque_article_legifrance_presents():
+    """Chaque article admis d'une source Légifrance a sa hiérarchie officielle, lue sur sa
+    page (lien) et datée ; aucune hiérarchie pour un article non admis."""
+    manifest = ingestion.load_manifest()
+    urls = []
+    for source_id, source in manifest.sources.items():
+        assert source["title"].strip(), source_id
+        if source["format"] != "legifrance":
+            assert "hierarchy" not in source, source_id
+            continue
+        assert isinstance(source["hierarchy_verified_at"], date)
+        assert set(source["hierarchy"]) == set(source["articles"]), source_id
+        for number, entry in source["hierarchy"].items():
+            assert LEGIFRANCE_ARTICLE.match(entry["url"]), (number, entry["url"])
+            assert entry["levels"], number
+            assert all(LEVEL.match(level) for level in entry["levels"]), number
+            urls.append(entry["url"])
+    assert len(urls) == len(set(urls)) == 9

@@ -31,7 +31,7 @@ from cdg import cli
 from cdg.adapters.postgres import migrations
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.domain import audit
-from cdg.domain.config import load_config
+from cdg.domain.config import DecisionConfig, SearchConfig, load_config
 from cdg.domain.version import UNKNOWN, CodeVersion
 
 CONFIG = load_config()
@@ -286,6 +286,34 @@ def test_rejeu_configuration_illisible_par_le_code_courant_erreur_explicite():
     data = record(state).model_dump(mode="json")
     with pytest.raises(audit.ReplayError, match="illisible par le code courant"):
         audit.replay(data, old)
+
+
+def test_configuration_archivee_d_avant_les_reglages_de_recherche_rejouable():
+    """ADR 006 : `crag.search` est apparu après l'archive (30/09). Une configuration
+    archivée sans lui se relit avec le comportement d'avant (valeurs par défaut du
+    modèle), et le rejeu repart des références scellées : décision identique."""
+    old = json.loads(json.dumps(JSON))
+    del old["crag"]["search"]
+    assert DecisionConfig.model_validate(old).crag.search == SearchConfig(
+        distinct_references=False
+    )
+    state = reviewed() | {"config_hash": audit.configuration_hash(old)}
+    del state["analysis_config"]
+    assert audit.replay(record(state).model_dump(mode="json"), old).identical
+
+
+@pytest.mark.parametrize("distinct", [False, True])
+def test_rejeu_independant_des_reglages_de_recherche(distinct):
+    """Le rejeu ne cherche rien dans le corpus : sous chaque réglage de la recherche,
+    une décision scellée se rejoue à l'identique sur sa configuration archivée."""
+    settings = CONFIG.crag.model_copy(
+        update={"search": SearchConfig(distinct_references=distinct)}
+    )
+    sealed_under = CONFIG.model_copy(update={"crag": settings}).model_dump(mode="json")
+    state = reviewed() | {"config_hash": audit.configuration_hash(sealed_under)}
+    del state["analysis_config"]
+    data = record(state).model_dump(mode="json")
+    assert audit.replay(data, sealed_under).identical
 
 
 def sealed_by(code: CodeVersion, *, analysed_by: CodeVersion | None = CODE) -> dict:

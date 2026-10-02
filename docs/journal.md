@@ -2710,6 +2710,88 @@ Nouveau chantier, à la demande explicite du propriétaire, inspiré de l'articl
 - **Un extrait par référence parmi les k premiers** (diversité) : une fiche ou un article en plusieurs extraits occupe plusieurs rangs du CRAG ; ne garder que le meilleur extrait de chaque référence laisserait la place aux articles. Technique nouvelle, non prévue au chantier.
 - **Rattachement déclaré à revoir pour les deux écarts** (1211 pour la durée d'engagement, RGPD 28 pour les transferts) : décision du propriétaire, hors de ce chantier.
 
+## 2026-10-01 · Qualité de la recherche, PR 2 : améliorations mesurées (branche `recherche-amelioree`)
+
+Dernière PR du chantier (décision du propriétaire, PR 1 fusionnée le 01/10). Trois techniques, dans cet ordre, chacune gardée seulement si la mesure progresse selon le critère validé ; pas de reranker. Chaque réglage vit dans `crag.search` de la configuration : le garder change l'empreinte de configuration. `config-check` le 01/10 avant tout changement : aucun contrat en attente dans la base locale (44 contrats, tous terminés).
+
+**Lecture du critère.** La formule validée (« au moins une requête gagne et aucune ne perd avec le filtre ») admet deux lectures : une requête qui gagne dans l'un ou l'autre mode, ou une requête qui gagne avec le filtre. Chaque technique est jugée sous les deux lectures, et sur les deux portées (toutes les références, articles seuls) ; si elles divergeaient, la décision reviendrait au propriétaire.
+
+### Technique 1 : un seul extrait par référence parmi les k premiers — gardée
+
+Cause directe du résultat clé de la PR 1 : une fiche ou un long article en plusieurs extraits occupait plusieurs des quatre rangs du CRAG. Réglage `crag.search.distinct_references` : la recherche garde, pour chaque référence, l'extrait le plus proche (`DISTINCT ON (reference)` avant l'ordre par distance, recherche toujours exacte), avec et sans filtre. Sans le réglage, la mesure redonne exactement la référence de la PR 1.
+
+| rappel@4 moyen | avant | après |
+|---|---|---|
+| avec filtre, toutes | 75,4 % | **89,3 %** |
+| avec filtre, articles seuls | 62,7 % | **84,1 %** |
+| sans filtre, toutes | 57,5 % | **72,2 %** |
+| sans filtre, articles seuls | 30,2 % | **55,6 %** |
+
+- **Requête par requête** (rappel@4, toutes les références) : avec le filtre, 7 requêtes gagnent (1 à 4 : plafonds de responsabilité, 13 : accord de traitement, 14 et 15 : transferts), aucune ne perd ; sans filtre, 8 gagnent (11 à 17, 20), aucune ne perd. Mêmes nombres pour les articles seuls. Critère rempli sous les deux lectures.
+- **Au rang du CRAG, le juge voit désormais l'article attendu dans 84,1 % des cas** (62,7 % avant) ; pour les plafonds de responsabilité, 1231-3 et, selon la requête, 1170 entrent dans les quatre premiers.
+- **La précision baisse**, comme attendu : quatre références distinctes au lieu de deux, dont plus de non attendues. Précision@4 avec filtre de 90,5 % à 83,3 % ; sans filtre, de 55,6 % à 45,2 %. Le juge de pertinence trie ces extraits ; le critère validé ne porte que sur le rappel.
+- **Reste hors des quatre premiers, avec le filtre** : 1170 pour les plafonds à 50 et 80 % (cinquième des cinq références rattachées, derrière 1171 non attendu) ; RGPD 45 pour un transfert sans garantie ; RGPD 44 pour les transferts à clauses ad hoc et types, où l'article 4 (définitions, non attendu) et l'article 40 prennent un rang ; et les deux écarts au rattachement (1211, RGPD 28), qu'aucun réglage de la recherche ne peut rendre.
+
+### Défaut de la réindexation, corrigé (avant la technique 2)
+
+- **Migration 008** : `header` (en-tête écrit par le code) et `embedded_hash` (empreinte de ce qui détermine le vecteur : préfixe de passage du modèle, en-tête, texte). `sync` la compare avec les métadonnées : un en-tête ou un préfixe changé, texte stocké identique, réindexe l'extrait ; un extrait d'avant la migration (empreinte vide) est remplacé au prochain `ingest`. Testé : en-tête changé (1 remplacé), préfixe changé (tout le corpus), extraits d'avant la migration.
+- **La mesure refuse un index périmé** : elle compare aussi l'empreinte du texte embarqué à celle que donnent les fichiers et le code. Vérifié sur la base locale le 01/10 : refus juste après la migration (« 64 extrait(s) manquant(s), 64 en trop : relancer ingest »), puis `ingest` (67 lignes remplacées), puis mesure identique à celle de la technique 1, l'en-tête n'ayant pas changé.
+- **Dans le cluster**, la tâche d'ingestion (crochet `post-install,post-upgrade`) lance `ingest` à chaque mise à jour : test du chart ; procédure dans `docs/exploitation.md`.
+- **Premier réglage ajouté depuis l'archive des configurations** (30/09) : obligatoire, `crag.search` rendait non rejouable toute décision scellée avant lui (« configuration illisible par le code courant »). Corrigé : valeur par défaut du modèle égale au comportement d'avant (relecture de l'archive), mais `load_config` exige toujours chaque réglage dans le fichier du projet, à toute profondeur. Tests : configuration archivée d'avant le réglage, rejouée à l'identique ; rejeu identique sous chaque réglage de la recherche.
+
+### Technique 2 : en-têtes de contexte déterministes — abandonnée
+
+Mesurée au commit 8fa5c3c, abandonnée au suivant. En-tête écrit par le code, sans LLM, avant l'embedding : référence, source en toutes lettres, hiérarchie officielle (articles Légifrance, intitulés lus le 01/10 sur la page de chaque article, lien au manifeste), intitulé de l'article (EUR-Lex), paragraphes qui commencent dans l'extrait, position de l'extrait. Exemple : « C. civ., art. 1170 — Code civil — Livre III : … > Section 2 : La validité du contrat > Sous-section 3 : Le contenu du contrat ».
+
+| rappel@4 moyen (technique 1 gardée → avec les en-têtes) | avant | après |
+|---|---|---|
+| avec filtre, toutes | 89,3 % | 94,0 % |
+| avec filtre, articles seuls | 84,1 % | 91,3 % |
+| sans filtre, toutes | 72,2 % | 75,0 % |
+| sans filtre, articles seuls | 55,6 % | 59,5 % |
+
+- **Requête par requête** (rappel@4) : avec le filtre, 4 requêtes gagnent (2 : plafond à 50 %, 14, 16, 17 : transferts, où RGPD 44 et 45 entrent dans les quatre premiers), **1 perd (requête 1, responsabilité de l'acheteur illimitée : 100 → 75 %)** ; sans filtre, 2 gagnent (14, 21), aucune ne perd. Le critère validé exige qu'aucune requête ne perde avec le filtre : **technique abandonnée**, sous les deux lectures du critère.
+- **Cause de la perte** : 1170 et 1171 sont dans la même sous-section et portent le même en-tête officiel. Avec lui, ils s'échangent : 1170 entre dans les quatre premiers (requête 2 gagne), 1171 en sort (requête 1 perd). Le contexte de section ne départage pas deux articles voisins ; seul leur texte le fait.
+- **Sans filtre, le rappel@8 recule** (89,3 → 83,3 %), même si le critère porte sur le rang 4.
+- **Aucune variante essayée** : changer l'en-tête jusqu'à trouver celle qui passe, sur 21 requêtes, reviendrait à l'ajuster à la mesure.
+- **Ce qui reste de la technique** : les intitulés et liens Légifrance dans le manifeste, avec leur test de présence (provenance de chaque article) ; la garde contre la troncature dans l'adaptateur fastembed. Avec l'en-tête long, deux extraits dépassaient 512 tokens (L442-1 extrait 2 : 543 ; RGPD 83 extrait 2 : 519) et fastembed les aurait tronqués en silence. Un passage tronqué est désormais refusé, jamais embarqué. Avec l'en-tête d'origine, aucun extrait ne dépasse : vérifié par l'ingestion locale, qui passe la garde.
+- **Retour vérifié** : après l'abandon, `ingest` (65 remplacés, 2 inchangés) puis mesure identique, octet pour octet, à celle de la technique 1.
+
+### Technique 3 : recherche hybride, plein texte français et vecteurs, fusion RRF — abandonnée
+
+Mesurée au commit 067c0c0, abandonnée au suivant (retour du code). Migration 009 : `unaccent` (module contrib de PostgreSQL, présent en local, extension « trusted » ; dans l'image de CloudNativePG, le paquet PGDG `postgresql-16` qui l'apporte, d'après sa recette officielle), configuration `cdg_francais` (unaccent puis `french_stem`), colonne de lexèmes générée (en-tête et texte), index GIN, `app_role` en lecture seule (testé). Liste plein texte : mots de la requête en OU (`plainto_tsquery` les exige tous), `ts_rank` normalisé par 1 + log(longueur) ; liste des vecteurs ; 20 candidats chacune, fusion par rangs réciproques (k = 60, calcul exact), un extrait par référence conservé. Réglages fixés une fois, sans essai d'autres valeurs.
+
+| rappel@4 moyen (technique 1 gardée → hybride) | avant | après |
+|---|---|---|
+| avec filtre, toutes | 89,3 % | 87,7 % |
+| avec filtre, articles seuls | 84,1 % | 81,7 % |
+| sans filtre, toutes | 72,2 % | 68,7 % |
+| sans filtre, articles seuls | 55,6 % | 49,2 % |
+
+- **Requête par requête** (rappel@4) : avec le filtre, aucune ne gagne, 1 perd (requête 3, plafond à 60 % : 1170 remplacé par 1171) ; sans filtre, 2 gagnent (6 : pénalités à 2 %, 21 : préavis non chiffré), 4 perdent (12 : délai non chiffré ; 13 : accord de traitement ; 14 et 15 : transferts). **Technique abandonnée** : aucun des trois volets du critère n'est rempli.
+- **Cause** : les requêtes écrites par le code commencent par l'intitulé du domaine (« protection des données personnelles : sous-traitance, transferts hors de l'Union européenne »), commun à toutes les requêtes d'un domaine. En plein texte, ces mots génériques pèsent autant que la situation propre à la clause : ils font monter les fiches et l'article 4 du RGPD (définitions, très dense en « données à caractère personnel »), qui chassent RGPD 28 ou 46. Le plein texte apporte ce que l'article d'Anthropic attend de BM25, les termes exacts (« Error code TS-999 ») ; nos requêtes n'en ont pas, et notre corpus n'a pas le vocabulaire rare qui le justifierait.
+- **Retour vérifié** : code d'avant la technique restauré, migration 009 retirée du dépôt ; dans la base locale, colonne, index, configuration et extension supprimés à la main ; mesure identique, octet pour octet, à celle de la technique 1. La migration n'a jamais tourné ailleurs (branche non fusionnée).
+
+### Bilan de la PR 2 et pistes
+
+**Gardé : un extrait par référence (technique 1).** Rappel@4 de 75,4 à 89,3 % avec le filtre (articles seuls : 62,7 à 84,1 %), de 57,5 à 72,2 % sans filtre (30,2 à 55,6 %). Abandonnés, chiffres ci-dessus : en-têtes de contexte, recherche hybride. Gardés en plus : la correction de la réindexation, la garde contre la troncature, les intitulés et liens Légifrance du manifeste, la relecture des configurations archivées d'avant `crag.search`.
+
+Pistes, hors périmètre (le chantier s'arrête à cette PR) :
+- **Reranker** (troisième technique de l'article) : écarté de ce chantier. Gain restant à aller chercher : rappel@4 de 89,3 % avec le filtre et de 72,2 % sans, contre 96,8 % et 95,2 % à k = 20 : les références attendues sont dans les vingt premiers, mal ordonnées. C'est le cas que vise un reranker (l'article reclasse les 150 premiers pour en garder 20).
+- **Requête sans l'intitulé du domaine pour le plein texte** : la recherche hybride pourrait être remesurée avec une requête réduite à la clause et à sa situation, ou sur un corpus client au vocabulaire rare (références, numéros de clause), où le plein texte a sa raison d'être.
+- **Chapitres du RGPD dans l'en-tête** (« Chapitre V : Transferts de données à caractère personnel vers des pays tiers… ») : non mesuré ; l'en-tête des articles Légifrance n'a pas passé le critère.
+- **Rattachement déclaré à revoir pour les deux écarts du jeu** (1211 pour la durée d'engagement, RGPD 28 pour les transferts) : décision du propriétaire, non changé dans ce chantier pour que la mesure reste comparable.
+
+### Défaut trouvé en lançant les séries réelles : le CRAG imbriqué échoue depuis le 28/09 (hors périmètre, signalé)
+
+Séries lancées le 01/10 à 19:17 UTC (coût annoncé : environ 0,10 $, au plus 0,15 $), arrêtées au dixième essai : **0,0072 $ dépensés** (9 essais consignés ; le critère 3 échouait avant tout appel au juge). Vrai journal d'audit : 5 enregistrements avant et après.
+
+- **Symptôme** : critère 3 en échec 5 fois sur 5 ; dans la série, **tous les contrats en `ESCALADE`**, contrat 01 compris (attendu : `GO` automatique). L'essai préalable « passait » : une escalade respecte l'invariant (jamais plus favorable). Échec consigné : `AttributeError: 'SyncPregelLoop' object has no attribute '_put_checkpoint_fut'`, dans chaque analyste dont le CRAG tourne, après 3 tentatives.
+- **Cause** (LangGraph 1.2.12 installé, `pregel/main.py`) : depuis le commit 66ab3dc du 28/09 (« Checkpoints écrits avant l'étape suivante »), le graphe est lancé en durabilité « sync ». LangGraph la transmet aux sous-graphes par la configuration ; le CRAG, invoqué par `graph.invoke(state)` sans durabilité, en hérite. Compilé sans checkpointer (décision du 25/09), il n'écrit jamais de checkpoint, mais attend en fin d'étape le futur de cette écriture (`loop._put_checkpoint_fut.result()`), qui n'existe pas.
+- **Reproduit sans LLM payant**, avec doublures (juge et recherche), sur cette branche et sur `main` (b0e9668) : échec identique, juge jamais appelé. Sur `main`, la seule durabilité passée à « async » le fait disparaître (juge appelé, aucun échec).
+- **Pourquoi aucun test ne l'a vu** : les tests non payants mettent une doublure à la place du CRAG dans le graphe, ou invoquent le sous-graphe seul ; le CRAG imbriqué dans un graphe avec checkpointer ne tourne que dans les tests payants, non relancés depuis la série 8 (26/09), et dans l'application réelle.
+- **Portée** : depuis le 28/09, toute analyse réelle dont une clause porte un constat escalade vers la revue humaine, au lieu de rendre sa décision : dans le sens prudent, jamais plus favorable, mais le système ne décide plus seul. Aucune analyse réelle scellée depuis dans le journal local.
+- **Corrigé à part**, sur décision du propriétaire (hors du périmètre figé du chantier) : PR #29, fusionnée, étiquette v1.0.1 avec sa release (entrée suivante). Les séries réelles de la PR 2 sont relancées après l'intégration de `main`.
 ## 2026-10-01 · Correctif : le CRAG imbriqué échouait depuis le 28/09 (branche `correctif-crag-durabilite`)
 
 Trouvé en lançant les séries réelles de la PR 2 du chantier « qualité de la recherche » (critère 3 en échec 5 fois sur 5 ; tous les contrats de la série en `ESCALADE`, contrat 01 compris ; séries arrêtées, 0,0072 $). Correctif à part, sur décision du propriétaire.
@@ -2719,3 +2801,34 @@ Trouvé en lançant les séries réelles de la PR 2 du chantier « qualité de l
 - **Pourquoi aucun test ne l'a vu** : les tests non payants du critère 3 font tourner le vrai CRAG dans le graphe, mais par `graph.invoke(...)` sans durabilité, donc en « async » ; ailleurs, une doublure remplace le CRAG. Le chemin réel (`run_contract`, « sync ») ne tournait que dans les tests payants, non relancés depuis le 26/09, et dans l'application.
 - **Correctif** : le CRAG est invoqué comme un graphe racine, avec son propre fil (`CRAG_ROOT`) ; LangGraph abandonne alors la configuration ambiante du parent (`_internal/_config.py`, `ensure_config`), durabilité comprise. Sans checkpointer, rien ne s'écrit sous ce fil. Écartée : passer `durability="async"` explicitement, qui corrige aussi, mais LangGraph avertit alors à chaque appel (« `durability` has no effect when no checkpointer is present »), en texte brut hors des journaux JSON.
 - **Tests** : les tests non payants du critère 3 passent désormais la durabilité de la production ; un nouveau test fait tourner le vrai CRAG dans chaque analyste par `run_contract`, sans échec ni avertissement de LangGraph. Les trois échouaient avant le correctif.
+
+## 2026-10-01 · Série 9 : après le correctif (v1.0.1) et la PR 2 de la recherche (branche `recherche-amelioree`)
+
+**Série 9 : 2026-10-01, 20:30:04 à 20:50:07 UTC, commit 48e2f7b (PR 2 avec `main` intégré, correctif compris), fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. Critère 3 et jeu complet, 71 réussites sur 71, sans relance.** Essai préalable juste avant (20:30:34 UTC, contrat 01, non compté) : conforme, `GO` automatique, 0,00115 $, 5,3 s, aucune extraction refusée. Vrai journal d'audit : 5 enregistrements avant et après. Ce sont ces résultats qui vont dans le README.
+
+**Critère 3 : 5/5** (`ESCALADE` aux 5 essais ; environ 6 600 tokens du petit modèle par essai). Critères 9 et 10 non relancés (demande : critère 3 et jeu complet).
+
+**Jeu de démonstration : invariant tenu aux 65 essais ; issue conforme 63 fois sur 65, les deux écarts dans le sens prudent.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Extractions refusées (motif) | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 01 maintenance | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00115 $ | 5,7 s (6,1 s) |
+| 02 nettoyage | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00150 $ | 6,5 s (6,5 s) |
+| 03 logiciel | `GO`, revue humaine | idem ×4, `ESCALADE` en revue ×1 | 4/5 (écart ×1, prudent) | 0 | 0,00133 $ | 7,3 s (8,0 s) |
+| 04 transport | `GO_RESERVES` automatique | idem ×5 | 5/5 | 5 (durée omise au premier essai) | 0,00218 $ | 10,8 s (11,7 s) |
+| 05 hébergement | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0 | 0,00183 $ | 6,6 s (7,5 s) |
+| 06 conseil | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00111 $ | 5,1 s (7,5 s) |
+| 07 centre de contacts | `NO_GO` automatique | idem ×4, `ESCALADE` en revue ×1 | 4/5 (plus prudente ×1) | 6 (catégorie du délai ×5 ; transfert omis ×1) | 0,00192 $ | 8,2 s (8,6 s) |
+| 08 application | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00111 $ | 5,3 s (5,8 s) |
+| 09 mobilier | `ESCALADE`, revue humaine | idem ×5 | 5/5 | 0 | 0,00112 $ | 5,8 s (6,0 s) |
+| 10 anglais | rejet | rejet ×5 | 5/5 | — | 0 $ | 0,1 s (0,1 s) |
+| P1 injection | `NO_GO`, revue humaine | idem ×5 | 5/5 | 0 | 0,00107 $ | 6,6 s (6,8 s) |
+| P2 fausses pistes | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00098 $ | 5,2 s (5,6 s) |
+| 13 réaliste | `ESCALADE`, revue humaine | idem ×5, par l'extraction | 5/5 | 10 (valeur absente de la citation : 3 mois ×6, 120 % ×4) | 0,00163 $ | 6,4 s (6,9 s) |
+
+- **Stabilité** : issue identique aux 5 essais pour 11 contrats sur 13 (03 et 07 varient). Chaque essai est scellé une fois et rejoué à l'identique. Explications du jeu : 54 par le LLM, 6 par le gabarit (contrat réaliste ×5, contrat 07 essai 4, escaladés avant les analystes), 5 rejets.
+- **Contrat 03, essai 4** : domaine opérationnel `INSUFFISANT`, le juge du CRAG n'a retenu ni l'article 1210 ni la fiche pour la durée d'engagement de 48 mois, d'où une escalade en revue au lieu d'un `GO` en revue (revue non prévue, `NO_GO` prudent). Variation du juge, dans le sens prudent, comme à la série 6. Au contrat P1, essai 4, le financier est aussi passé `INSUFFISANT`, sans changer l'issue (revue humaine imposée de toute façon).
+- **Contrat 07, essai 4** : transfert omis à la seconde extraction (« sont traitées et hébergées »), détecté, escaladé : même écart qu'à la série 8, essai 2.
+- **Comparaison avec la série 8 (26/09, avant le défaut du 28/09)** : 63 issues conformes contre 64, refus d'extraction 21 sur 15 essais contre 22 sur 16, mêmes motifs. Le seul écart nouveau vient du juge du CRAG (contrat 03) ; la recherche lui montre désormais un extrait par référence, sans qu'on puisse imputer l'écart à cela sur un essai.
+- **Coût** : jeu **0,0841 $** pour 65 essais (258 905 tokens du modèle principal, 138 495 du petit modèle), environ 0,0014 $ par analyse en moyenne, 0,00121 $ en médiane ; durée médiane 6,4 s (extraction 2,9 s, explication 1,7 s). Le petit modèle consomme 34 % de tokens de moins qu'à la série 8 (209 734) : cohérent avec moins de réécritures, le juge trouvant plus souvent une référence au premier passage, mais non mesuré essai par essai.
+- **Dépense réelle du chantier**, séries comprises : 0,0072 $ (séries arrêtées sur le défaut), 0,0012 $ et quelques millièmes (vérification du correctif : essai préalable, critère 3), 0,0853 $ et quelques millièmes (série 9 : jeu, essai préalable, critère 3) : environ 0,10 $, sous les 0,15 $ annoncés.

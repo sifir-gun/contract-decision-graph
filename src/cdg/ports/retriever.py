@@ -40,3 +40,9 @@ class CorpusSearch(Protocol):
     (`application/evaluation.py`, ADR 006). Le CRAG passe toujours par `Retriever`."""
 
     def search_unfiltered(self, query: str, *, k: int) -> list[Passage]: ...
+
+    def indexed(self) -> list[tuple[str, str, str | None]]:
+        """Extraits indexés du modèle (référence, texte, empreinte du texte embarqué ;
+        None avant la migration 008), chacun une fois, quel que soit le réglage de la
+        recherche : la mesure les compare aux fichiers du corpus."""
+        ...

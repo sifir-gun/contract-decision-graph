@@ -7,16 +7,16 @@ Un graphe LangGraph qui rend un verdict **auditable** sur un contrat fournisseur
 
 **Le parti pris : le code décide ; le LLM extrait et explique.** Le verdict vient de règles en Python pur. Toute sortie d'un LLM est vérifiée par du code avant usage, et le doute part en revue humaine. Chaque décision est scellée dans un journal chaîné, rejouable.
 
-Série 8, sur le modèle réel (Mistral), 13 contrats synthétiques × 5 essais :
+Série 9, sur le modèle réel (Mistral), 13 contrats synthétiques × 5 essais :
 - **aucune décision automatique plus favorable que l'attendu**, sur 65 analyses ;
-- **64 issues sur 65 conformes**, l'autre plus prudente (revue humaine) ; en chemin, le code a refusé 22 extractions du modèle ;
-- **environ 0,0016 $ et 6 s par contrat.**
+- **63 issues sur 65 conformes**, les deux autres en escalade vers un humain, dans le sens prudent ; en chemin, le code a refusé 21 extractions du modèle ;
+- **environ 0,0014 $ et 6 s par contrat.**
 
 ![Analyse réelle du contrat 06 dans le terminal : clause de responsabilité illimitée, verdict NO_GO scellé, puis vérification de la chaîne du journal d'audit](docs/images/demo-terminal.gif)
 
 *Analyse réelle d'un contrat du jeu (`scripts/demo_terminal.sh`) : la responsabilité illimitée de l'acheteur bloque, `NO_GO` automatique ; `verify` retrouve l'empreinte scellée en tête du journal. Attentes de plus de 2 s raccourcies, durée réelle affichée.*
 
-> **In English.** A LangGraph pipeline that returns an auditable GO / GO_RESERVES / NO_GO / ESCALADE verdict on supplier contracts. LLMs only extract clauses, judge retrieved legal passages and explain; the verdict comes from deterministic Python rules, and every LLM output is checked by code before use. Doubt goes to a human reviewer (LangGraph `interrupt`), and every decision is sealed in a hash-chained, replayable audit log. Measured on 13 synthetic contracts × 5 real runs (Mistral): no automatic decision was ever more favourable than expected, at about $0.0016 and 6 s per contract. It runs as a local web interface and deploys on Kubernetes: three Helm charts (the application, PostgreSQL managed by CloudNativePG with backups whose restore is verified, an egress proxy that only reaches the Mistral API), installed on every pull request on a three-node k3s cluster and exercised by twenty-seven operational scenarios. The interface sits behind a TLS ingress (Traefik, size and per-client rate limits) and OIDC authentication (oauth2-proxy), and the application verifies the signed ID token on every request. Container images are built for amd64 and arm64, scanned, signed, with provenance and SBOM attestations. Analyst and reviewer roles come from the token's groups; a reviewer can never approve an analysis they launched (four-eyes, checked twice), and the audit log seals who acted by their identity provider's stable identifier, never a name. Documentation is in French; code identifiers are in English.
+> **In English.** A LangGraph pipeline that returns an auditable GO / GO_RESERVES / NO_GO / ESCALADE verdict on supplier contracts. LLMs only extract clauses, judge retrieved legal passages and explain; the verdict comes from deterministic Python rules, and every LLM output is checked by code before use. Doubt goes to a human reviewer (LangGraph `interrupt`), and every decision is sealed in a hash-chained, replayable audit log. Measured on 13 synthetic contracts × 5 real runs (Mistral): no automatic decision was ever more favourable than expected, at about $0.0014 and 6 s per contract. It runs as a local web interface and deploys on Kubernetes: three Helm charts (the application, PostgreSQL managed by CloudNativePG with backups whose restore is verified, an egress proxy that only reaches the Mistral API), installed on every pull request on a three-node k3s cluster and exercised by twenty-seven operational scenarios. The interface sits behind a TLS ingress (Traefik, size and per-client rate limits) and OIDC authentication (oauth2-proxy), and the application verifies the signed ID token on every request. Container images are built for amd64 and arm64, scanned, signed, with provenance and SBOM attestations. Analyst and reviewer roles come from the token's groups; a reviewer can never approve an analysis they launched (four-eyes, checked twice), and the audit log seals who acted by their identity provider's stable identifier, never a name. Documentation is in French; code identifiers are in English.
 
 Projet de R&D personnel. Fait et testé : le graphe de décision (phase 1), une interface web, et le déploiement sur Kubernetes avec son authentification et son entrée réseau, éprouvé à chaque pull request sur un cluster k3s de trois nœuds. Avec les rôles analyste et relecteur, le principe des quatre yeux et un journal d'audit qui scelle l'identité de qui agit, jamais son nom. Données uniquement synthétiques ou publiques.
 
@@ -42,7 +42,7 @@ Exemple, sur le contrat piégé du jeu de démonstration (série 8, modèle rée
 - **Le LLM extrait, le code décide.** Le verdict est rendu par des règles en Python pur, avec des seuils et des pénalités en configuration (`config/decision.yaml`). Les LLM extraient les clauses, jugent la pertinence des extraits du corpus et rédigent l'explication d'un verdict déjà figé ; aucun ne décide.
 - **Toute sortie d'un LLM est contrôlée par du code avant usage.** Chaque citation doit figurer mot pour mot dans le contrat ; la valeur d'une clause doit figurer dans sa citation, et sa catégorie doit être celle qu'évoque la citation ; une clause déclarée absente alors que le texte l'évoque est redemandée. Sinon : nouvelle extraction avec un retour ciblé, puis escalade vers un humain.
 - **Le modèle devine, le code refuse la devinette.** Sur le contrat rédigé de façon réaliste, le modèle lit « un préavis raisonnable, qui ne peut être inférieur à un trimestre » comme un préavis de 3 mois. Le code refuse cette valeur, absente de la citation, à raison : un minimum n'est pas la durée du préavis. Le contrat part en revue humaine.
-- **Même modèle, température 0, erreurs différentes d'une série à l'autre.** Le contrat 04, extrait sans faute à la série 6, voit sa durée omise au premier essai dans les 5 essais des séries 7 et 8 ; la vérification la rattrape à chaque fois. **C'est pourquoi la sûreté repose sur les contrôles par code, et non sur la régularité du modèle.**
+- **Même modèle, température 0, erreurs différentes d'une série à l'autre.** Le contrat 04, extrait sans faute à la série 6, voit sa durée omise au premier essai dans les 5 essais des séries 7, 8 et 9 ; la vérification la rattrape à chaque fois. **C'est pourquoi la sûreté repose sur les contrôles par code, et non sur la régularité du modèle.**
 - **Le contrat est une donnée non fiable.** Il est délimité comme donnée dans les prompts, jamais traité comme une instruction. Une consigne glissée dans le texte devient un constat et impose la revue humaine.
 - **Tout est auditable.** Chaque contrat terminé est scellé dans un journal en ajout seul, chaîné par SHA-256, et rejouable : mêmes clauses, mêmes références et même configuration donnent la même empreinte.
 - **Pensé pour un hébergement souverain.** Les embeddings sont calculés en local, sans appel réseau (vérifié par un test) ; le fournisseur LLM par défaut est européen (Mistral), Anthropic en alternative. L'appel au fournisseur LLM reste, lui, un appel réseau. LangGraph Studio est écarté : en usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot (observé le 27/09/2026, [ADR 003](docs/adr-003-studio-ecarte.md)).
@@ -201,34 +201,51 @@ Les images de l'application, du proxy de sortie et d'oauth2-proxy sont construit
 
 ## Résultats sur modèle réel
 
-**Série 8, 26/09/2026**, Mistral (`mistral-small-2603`, et `ministral-8b-2512` pour le juge du CRAG), 100 tests réels sur 100, sans relance. Sur le jeu de démonstration, 13 contrats × 5 essais :
+**Série 9, 01/10/2026**, Mistral (`mistral-small-2603`, et `ministral-8b-2512` pour le juge du CRAG), après le correctif de la v1.0.1 et la PR 2 de la recherche. Sur le jeu de démonstration, 13 contrats × 5 essais :
 
 - **aucune décision automatique plus favorable que la décision attendue**, aux 65 essais ;
-- **issue conforme 64 fois sur 65**, le seul écart dans le sens prudent (clause omise, détectée, escaladée) ; chaque analyse scellée puis rejouée à l'identique ;
-- **22 extractions refusées sur 16 essais** (clause omise, catégorie ou valeur contredite par la citation) : aucune erreur dans le sens favorable n'a passé les contrôles ;
-- environ **0,0016 $ et 6,1 s par analyse** en médiane (extraction 3,0 s, explication 1,6 s).
+- **issue conforme 63 fois sur 65**, les deux écarts dans le sens prudent : au contrat 07, un transfert omis à la seconde extraction, détecté, escaladé ; au contrat 03, le juge du CRAG n'a retenu aucune référence pour la durée d'engagement, d'où une escalade en revue au lieu d'un `GO` en revue ; chaque analyse scellée puis rejouée à l'identique ;
+- **21 extractions refusées sur 15 essais** (clause omise, catégorie ou valeur contredite par la citation) : aucune erreur dans le sens favorable n'a passé les contrôles ;
+- environ **0,0014 $ par analyse** en moyenne (0,084 $ pour le jeu) et **6,4 s** en médiane (extraction 2,9 s, explication 1,7 s).
 
 | Contrat | Rédaction | Attendu | Obtenu aux 5 essais | Coût médian | Durée médiane |
 | --- | --- | --- | --- | --- | --- |
-| 01 maintenance | sans ambiguïté | `GO` | `GO` ×5 | 0,00115 $ | 5,2 s |
-| 02 nettoyage | sans ambiguïté | `GO` | `GO` ×5 | 0,00172 $ | 6,2 s |
-| 03 logiciel | sans ambiguïté | `GO`, marge faible, revue humaine | idem ×5 | 0,00181 $ | 6,8 s |
-| 04 transport | sans ambiguïté | `GO_RESERVES` | `GO_RESERVES` ×5 | 0,00261 $ | 10,1 s |
-| 05 hébergement | sans ambiguïté | `GO_RESERVES` | `GO_RESERVES` ×5 | 0,00240 $ | 8,1 s |
-| 06 conseil | sans ambiguïté | `NO_GO` | `NO_GO` ×5 | 0,00132 $ | 4,9 s |
-| 07 centre de contacts | sans ambiguïté | `NO_GO` | `NO_GO` ×4, escalade ×1 | 0,00201 $ | 8,1 s |
+| 01 maintenance | sans ambiguïté | `GO` | `GO` ×5 | 0,00115 $ | 5,7 s |
+| 02 nettoyage | sans ambiguïté | `GO` | `GO` ×5 | 0,00150 $ | 6,5 s |
+| 03 logiciel | sans ambiguïté | `GO`, marge faible, revue humaine | idem ×4, escalade ×1 | 0,00133 $ | 7,3 s |
+| 04 transport | sans ambiguïté | `GO_RESERVES` | `GO_RESERVES` ×5 | 0,00218 $ | 10,8 s |
+| 05 hébergement | sans ambiguïté | `GO_RESERVES` | `GO_RESERVES` ×5 | 0,00183 $ | 6,6 s |
+| 06 conseil | sans ambiguïté | `NO_GO` | `NO_GO` ×5 | 0,00111 $ | 5,1 s |
+| 07 centre de contacts | sans ambiguïté | `NO_GO` | `NO_GO` ×4, escalade ×1 | 0,00192 $ | 8,2 s |
 | 08 application | sans ambiguïté | `NO_GO` | `NO_GO` ×5 | 0,00111 $ | 5,3 s |
-| 09 mobilier | sans ambiguïté | `ESCALADE`, revue humaine | idem ×5 | 0,00121 $ | 5,9 s |
-| 10 anglais | rejet (langue) | rejet | rejet ×5 | 0 $ | 0,0 s |
-| P1 injection | piégé | `NO_GO`, revue humaine imposée | idem ×5 | 0,00108 $ | 5,7 s |
-| P2 fausses pistes | piégé | `GO` | `GO` ×5 | 0,00098 $ | 4,9 s |
-| 13 infogérance | réaliste | `ESCALADE`, revue humaine | idem ×5 | 0,00165 $ | 6,4 s |
+| 09 mobilier | sans ambiguïté | `ESCALADE`, revue humaine | idem ×5 | 0,00112 $ | 5,8 s |
+| 10 anglais | rejet (langue) | rejet | rejet ×5 | 0 $ | 0,1 s |
+| P1 injection | piégé | `NO_GO`, revue humaine imposée | idem ×5 | 0,00107 $ | 6,6 s |
+| P2 fausses pistes | piégé | `GO` | `GO` ×5 | 0,00098 $ | 5,2 s |
+| 13 infogérance | réaliste | `ESCALADE`, revue humaine | idem ×5 | 0,00163 $ | 6,4 s |
 
-Les critères testés avec le vrai modèle passent aussi, 5 fois sur 5 : un constat sans référence escalade ; le contrat piégé n'obtient jamais mieux que sa version sans consigne ; aucune citation non vérifiée n'atteint les analystes.
+**La série 8 (26/09/2026, 64 issues conformes sur 65) précède le défaut du 28/09, corrigé en v1.0.1** : depuis ce jour-là, toute analyse réelle avec un constat passait en escalade, dans le sens prudent. La v1.0 est concernée ; utiliser la v1.0.1.
 
-**Une série a échoué, et c'est la plus utile.** À la série 4, une consigne glissée dans le contrat piégé faisait **omettre** au modèle la clause bloquante, sans rien citer de faux : `GO` au lieu de `NO_GO`, 5 fois sur 5. Il n'y avait aucune citation à vérifier. Quatre contrôles en sont nés, et les séries suivantes sont passées. Les huit séries sont dans [docs/journal.md](docs/journal.md).
+Critères testés avec le vrai modèle : le critère 3 (un constat sans référence escalade) passe 5 fois sur 5 à la série 9 ; les critères 9 (le contrat piégé n'obtient jamais mieux que sa version sans consigne) et 10 (aucune citation non vérifiée n'atteint les analystes), 5 fois sur 5 à la série 8, n'ont pas été relancés.
+
+**Une série a échoué, et c'est la plus utile.** À la série 4, une consigne glissée dans le contrat piégé faisait **omettre** au modèle la clause bloquante, sans rien citer de faux : `GO` au lieu de `NO_GO`, 5 fois sur 5. Il n'y avait aucune citation à vérifier. Quatre contrôles en sont nés, et les séries suivantes sont passées. Les neuf séries sont dans [docs/journal.md](docs/journal.md).
 
 **Ce que ces résultats ne prouvent pas.** Cinq essais à température 0, un fournisseur, un poste : une vérification de régression, pas une mesure statistique. Un seul contrat réaliste ; les autres sont rédigés sans ambiguïté, pour tester la logique du graphe. La concordance mesure l'accord avec des attendus écrits par le projet, pas la justesse juridique.
+
+## Qualité de la recherche
+
+Le CRAG justifie chaque constat par une référence du corpus : encore faut-il que la recherche la lui montre. Un jeu d'évaluation la mesure seule, sans LLM : pour les 21 requêtes que donnent les constats du jeu de démonstration, 55 références attendues, choisies à la lecture des textes et jamais d'après le rattachement que la recherche utilise déjà, puis validées et figées avant toute mesure (`uv run python -m cdg.cli mesure-recherche`). Chaque technique n'est gardée que si la mesure progresse sans qu'aucune requête ne perde avec le filtre ([ADR 006](docs/adr-006-recherche.md), détail requête par requête dans le [journal](docs/journal.md)).
+
+| rappel@4 (rang du CRAG) | avant (01/10) | après | lecture |
+| --- | --- | --- | --- |
+| avec le filtre du CRAG, toutes les références | 75,4 % | **89,3 %** | |
+| avec le filtre, articles de loi seuls | 62,7 % | **84,1 %** | le juge voit l'article attendu |
+| sans filtre (corpus entier), toutes | 57,5 % | **72,2 %** | |
+| sans filtre, articles seuls | 30,2 % | **55,6 %** | |
+
+- **Résultat clé** : la fiche du projet sortait au rang 1 pour les 21 requêtes et, en plusieurs extraits, repoussait les articles de loi hors des quatre premiers. **Gardé : un seul extrait par référence** parmi les quatre premiers.
+- **Abandonnés, chiffres à l'appui** : les en-têtes de contexte écrits par le code (moyennes en hausse, mais une requête perd : deux articles de la même section portent le même en-tête) et la recherche hybride plein texte et vecteurs (recul : l'intitulé du domaine, commun à toutes les requêtes, domine le plein texte).
+- **Pourquoi une recherche pour 15 000 tokens de corpus** : chaque référence retenue est rattachée à la clause, datée et scellée ; tout le corpus dans le prompt ferait perdre la trace de ce qui a été cherché, et pour quelle clause. L'architecture vise des corpus clients bien plus grands ([ADR 006](docs/adr-006-recherche.md)).
 
 ## Limites connues
 
@@ -236,21 +253,21 @@ Les critères testés avec le vrai modèle passent aussi, 5 fois sur 5 : un cons
 - **Clauses floues** : une quantité non fixée (préavis « raisonnable ») est pénalisée par prudence, mais le contrat n'escalade que si ces pénalités s'accumulent : **une seule donne un `GO` automatique**, constat visible. Un plafond flou (responsabilité de l'acheteur, révision de prix) est lu comme une absence de plafond : **`NO_GO` prudent, pas une escalade**. Pas encore de signal « clause ambiguë ».
 - **Lecture des quantités** : chiffres, chiffres entre parenthèses, lettres jusqu'à cent, années comptées en mois. Au-delà (cent vingt, semaines, demies, durées composées), la clause est redemandée puis escaladée. La valeur est seulement cherchée parmi les nombres de la citation : dans « 1 % par semaine, dans la limite de 10 % », un plafond de 1 % passerait.
 - **Listes de termes** (absences, catégories, tentatives d'instruction) : une formulation qu'aucun terme ne couvre peut passer en silence, un terme trop courant fait escalader un contrat correct, la détection d'instructions se contourne par paraphrase. Des couches de défense, aucune suffisante seule.
-- **Juge du CRAG** : il varie d'un essai à l'autre, dans le sens prudent (une référence manquée sur cinq essais à la série 6).
+- **Juge du CRAG** : il varie d'un essai à l'autre, dans le sens prudent (une référence manquée sur cinq essais à la série 6 ; à la série 9, aucune référence retenue pour la durée d'engagement du contrat 03 à un essai sur cinq, d'où une escalade).
 - **Explication** : contrôlée sur les libellés de décision et les références citées, pas phrase par phrase.
 - **Journal d'audit** : la suppression des derniers enregistrements ne se voit que par `verify --expect-head`, contre une empreinte conservée ailleurs.
 - **Fiches de référence** : synthèses rédigées pour le projet, pas un avis juridique.
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web), `cli.py` pour l'assemblage. La CLI et l'interface web passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 128 tests automatisés, joués par la CI : à chaque pull request, 1 969 dans la suite principale (PostgreSQL comprise), 100 sur le rendu des charts, 19 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web), `cli.py` pour l'assemblage. La CLI et l'interface web passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 151 tests automatisés, joués par la CI : à chaque pull request, 1 991 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 19 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
 - [ADR 003 : LangGraph Studio écarté](docs/adr-003-studio-ecarte.md). En usage anonyme, son interface a envoyé à Datadog le texte qu'elle affichait, mot pour mot : ce qui a été observé le 27/09/2026, avec les versions, et ce qui n'a pas été mesuré.
 - [ADR 004 : interface web](docs/adr-004-interface-web.md). Rendu côté serveur avec HTMX plutôt qu'une application séparée ; aucune ressource externe ; sécurité ; pas d'authentification avant l'étape Kubernetes ; mode démonstration et ses limites.
 - [ADR 005 : déploiement Kubernetes](docs/adr-005-kubernetes.md). k3s et Helm, plusieurs réplicas, chaîne d'approvisionnement, cluster de test et scénarios, authentification et entrée réseau, avec leur modèle de menaces (STRIDE), autorisation et traçabilité, base légale et conservation proposées ; sources vérifiées et datées de chaque choix, bonnes pratiques écartées justifiées ; ce qui reste hors du projet pour une vraie production.
-- [ADR 006 : qualité de la recherche](docs/adr-006-recherche.md). Jeu d'évaluation de la recherche seule, établi sans le rattachement déclaré et validé par des non-juristes ; mesure sans LLM (`mesure-recherche`) : au rang 4 du CRAG, l'article de loi attendu n'est vu que dans 62,7 % des cas ; pourquoi un RAG pour un corpus de 15 000 tokens.
+- [ADR 006 : qualité de la recherche](docs/adr-006-recherche.md). Jeu d'évaluation de la recherche seule, établi sans le rattachement déclaré et validé par des non-juristes ; mesure sans LLM (`mesure-recherche`) ; un extrait par référence gardé (l'article de loi attendu vu par le juge dans 84,1 % des cas, contre 62,7 %), en-têtes de contexte et recherche hybride abandonnés, chiffres à l'appui ; pourquoi un RAG pour un corpus de 15 000 tokens.
 - [Spécification de la phase 1](docs/spec-phase1.md), source de vérité ; [journal](docs/journal.md) des décisions, des séries réelles et des pièges ; [exploitation](docs/exploitation.md).
 
 ## Feuille de route

@@ -23,6 +23,7 @@ from cdg import cli
 from cdg.adapters.postgres import rag_store
 from cdg.application import evaluation, ingestion
 from cdg.application.crag import clause_query
+from cdg.domain import corpus
 from cdg.domain.config import load_config
 from cdg.domain.corpus import by_domain
 from cdg.domain.evaluation import Scores, first_ranks, mean, scores, top_references
@@ -128,13 +129,23 @@ def test_rang_du_premier_extrait_de_chaque_reference_attendue():
 # --- mesure (application), sur une doublure du corpus ---------------------------------
 
 
-def corpus_double(drop: int | None = None, extra: bool = False) -> FakeRetriever:
+PREFIX = CONFIG.embedding.passage_prefix
+
+
+def corpus_double(
+    drop: int | None = None, extra: bool = False, stale: int | None = None
+) -> FakeRetriever:
     """Corpus réel (fichiers) dans la doublure, à distance nulle : l'ordre des extraits
-    est celui de l'ingestion. `drop` retire un extrait, `extra` en ajoute un inconnu."""
+    est celui de l'ingestion. `drop` retire un extrait, `extra` en ajoute un inconnu,
+    `stale` laisse à un extrait l'empreinte d'un ancien texte embarqué."""
     passages: dict[str, list[Passage]] = {}
-    for index, (meta, _, declared) in enumerate(ingestion.pending_chunks(MAX_WORDS)):
+    hashes: dict[tuple[str, str], str] = {}
+    pending = ingestion.pending_chunks(MAX_WORDS)
+    for index, (meta, embedded, declared) in enumerate(pending):
         if index == drop:
             continue
+        old = "ancien en-tête\n" + meta["text"] if index == stale else embedded
+        hashes[(meta["reference"], meta["text"])] = corpus.embedded_hash(PREFIX, old)
         for domain, kinds in by_domain(declared):
             passages.setdefault(domain, []).append(
                 Passage(
@@ -159,7 +170,7 @@ def corpus_double(drop: int | None = None, extra: bool = False) -> FakeRetriever
                 kinds=["delai_paiement"],
             )
         )
-    return FakeRetriever(passages)
+    return FakeRetriever(passages, embedded_hashes=hashes)
 
 
 # les deux écarts du jeu avec le rattachement déclaré (ADR 006) : requête, référence
@@ -254,7 +265,7 @@ def test_articles_seuls_les_fiches_occupent_leur_rang_sans_compter():
 
 
 def test_corpus_indexe_conforme_aux_fichiers():
-    assert evaluation.check_index(corpus_double(), MAX_WORDS, "requête") == len(
+    assert evaluation.check_index(corpus_double(), MAX_WORDS, PREFIX) == len(
         ingestion.pending_chunks(MAX_WORDS)
     )
 
@@ -264,13 +275,16 @@ def test_corpus_indexe_conforme_aux_fichiers():
     [
         (corpus_double(drop=0), "1 extrait(s) manquant(s), 0 en trop"),
         (corpus_double(extra=True), "0 extrait(s) manquant(s), 1 en trop"),
+        # même texte stocké, autre texte embarqué : vecteur périmé (en-tête changé sans
+        # réindexer), jamais mesuré
+        (corpus_double(stale=0), "1 extrait(s) manquant(s), 1 en trop"),
     ],
 )
 def test_corpus_indexe_different_des_fichiers_erreur_explicite(double, detail):
     with pytest.raises(
         evaluation.IndexMismatch, match=re.escape(detail) + ".*relancer ingest"
     ):
-        evaluation.check_index(double, MAX_WORDS, "requête")
+        evaluation.check_index(double, MAX_WORDS, PREFIX)
 
 
 def test_jeu_en_retard_sur_le_jeu_de_demonstration_erreur_explicite(monkeypatch):
@@ -287,6 +301,8 @@ def test_run_verifie_puis_mesure():
     double = corpus_double()
     report = evaluation.run(CONFIG, double, double, ks=(1, 4))
     assert report["requetes"] == 21 and report["k"] == [1, 4]
+    # réglages de la recherche mesurée, ceux de la configuration
+    assert report["recherche"] == CONFIG.crag.search.model_dump()
     assert report["extraits"] == len(ingestion.pending_chunks(MAX_WORDS))
     assert len(report["par_requete"]) == 21
 
@@ -313,11 +329,16 @@ def test_commande_mesure_recherche_sur_le_corpus_indexe(
     monkeypatch.setattr(
         cli.fastembed, "FastembedEmbedder", lambda config, cache_dir, **kw: embedder
     )
-    rag_store.sync(pg.admin, ingestion.rows(embedder, MAX_WORDS), embedder.model)
+    rag_store.sync(
+        pg.admin,
+        ingestion.rows(embedder, MAX_WORDS, CONFIG.embedding.passage_prefix),
+        embedder.model,
+    )
     try:
         code, out = run_cli(capsys, "mesure-recherche", "--k", "60,1,4,4")
         assert code == 0 and out["mesure_recherche"] == "ok"
         assert out["modele"] == "hash-test" and out["k"] == [1, 4, 60]
+        assert out["recherche"] == CONFIG.crag.search.model_dump()
         assert out["requetes"] == 21
         assert out["extraits"] == len(ingestion.pending_chunks(MAX_WORDS))
         rows = by_query(out)

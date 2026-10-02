@@ -8,18 +8,21 @@ from doubles import HashEmbedder
 
 from cdg.adapters.postgres import rag_store
 from cdg.application import ingestion
+from cdg.domain import corpus
 from cdg.domain.config import load_config
 from cdg.domain.models import DOMAIN_KINDS
 
 pytestmark = pytest.mark.pg
 
 EMBEDDER = HashEmbedder()
-MAX_WORDS = load_config().corpus.chunk_max_words
+CONFIG = load_config()
+MAX_WORDS = CONFIG.corpus.chunk_max_words
+PREFIX = CONFIG.embedding.passage_prefix
 
 
 @pytest.fixture
 def ingested(pg):
-    rows = ingestion.rows(EMBEDDER, MAX_WORDS)
+    rows = ingestion.rows(EMBEDDER, MAX_WORDS, PREFIX)
     summary = rag_store.sync(pg.admin, rows, EMBEDDER.model)
     yield rows, summary
     with psycopg.connect(pg.admin) as conn:
@@ -158,3 +161,82 @@ def test_rattachement_modifie_extrait_remplace(pg, ingested):
     ]
     summary = rag_store.sync(pg.admin, changed, EMBEDDER.model)
     assert summary["deleted"] == summary["inserted"] > 0
+
+
+# --- réindexation : empreinte du texte embarqué (défaut relevé le 01/10, ADR 006) ---------
+
+
+def stored_hashes(pg) -> dict[tuple, str]:
+    return {
+        (reference, domain, index): embedded
+        for reference, domain, index, embedded in query(
+            pg,
+            "SELECT reference, domain, chunk_index, embedded_hash FROM rag_chunks "
+            "WHERE embedding_model = %s",
+            EMBEDDER.model,
+        )
+    }
+
+
+def test_en_tete_et_empreinte_du_texte_embarque_stockes(pg, ingested):
+    rows, _ = ingested
+    stored = stored_hashes(pg)
+    for row in rows:
+        assert row.embedded_hash == corpus.embedded_hash(
+            PREFIX, corpus.embedded_text(row.header, row.text)
+        )
+        assert stored[(row.reference, row.domain, row.chunk_index)] == row.embedded_hash
+    [(header,)] = set(
+        query(
+            pg,
+            "SELECT header FROM rag_chunks WHERE embedding_model = %s "
+            "AND reference = 'RGPD, art. 28'",
+            EMBEDDER.model,
+        )
+    )
+    assert header.startswith("RGPD, art. 28")
+
+
+def test_en_tete_change_texte_stocke_identique_extrait_reindexe(pg, ingested):
+    """Le texte stocké, donc son empreinte, ne change pas ; le texte embarqué si : le
+    vecteur doit être recalculé. Avant la correction, sync n'y voyait rien."""
+    rows, _ = ingested
+    target = next(r for r in rows if r.reference == "C. civ., art. 1170")
+    header = target.header + " — Sous-section 3 : Le contenu du contrat"
+    changed = [
+        r.model_copy(
+            update={
+                "header": header,
+                "embedded_hash": corpus.embedded_hash(
+                    PREFIX, corpus.embedded_text(header, r.text)
+                ),
+            }
+        )
+        if r is target
+        else r
+        for r in rows
+    ]
+    summary = rag_store.sync(pg.admin, changed, EMBEDDER.model)
+    assert (summary["inserted"], summary["deleted"]) == (1, 1)
+
+
+def test_prefixe_de_passage_change_tout_le_corpus_reindexe(pg, ingested):
+    rows, _ = ingested
+    other = ingestion.rows(EMBEDDER, MAX_WORDS, "autre préfixe : ")
+    summary = rag_store.sync(pg.admin, other, EMBEDDER.model)
+    assert summary["inserted"] == summary["deleted"] == len(rows)
+    assert set(stored_hashes(pg).values()) == {r.embedded_hash for r in other}
+
+
+def test_extraits_indexes_avant_la_migration_008_reindexes(pg, ingested):
+    """Sans empreinte du texte embarqué (colonne vide) : vecteur d'origine inconnue,
+    l'extrait est remplacé au prochain ingest."""
+    rows, _ = ingested
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute(
+            "UPDATE rag_chunks SET embedded_hash = NULL, header = NULL "
+            "WHERE embedding_model = %s",
+            (EMBEDDER.model,),
+        )
+    summary = rag_store.sync(pg.admin, rows, EMBEDDER.model)
+    assert summary["inserted"] == summary["deleted"] == len(rows)

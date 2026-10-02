@@ -23,6 +23,8 @@ from cdg.domain.corpus import (
     chunk,
     citations,
     claim_lines,
+    embedded_hash,
+    embedded_text,
     parse_eurlex,
     parse_legifrance,
 )
@@ -105,8 +107,8 @@ def pending_chunks(max_words: int) -> Pending:
     """Extraits des articles admis et des fiches, avant embedding : métadonnées, texte à
     embarquer, types de clause que la source peut justifier.
 
-    Le texte embarqué est précédé de la référence (et de l'intitulé) pour la recherche ;
-    le texte stocké reste celui de l'article, cité tel quel. Une fiche prend la plus proche
+    Le texte embarqué est précédé d'un en-tête écrit par le code (`meta["header"]`) pour
+    la recherche ; le texte stocké reste celui de l'article, cité tel quel. Une fiche prend la plus proche
     des fins de validité des articles qu'elle cite : elle les paraphrase, elle expire avec.
     """
     pending: Pending = []
@@ -125,6 +127,7 @@ def pending_chunks(max_words: int) -> Pending:
                 "source_id": article.source_id,
                 "reference": article.reference,
                 "text": text,
+                "header": header,
                 "article": article.article,
                 "chunk_index": index,
                 "valid_from": article.valid_from,
@@ -133,7 +136,7 @@ def pending_chunks(max_words: int) -> Pending:
                 "note": article.note,
                 "retrieved_at": article.retrieved_at,
             }
-            pending.append((meta, f"{header}\n{text}", kinds))
+            pending.append((meta, embedded_text(header, text), kinds))
     for fiche in load_fiches():
         reference = fiche_reference(fiche)
         for index, text in enumerate(chunk(fiche.body, max_words)):
@@ -141,10 +144,11 @@ def pending_chunks(max_words: int) -> Pending:
                 "source_id": fiche.id,
                 "reference": reference,
                 "text": text,
+                "header": reference,
                 "chunk_index": index,
                 "valid_until": _fiche_validity(fiche, validity),
             }
-            pending.append((meta, f"{reference}\n{text}", fiche.kinds))
+            pending.append((meta, embedded_text(reference, text), fiche.kinds))
     return pending
 
 
@@ -173,8 +177,10 @@ def source_validities() -> dict[str, date | None]:
     return sources
 
 
-def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
-    """Extraits à ingérer, un par domaine d'indexation, embarqués par le port."""
+def rows(embedder: Embedder, max_words: int, passage_prefix: str) -> list[ChunkRow]:
+    """Extraits à ingérer, un par domaine d'indexation, embarqués par le port. Le préfixe
+    de passage du modèle (configuration), ajouté par l'adaptateur, entre dans l'empreinte
+    du texte embarqué : le changer réindexe tout le corpus."""
     pending = pending_chunks(max_words)
     vectors = embedder.embed_passages([embedded for _, embedded, _ in pending])
     return [
@@ -186,9 +192,10 @@ def rows(embedder: Embedder, max_words: int) -> list[ChunkRow]:
                 "kinds": domain_kinds,
                 "embedding_model": embedder.model,
                 "embedding": vector,
+                "embedded_hash": embedded_hash(passage_prefix, embedded),
                 **meta,
             }
         )
-        for (meta, _, kinds), vector in zip(pending, vectors, strict=True)
+        for (meta, embedded, kinds), vector in zip(pending, vectors, strict=True)
         for domain, domain_kinds in by_domain(kinds)
     ]

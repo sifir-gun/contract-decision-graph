@@ -175,7 +175,9 @@ def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
     modèle et avant la création du thread.
     """
     llm = build_provider(config.llm)
-    retriever = rag_store.PgvectorRetriever(app_pool(), process_embedder(config))
+    retriever = rag_store.PgvectorRetriever(
+        app_pool(), process_embedder(config), config.crag.search
+    )
     return Deps(
         extractor=LLMExtractor(llm),
         crag=orchestrator.crag_runner(retriever, llm, config),
@@ -279,7 +281,9 @@ def _ingest(args: argparse.Namespace) -> dict:
         threads=EMBEDDER_THREADS["threads"],
         batch_size=EMBEDDER_THREADS["batch_size"],
     )
-    rows = ingestion.rows(embedder, config.corpus.chunk_max_words)
+    rows = ingestion.rows(
+        embedder, config.corpus.chunk_max_words, config.embedding.passage_prefix
+    )
     summary = rag_store.sync(conninfo.admin_conninfo, rows, embedder.model)
     return {"ingest": "ok", "model": embedder.model, **summary}
 
@@ -294,7 +298,7 @@ def _mesure_recherche(args: argparse.Namespace) -> dict:
         threads=EMBEDDER_THREADS["threads"],
         batch_size=EMBEDDER_THREADS["batch_size"],
     )
-    retriever = rag_store.PgvectorRetriever(app_pool(), embedder)
+    retriever = rag_store.PgvectorRetriever(app_pool(), embedder, config.crag.search)
     report = evaluation.run(config, retriever, retriever, args.k)
     return {"mesure_recherche": "ok", "modele": embedder.model, **report}
 
