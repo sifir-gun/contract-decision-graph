@@ -36,6 +36,8 @@ LIBRARIES = {
     # python-multipart n'est jamais importé : Starlette s'en sert pour lire les formulaires
     # vérification des jetons d'identité (PR D1) ; PyJWT charge lui-même cryptography
     "jwt": ("adapters/oidc.py",),
+    # serveur MCP en stdio (ADR 007) : adaptateur entrant, troisième porte
+    "mcp": ("adapters/mcp/",),
 }
 
 # couche -> modules internes (cdg.<nom>) qu'elle peut importer, en plus d'elle-même ;

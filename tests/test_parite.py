@@ -1,15 +1,19 @@
-"""Même moteur, deux portes (décision du 27/09, principe 1) : chaque action de l'interface
-web appelle la même méthode du service des contrats que sa commande de la CLI.
+"""Même moteur, trois portes (décision du 27/09, principe 1 ; serveur MCP, ADR 007) :
+chaque action de l'interface web et chaque outil du serveur MCP appellent la même méthode
+du service des contrats que leur commande de la CLI.
 
-Les deux portes tournent sur le même service en mémoire, enveloppé d'un enregistreur des
-méthodes appelées ; la CLI le reçoit à la place de `build_service`.
+Les portes tournent sur le même service en mémoire, enveloppé d'un enregistreur des
+méthodes appelées ; la CLI le reçoit à la place de `build_service`. Le serveur MCP n'a
+aucun outil de décision : aucun de ses outils n'appelle decide, expire ni relaunch.
 """
 
 import pytest
 from cli_helpers import run_cli
+from mcp_helpers import MCP_ACTOR, session
 from web_helpers import PENDING_TEXT, analyse, client, csrf, memory_service
 
 from cdg import cli
+from cdg.adapters.mcp.server import create_server
 
 METHODS = {
     "analyse",
@@ -37,6 +41,14 @@ WEB_TO_CLI = {
     "GET /administration": "config-check",
     "POST /contrats/{id}/relance": "relaunch",
 }
+# outil du serveur MCP -> commande de la CLI ; aucun outil de décision
+MCP_TO_CLI = {
+    "analyser_contrat": "run",
+    "lister_contrats": "list",
+    "consulter_dossier": "show",
+    "verifier_journal": "verify",
+}
+DECISIONS = {"decide", "expire", "relaunch"}
 
 
 class Recorder:
@@ -151,3 +163,35 @@ def test_action_de_l_interface_et_sa_commande_appellent_la_meme_methode(
     action, web_calls, cli_calls
 ):
     assert web_calls[action] == cli_calls[WEB_TO_CLI[action]]
+
+
+@pytest.fixture
+def mcp_calls() -> dict[str, set[str]]:
+    recorder = Recorder(memory_service())
+    server = create_server(recorder, actor=MCP_ACTOR, demo=False)
+    arguments = {
+        "analyser_contrat": {"texte": PENDING_TEXT, "identifiant": "c-attente"},
+        "lister_contrats": {},
+        "consulter_dossier": {"thread_id": "c-attente"},
+        "verifier_journal": {},
+    }
+
+    async def steps(client):
+        calls = {}
+        for name in MCP_TO_CLI:  # l'analyse d'abord : le dossier existe ensuite
+            result = await client.call_tool(name, arguments[name])
+            assert not result.is_error, (name, result.content)
+            calls[name] = recorder.take()
+        return calls
+
+    return session(server, steps)
+
+
+@pytest.mark.parametrize("tool", MCP_TO_CLI)
+def test_outil_mcp_et_sa_commande_appellent_la_meme_methode(tool, mcp_calls, cli_calls):
+    assert mcp_calls[tool] == cli_calls[MCP_TO_CLI[tool]]
+    assert len(mcp_calls[tool]) == 1
+
+
+def test_aucun_outil_mcp_n_appelle_une_methode_de_decision(mcp_calls):
+    assert set().union(*mcp_calls.values()) & DECISIONS == set()
