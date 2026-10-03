@@ -1,4 +1,5 @@
-"""Observabilité (ADR 008) : réglages de l'export des traces et tarifs des modèles.
+"""Observabilité (ADR 008) : réglages de l'export des traces et tarifs des modèles ;
+télémétrie sans destination (`NoTelemetry`) et fournisseur LLM observé.
 
 Les réglages vivent dans `config/tarifs.yaml`, hors de `config/decision.yaml` : ce ne sont
 pas des réglages de l'analyse, et ils changeraient l'empreinte de ses décisions (les séries
@@ -6,7 +7,8 @@ réelles, `tests/serie.py`, gardaient déjà leurs tarifs à part). Ils sont val
 modèle Pydantic au démarrage : invalides, rien ne démarre.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Any
@@ -14,7 +16,11 @@ from typing import Annotated, Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from cdg.domain.authorization import Actor
 from cdg.domain.config import LLMConfig
+from cdg.domain.models import Usage
+from cdg.ports.llm import LLMProvider, SchemaT, Tier
+from cdg.ports.telemetry import Finish, LLMCall, Operation, Telemetry
 
 DEFAULT_TARIFS_PATH = Path(__file__).resolve().parents[3] / "config" / "tarifs.yaml"
 
@@ -90,3 +96,62 @@ def cost_usd(
     entree = tokens_in * tarif.entree_usd_par_mtoken
     sortie = tokens_out * tarif.sortie_usd_par_mtoken
     return (entree + sortie) / 1_000_000
+
+
+# --- télémétrie sans destination, fournisseur observé -------------------------------------
+
+
+def _ignore(status: Mapping[str, Any]) -> None:
+    return None
+
+
+class _NoCall:
+    def done(self, usage: Usage) -> None:
+        return None
+
+
+class NoTelemetry:
+    """Sans destination configurée : rien n'est créé, rien n'est envoyé nulle part."""
+
+    @contextmanager
+    def operation(
+        self, name: Operation, *, contract_id: str | None, actor: Actor | None
+    ) -> Iterator[Finish]:
+        yield _ignore
+
+    @contextmanager
+    def step(
+        self,
+        node: str,
+        *,
+        attempt: int,
+        domain: str | None,
+        passthrough: tuple[type[BaseException], ...] = (),
+    ) -> Iterator[None]:
+        yield
+
+    @contextmanager
+    def llm_call(self, *, provider: str, tier: str, node: str) -> Iterator[LLMCall]:
+        yield _NoCall()
+
+    def close(self) -> None:
+        return None
+
+
+class ObservedProvider:
+    """Fournisseur LLM dont chaque appel passe par la télémétrie : modèle, tokens,
+    latence, coût et rang de l'appel ; jamais le prompt ni la réponse."""
+
+    def __init__(self, inner: LLMProvider, telemetry: Telemetry) -> None:
+        self._inner, self._telemetry = inner, telemetry
+        self.name = inner.name
+
+    def structured(
+        self, *, tier: Tier, system: str, user: str, schema: type[SchemaT], node: str
+    ) -> tuple[SchemaT, Usage]:
+        with self._telemetry.llm_call(provider=self.name, tier=tier, node=node) as call:
+            result, usage = self._inner.structured(
+                tier=tier, system=system, user=user, schema=schema, node=node
+            )
+            call.done(usage)
+        return result, usage

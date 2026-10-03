@@ -27,13 +27,20 @@ from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_op
 from cdg.adapters.llm.anthropic import AnthropicProvider
 from cdg.adapters.llm.mistral import MistralProvider
 from cdg.adapters.oidc import OidcVerifier
+from cdg.adapters.otel.telemetry import OtelTelemetry
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.postgres.rag_store import PgvectorRetriever
 from cdg.adapters.postgres.resumes import PostgresResumeCounter
 from cdg.application.deps import Crag, Extractor
 from cdg.application.extraction import LLMExtractor
+from cdg.application.observation import (
+    NoTelemetry,
+    ObservedProvider,
+    load_observability_config,
+)
 from cdg.domain.config import load_config
+from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.embedder import Embedder
 from cdg.ports.engine import ContractEngine
@@ -42,6 +49,7 @@ from cdg.ports.llm import LLMProvider
 from cdg.ports.locks import ContractLocks
 from cdg.ports.resumes import ResumeCounter
 from cdg.ports.retriever import CorpusSearch, Retriever
+from cdg.ports.telemetry import Telemetry
 
 CONFIG = load_config()
 
@@ -80,6 +88,18 @@ IMPLEMENTATIONS = [
     (ContractLocks, lambda: PostgresContractLocks(lambda: "")),
     (ResumeCounter, LocalResumeCounter),
     (ResumeCounter, lambda: PostgresResumeCounter(lambda: "")),
+    # télémétrie (ADR 008) : sans destination, et par OpenTelemetry (SDK en mémoire)
+    (Telemetry, NoTelemetry),
+    (
+        Telemetry,
+        lambda: OtelTelemetry(
+            load_observability_config(),
+            span_processor=None,
+            metric_reader=None,
+            code=CodeVersion(commit="0" * 40, image=None),
+        ),
+    ),
+    (LLMProvider, lambda: ObservedProvider(FakeLLM(), NoTelemetry())),
 ]
 
 

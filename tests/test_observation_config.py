@@ -68,6 +68,17 @@ def test_reglage_manquant_inconnu_ou_invalide_refuse(tmp_path, change):
         load_observability_config(write(tmp_path, data))
 
 
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [("tarifs: [", "YAML illisible"), ("- liste", "dictionnaire YAML")],
+)
+def test_fichier_illisible_ou_mal_forme_refuse(tmp_path, text, message):
+    path = tmp_path / "tarifs.yaml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ObservabilityConfigError, match=message):
+        load_observability_config(path)
+
+
 def test_fichier_absent_refuse(tmp_path):
     with pytest.raises(ObservabilityConfigError, match="introuvable"):
         load_observability_config(tmp_path / "absent.yaml")
