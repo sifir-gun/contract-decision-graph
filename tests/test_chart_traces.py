@@ -118,7 +118,7 @@ def test_sortie_vers_la_seule_cible_des_traces():
         # hors du cluster, même en https : refusé (souveraineté, ADR 008)
         ["--set", "traces.destination=https://cloud.langfuse.com/api/public/otel"],
         ["--set", "traces.destination=http://langfuse.example.org/api/public/otel"],
-        ["--set", "traces.destination=http://pk:sk@langfuse-web.cdg.svc/otel"],
+        ["--set", "traces.destination=http://pk:sk@langfuse.example.org/otel"],
         [*TRACES, "--set", "traces.identite=nom"],
     ],
 )
