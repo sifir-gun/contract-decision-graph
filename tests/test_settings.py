@@ -117,6 +117,9 @@ def test_secrets_du_chart_et_de_l_application_memes_noms():
         "APP_DB_PASSWORD",
         "POSTGRES_USER",
         "POSTGRES_PASSWORD",
+        # destination des traces (ADR 008)
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
     )
     assert str(SECRETS_DIR) == "/run/secrets/cdg"
 
