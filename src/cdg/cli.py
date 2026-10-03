@@ -9,10 +9,12 @@ Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 import argparse
 import atexit
 import functools
+import ipaddress
 import json
 import logging
 import logging.config
 import os
+import socket
 import sys
 import threading
 from collections.abc import Callable
@@ -866,10 +868,30 @@ def _warm_up(config: DecisionConfig, started: threading.Event) -> None:
     started.set()
 
 
-# hôtes où une destination en http clair est admise : le poste, ou un service interne au
-# cluster (nom court, ou nom de service terminé par l'un de ces suffixes) ; ailleurs, https
-LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+# hôtes où une destination en http clair est admise : le poste (adresse de bouclage, ou
+# localhost), ou un service interne au cluster (nom court, ou nom de service terminé par
+# l'un de ces suffixes) ; ailleurs, https
 CLUSTER_SUFFIXES = (".svc", ".svc.cluster.local")
+
+
+def _ip_literal(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """L'adresse IP que désigne `host`, sous toutes les formes que résout le système
+    (décimale, hexadécimale, abrégée : `134744072` est 8.8.8.8), ou None pour un nom."""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    try:
+        return ipaddress.ip_address(socket.inet_aton(host))
+    except OSError:
+        return None
+
+
+def _internal(host: str) -> bool:
+    address = _ip_literal(host)
+    if address is not None:
+        return address.is_loopback
+    return host == "localhost" or "." not in host or host.endswith(CLUSTER_SUFFIXES)
 
 
 def _destination(value: str) -> str:
@@ -877,7 +899,7 @@ def _destination(value: str) -> str:
     le cluster ; ni identifiants, ni requête, ni fragment (les clés viennent des secrets)."""
     parts = urlsplit(value)
     host = parts.hostname or ""
-    internal = host in LOCAL_HOSTS or "." not in host or host.endswith(CLUSTER_SUFFIXES)
+    internal = _internal(host)
     if parts.scheme not in ("http", "https") or not host:
         raise argparse.ArgumentTypeError(
             f"destination : une URL https attendue (http sur le poste ou dans le cluster)"
