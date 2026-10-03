@@ -2913,3 +2913,59 @@ PR de correctif à part, après la fusion du serveur MCP (PR #31).
 - **Cause** : `log = logging.getLogger(__name__)` dans `cli.py`. Lancée par `python -m cdg.cli` (image, README), la CLI s'appelle `__main__`, hors du journal `cdg` (INFO) ; la racine est en WARNING. En `--journaux json`, ses messages d'information se perdaient donc : l'annonce de `web` (adresse de l'interface, dans le cluster aussi), celle de `mcp`, et le nombre d'analyses interrompues reprises. En texte, `_tell` écrit l'annonce directement : rien ne manquait au terminal.
 - **Pourquoi les tests ne le voyaient pas** : ils appellent `cli.main`, où le module s'appelle `cdg.cli`. Correction : journal nommé `cdg.cli` ; deux tests lancent la CLI en sous-processus, comme l'image, et lisent l'annonce de `web` et de `mcp` en JSON. Sans la correction, ils échouent tous deux.
 - **Observé en écrivant le test, non changé** : après un arrêt propre sur SIGTERM, uvicorn 0.54 relance le signal capturé (`Server.capture_signals`). Hors d'un conteneur, `web` se termine donc sur SIGTERM (code -15), avant d'écrire son résultat final. Dans l'image, en PID 1, le signal relancé est ignoré, le résultat s'écrit et le code vaut 0 (`tests/test_image.py`). Le test le constate.
+
+## 2026-10-03 · Observabilité, PR 1 : instrumentation (branche `observabilite`)
+
+Chantier ouvert le 02/10 à la demande explicite du propriétaire : deux PR au plus, périmètre figé, toute idée nouvelle notée ici comme piste. PR 1 : traces et métriques OpenTelemetry, confidentialité, traçage par des tiers coupé, échec ouvert, destination comme réglage. PR 2 : Langfuse dans le cluster de test, règles réseau, scénario du cluster. Choix et sécurité : [ADR 008](adr-008-observabilite.md).
+
+### Décisions du propriétaire (02/10 et 03/10)
+
+- **Plan validé sans brainstorming** (périmètre décidé) ; exécution tâche par tâche dans la session, relecteur neuf avant chaque PR, en priorité sur la confidentialité des traces.
+- **Langfuse** : profil compose optionnel sur le poste, et scénario dans le cluster de test de la CI seulement, d'après la mesure du 02/10 ; stockage objet sur **SeaweedFS**, déjà dans le cluster, et non MinIO (dépôt archivé) ; **seule la partie MIT** de Langfuse, sans clé de licence ; dans l'ADR, ClickHouse en un nœud pour les tests et ce qu'exigerait une production en haute disponibilité (PR 2).
+- **Identité** : par défaut, aucune, pas même le `sub` ; le canal suffit. Sans sa partie commerciale, Langfuse ne supprime pas les traces : un `sub` s'y accumulerait sans fin (conservation, RGPD). Réglage optionnel `--traces-identite sub`, désactivé par défaut et dans le chart, documenté avec cet avertissement ; test qu'aucune identité ne sort par défaut.
+- **Images de Langfuse ni signées ni attestées** : l'exception à la vérification des signatures ne vaut que pour celles utilisées en test (CI et profil du poste), jamais pour les images du produit (PR 2).
+- **Dépendances** ajoutées par le propriétaire : `opentelemetry-sdk` et `opentelemetry-exporter-otlp-proto-http` 1.45.0.
+
+### Mesure de Langfuse sur le poste (02/10, 18:54 à 19:10 UTC)
+
+Compose officiel du tag v4.50.0, images figées par empreinte, à côté de sept conteneurs déjà en marche, rien d'arrêté ; plafond fixé par le propriétaire : 6 Go pour la VM Docker. Départ : 1,49 Go. Langfuse seul : **+2,8 Go au pic du démarrage, +2,1 Go au repos, +2,3 Go en médiane et +2,5 Go au plus** pendant l'envoi de 600 analyses (10 200 spans en 1 min 51 s, environ 40 fois le rythme réel). Au pic : web 951 Mio, ClickHouse 750, worker 647, MinIO 104, PostgreSQL 88, Redis 9. Maximum de la VM : 4,28 Go. Disque : 3,53 Go d'images, environ 150 Mo de données, dont 2,9 Ko par analyse dans ClickHouse. Les 10 217 spans ont été reçus, modèle, tokens et coût relus. Tout ce qui avait été créé a été supprimé, inventaire identique au départ. Conclusion : Langfuse tient sur le poste à côté de l'existant, pas à côté du cluster k3d local.
+
+### Faits et pièges
+
+- **LangSmith** (0.14.0, venu de `langchain-core`) : `LANGCHAIN_TRACING_V2=true` l'emporte sur le `LANGSMITH_TRACING=false` du `Dockerfile`, et la lecture de l'environnement est mise en cache. `langsmith.configure(enabled=False)` l'emporte sur tout ; le test le prouve avec des témoins, qui le réactivent pour vérifier que le test ne passe pas à vide.
+- **SDK Mistral** : `MISTRAL_SDK_TELEMETRY` tracerait prompts et réponses, vers le provider global ou vers `api.mistral.ai`. Refusée au démarrage, comme les variables de LangSmith.
+- **SDK MCP** : son middleware OpenTelemetry enregistre le texte des exceptions s'il trouve un provider global ; le provider du projet ne l'est jamais. Mais, même sans provider global, il installe comme contexte courant le `traceparent` et le `tracestate` du `_meta` de la requête : l'analyse devenait l'enfant d'une trace choisie par le client, son `tracestate` (texte libre) partait dans chaque span, et un drapeau « non échantillonné » coupait l'enregistrement. Trouvé par la relecture ; chaque opération est désormais une racine.
+- **OpenTelemetry 1.45** :
+  - `force_flush` ignore son délai, `shutdown` peut attendre 30 s : la fermeture se fait dans un fil, attendu au plus `delai_fermeture_s` ;
+  - l'exportateur passe par urllib3, qui ignore `HTTPS_PROXY` ;
+  - son export est borné par son délai, tentatives comprises ; ses journaux citent le code et la raison HTTP, ou l'erreur de transport, jamais les clés ;
+  - même configuré par le code, le SDK lit encore des variables `OTEL_*` (en-têtes ajoutés, compression, certificats, échantillonnage, limites des spans, `OTEL_SDK_DISABLED`) ; la taille des lots venait de `OTEL_BSP_MAX_EXPORT_BATCH_SIZE`, et une file plus petite qu'un lot était refusée : elle est désormais un réglage de `config/tarifs.yaml` (`lot_max`), passé par le code, comme l'intervalle des métriques.
+- **LangGraph** copie le contexte dans ses fils : les quatre analystes, en parallèle, restent dans la trace de l'analyse. `get_runtime()` lève une erreur hors d'une exécution : la tentative du nœud est alors absente.
+- **Langfuse 4** : l'ancienne API des traces répond 404 (mode « events only ») ; la lecture se fait par `/api/public/v2/observations`. Le point d'entrée OTLP de métriques répond 200 et les jette. Tous les attributs d'un span sont rangés en métadonnées. Aucun tarif Mistral.
+- **Coût** : arrondi à chaque appel, il faussait les totaux d'une série ; il est désormais cumulé sans arrondi, et arrondi à l'émission.
+- **Écart de procédure, corrigé** : la tâche 5 a été commitée avec un test en échec (`test_secrets_du_chart_et_de_l_application_memes_noms`, liste des secrets à compléter), parce que la commande enchaînée lisait le code de sortie de `tail` au lieu de celui de pytest. Corrigé dans un commit à part ; le code de sortie de pytest est désormais lu explicitement.
+- **Fils d'export abandonnés entre deux tests** : `close()` les laisse finir en arrière-plan, et ils journalisaient dans la sortie capturée de `test_parite.py`, dont le JSON devenait illisible ; vu sous couverture seulement, par l'ordre des fichiers. Chaque test de l'échec ouvert attend désormais la fin de ses fils, et échoue s'ils survivent.
+- **Défaut trouvé en écrivant la documentation, corrigé** : une destination en `http` était admise pour tout hôte contenant `.svc`, donc pour un hôte externe comme `traces.svc.example.org`, et les clés seraient parties en clair. Un service du cluster se reconnaît désormais à son suffixe.
+- **Nombre de tests** : la suite principale passe de 2 125 à 2 252 (relecture comprise) ; le total, de 2 286 à 2 413.
+
+### Relecture de la branche avant la PR (03/10)
+
+Relecteur neuf sur toute la branche, en priorité sur la confidentialité des traces ; douze constats, reproduits pour la plupart par des scripts hors du dépôt. Suites, chacune dans son commit, avec un test qui échouait avant :
+
+- **Contexte d'un client MCP repris par les traces** (constat haut) : le middleware du SDK MCP installe le `traceparent` et le `tracestate` du `_meta` de la requête comme contexte courant. L'analyse devenait l'enfant d'une trace choisie par le client ; le `tracestate`, texte libre de plusieurs kilo-octets hors de toute liste blanche, partait dans chaque span ; un drapeau « non échantillonné » coupait l'enregistrement sans rien dire. Corrigé : chaque opération est une racine.
+- **http en clair vers l'extérieur** par une adresse IP littérale (`134744072`, soit 8.8.8.8, `0x08080808`, IPv6) : corrigé, seule une adresse de bouclage passe en http.
+- **Reprise des analyses interrompues** : une trace vide par minute et par réplica, et plusieurs contrats mêlés dans une même trace, tentatives comptées de l'un à l'autre. Corrigé : une trace par contrat repris, ouverte par le moteur, aucune sans reprise.
+- **Identifiant de session non validé** lors d'une revue (`jean.dupont@example.com` tapé dans l'URL sortait) ; « @ » admis dans les identifiants. Corrigé : format du domaine exigé, « @ » retiré.
+- **Refus de la destination** qui recopiaient l'URL, identifiants compris : corrigé.
+- **Télémétrie du SDK Mistral** protégée par une seule défense : l'adaptateur la coupe aussi. En reproduisant le défaut, le test, encore en échec, a pu tenter à la sortie du processus un envoi vers `api.mistral.ai` : spans d'une requête sur le contrat 01 du jeu (synthétique, masqué, public dans le dépôt), avec la clé fictive `cle-factice`. Le test redirige désormais le point d'envoi du SDK vers un port fermé du poste.
+- **Tests** : deux mutations passaient inaperçues (acteur de la revue perdu, garde du nom de modèle retirée) ; un test ne vérifiait rien ; le test des 13 contrats ne cherchait ni les prompts envoyés ni les réponses de l'explication. Corrigés ; les deux mutations sont détectées.
+- **Réglages** : taille des lots et intervalle des métriques sortis du code vers `config/tarifs.yaml` ; valeurs des métriques arrondies par la fonction unique.
+- **Documentation** : variables `OTEL_*` lues par le SDK complétées ; redirection de la destination (le SDK la compte comme un succès) ; étape de la revue autour d'`interrupt()` ; identité « par défaut » dans le README ; `.env.example`.
+- **Pour la PR 2** : dans le cluster, le ConfigMap monté sur `/app/config` masquerait `config/tarifs.yaml`, et `--traces` y ferait échouer le démarrage. À corriger avec le chart.
+- **Souveraineté, décision du propriétaire (03/10)** : le code ne contrôlait que le chiffrement, et `https://cloud.langfuse.com` était admis ; la souveraineté ne reposait que sur les règles réseau de la PR 2. Désormais, partout, seule une destination sur le poste (adresse de bouclage, `localhost`) ou dans le cluster (nom court, `.svc`) est admise, en http ou en https.
+
+### Pistes (hors périmètre, notées sans code)
+
+- **Refuser au démarrage toute variable `OTEL_*`** quand une destination est configurée, comme les variables de traçage tiers : aucune ne change la destination, mais `OTEL_SDK_DISABLED` ou un échantillonneur coupent les traces sans rien dire, et des en-têtes s'ajoutent à l'export.
+- **Pseudonymiser l'identifiant du contrat** dans les traces (une empreinte) : il est choisi par l'opérateur et pourrait, par erreur, porter le nom d'un client.
+- **Purge des traces** : la rétention de Langfuse relève de son édition commerciale ; une purge par son API, ou par ClickHouse, serait à écrire si le `sub` était un jour émis.

@@ -14,6 +14,7 @@ Les chaînes de connexion PostgreSQL sont dans `adapters/postgres/conninfo.py`.
 """
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,7 +29,37 @@ SECRETS = (
     "APP_DB_PASSWORD",
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
+    # destination des traces (ADR 008), Langfuse : clé publique et clé secrète
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
 )
+
+
+# traçage par un tiers (ADR 008), refusé au démarrage : LangSmith (langsmith, qui vient avec
+# langchain-core ; *_TRACING_V2 l'emporte sur *_TRACING, et LANGCHAIN_TRACING_V2=true sur
+# le LANGSMITH_TRACING=false de l'image), son mode OpenTelemetry, et la télémétrie du SDK
+# Mistral, qui tracerait prompts et réponses (global : vers le traceur global ; dedicated :
+# vers api.mistral.ai)
+TRACING_VARS = (
+    "LANGSMITH_TRACING_V2",
+    "LANGCHAIN_TRACING_V2",
+    "LANGSMITH_TRACING",
+    "LANGCHAIN_TRACING",
+    "LANGSMITH_TRACING_MODE",
+    "LANGSMITH_OTEL_ENABLED",
+    "LANGSMITH_OTEL_ONLY",
+    "MISTRAL_SDK_TELEMETRY",
+)
+
+
+def third_party_tracing(environ: Mapping[str, str]) -> list[str]:
+    """Variables qui activeraient un traçage par un tiers, dans l'ordre de TRACING_VARS :
+    toute valeur autre que vide ou « false » (sans tenir compte de la casse)."""
+    return [
+        name
+        for name in TRACING_VARS
+        if environ.get(name, "").strip().lower() not in ("", "false")
+    ]
 
 
 class SettingsError(Exception):

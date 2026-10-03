@@ -9,10 +9,12 @@ Sortie JSON sur stdout ; une erreur est rendue en JSON sur stderr, code 1.
 import argparse
 import atexit
 import functools
+import ipaddress
 import json
 import logging
 import logging.config
 import os
+import socket
 import sys
 import threading
 from collections.abc import Callable
@@ -34,6 +36,7 @@ from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm import API_KEY_VARS, build_provider
+from cdg.adapters.otel import telemetry as otel
 from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
@@ -46,6 +49,13 @@ from cdg.application import demo_set, evaluation, ingestion
 from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
+from cdg.application.observation import (
+    NoTelemetry,
+    ObservabilityConfigError,
+    ObservedProvider,
+    load_observability_config,
+    missing_prices,
+)
 from cdg.application.service import ContractService
 from cdg.domain import audit, authorization, expiry
 from cdg.domain.authorization import Actor
@@ -54,6 +64,7 @@ from cdg.domain.models import Decision
 from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
+from cdg.ports.telemetry import Telemetry
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
 LEGAL_TIMEZONE = ZoneInfo("Europe/Paris")
@@ -65,6 +76,9 @@ def today() -> date:
 
 # taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
 POOL = {"size": connexions.DEFAULT_SIZE}
+# télémétrie du processus (ADR 008), construite par main d'après --traces et
+# --metriques ; sans destination, rien n'est créé ni envoyé
+TELEMETRY: dict[str, Telemetry] = {"processus": NoTelemetry()}
 # fils de calcul et taille des lots de l'embedder : options --fils-embedding et
 # --lot-embedding, ou CDG_FILS_EMBEDDING et CDG_LOT_EMBEDDING (main)
 EMBEDDER_THREADS: dict[str, int | None] = {"threads": None, "batch_size": None}
@@ -177,7 +191,8 @@ def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
     Le fournisseur d'abord : une clé d'API absente échoue avant tout chargement de
     modèle et avant la création du thread.
     """
-    llm = build_provider(config.llm)
+    telemetry = TELEMETRY["processus"]
+    llm = ObservedProvider(build_provider(config.llm), telemetry)
     retriever = rag_store.PgvectorRetriever(
         app_pool(), process_embedder(config), config.crag.search
     )
@@ -188,6 +203,7 @@ def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
         clock=now,
         explainer=LLMExplainer(llm),
         code_version=code,
+        telemetry=telemetry,
     )
 
 
@@ -214,7 +230,9 @@ def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
     var = API_KEY_VARS[config.llm.provider]
     if not settings.secret(var):
         return TemplateOnly(f"clé d'API absente ({var}) : explication par le gabarit")
-    return LLMExplainer(build_provider(config.llm))
+    return LLMExplainer(
+        ObservedProvider(build_provider(config.llm), TELEMETRY["processus"])
+    )
 
 
 def review_deps(
@@ -231,6 +249,7 @@ def review_deps(
         clock=now,
         explainer=explainer,
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
 
 
@@ -335,6 +354,7 @@ def build_service(config: DecisionConfig) -> ContractService:
         today=lambda: today(),
         now=lambda: now(),
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
 
 
@@ -360,6 +380,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
         clock=now,
         explainer=DEMO_EXPLAINER,
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
     engine = LangGraphEngine(
         config,
@@ -380,7 +401,13 @@ def demo_service(config: DecisionConfig) -> ContractService:
         today=lambda: expected_on,
         now=lambda: now(),
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
+
+
+class TracageTiersRefuse(Exception):
+    """Variable qui activerait un traçage par un tiers (LangSmith, SDK Mistral) : rien ne
+    démarre (ADR 008). La variable est nommée, jamais sa valeur."""
 
 
 class AccesRefuse(Exception):
@@ -841,6 +868,85 @@ def _warm_up(config: DecisionConfig, started: threading.Event) -> None:
     started.set()
 
 
+# souveraineté (ADR 008, décision du 03/10) : une destination n'est admise que sur le poste
+# (adresse de bouclage, ou localhost) ou dans le cluster (nom court, ou nom de service
+# terminé par l'un de ces suffixes), en http ou en https ; jamais ailleurs
+CLUSTER_SUFFIXES = (".svc", ".svc.cluster.local")
+
+
+def _ip_literal(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """L'adresse IP que désigne `host`, sous toutes les formes que résout le système
+    (décimale, hexadécimale, abrégée : `134744072` est 8.8.8.8), ou None pour un nom."""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    try:
+        return ipaddress.ip_address(socket.inet_aton(host))
+    except OSError:
+        return None
+
+
+def _internal(host: str) -> bool:
+    address = _ip_literal(host)
+    if address is not None:
+        return address.is_loopback
+    return host == "localhost" or "." not in host or host.endswith(CLUSTER_SUFFIXES)
+
+
+def _destination(value: str) -> str:
+    """URL d'une destination OTLP (traces ou métriques) : sur le poste ou dans le cluster
+    seulement, en http ou en https ; ni identifiants, ni requête, ni fragment (les clés
+    viennent des secrets). Un refus ne cite jamais l'URL, qui peut porter une clé."""
+    parts = urlsplit(value)
+    host = parts.hostname or ""
+    if parts.scheme not in ("http", "https") or not host:
+        raise argparse.ArgumentTypeError("destination : une URL http ou https attendue")
+    if parts.username is not None or parts.password is not None:
+        raise argparse.ArgumentTypeError(
+            "destination : pas d'identifiants dans l'URL (LANGFUSE_PUBLIC_KEY et "
+            "LANGFUSE_SECRET_KEY, en secrets)"
+        )
+    if parts.query or parts.fragment:
+        raise argparse.ArgumentTypeError(
+            "destination : ni requête ni fragment dans l'URL"
+        )
+    if not _internal(host):
+        raise argparse.ArgumentTypeError(
+            "destination hors du poste et du cluster refusée (ADR 008) : adresse de "
+            "bouclage, localhost, nom court ou service du cluster (.svc) seulement"
+        )
+    return value
+
+
+def _telemetry(args: argparse.Namespace) -> Telemetry:
+    """Télémétrie du processus (ADR 008) : aucune sans destination (rien n'est créé ni
+    envoyé) ; sinon l'export OTLP, après vérification des tarifs et des clés."""
+    if args.traces is None and args.metriques is None:
+        return NoTelemetry()
+    observability = load_observability_config()
+    missing = missing_prices(observability, load_config().llm)
+    if missing:
+        raise ObservabilityConfigError(
+            f"modèles sans tarif dans config/tarifs.yaml : {', '.join(missing)} ; les "
+            "ajouter avec leur source (ADR 008)"
+        )
+    traces = None
+    if args.traces is not None:
+        traces = otel.Destination(
+            args.traces,
+            settings.require_secret("LANGFUSE_PUBLIC_KEY"),
+            settings.require_secret("LANGFUSE_SECRET_KEY"),
+        )
+    return otel.build(
+        observability,
+        traces=traces,
+        metrics=args.metriques,
+        code=code_version(),
+        identity=args.traces_identite,
+    )
+
+
 def _positive(text: str) -> int:
     value = int(text)
     if value < 1:
@@ -887,6 +993,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("CDG_LOT_EMBEDDING"),
         help="textes embarqués à la fois (ou CDG_LOT_EMBEDDING) : borne le pic mémoire de "
         "l'ingestion (mesure dans l'ADR 005) ; par défaut, celui de fastembed (256)",
+    )
+    parser.add_argument(
+        "--traces",
+        type=_destination,
+        default=os.environ.get("CDG_TRACES") or None,
+        help="destination des traces OpenTelemetry (ou CDG_TRACES), sur le poste ou dans "
+        "le cluster seulement, par exemple http://127.0.0.1:3100/api/public/otel pour "
+        "Langfuse ; clés LANGFUSE_PUBLIC_KEY et LANGFUSE_SECRET_KEY en secrets. Aucune par "
+        "défaut : rien n'est envoyé (ADR 008)",
+    )
+    parser.add_argument(
+        "--metriques",
+        type=_destination,
+        default=os.environ.get("CDG_METRIQUES") or None,
+        help="destination des métriques OpenTelemetry (ou CDG_METRIQUES), sur le poste ou "
+        "dans le cluster seulement ; aucune par défaut (Langfuse les reçoit et les jette : "
+        "ses tableaux viennent des traces)",
+    )
+    parser.add_argument(
+        "--traces-identite",
+        choices=otel.IDENTITIES,
+        default=os.environ.get("CDG_TRACES_IDENTITE", "aucune"),
+        help="aucune (défaut) : aucune identité dans les traces ; sub : le sub "
+        "pseudonyme de l'interface authentifiée. Langfuse sans sa partie commerciale ne "
+        "supprime pas les traces : un sub s'y accumulerait sans fin (conservation, RGPD)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
@@ -1190,6 +1321,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
         logging.config.dictConfig(journaux.config(args.journaux, stream))
+        tracing = settings.third_party_tracing(os.environ)
+        if tracing:
+            raise TracageTiersRefuse(
+                f"traçage par un tiers refusé (ADR 008) : {', '.join(tracing)} ; retirer "
+                "ces variables, ou les mettre à false"
+            )
+        TELEMETRY["processus"] = _telemetry(args)
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
@@ -1199,6 +1337,10 @@ def main(argv: list[str] | None = None) -> int:
             error |= payload
         print(json.dumps(error, ensure_ascii=False, default=str), file=sys.stderr)
         return 1
+    finally:
+        # derniers lots envoyés, en un temps borné ; télémétrie du processus remise à zéro
+        telemetry, TELEMETRY["processus"] = TELEMETRY["processus"], NoTelemetry()
+        telemetry.close()
     # en json, le résultat tient sur une ligne, comme chaque entrée du journal
     indent = None if args.journaux == "json" else 2
     print(json.dumps(result, ensure_ascii=False, indent=indent, default=str), file=out)

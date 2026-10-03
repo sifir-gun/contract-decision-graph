@@ -18,6 +18,8 @@ LIBRARIES = {
     "langchain_core": (
         "adapters/langgraph/",
     ),  # RunnableConfig, type des appels au graphe
+    # client de LangSmith, venu avec langchain-core : coupé par le moteur (ADR 008)
+    "langsmith": ("adapters/langgraph/",),
     # PostgresSaver exige une connexion psycopg, ou un pool (décision du 28/09)
     "psycopg": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
     "psycopg_pool": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
@@ -38,6 +40,8 @@ LIBRARIES = {
     "jwt": ("adapters/oidc.py",),
     # serveur MCP en stdio (ADR 007) : adaptateur entrant, troisième porte
     "mcp": ("adapters/mcp/",),
+    # télémétrie (ADR 008) : API et SDK OpenTelemetry, exportateur OTLP
+    "opentelemetry": ("adapters/otel/",),
 }
 
 # couche -> modules internes (cdg.<nom>) qu'elle peut importer, en plus d'elle-même ;

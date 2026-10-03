@@ -5,7 +5,7 @@ La série elle-même est dans `test_llm_jeu.py`."""
 import pytest
 from demo_set import load
 from serie import (
-    PRICES_USD_PER_MTOKEN,
+    TARIFS,
     Pacer,
     analysts_wall_ms,
     classify,
@@ -131,8 +131,9 @@ def usage(node, model, tokens_in=0, tokens_out=0, latency_ms=0):
 
 
 def test_tarifs_des_modeles_de_la_configuration():
+    """Les séries lisent les tarifs communs avec les traces (config/tarifs.yaml)."""
     config = load_config().llm
-    assert set(PRICES_USD_PER_MTOKEN) == {config.model("main"), config.model("light")}
+    assert {config.model("main"), config.model("light")} <= set(TARIFS)
 
 
 def test_cout_aux_tarifs_publies():
@@ -150,7 +151,7 @@ def test_cout_aux_tarifs_publies():
 
 def test_modele_sans_tarif_erreur_explicite():
     with pytest.raises(ValueError, match="tarif inconnu"):
-        cost_usd([usage("explain", "claude-sonnet-5", 1, 1)])
+        cost_usd([usage("explain", "modele-inconnu", 1, 1)])
 
 
 def test_latences_par_etape():

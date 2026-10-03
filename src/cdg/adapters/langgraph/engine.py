@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
+import langsmith
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     ChannelVersions,
@@ -132,6 +133,10 @@ class LangGraphEngine:
     ):
         self._config, self._open, self._deps = config, open_graph, deps
         self._locks, self._resumes = locks, resumes
+        # LangSmith jamais actif (ADR 008) : ce réglage global passe avant l'environnement,
+        # où LANGCHAIN_TRACING_V2=true l'emporterait sur LANGSMITH_TRACING=false ; la CLI
+        # refuse en plus de démarrer avec une telle variable
+        langsmith.configure(enabled=False)
 
     def run(
         self,
@@ -190,14 +195,17 @@ class LangGraphEngine:
             )
 
     def resume_interrupted(self) -> list[dict[str, Any]]:
-        # les dépendances d'une analyse : la reprise refait les étapes interrompues
-        with self._open(self._deps.run()) as graph:
+        # les dépendances d'une analyse : la reprise refait les étapes interrompues ;
+        # une trace par analyse reprise (ADR 008)
+        deps = self._deps.run()
+        with self._open(deps) as graph:
             return orchestrator.resume_interrupted(
                 graph,
                 hold=self._locks.hold,
                 record=self._resumes.record,
                 limit=self._config.interrupted.max_resumes,
                 config=self._config,
+                telemetry=deps.telemetry,
             )
 
 

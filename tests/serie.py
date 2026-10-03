@@ -16,16 +16,14 @@ from itertools import pairwise
 from statistics import median
 from typing import Any
 
+from cdg.application import observation
+from cdg.application.observation import load_observability_config
 from cdg.domain.models import Clause, Usage
 
-# tarifs publiés par Mistral, dollars par million de tokens (entrée, sortie), relevés le
-# 26/09/2026 sur mistral.ai/pricing/api : Mistral Small 4 (mistral-small-2603) et
-# Ministral 3 8B (ministral-8b-2512). Hors configuration : ce ne sont pas des réglages de
-# l'analyse, et ils changeraient son empreinte.
-PRICES_USD_PER_MTOKEN: dict[str, tuple[float, float]] = {
-    "mistral-small-2603": (0.15, 0.60),
-    "ministral-8b-2512": (0.15, 0.15),
-}
+# tarifs publiés, dollars par million de tokens, avec leur source et leur date : ceux de
+# config/tarifs.yaml, communs avec les traces (ADR 008). Hors de decision.yaml : ce ne
+# sont pas des réglages de l'analyse, et ils changeraient son empreinte.
+TARIFS = load_observability_config().tarifs
 # ordre de faveur des décisions finales ; une revue humaine en attente n'accorde rien
 RANK = {"GO": 2, "GO_RESERVES": 1, "NO_GO": 0, None: 0}
 
@@ -132,15 +130,11 @@ def clause_gaps(obtained: list[Clause], expected: list[Clause]) -> list[str]:
 
 
 def cost_usd(usage: list[Usage]) -> float:
-    total = 0.0
-    for u in usage:
-        if u.model not in PRICES_USD_PER_MTOKEN:
-            raise ValueError(
-                f"tarif inconnu pour {u.model} : l'ajouter, avec sa source"
-            )
-        price_in, price_out = PRICES_USD_PER_MTOKEN[u.model]
-        total += (u.tokens_in * price_in + u.tokens_out * price_out) / 1_000_000
-    return total
+    """Coût des appels, aux tarifs de config/tarifs.yaml (un modèle sans tarif lève
+    `UnpricedModel`, une ValueError)."""
+    return sum(
+        observation.cost_usd(u.model, u.tokens_in, u.tokens_out, TARIFS) for u in usage
+    )
 
 
 def tokens_by_model(usage: list[Usage]) -> dict[str, int]:

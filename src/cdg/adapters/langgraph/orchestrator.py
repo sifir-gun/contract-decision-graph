@@ -39,6 +39,7 @@ from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
+from cdg.application.observation import NoTelemetry
 from cdg.application.state import AnalystInput, ContractState
 from cdg.domain import audit, expiry, masking, policy, resumption
 from cdg.domain.authorization import Actor
@@ -49,6 +50,7 @@ from cdg.ports.engine import ThreadError
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
 from cdg.ports.locks import ContractBusy
 from cdg.ports.retriever import Retriever
+from cdg.ports.telemetry import Telemetry
 
 log = logging.getLogger(__name__)
 
@@ -208,12 +210,41 @@ def will_retry(name: str, policy: RetryPolicy) -> Callable[[Exception], bool]:
     return lambda exc: _retried(policy, exc, _attempt(name))
 
 
+_NO_TELEMETRY = NoTelemetry()  # sans destination : aucune étape tracée
+
+
+def _node_attempt() -> int | None:
+    """Rang de l'exécution du nœud (1 à la première), pour sa trace ; None hors d'une
+    exécution du graphe (un nœud appelé directement, dans un test)."""
+    try:
+        info = get_runtime().execution_info
+    except RuntimeError:  # LangGraph : appelé hors d'un contexte d'exécution
+        return None
+    return info.node_attempt if info is not None else None
+
+
+def stepped(
+    name: str, fn: Callable[[Any], dict[str, Any]], telemetry: Telemetry
+) -> Node:
+    """Nœud non gardé (`human_review`, où aboutissent les échecs), avec son étape (ADR
+    008) ; l'interruption de la revue n'est pas un échec."""
+
+    def node(state: Any) -> dict[str, Any]:
+        with telemetry.step(
+            name, attempt=_node_attempt(), domain=None, passthrough=(GraphBubbleUp,)
+        ):
+            return fn(state)
+
+    return node
+
+
 def guard(
     name: str,
     fn: Callable[[Any], dict[str, Any]],
     *,
     retry: RetryPolicy | None = None,
     on_failure: Callable[[list[NodeFailure]], dict[str, Any]] | None = None,
+    telemetry: Telemetry = _NO_TELEMETRY,
 ) -> Node:
     """Garde d'échec de nœud : une exception devient un `NodeFailure` dans `failures`.
 
@@ -224,11 +255,19 @@ def guard(
       l'humain), à partir de tous les échecs connus.
     `explain` se replie lui-même sur le gabarit : sa garde ne voit qu'une erreur d'avant
     l'appel au LLM.
+    Chaque exécution a son étape (ADR 008) : l'exception la traverse avant la garde,
+    l'étape en garde le type ; le contrôle de LangGraph la ferme sans échec.
     """
 
     def node(state: Any) -> dict[str, Any]:
         try:
-            return fn(state)
+            with telemetry.step(
+                name,
+                attempt=_node_attempt(),
+                domain=state.get("domain"),  # analyste seulement
+                passthrough=(GraphBubbleUp,),
+            ):
+                return fn(state)
         except GraphBubbleUp:
             raise
         except Exception as exc:
@@ -305,10 +344,12 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     retry = retry_policy(config.analyst_retry, retry_on=analyst_retryable)
     extraction_retry = retry_policy(config.extraction_retry, retry_on=transient)
     explain_retry = retry_policy(config.explain_retry, retry_on=transient)
+    # chaque nœud gardé a son étape (ADR 008)
+    guarded = partial(guard, telemetry=deps.telemetry)
     builder = StateGraph(ContractState)
     builder.add_node(
         "validate_input",
-        guard(
+        guarded(
             "validate_input",
             partial(validate_input, decision_config=config),
             on_failure=escalate,
@@ -316,7 +357,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     )
     builder.add_node(
         "extract_clauses",
-        guard(
+        guarded(
             "extract_clauses",
             partial(extract_clauses, extractor=deps.extractor),
             retry=extraction_retry,
@@ -325,7 +366,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     )
     builder.add_node(
         "verify_extraction",
-        guard(
+        guarded(
             "verify_extraction",
             partial(verify_extraction, decision_config=config),
             on_failure=escalate,
@@ -335,7 +376,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     # (voir docs/journal.md)
     builder.add_node(
         "analyst",
-        guard(
+        guarded(
             "analyst",
             partial(analyst, crag=deps.crag, decision_config=config),
             retry=retry,
@@ -345,17 +386,24 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     )
     builder.add_node(
         "decision_gate",
-        guard(
+        guarded(
             "decision_gate",
             partial(decision_gate, decision_config=config),
             on_failure=escalate,
         ),
     )
-    builder.add_node("human_review", partial(human_review, decision_config=config))
+    builder.add_node(
+        "human_review",
+        stepped(
+            "human_review",
+            partial(human_review, decision_config=config),
+            deps.telemetry,
+        ),
+    )
     # explain se replie sur le gabarit, sauf pour une erreur passagère encore reprise
     builder.add_node(
         "explain",
-        guard(
+        guarded(
             "explain",
             partial(
                 explain,
@@ -369,7 +417,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
     )
     builder.add_node(
         "audit_seal",
-        guard(
+        guarded(
             "audit_seal",
             lambda state: audit_seal(
                 state,
@@ -381,7 +429,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
             ),
         ),
     )
-    builder.add_node("reject", guard("reject", reject))
+    builder.add_node("reject", guarded("reject", reject))
 
     builder.add_edge(START, "validate_input")
     builder.add_conditional_edges(
@@ -660,6 +708,7 @@ def resume_interrupted(
     limit: int,
     config: DecisionConfig,
     thread_ids: set[str] | None = None,
+    telemetry: Telemetry = _NO_TELEMETRY,
 ) -> list[dict]:
     """Reprend depuis leur dernier checkpoint les threads restés en cours (un processus
     arrêté ou mort au milieu d'une analyse), chacun sous son verrou, relu sous le verrou.
@@ -674,7 +723,10 @@ def resume_interrupted(
     cumulées, sont citées toutes deux.
 
     `thread_ids` restreint la reprise, comme pour l'expiration : les tests ne touchent
-    jamais aux autres threads de la base. La CLI et l'interface n'en passent pas."""
+    jamais aux autres threads de la base. La CLI et l'interface n'en passent pas.
+
+    Une trace par analyse reprise (ADR 008), ouverte sous le verrou une fois la reprise
+    décidée : aucune quand il n'y a rien à reprendre."""
     current = audit.config_hash(config)
     found = set(list_threads(graph))
     if thread_ids is not None:
@@ -687,28 +739,33 @@ def resume_interrupted(
             with hold(thread_id):
                 if not _in_progress(graph, thread_id):
                     continue  # fini entre-temps
-                attempt = record(thread_id)
-                snapshot = graph.get_state(_thread(thread_id))
-                analysed_with = snapshot.values.get("config_hash")
-                failures = resumption.escalation_failures(
-                    snapshot.next, attempt, limit, analysed_with, current
-                )
-                if failures:
-                    _escalate_interrupted(
-                        graph,
-                        thread_id,
-                        failures,
-                        resumption.config_change(analysed_with, current),
-                        resumption.escalation_record(
-                            attempt, limit, analysed_with, current
-                        ),
+                with telemetry.operation(
+                    "reprise", contract_id=thread_id, actor=None
+                ) as finish:
+                    attempt = record(thread_id)
+                    snapshot = graph.get_state(_thread(thread_id))
+                    analysed_with = snapshot.values.get("config_hash")
+                    failures = resumption.escalation_failures(
+                        snapshot.next, attempt, limit, analysed_with, current
                     )
-                else:
-                    log.info(
-                        "reprise %d de l'analyse interrompue %s", attempt, thread_id
-                    )
-                    graph.invoke(None, _thread(thread_id), durability=DURABILITY)
-                resumed.append(thread_status(graph, thread_id))
+                    if failures:
+                        _escalate_interrupted(
+                            graph,
+                            thread_id,
+                            failures,
+                            resumption.config_change(analysed_with, current),
+                            resumption.escalation_record(
+                                attempt, limit, analysed_with, current
+                            ),
+                        )
+                    else:
+                        log.info(
+                            "reprise %d de l'analyse interrompue %s", attempt, thread_id
+                        )
+                        graph.invoke(None, _thread(thread_id), durability=DURABILITY)
+                    status = thread_status(graph, thread_id)
+                    finish(status)
+                resumed.append(status)
         except ContractBusy:
             continue  # en cours dans un autre processus
     return resumed
