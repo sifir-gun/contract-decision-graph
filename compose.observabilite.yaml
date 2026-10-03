@@ -7,8 +7,9 @@
 #   docker compose -f compose.observabilite.yaml down -v    # arrête, données supprimées
 #
 # Partie libre de Langfuse seule (MIT hors ee/) : aucune clé de licence. Télémétrie,
-# assistant et inscription coupés. Seule l'interface est publiée, sur 127.0.0.1:3100 ; les
-# magasins de données n'ont qu'un réseau interne, sans sortie. Images figées par empreinte,
+# assistant et inscription coupés. Seule l'interface est publiée, sur 127.0.0.1:3100, sans
+# sortie vers Internet (sa vérification de mise à jour échoue) ; les autres services n'ont
+# qu'un réseau interne, sans sortie. Images figées par empreinte,
 # les mêmes que dans le cluster de test ; images de Langfuse, de ClickHouse et de Valkey
 # sans signature vérifiable : exception limitée aux tests
 # (securite/exceptions-signatures.yaml). Secrets dans .env, tous exigés (.env.example).
@@ -77,6 +78,9 @@ services:
     ports:
       - 127.0.0.1:3100:3000
     networks: [interne, poste]
+    # aucun résolveur pour les noms d'Internet : Langfuse web vérifie ses mises à jour
+    # auprès de langfuse.com à chaque page authentifiée (checkUpdate, non réglable)
+    dns: [127.0.0.1]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/public/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 5s
@@ -186,7 +190,11 @@ services:
 networks:
   interne:
     internal: true
-  poste: {}
+  # réseau du port publié, sans traduction d'adresse : le poste joint l'interface, mais
+  # Langfuse web ne sort pas vers Internet
+  poste:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
 
 volumes:
   postgres:
