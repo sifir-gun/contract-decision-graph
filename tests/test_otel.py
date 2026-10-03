@@ -16,11 +16,18 @@ import logging
 
 import pytest
 from doubles import FakeLLM
-from opentelemetry import metrics, trace
+from opentelemetry import context, metrics, trace
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import SpanKind, StatusCode
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    SpanContext,
+    SpanKind,
+    StatusCode,
+    TraceFlags,
+    TraceState,
+)
 from pydantic import BaseModel
 
 from cdg.adapters.otel import attributes
@@ -297,6 +304,35 @@ def test_sub_seulement_avec_le_reglage():
 def test_reglage_d_identite_inconnu_refuse():
     with pytest.raises(ValueError, match="identité"):
         otel(identity="nom")
+
+
+# --- contexte distant ----------------------------------------------------------------------
+
+
+def test_operation_toujours_racine_meme_sous_un_contexte_distant():
+    """Un contexte reçu d'un client (le SDK MCP installe le `traceparent` et le
+    `tracestate` de `_meta`), ici non échantillonné et porteur d'un texte libre, n'est
+    jamais repris : chaque opération ouvre sa propre trace, enregistrée."""
+    telemetry, exporter, _ = otel()
+    remote = SpanContext(
+        trace_id=0x4BF92F3577B34DA6A3CE929D0E0E4736,
+        span_id=0x00F067AA0BA902B7,
+        is_remote=True,
+        trace_flags=TraceFlags(TraceFlags.DEFAULT),
+        trace_state=TraceState([("fuite", "Le fournisseur ACME paiera")]),
+    )
+    token = context.attach(trace.set_span_in_context(NonRecordingSpan(remote)))
+    try:
+        analyse(telemetry)
+    finally:
+        context.detach(token)
+    spans = exporter.get_finished_spans()
+    assert spans, "rien d'enregistré : le contexte distant non échantillonné l'emporte"
+    root = by_name(exporter)["cdg.analyse"]
+    assert root.parent is None
+    assert root.context.trace_id != remote.trace_id
+    assert {s.context.trace_id for s in spans} == {root.context.trace_id}
+    assert "ACME" not in dumped(exporter)
 
 
 # --- provider, ressource, métriques -----------------------------------------------------------

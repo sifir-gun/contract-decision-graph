@@ -26,6 +26,8 @@ Le port `ports/telemetry.py` a trois points d'entrée et une fermeture : `operat
 
 **Adaptateur** (`adapters/otel/`), seul à importer `opentelemetry` (`tests/test_isolation.py`). OpenTelemetry Python **1.45.0** (25/09/2026), licence Apache-2.0, aucun avis de sécurité au 02/10 : API, SDK, exportateur OTLP en HTTP. Il a son propre `TracerProvider` et son propre `MeterProvider`, **jamais installés comme globaux** : ni la télémétrie du SDK Mistral, qui tracerait prompts et réponses, ni le middleware du SDK MCP, qui enregistre le texte des exceptions, ne trouvent où émettre. La ressource est construite par le code (nom du service, commit) : ni hôte, ni processus, ni `OTEL_RESOURCE_ATTRIBUTES`.
 
+**Chaque opération est une racine.** Le middleware du SDK MCP, actif par défaut, installe comme contexte courant le `traceparent` et le `tracestate` que le client met dans le `_meta` de sa requête, même sans provider global : repris, ce contexte rattacherait l'analyse à une trace choisie par le client, copierait son `tracestate` (un texte libre de plusieurs kilo-octets, hors de toute liste blanche) dans chaque span exporté, et un drapeau « non échantillonné » couperait l'enregistrement sans rien dire. Le span d'une opération s'ouvre donc toujours sur un contexte vide (relecture de la branche, 03/10).
+
 ### Confidentialité des traces
 
 Langfuse range dans ses métadonnées tous les attributs qu'il reçoit : ce qui part doit donc être sûr en entier.

@@ -5,6 +5,8 @@
   SDK MCP (qui enregistre le texte des exceptions) ne trouvent où émettre.
 - Ressource construite par le code (nom du service, commit), jamais par `Resource.create`
   ni par ses détecteurs : ni hôte, ni processus, ni variables `OTEL_RESOURCE_ATTRIBUTES`.
+- Chaque opération est une racine : un contexte reçu d'un client (le SDK MCP installe
+  celui du `_meta` de la requête) n'est jamais repris.
 - Attributs en liste blanche (`attributes.py`). Une exception ne laisse que son type
   (`error.type`) et un statut d'erreur sans description : ni `record_exception`, ni
   message. Aucune identité par défaut ; le `sub` de l'interface authentifiée sur réglage.
@@ -26,6 +28,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.metrics import MeterProvider
@@ -164,8 +167,13 @@ class OtelTelemetry:
         user = None
         if self._identity == "sub" and actor is not None and actor.canal == "interface":
             user = actor.sub
+        # toujours une racine : jamais le contexte courant, que le SDK MCP tire du
+        # `_meta` du client (rattachement, `tracestate` libre, échantillonnage)
         with self._tracer.start_as_current_span(
-            f"cdg.{name}", record_exception=False, set_status_on_exception=False
+            f"cdg.{name}",
+            context=Context(),
+            record_exception=False,
+            set_status_on_exception=False,
         ) as span:
             values: dict[str, Any] = {
                 "langfuse.trace.name": name,

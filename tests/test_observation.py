@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from doubles import CODE, CONTRACT_TEXT, clauses
 from fuites import leaks
+from mcp_helpers import MCP_ACTOR, session
 from observation_helpers import ANALYSTE, CONFIG, service, tarifs_de_test
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -23,6 +24,7 @@ from web_helpers import PENDING_TEXT
 
 from cdg import cli
 from cdg.adapters.demo.references import DeclaredCrag
+from cdg.adapters.mcp.server import create_server
 from cdg.adapters.otel.telemetry import OtelTelemetry
 from cdg.application import demo_set
 from cdg.application.observation import NoTelemetry
@@ -149,6 +151,37 @@ def test_interruption_de_la_revue_n_est_pas_un_echec(otel):
     svc.analyse(PENDING_TEXT, contract_id="c-attente", actor=ANALYSTE)
     [review] = [s for s in exporter.get_finished_spans() if s.name == "human_review"]
     assert "error.type" not in review.attributes
+
+
+def test_contexte_d_un_client_mcp_ignore(otel, monkeypatch):
+    """Le SDK MCP installe comme contexte courant le `traceparent` et le `tracestate`
+    que le client met dans `_meta` : ni le rattachement, ni le texte libre du
+    `tracestate`, ni son drapeau d'échantillonnage ne passent dans les traces."""
+    telemetry, exporter, _ = otel
+    monkeypatch.setitem(cli.TELEMETRY, "processus", telemetry)
+    server = create_server(cli.demo_service(CONFIG), actor=MCP_ACTOR, demo=True)
+    trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+    for flags in ("01", "00"):
+        arguments = {
+            "contrat_du_jeu": "demo-01-go-maintenance",
+            "identifiant": f"c-{flags}",
+        }
+        meta = {
+            "traceparent": f"00-{trace_id}-00f067aa0ba902b7-{flags}",
+            "tracestate": "fuite=Le fournisseur ACME paiera 30 pct de penalites",
+        }
+        result = session(
+            server,
+            lambda client, arguments=arguments, meta=meta: client.call_tool(
+                "analyser_contrat", arguments, meta=meta
+            ),
+        )
+        assert not result.is_error, result.content
+    roots = [root_of(spans) for spans in traces(exporter).values()]
+    assert [r.attributes["langfuse.session.id"] for r in roots] == ["c-01", "c-00"]
+    assert all(r.context.trace_id != int(trace_id, 16) for r in roots)
+    spans = [json.loads(s.to_json()) for s in exporter.get_finished_spans()]
+    assert "ACME" not in json.dumps(spans)
 
 
 def test_revue_refusee_type_seulement(otel):

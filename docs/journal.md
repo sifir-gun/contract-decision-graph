@@ -2934,7 +2934,7 @@ Compose officiel du tag v4.50.0, images figées par empreinte, à côté de sept
 
 - **LangSmith** (0.14.0, venu de `langchain-core`) : `LANGCHAIN_TRACING_V2=true` l'emporte sur le `LANGSMITH_TRACING=false` du `Dockerfile`, et la lecture de l'environnement est mise en cache. `langsmith.configure(enabled=False)` l'emporte sur tout ; le test le prouve avec des témoins, qui le réactivent pour vérifier que le test ne passe pas à vide.
 - **SDK Mistral** : `MISTRAL_SDK_TELEMETRY` tracerait prompts et réponses, vers le provider global ou vers `api.mistral.ai`. Refusée au démarrage, comme les variables de LangSmith.
-- **SDK MCP** : son middleware OpenTelemetry enregistre le texte des exceptions s'il trouve un provider global. Le provider du projet ne l'est jamais.
+- **SDK MCP** : son middleware OpenTelemetry enregistre le texte des exceptions s'il trouve un provider global ; le provider du projet ne l'est jamais. Mais, même sans provider global, il installe comme contexte courant le `traceparent` et le `tracestate` du `_meta` de la requête : l'analyse devenait l'enfant d'une trace choisie par le client, son `tracestate` (texte libre) partait dans chaque span, et un drapeau « non échantillonné » coupait l'enregistrement. Trouvé par la relecture ; chaque opération est désormais une racine.
 - **OpenTelemetry 1.45** :
   - `force_flush` ignore son délai, `shutdown` peut attendre 30 s : la fermeture se fait dans un fil, attendu au plus `delai_fermeture_s` ;
   - l'exportateur passe par urllib3, qui ignore `HTTPS_PROXY` ;
