@@ -357,8 +357,11 @@ def build(
     identity: str = "aucune",
 ) -> Telemetry:
     """Télémétrie du processus : rien sans destination (aucun objet du SDK créé) ; sinon
-    l'export OTLP en HTTP, configuré par le code seul (jamais par les variables `OTEL_*`,
-    dont le SDK fusionne pourtant les en-têtes : à ne pas poser)."""
+    l'export OTLP en HTTP. Destination, délais, file, lots et ressource sont fixés par le
+    code. Le SDK lit pourtant encore quelques variables `OTEL_*` (en-têtes ajoutés à ceux
+    du code, compression, certificats, échantillonnage, limites des spans,
+    `OTEL_SDK_DISABLED`) : aucune ne change la destination ni n'ajoute de donnée ; à ne
+    pas poser (ADR 008)."""
     if traces is None and metrics is None:
         return NoTelemetry()
     export = config.export
