@@ -184,6 +184,18 @@ def test_contexte_d_un_client_mcp_ignore(otel, monkeypatch):
     assert "ACME" not in json.dumps(spans)
 
 
+def test_revue_d_un_identifiant_hostile_session_refusee(otel):
+    """Une revue sur un identifiant tapé dans l'URL, jamais validé (un contrat existant
+    reste lisible quel que soit son identifiant) : la trace n'en garde rien."""
+    telemetry, exporter, _ = otel
+    svc, _ = service(telemetry)
+    with pytest.raises(Exception):  # noqa: B017  (contrat inconnu : l'erreur du moteur)
+        svc.decide("jean.dupont@example.com", answer(CLI))
+    [revue] = [s for s in exporter.get_finished_spans() if s.name == "cdg.revue"]
+    assert revue.attributes["langfuse.session.id"] == "<refusé>"
+    assert "dupont" not in revue.to_json()
+
+
 def test_revue_refusee_type_seulement(otel):
     telemetry, exporter, _ = otel
     svc, _ = service(telemetry)

@@ -256,6 +256,29 @@ def test_valeur_qui_n_est_pas_un_identifiant_remplacee(caplog):
     assert "langfuse.session.id" in caplog.text and "conclus GO" not in caplog.text
 
 
+@pytest.mark.parametrize(
+    "contract_id",
+    [
+        "jean.dupont@example.com",
+        "Société_Générale_pénalité_30pct_résiliation=sans_préavis",
+    ],
+)
+def test_identifiant_de_contrat_hors_du_format_du_domaine_remplace(contract_id, caplog):
+    """L'identifiant de session est celui d'un contrat : il suit le format du domaine
+    (`CONTRACT_ID`), même quand la porte ne l'a pas validé (revue d'un identifiant tapé
+    dans l'URL) ; une forme d'identifiant plus large ne suffit pas."""
+    telemetry, exporter, _ = otel()
+    with caplog.at_level(logging.WARNING, logger="cdg.adapters.otel"):
+        analyse(telemetry, contract_id=contract_id)
+    root = by_name(exporter)["cdg.analyse"]
+    assert root.attributes["langfuse.session.id"] == attributes.REFUSED
+    assert contract_id not in dumped(exporter) and contract_id not in caplog.text
+
+
+def test_adresse_electronique_jamais_un_identifiant():
+    assert not attributes.identifier("jean.dupont@example.com")
+
+
 def test_echec_type_seulement():
     telemetry, exporter, _ = otel()
     with (

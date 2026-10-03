@@ -86,7 +86,7 @@ Le coût est calculé par le code, aux tarifs de `config/tarifs.yaml` (dollars p
 
 ## Limites
 
-- **L'identifiant du contrat sort** (`langfuse.session.id`), pour relier l'analyse et sa revue. Il est choisi par l'opérateur : comme dans le journal d'audit, il ne doit pas porter le nom d'un client.
+- **L'identifiant du contrat sort** (`langfuse.session.id`), pour relier l'analyse et sa revue. Il est choisi par l'opérateur ou, par MCP, par l'assistant ; dans les traces, il doit suivre le format du domaine (lettres non accentuées, chiffres, `.`, `_`, `-`), sinon il est remplacé, même lors d'une revue où il vient de l'URL sans contrôle. Comme dans le journal d'audit, il ne doit pas porter le nom d'un client. Une adresse électronique n'est jamais une valeur admise.
 - **Les traces s'accumulent** : la rétention de Langfuse relève de son édition commerciale. Par défaut, elles ne contiennent aucune donnée personnelle ; avec `--traces-identite sub`, il faudrait les purger à la main.
 - **Le coût est une estimation** aux tarifs relevés : la facture du fournisseur peut différer (remises, changement de prix). Les tarifs se relèvent avec leur source et leur date.
 - **Les variables `OTEL_*` lues par le SDK** quand une destination est configurée ne sont ni refusées ni contrôlées : elles ne sont pas à poser (piste au journal).

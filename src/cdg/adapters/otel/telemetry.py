@@ -48,6 +48,7 @@ from cdg.application.observation import (
 )
 from cdg.application.service import state_label
 from cdg.domain.authorization import Actor
+from cdg.domain.identifiers import CONTRACT_ID
 from cdg.domain.models import Usage
 from cdg.domain.numeric import rounded
 from cdg.domain.version import CodeVersion
@@ -114,6 +115,16 @@ class _Call:
         self.usage = usage
 
 
+def _session(contract_id: str | None) -> str | None:
+    """Identifiant de session : celui d'un contrat, au format du domaine ; sinon remplacé
+    (une revue reçoit l'identifiant tel que tapé, et un contrat ancien peut ne pas suivre
+    le format, contrôlé à la création seulement)."""
+    if contract_id is None or CONTRACT_ID.fullmatch(contract_id):
+        return contract_id
+    log.warning("attribut langfuse.session.id : identifiant hors du format, remplacé")
+    return attributes.REFUSED
+
+
 def _failed(span: Span, exc: BaseException) -> dict[str, Any]:
     span.set_status(Status(StatusCode.ERROR))  # sans description : jamais le message
     return {"error.type": type(exc).__name__}
@@ -177,7 +188,7 @@ class OtelTelemetry:
         ) as span:
             values: dict[str, Any] = {
                 "langfuse.trace.name": name,
-                "langfuse.session.id": contract_id,
+                "langfuse.session.id": _session(contract_id),
                 "langfuse.user.id": user,
                 "cdg.operation": name,
                 "cdg.canal": actor.canal if actor is not None else None,

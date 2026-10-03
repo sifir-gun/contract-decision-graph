@@ -15,7 +15,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 REFUSED = "<refusé>"
-_IDENTIFIER = re.compile(r"[\w.:/@+|=-]{1,200}")
+# sans « @ » : une adresse électronique n'est jamais un identifiant
+_IDENTIFIER = re.compile(r"[\w.:/+|=-]{1,200}")
 
 ALLOWED: dict[str, frozenset[str]] = {
     "operation": frozenset(
