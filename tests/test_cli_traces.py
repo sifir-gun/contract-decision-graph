@@ -221,3 +221,20 @@ def test_url_de_destination_admise(url):
 def test_url_de_destination_refusee(url, motif):
     with pytest.raises(cli.argparse.ArgumentTypeError, match=motif):
         cli._destination(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ftp://pk:canari-7f3e@langfuse.example.org/otel",
+        "langfuse.example.org/otel?jeton=canari-7f3e",
+        "http://pk:canari-7f3e@langfuse.example.org/otel",
+        "https://langfuse.example.org/otel?jeton=canari-7f3e",
+        "http://langfuse.example.org/otel#canari-7f3e",
+    ],
+)
+def test_url_refusee_sans_la_citer(url):
+    """Le message d'erreur ne reprend jamais l'URL : elle peut porter une clé."""
+    with pytest.raises(cli.argparse.ArgumentTypeError) as refused:
+        cli._destination(url)
+    assert "canari-7f3e" not in str(refused.value)

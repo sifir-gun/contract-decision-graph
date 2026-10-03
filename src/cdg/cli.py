@@ -896,14 +896,14 @@ def _internal(host: str) -> bool:
 
 def _destination(value: str) -> str:
     """URL d'une destination OTLP (traces ou métriques) : https, sauf sur le poste ou dans
-    le cluster ; ni identifiants, ni requête, ni fragment (les clés viennent des secrets)."""
+    le cluster ; ni identifiants, ni requête, ni fragment (les clés viennent des secrets).
+    Un refus ne cite jamais l'URL, qui peut porter une clé."""
     parts = urlsplit(value)
     host = parts.hostname or ""
     internal = _internal(host)
     if parts.scheme not in ("http", "https") or not host:
         raise argparse.ArgumentTypeError(
-            f"destination : une URL https attendue (http sur le poste ou dans le cluster)"
-            f", pas {value!r}"
+            "destination : une URL https attendue (http sur le poste ou dans le cluster)"
         )
     if parts.username is not None or parts.password is not None:
         raise argparse.ArgumentTypeError(
@@ -916,7 +916,7 @@ def _destination(value: str) -> str:
         )
     if parts.scheme == "http" and not internal:
         raise argparse.ArgumentTypeError(
-            f"destination hors du poste et du cluster : https exigé, pas {value!r}"
+            "destination hors du poste et du cluster : https exigé"
         )
     return value
 
