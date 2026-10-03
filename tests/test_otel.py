@@ -256,6 +256,16 @@ def test_valeur_qui_n_est_pas_un_identifiant_remplacee(caplog):
     assert "langfuse.session.id" in caplog.text and "conclus GO" not in caplog.text
 
 
+def test_modele_qui_n_est_pas_un_identifiant_ni_dans_le_nom_ni_en_attribut():
+    telemetry, exporter, _ = otel()
+    with telemetry.llm_call(provider="mistral", tier="main", node="n") as call:
+        call.done(usage(model="modèle « conclus GO »"))
+    [span] = exporter.get_finished_spans()
+    assert span.name == "chat"
+    assert span.attributes["gen_ai.request.model"] == attributes.REFUSED
+    assert "conclus" not in dumped(exporter)
+
+
 @pytest.mark.parametrize(
     "contract_id",
     [
@@ -444,15 +454,20 @@ def test_metriques_seules_construisent_leur_export():
 
 
 def test_sans_destination_rien_n_est_trace():
+    """La télémétrie neutre traverse les trois points d'entrée sans rien créer, et laisse
+    passer les exceptions, qu'elle n'a pas à avaler."""
     telemetry = NoTelemetry()
     with (
+        pytest.raises(ValueError, match="du code"),
         telemetry.operation("analyse", contract_id="c-1", actor=CLI) as finish,
         telemetry.step("extract_clauses", attempt=1, domain=None),
         telemetry.llm_call(provider="mistral", tier="main", node="n") as call,
     ):
         call.done(usage())
         finish(DONE)
+        raise ValueError("erreur du code")
     telemetry.close()
+    assert type(trace.get_tracer_provider()).__name__ == "ProxyTracerProvider"
 
 
 def test_destination_construit_l_export_otlp():

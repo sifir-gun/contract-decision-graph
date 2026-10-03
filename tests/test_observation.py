@@ -128,6 +128,32 @@ def test_revue_et_expiration_ont_leur_trace_de_meme_session(otel):
     )
 
 
+def test_acteur_de_la_revue_sur_sa_trace():
+    """Le canal du relecteur, et son `sub` avec le réglage seulement, sur la trace de la
+    revue (analyse et revue par deux personnes de l'interface authentifiée)."""
+    for identity, user in (("aucune", None), ("sub", "sub-relecteur")):
+        exporter = InMemorySpanExporter()
+        telemetry = OtelTelemetry(
+            tarifs_de_test(),
+            span_processor=SimpleSpanProcessor(exporter),
+            metric_reader=None,
+            code=CODE,
+            identity=identity,
+        )
+        svc, _ = service(telemetry)
+        iss = "https://idp.example.org"
+        analyste = Actor(canal="interface", authentifie=True, iss=iss, sub="sub-a")
+        relecteur = Actor(
+            canal="interface", authentifie=True, iss=iss, sub="sub-relecteur"
+        )
+        svc.analyse(PENDING_TEXT, contract_id="c-attente", actor=analyste)
+        svc.decide("c-attente", answer(relecteur))
+        [revue] = [s for s in exporter.get_finished_spans() if s.name == "cdg.revue"]
+        assert revue.attributes["cdg.canal"] == "interface"
+        assert revue.attributes.get("langfuse.user.id") == user
+        assert "error.type" not in revue.attributes
+
+
 def test_analystes_en_parallele_dans_la_meme_trace(otel):
     telemetry, exporter, _ = otel
     svc, _ = service(telemetry)
@@ -287,6 +313,16 @@ def test_aucun_texte_des_13_contrats_dans_les_traces(otel):
         sources += [c.quote for c in contract.clauses if c.quote]
         parties += list(contract.parties)
         sent += [call for llm in llms for call in llm.calls]
+    # ce qui est parti au modèle (prompts réels) et ce qu'il a répondu : citations de
+    # l'extraction (ci-dessus), textes de l'explication
+    assert {call["node"] for call in sent} >= {"extract_clauses", "explain"}
+    sources += [call["user"] for call in sent]
+    sources += [
+        finding["text"]
+        for call in sent
+        if call["node"] == "explain"
+        for finding in faithful_explanation(call["user"])["findings"]
+    ]
     out = dumped(exporter, reader)
     assert exporter.get_finished_spans(), "aucune trace : le test passerait à vide"
     found = {window for source in sources for window in leaks(source, out)}
