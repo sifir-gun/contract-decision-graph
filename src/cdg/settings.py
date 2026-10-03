@@ -29,6 +29,9 @@ SECRETS = (
     "APP_DB_PASSWORD",
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
+    # destination des traces (ADR 008), Langfuse : clé publique et clé secrète
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
 )
 
 

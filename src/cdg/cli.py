@@ -34,6 +34,7 @@ from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph import checkpointer, orchestrator
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.adapters.llm import API_KEY_VARS, build_provider
+from cdg.adapters.otel import telemetry as otel
 from cdg.adapters.postgres import connexions, conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
@@ -46,7 +47,13 @@ from cdg.application import demo_set, evaluation, ingestion
 from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
-from cdg.application.observation import NoTelemetry, ObservedProvider
+from cdg.application.observation import (
+    NoTelemetry,
+    ObservabilityConfigError,
+    ObservedProvider,
+    load_observability_config,
+    missing_prices,
+)
 from cdg.application.service import ContractService
 from cdg.domain import audit, authorization, expiry
 from cdg.domain.authorization import Actor
@@ -859,6 +866,66 @@ def _warm_up(config: DecisionConfig, started: threading.Event) -> None:
     started.set()
 
 
+# hôtes où une destination en http clair est admise : le poste, ou un service interne au
+# cluster (nom court, ou en .svc) ; ailleurs, https
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _destination(value: str) -> str:
+    """URL d'une destination OTLP (traces ou métriques) : https, sauf sur le poste ou dans
+    le cluster ; ni identifiants, ni requête, ni fragment (les clés viennent des secrets)."""
+    parts = urlsplit(value)
+    host = parts.hostname or ""
+    internal = host in LOCAL_HOSTS or "." not in host or ".svc" in host
+    if parts.scheme not in ("http", "https") or not host:
+        raise argparse.ArgumentTypeError(
+            f"destination : une URL https attendue (http sur le poste ou dans le cluster)"
+            f", pas {value!r}"
+        )
+    if parts.username is not None or parts.password is not None:
+        raise argparse.ArgumentTypeError(
+            "destination : pas d'identifiants dans l'URL (LANGFUSE_PUBLIC_KEY et "
+            "LANGFUSE_SECRET_KEY, en secrets)"
+        )
+    if parts.query or parts.fragment:
+        raise argparse.ArgumentTypeError(
+            "destination : ni requête ni fragment dans l'URL"
+        )
+    if parts.scheme == "http" and not internal:
+        raise argparse.ArgumentTypeError(
+            f"destination hors du poste et du cluster : https exigé, pas {value!r}"
+        )
+    return value
+
+
+def _telemetry(args: argparse.Namespace) -> Telemetry:
+    """Télémétrie du processus (ADR 008) : aucune sans destination (rien n'est créé ni
+    envoyé) ; sinon l'export OTLP, après vérification des tarifs et des clés."""
+    if args.traces is None and args.metriques is None:
+        return NoTelemetry()
+    observability = load_observability_config()
+    missing = missing_prices(observability, load_config().llm)
+    if missing:
+        raise ObservabilityConfigError(
+            f"modèles sans tarif dans config/tarifs.yaml : {', '.join(missing)} ; les "
+            "ajouter avec leur source (ADR 008)"
+        )
+    traces = None
+    if args.traces is not None:
+        traces = otel.Destination(
+            args.traces,
+            settings.require_secret("LANGFUSE_PUBLIC_KEY"),
+            settings.require_secret("LANGFUSE_SECRET_KEY"),
+        )
+    return otel.build(
+        observability,
+        traces=traces,
+        metrics=args.metriques,
+        code=code_version(),
+        identity=args.traces_identite,
+    )
+
+
 def _positive(text: str) -> int:
     value = int(text)
     if value < 1:
@@ -905,6 +972,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("CDG_LOT_EMBEDDING"),
         help="textes embarqués à la fois (ou CDG_LOT_EMBEDDING) : borne le pic mémoire de "
         "l'ingestion (mesure dans l'ADR 005) ; par défaut, celui de fastembed (256)",
+    )
+    parser.add_argument(
+        "--traces",
+        type=_destination,
+        default=os.environ.get("CDG_TRACES") or None,
+        help="destination des traces OpenTelemetry (ou CDG_TRACES), par exemple "
+        "http://127.0.0.1:3100/api/public/otel pour Langfuse ; clés LANGFUSE_PUBLIC_KEY "
+        "et LANGFUSE_SECRET_KEY en secrets. Aucune par défaut : rien n'est envoyé (ADR 008)",
+    )
+    parser.add_argument(
+        "--metriques",
+        type=_destination,
+        default=os.environ.get("CDG_METRIQUES") or None,
+        help="destination des métriques OpenTelemetry (ou CDG_METRIQUES) ; aucune par "
+        "défaut (Langfuse les reçoit et les jette : ses tableaux viennent des traces)",
+    )
+    parser.add_argument(
+        "--traces-identite",
+        choices=otel.IDENTITIES,
+        default=os.environ.get("CDG_TRACES_IDENTITE", "aucune"),
+        help="aucune (défaut) : aucune identité dans les traces ; sub : le sub "
+        "pseudonyme de l'interface authentifiée. Langfuse sans sa partie commerciale ne "
+        "supprime pas les traces : un sub s'y accumulerait sans fin (conservation, RGPD)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser(
@@ -1214,6 +1304,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"traçage par un tiers refusé (ADR 008) : {', '.join(tracing)} ; retirer "
                 "ces variables, ou les mettre à false"
             )
+        TELEMETRY["processus"] = _telemetry(args)
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001
@@ -1223,6 +1314,10 @@ def main(argv: list[str] | None = None) -> int:
             error |= payload
         print(json.dumps(error, ensure_ascii=False, default=str), file=sys.stderr)
         return 1
+    finally:
+        # derniers lots envoyés, en un temps borné ; télémétrie du processus remise à zéro
+        telemetry, TELEMETRY["processus"] = TELEMETRY["processus"], NoTelemetry()
+        telemetry.close()
     # en json, le résultat tient sur une ligne, comme chaque entrée du journal
     indent = None if args.journaux == "json" else 2
     print(json.dumps(result, ensure_ascii=False, indent=indent, default=str), file=out)
