@@ -136,3 +136,22 @@ def test_interface_publiee_sans_sortie_vers_internet():
         "driver_opts": {"com.docker.network.bridge.enable_ip_masquerade": "false"}
     }
     assert services()["langfuse-web"]["dns"] == ["127.0.0.1"]
+
+
+def test_aucun_secret_en_argument_ni_dans_une_sonde():
+    """Un secret en argument se lit dans la table des processus de la VM et dans
+    `docker inspect` : les secrets passent par l'environnement (Valkey lit le sien par un
+    fichier de configuration écrit au démarrage, valkey-cli par REDISCLI_AUTH, le client
+    de ClickHouse par CLICKHOUSE_PASSWORD)."""
+    for name, service in services().items():
+        argv = [
+            *(service.get("entrypoint") or []),
+            *(
+                service.get("command")
+                if isinstance(service.get("command"), list)
+                else [service.get("command") or ""]
+            ),
+            *((service.get("healthcheck") or {}).get("test") or []),
+        ]
+        for part in argv:
+            assert "${" not in str(part), (name, part)

@@ -126,7 +126,9 @@ services:
       - ./docker/observabilite/clickhouse-journaux.xml:/etc/clickhouse-server/config.d/journaux.xml:ro
     networks: [interne]
     healthcheck:
-      test: ["CMD", "clickhouse", "client", "--user", "langfuse", "--password", "${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD absent, voir .env.example}", "--query", "SELECT 1"]
+      # le client lit CLICKHOUSE_USER et CLICKHOUSE_PASSWORD dans l'environnement : aucun
+      # secret en argument
+      test: ["CMD", "clickhouse", "client", "--query", "SELECT 1"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -137,13 +139,21 @@ services:
     image: docker.io/valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
     restart: unless-stopped
     user: "999:999"
-    entrypoint: ["valkey-server"]
-    command: ["--requirepass", "${LANGFUSE_VALKEY_PASSWORD:?LANGFUSE_VALKEY_PASSWORD absent, voir .env.example}", "--maxmemory-policy", "noeviction", "--dir", "/data"]
+    # mot de passe par l'environnement, jamais en argument : un fichier de configuration
+    # écrit au démarrage (umask 077), puis valkey-server ; valkey-cli lit REDISCLI_AUTH
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        umask 077
+        printf 'requirepass %s\nmaxmemory-policy noeviction\ndir /data\n' "$$REDISCLI_AUTH" > /tmp/valkey.conf
+        exec valkey-server /tmp/valkey.conf
+    environment:
+      REDISCLI_AUTH: ${LANGFUSE_VALKEY_PASSWORD:?LANGFUSE_VALKEY_PASSWORD absent, voir .env.example}
     volumes:
       - valkey:/data
     networks: [interne]
     healthcheck:
-      test: ["CMD", "valkey-cli", "--no-auth-warning", "-a", "${LANGFUSE_VALKEY_PASSWORD:?LANGFUSE_VALKEY_PASSWORD absent, voir .env.example}", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 3s
       timeout: 5s
       retries: 20

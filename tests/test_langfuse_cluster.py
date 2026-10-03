@@ -320,3 +320,13 @@ def test_stockage_sans_sortie_entree_s3_bornee():
     for rule in egress:
         for peer in rule["to"]:
             assert peer["podSelector"] == {"matchLabels": {"k8s-app": "kube-dns"}}
+
+
+def test_aucun_secret_en_argument():
+    """`$(VAR)` dans les arguments est développé par le kubelet : le secret se lirait dans
+    la table des processus du nœud. Valkey lit son mot de passe dans un fichier de
+    configuration écrit au démarrage depuis l'environnement."""
+    for name, spec in pods().items():
+        for container in spec["containers"]:
+            for part in [*container.get("command", []), *container.get("args", [])]:
+                assert "$(" not in part, (name, part)

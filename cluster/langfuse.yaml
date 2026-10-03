@@ -326,18 +326,19 @@ spec:
           type: RuntimeDefault
       containers:
         - name: valkey
-          # Valkey (BSD-3) plutôt que Redis 7.4 (RSALv2/SSPLv1) ; sans le script d'entrée
+          # Valkey (BSD-3) plutôt que Redis 7.4 (RSALv2/SSPLv1) ; sans le script d'entrée.
+          # Mot de passe par l'environnement, jamais en argument (le kubelet développerait
+          # $(…) dans la table des processus) : fichier de configuration écrit au
+          # démarrage dans un volume en mémoire, puis valkey-server
           image: ${VALKEY}
-          command: ["valkey-server"]
+          command: ["sh", "-ec"]
           args:
-            - --requirepass
-            - $(VALKEY_PASSWORD)
-            - --maxmemory-policy
-            - noeviction
-            - --dir
-            - /data
+            - |
+              umask 077
+              printf 'requirepass %s\nmaxmemory-policy noeviction\ndir /data\n' "$REDISCLI_AUTH" > /etc/valkey/valkey.conf
+              exec valkey-server /etc/valkey/valkey.conf
           env:
-            - name: VALKEY_PASSWORD
+            - name: REDISCLI_AUTH
               valueFrom:
                 secretKeyRef: {name: langfuse, key: valkey-password}
           ports:
@@ -357,10 +358,16 @@ spec:
           volumeMounts:
             - name: donnees
               mountPath: /data
+            - name: configuration
+              mountPath: /etc/valkey
       volumes:
         - name: donnees
           emptyDir:
             sizeLimit: 256Mi
+        - name: configuration
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
 ---
 apiVersion: apps/v1
 kind: Deployment
