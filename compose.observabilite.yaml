@@ -57,6 +57,9 @@ services:
     depends_on: *depend
     environment:
       <<: *langfuse-env
+      # Next.js écoute sur $HOSTNAME, que Docker pose au nom du conteneur : toutes les
+      # adresses du conteneur, pour la sonde et le port publié
+      HOSTNAME: 0.0.0.0
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET absent, voir .env.example}
       AUTH_DISABLE_SIGNUP: "true"
       # organisation, projet et clés posés au démarrage ; les clés sont celles que lit

@@ -118,3 +118,9 @@ def test_magasins_sur_un_reseau_interne_sans_sortie():
 def test_valkey_et_clickhouse_sans_root():
     assert services()["langfuse-valkey"]["user"] == "999:999"
     assert services()["langfuse-clickhouse"]["user"] == "101:101"
+
+
+def test_web_ecoute_sur_toutes_les_adresses_du_conteneur():
+    """Next.js écoute sur $HOSTNAME, que Docker pose au nom du conteneur : la sonde
+    (127.0.0.1) ne le joindrait pas."""
+    assert services()["langfuse-web"]["environment"]["HOSTNAME"] == "0.0.0.0"

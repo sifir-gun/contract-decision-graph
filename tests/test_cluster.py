@@ -1734,7 +1734,7 @@ def test_trace_d_une_analyse_dans_langfuse(langfuse):
     identifier = f"trace-{uuid.uuid4().hex[:8]}"
     with interface(pod) as client:
         response = analyse(client, GO, identifier)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 303, response.text  # vers le dossier du contrat
 
     def found() -> list[dict]:
         seen = observations(identifier)
@@ -1771,8 +1771,10 @@ def test_trace_d_une_analyse_dans_langfuse(langfuse):
         "--",
         "sh",
         "-c",
-        f'echo "fs.ls /buckets/{CLUSTER.LANGFUSE_BUCKET}/events" | weed shell',
+        f'echo "fs.ls /buckets/{CLUSTER.LANGFUSE_BUCKET}/events/otel" | weed shell',
     )
+    # lots OTLP bruts sous events/otel/<projet>/… (Langfuse 4.50.0,
+    # OtelIngestionProcessor.publishToOtelIngestionQueue)
     assert "cdg-traces" in events, events
 
 

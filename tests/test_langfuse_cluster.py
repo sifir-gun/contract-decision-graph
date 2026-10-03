@@ -227,3 +227,49 @@ def test_mesure_de_langfuse_relevee_par_la_ci_au_repos_et_apres_les_scenarios():
     assert steps[rest]["id"].startswith("diagnostic-")
     assert steps[after]["id"].startswith("diagnostic-")
     assert steps[after]["if"] == "always()"
+
+
+def test_utilisateur_numerique_pour_chaque_pod():
+    """Les images de Langfuse déclarent un utilisateur nommé (nextjs, expressjs, UID
+    1001) : avec runAsNonRoot sans runAsUser, le kubelet refuse le conteneur (« image
+    has non-numeric user »). Chaque pod pose donc un utilisateur numérique."""
+    expected = {
+        "langfuse-web": 1001,
+        "langfuse-worker": 1001,
+        "langfuse-clickhouse": 101,
+        "langfuse-valkey": 999,
+        "langfuse-postgres": 999,
+    }
+    for name, spec in pods().items():
+        context = spec["securityContext"]
+        assert context["runAsUser"] == expected[name], name
+        assert context["runAsGroup"] == expected[name], name
+
+
+def test_web_ecoute_sur_toutes_les_adresses_du_pod():
+    """Le serveur autonome de Next.js écoute sur $HOSTNAME, que le moteur de conteneurs
+    pose au nom du pod : sans 0.0.0.0, ni la redirection de port (localhost) ni les
+    sondes ne le joignent."""
+    [web] = pods()["langfuse-web"]["containers"]
+    assert variables(web)["HOSTNAME"]["value"] == "0.0.0.0"
+
+
+def test_etiquettes_du_web_celles_que_vise_la_regle_du_chart():
+    """La règle de sortie du chart (traces.cible par défaut) désigne le pod web de
+    Langfuse par ses étiquettes : elles y sont, dans l'espace attendu."""
+    values = yaml.safe_load(
+        (
+            cluster().ROOT / "chart" / "contract-decision-graph" / "values.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    target = values["traces"]["cible"]
+    [web] = [
+        d for d in of_kind("Deployment") if d["metadata"]["name"] == "langfuse-web"
+    ]
+    labels = web["spec"]["template"]["metadata"]["labels"]
+    assert target["selecteur"].items() <= labels.items()
+    assert web["metadata"]["namespace"] == target["espaceDeNoms"]
+    [service] = [
+        s for s in of_kind("Service") if s["metadata"]["name"] == "langfuse-web"
+    ]
+    assert service["spec"]["ports"][0]["port"] == target["port"]

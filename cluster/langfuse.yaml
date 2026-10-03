@@ -379,7 +379,12 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
+        # l'image déclare l'utilisateur expressjs, nommé (UID 1001) : runAsNonRoot exige
+        # un utilisateur numérique pour le vérifier
         runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -469,16 +474,27 @@ spec:
     metadata:
       labels:
         app: langfuse-web
+        # étiquette que vise la règle de sortie du chart de l'application (traces.cible)
+        app.kubernetes.io/name: langfuse-web
     spec:
       automountServiceAccountToken: false
       securityContext:
+        # l'image déclare l'utilisateur nextjs, nommé (UID 1001) : runAsNonRoot exige un
+        # utilisateur numérique pour le vérifier
         runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: web
           image: ${LANGFUSE_WEB}
           env:
+            # Next.js écoute sur $HOSTNAME, que le moteur de conteneurs pose au nom du
+            # pod : toutes les adresses du pod, pour la redirection de port et les sondes
+            - name: HOSTNAME
+              value: "0.0.0.0"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef: {name: langfuse, key: postgres-password}
