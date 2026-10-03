@@ -109,7 +109,7 @@ Secrets en fichiers, jamais en variables d'environnement (CIS 5.4.1) : un volume
 monté en lecture seule au dossier que lit l'application (settings.SECRETS_DIR), un fichier
 par secret, nommé comme sa variable (settings.SECRETS). 0440 : root et le groupe du pod.
 Chaque conteneur ne reçoit que les siens : `llm` (clé de Mistral), `administrateur`
-(migrations et ingestion).
+(migrations et ingestion), `traces` (clés de Langfuse, l'interface seule, ADR 008).
 */}}
 {{- define "cdg.volumeSecrets" -}}
 {{- $v := .racine.Values -}}
@@ -128,6 +128,15 @@ Chaque conteneur ne reçoit que les siens : `llm` (clé de Mistral), `administra
           items:
             - key: {{ $v.llm.cle }}
               path: MISTRAL_API_KEY
+      {{- end }}
+      {{- if .traces }}
+      - secret:
+          name: {{ $v.traces.secret }}
+          items:
+            - key: {{ $v.traces.clePublique }}
+              path: LANGFUSE_PUBLIC_KEY
+            - key: {{ $v.traces.cleSecrete }}
+              path: LANGFUSE_SECRET_KEY
       {{- end }}
       {{- if .administrateur }}
       - secret:

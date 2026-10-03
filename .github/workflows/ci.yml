@@ -169,7 +169,7 @@ jobs:
             | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP" linux-amd64/helm
           sudo install -m 0755 "$RUNNER_TEMP/linux-amd64/helm" /usr/local/bin/helm
-      - name: Validation statique (helm lint, kubeconform, kube-linter) des trois variantes
+      - name: Validation statique (helm lint, kubeconform, kube-linter) de chaque variante
         run: uv run --no-sync python scripts/chart.py verifier --dossier "$RUNNER_TEMP/chart"
       - name: Garanties du chart rendu (sécurité, empreintes, réseau, tâches, arrêt propre)
         run: uv run --no-sync pytest -m chart --chart

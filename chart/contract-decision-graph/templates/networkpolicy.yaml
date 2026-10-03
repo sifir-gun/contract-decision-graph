@@ -67,6 +67,19 @@ spec:
         - port: {{ .Values.proxy.port }}
           protocol: TCP
     {{- end }}
+    {{- if .Values.traces.destination }}
+    # traces (ADR 008) : l'export OTLP joint Langfuse en direct, sur son seul port
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.traces.cible.espaceDeNoms }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.traces.cible.selecteur | nindent 14 }}
+      ports:
+        - port: {{ .Values.traces.cible.port }}
+          protocol: TCP
+    {{- end }}
 {{- if include "cdg.taches" . | trim }}
 ---
 # Tâches : en sortie, le DNS et PostgreSQL seulement ; aucune entrée. Posée avec elles

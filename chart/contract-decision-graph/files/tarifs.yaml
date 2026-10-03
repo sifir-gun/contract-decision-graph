@@ -1,0 +1,39 @@
+# Tarifs des modèles et réglages de l'export des traces (ADR 008).
+#
+# Hors de decision.yaml : ce ne sont pas des réglages de l'analyse, et ils changeraient
+# l'empreinte de ses décisions. Le coût d'un appel au LLM, calculé ici, part dans sa trace
+# (Langfuse n'a aucun tarif Mistral) ; les séries réelles (tests/serie.py) le lisent aussi.
+# Chaque modèle de decision.yaml, pour chaque fournisseur, doit avoir son tarif : sinon,
+# le démarrage avec des traces est refusé. Validé au démarrage : invalide, rien ne démarre.
+
+# dollars par million de tokens, entrée et sortie, avec la page relevée et la date
+tarifs:
+  mistral-small-2603:          # Mistral Small 4
+    entree_usd_par_mtoken: 0.15
+    sortie_usd_par_mtoken: 0.60
+    source: https://mistral.ai/pricing/api
+    releve_le: 2026-09-26
+  ministral-8b-2512:           # Ministral 3 8B
+    entree_usd_par_mtoken: 0.15
+    sortie_usd_par_mtoken: 0.15
+    source: https://mistral.ai/pricing/api
+    releve_le: 2026-09-26
+  claude-sonnet-5:             # Claude Sonnet 5 (tarif d'introduction devenu standard)
+    entree_usd_par_mtoken: 2.0
+    sortie_usd_par_mtoken: 10.0
+    source: https://platform.claude.com/docs/en/about-claude/pricing
+    releve_le: 2026-10-03
+  claude-haiku-4-5-20251001:   # Claude Haiku 4.5
+    entree_usd_par_mtoken: 1.0
+    sortie_usd_par_mtoken: 5.0
+    source: https://platform.claude.com/docs/en/about-claude/pricing
+    releve_le: 2026-10-03
+
+# export des traces : en arrière-plan, jamais dans le chemin d'une analyse (échec ouvert)
+export:
+  delai_export_s: 2.0          # délai d'une requête d'export, nouvelles tentatives comprises
+  delai_lot_ms: 1000           # attente avant l'envoi d'un lot
+  file_max: 2048               # spans en attente au plus ; au-delà, les plus anciens sont abandonnés
+  lot_max: 512                 # spans par lot exporté au plus (celle du SDK), jamais plus que file_max
+  delai_fermeture_s: 2.0       # à l'arrêt du processus, attente au plus de l'envoi des derniers lots
+  intervalle_metriques_s: 60   # métriques : un envoi par intervalle (avec --metriques seulement)

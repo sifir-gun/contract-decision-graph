@@ -3,6 +3,12 @@ Authentification et entrée réseau (PR D1, ADR 005).
 */}}
 
 {{- /* Valeurs exigées : aucune entrée sans authentification, rien de flou avec elle. */}}
+{{- define "cdg.traces.valider" -}}
+{{- if and .Values.traces.destination (ne .Values.mode "reel") -}}
+{{- fail "traces.destination : en mode réel seulement (clés en fichiers avec les secrets de l'interface ; ADR 008)" -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "cdg.authentification.valider" -}}
 {{- $auth := .Values.authentification -}}
 {{- if not $auth.active -}}

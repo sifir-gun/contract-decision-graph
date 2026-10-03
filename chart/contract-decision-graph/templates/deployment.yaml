@@ -3,6 +3,7 @@
 {{- $web := dict "racine" . "composant" "web" -}}
 {{- $auth := .Values.authentification.active -}}
 {{- include "cdg.authentification.valider" . -}}
+{{- include "cdg.traces.valider" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -134,6 +135,13 @@ spec:
             - --lot-embedding
             - {{ .Values.embedding.lot | quote }}
             {{- end }}
+            {{- with .Values.traces.destination }}
+            # traces vers un service du cluster (ADR 008) ; identité aucune par défaut
+            - --traces
+            - {{ . | quote }}
+            - --traces-identite
+            - {{ $.Values.traces.identite | quote }}
+            {{- end }}
             - web
             {{- if not $reel }}
             - --demo
@@ -261,7 +269,7 @@ spec:
             name: {{ include "cdg.nomComplet" . }}-configuration
         {{- if $reel }}
         {{- include "cdg.volumeModele" . | nindent 8 }}
-        {{- include "cdg.volumeSecrets" (dict "racine" . "llm" true "administrateur" false) | nindent 8 }}
+        {{- include "cdg.volumeSecrets" (dict "racine" . "llm" true "administrateur" false "traces" (not (empty .Values.traces.destination))) | nindent 8 }}
         {{- end }}
         {{- if $auth }}
         # secrets d'oauth2-proxy, pour lui seul, en fichiers (0440, groupe du pod)
