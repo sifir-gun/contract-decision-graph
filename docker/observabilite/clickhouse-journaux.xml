@@ -1,0 +1,21 @@
+<!--
+  ClickHouse de Langfuse, pour les tests (poste et cluster de la CI ; ADR 008) : journaux
+  système réduits, en mémoire comme sur disque. Les tables system.*_log que Langfuse ne
+  lit pas sont retirées ; le journal du serveur reste sur la sortie standard.
+-->
+<clickhouse>
+  <logger>
+    <level>warning</level>
+    <console>1</console>
+  </logger>
+  <trace_log remove="1"/>
+  <metric_log remove="1"/>
+  <asynchronous_metric_log remove="1"/>
+  <query_thread_log remove="1"/>
+  <query_views_log remove="1"/>
+  <part_log remove="1"/>
+  <text_log remove="1"/>
+  <processors_profile_log remove="1"/>
+  <opentelemetry_span_log remove="1"/>
+  <session_log remove="1"/>
+</clickhouse>

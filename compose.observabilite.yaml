@@ -1,0 +1,192 @@
+# Langfuse auto-hébergé sur le poste (ADR 008) : destination des traces, pour les essais.
+# À part de docker-compose.yml : docker compose exige les variables d'un profil même
+# inactif, et la base seule ne doit pas dépendre des secrets de Langfuse.
+#
+#   docker compose -f compose.observabilite.yaml up -d      # démarre (cluster local arrêté)
+#   docker compose -f compose.observabilite.yaml down       # arrête, données gardées
+#   docker compose -f compose.observabilite.yaml down -v    # arrête, données supprimées
+#
+# Partie libre de Langfuse seule (MIT hors ee/) : aucune clé de licence. Télémétrie,
+# assistant et inscription coupés. Seule l'interface est publiée, sur 127.0.0.1:3100 ; les
+# magasins de données n'ont qu'un réseau interne, sans sortie. Images figées par empreinte,
+# les mêmes que dans le cluster de test ; images de Langfuse, de ClickHouse et de Valkey
+# sans signature vérifiable : exception limitée aux tests
+# (securite/exceptions-signatures.yaml). Secrets dans .env, tous exigés (.env.example).
+name: cdg-observabilite
+
+x-langfuse-env: &langfuse-env
+  DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?LANGFUSE_POSTGRES_PASSWORD absent, voir .env.example}@langfuse-postgres:5432/langfuse
+  NEXTAUTH_URL: http://localhost:3100
+  SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT absent, voir .env.example}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY absent, voir .env.example}
+  TELEMETRY_ENABLED: "false"
+  LANGFUSE_IN_APP_AGENT_ENABLED: "false"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+  CLICKHOUSE_USER: langfuse
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD absent, voir .env.example}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  # événements bruts dans SeaweedFS (seau langfuse) ; ni médias ni exports
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-seaweedfs:8333
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_S3_ACCESS_KEY_ID:?LANGFUSE_S3_ACCESS_KEY_ID absent, voir .env.example}
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_S3_SECRET_ACCESS_KEY:?LANGFUSE_S3_SECRET_ACCESS_KEY absent, voir .env.example}
+  LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+  REDIS_HOST: langfuse-valkey
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${LANGFUSE_VALKEY_PASSWORD:?LANGFUSE_VALKEY_PASSWORD absent, voir .env.example}
+
+x-depend: &depend
+  langfuse-postgres:
+    condition: service_healthy
+  langfuse-clickhouse:
+    condition: service_healthy
+  langfuse-valkey:
+    condition: service_healthy
+  langfuse-seau:
+    condition: service_completed_successfully
+
+services:
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:4.50.0@sha256:3d2ae888a0e6edb41fdba6e7d5baca5e4baede3a870dac7970dadd9d925b018e
+    restart: unless-stopped
+    depends_on: *depend
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET absent, voir .env.example}
+      AUTH_DISABLE_SIGNUP: "true"
+      # organisation, projet et clés posés au démarrage ; les clés sont celles que lit
+      # l'application (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY)
+      LANGFUSE_INIT_ORG_ID: cdg
+      LANGFUSE_INIT_ORG_NAME: contract-decision-graph
+      LANGFUSE_INIT_PROJECT_ID: cdg-traces
+      LANGFUSE_INIT_PROJECT_NAME: traces
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?LANGFUSE_PUBLIC_KEY absent, voir .env.example}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?LANGFUSE_SECRET_KEY absent, voir .env.example}
+      # compte de l'interface de Langfuse, sur le poste seulement
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?LANGFUSE_INIT_USER_EMAIL absent, voir .env.example}
+      LANGFUSE_INIT_USER_NAME: operateur
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?LANGFUSE_INIT_USER_PASSWORD absent, voir .env.example}
+    ports:
+      - 127.0.0.1:3100:3000
+    networks: [interne, poste]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/public/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:4.50.0@sha256:52f7fd41ded2f1a6acab13ff7cb1832d36dfe2cbf44adea402b7a09cfa4ce800
+    restart: unless-stopped
+    depends_on: *depend
+    environment: *langfuse-env
+    networks: [interne]
+
+  langfuse-postgres:
+    # l'image de la base du projet (docker-compose.yml), PostgreSQL 16
+    image: docker.io/pgvector/pgvector:pg16@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?LANGFUSE_POSTGRES_PASSWORD absent, voir .env.example}
+      POSTGRES_DB: langfuse
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    networks: [interne]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U langfuse -d langfuse"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  langfuse-clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:25.12.11.4-distroless@sha256:c77ffab1910984a1443408a1c21668613b33f5add5f493f7b4b34eb2fcd2154c
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD absent, voir .env.example}
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+      - ./docker/observabilite/clickhouse-journaux.xml:/etc/clickhouse-server/config.d/journaux.xml:ro
+    networks: [interne]
+    healthcheck:
+      test: ["CMD", "clickhouse", "client", "--user", "langfuse", "--password", "${LANGFUSE_CLICKHOUSE_PASSWORD:?LANGFUSE_CLICKHOUSE_PASSWORD absent, voir .env.example}", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  langfuse-valkey:
+    # Valkey (BSD-3) plutôt que Redis 7.4 (RSALv2/SSPLv1) ; lancé sans root, sans le script
+    # d'entrée de l'image
+    image: docker.io/valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+    restart: unless-stopped
+    user: "999:999"
+    entrypoint: ["valkey-server"]
+    command: ["--requirepass", "${LANGFUSE_VALKEY_PASSWORD:?LANGFUSE_VALKEY_PASSWORD absent, voir .env.example}", "--maxmemory-policy", "noeviction", "--dir", "/data"]
+    volumes:
+      - valkey:/data
+    networks: [interne]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "--no-auth-warning", "-a", "${LANGFUSE_VALKEY_PASSWORD:?LANGFUSE_VALKEY_PASSWORD absent, voir .env.example}", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  langfuse-seaweedfs:
+    # SeaweedFS du cluster de test (scripts/cluster.py), stockage S3 de Langfuse ; identité
+    # d'administration tirée de AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY (SeaweedFS 4.47)
+    image: docker.io/chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    restart: unless-stopped
+    command: ["server", "-dir=/data", "-master.volumeSizeLimitMB=64", "-volume.max=16", "-s3", "-s3.port=8333"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${LANGFUSE_S3_ACCESS_KEY_ID:?LANGFUSE_S3_ACCESS_KEY_ID absent, voir .env.example}
+      AWS_SECRET_ACCESS_KEY: ${LANGFUSE_S3_SECRET_ACCESS_KEY:?LANGFUSE_S3_SECRET_ACCESS_KEY absent, voir .env.example}
+    volumes:
+      - seaweedfs:/data
+    networks: [interne]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9333/cluster/status"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  langfuse-seau:
+    # seau langfuse, créé s'il manque (comme dans le cluster de test) ; échec explicite
+    image: docker.io/chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    restart: "no"
+    depends_on:
+      langfuse-seaweedfs:
+        condition: service_healthy
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        maitre=langfuse-seaweedfs:9333
+        for essai in $$(seq 30); do
+          if echo "s3.bucket.list" | weed shell -master=$$maitre > /tmp/seaux 2>&1; then break; fi
+          sleep 2
+        done
+        if grep -qw langfuse /tmp/seaux; then echo "seau langfuse présent"; exit 0; fi
+        echo "s3.bucket.create -name langfuse" | weed shell -master=$$maitre
+        echo "s3.bucket.list" | weed shell -master=$$maitre | grep -qw langfuse
+        echo "seau langfuse créé"
+    networks: [interne]
+
+networks:
+  interne:
+    internal: true
+  poste: {}
+
+volumes:
+  postgres:
+  clickhouse:
+  valkey:
+  seaweedfs:
