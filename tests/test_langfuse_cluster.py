@@ -273,3 +273,50 @@ def test_etiquettes_du_web_celles_que_vise_la_regle_du_chart():
         s for s in of_kind("Service") if s["metadata"]["name"] == "langfuse-web"
     ]
     assert service["spec"]["ports"][0]["port"] == target["port"]
+
+
+def storage_docs() -> list[dict]:
+    module = cluster()
+    text = module._manifest("seaweedfs.yaml", SEAWEEDFS=module.SEAWEEDFS)
+    return [d for d in yaml.safe_load_all(text) if d]
+
+
+def test_seaweedfs_sans_telemetrie():
+    """SeaweedFS 4.47 envoie par défaut des statistiques à telemetry.seaweedfs.com
+    (`-master.telemetry`, vrai par défaut) ; il stocke les sauvegardes et les événements
+    bruts de Langfuse : coupée, dans le cluster comme sur le poste."""
+    [deployment] = [d for d in storage_docs() if d["kind"] == "Deployment"]
+    [container] = deployment["spec"]["template"]["spec"]["containers"]
+    assert "-master.telemetry=false" in container["args"]
+    compose = yaml.safe_load(
+        (cluster().ROOT / "compose.observabilite.yaml").read_text(encoding="utf-8")
+    )
+    assert (
+        "-master.telemetry=false"
+        in compose["services"]["langfuse-seaweedfs"]["command"]
+    )
+
+
+def test_stockage_sans_sortie_entree_s3_bornee():
+    """Espace cdg-stockage : refus par défaut ; entrée S3 (8333) depuis la base (cdg, et
+    le greffon de sauvegarde, cnpg-system) et Langfuse seulement ; sortie : le DNS."""
+    policies = {
+        d["metadata"]["name"]: d["spec"]
+        for d in storage_docs()
+        if d["kind"] == "NetworkPolicy"
+    }
+    assert policies["refus-par-defaut"] == {
+        "podSelector": {},
+        "policyTypes": ["Ingress", "Egress"],
+    }
+    [entry] = policies["entree-s3"]["ingress"]
+    assert entry["ports"] == [{"port": 8333, "protocol": "TCP"}]
+    assert sorted(
+        peer["namespaceSelector"]["matchLabels"]["kubernetes.io/metadata.name"]
+        for peer in entry["from"]
+    ) == ["cdg", "cdg-observabilite", "cnpg-system"]
+    egress = [rule for spec in policies.values() for rule in spec.get("egress", [])]
+    assert [p["port"] for rule in egress for p in rule["ports"]] == [53, 53]
+    for rule in egress:
+        for peer in rule["to"]:
+            assert peer["podSelector"] == {"matchLabels": {"k8s-app": "kube-dns"}}

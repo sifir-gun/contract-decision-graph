@@ -1781,8 +1781,9 @@ def test_trace_d_une_analyse_dans_langfuse(langfuse):
 def test_traces_hors_du_cluster_bloquees(langfuse):
     """Aucune exportation hors du cluster (ADR 008) : une destination externe est refusée
     au lancement par l'application ; une sortie directe vers Internet est bloquée par les
-    règles réseau, depuis l'interface comme depuis les pods de Langfuse ; le proxy de
-    sortie refuse le domaine de Langfuse Cloud. L'export OTLP, lui, ignore le proxy."""
+    règles réseau, depuis l'interface, depuis les pods de Langfuse et depuis SeaweedFS,
+    qui garde ses événements bruts ; le proxy de sortie refuse le domaine de Langfuse
+    Cloud. L'export OTLP, lui, ignore le proxy."""
     pod = web_pods()[0]["metadata"]["name"]
     launched = subprocess.run(
         KUBECTL
@@ -1806,6 +1807,18 @@ def test_traces_hors_du_cluster_bloquees(langfuse):
     assert "407" in kubectl(
         "exec", "-n", "cdg", pod, "-c", "web", "--", "python", "-c", probe, "proxy"
     )
+    # le stockage des événements bruts non plus (curl est dans l'image de SeaweedFS)
+    out = kubectl(
+        "exec",
+        "-n",
+        CLUSTER.STORAGE_NAMESPACE,
+        "deployment/seaweedfs",
+        "--",
+        "sh",
+        "-c",
+        "curl -s -o /dev/null -m 5 https://1.1.1.1/ && echo ouvert || echo refuse",
+    )
+    assert out.startswith("refuse"), ("seaweedfs", out)
     for deployment in ("langfuse-web", "langfuse-worker"):
         out = kubectl(
             "exec",
