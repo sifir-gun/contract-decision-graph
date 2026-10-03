@@ -383,6 +383,11 @@ def demo_service(config: DecisionConfig) -> ContractService:
     )
 
 
+class TracageTiersRefuse(Exception):
+    """Variable qui activerait un traçage par un tiers (LangSmith, SDK Mistral) : rien ne
+    démarre (ADR 008). La variable est nommée, jamais sa valeur."""
+
+
 class AccesRefuse(Exception):
     """Décision par la CLI refusée : dans le cluster, en accès d'urgence seulement."""
 
@@ -1190,6 +1195,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # CDG_JOURNAUX n'est pas contrôlé par argparse : config() refuse un format inconnu
         logging.config.dictConfig(journaux.config(args.journaux, stream))
+        tracing = settings.third_party_tracing(os.environ)
+        if tracing:
+            raise TracageTiersRefuse(
+                f"traçage par un tiers refusé (ADR 008) : {', '.join(tracing)} ; retirer "
+                "ces variables, ou les mettre à false"
+            )
         result = handler(args)
     # toute erreur est rendue en JSON structuré, code 1 : jamais de trace brute ni de repli
     except Exception as exc:  # noqa: BLE001

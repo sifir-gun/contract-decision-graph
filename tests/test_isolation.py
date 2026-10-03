@@ -18,6 +18,8 @@ LIBRARIES = {
     "langchain_core": (
         "adapters/langgraph/",
     ),  # RunnableConfig, type des appels au graphe
+    # client de LangSmith, venu avec langchain-core : coupé par le moteur (ADR 008)
+    "langsmith": ("adapters/langgraph/",),
     # PostgresSaver exige une connexion psycopg, ou un pool (décision du 28/09)
     "psycopg": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),
     "psycopg_pool": ("adapters/postgres/", "adapters/langgraph/checkpointer.py"),

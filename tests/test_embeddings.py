@@ -266,11 +266,15 @@ def test_aucune_connexion_reseau_au_chargement_du_modele_ni_a_l_embedding(monkey
 
 # --- langsmith : rien n'est envoyé dans notre configuration ------------------------------------
 #
-# langsmith, client de traçage de LangSmith, vient avec langchain-core. Il ne trace que si
-# LANGSMITH_TRACING (ou LANGCHAIN_TRACING_V2) vaut « true » (0.14.0,
-# utils.tracing_is_enabled) ; l'image pose LANGSMITH_TRACING=false et ne porte aucune clé.
-# Une analyse complète (graphe, doublures) ne doit rien tenter. Le témoin active le traçage
-# avec une clé fictive : il prouve que le test verrait un envoi.
+# langsmith, client de traçage de LangSmith, vient avec langchain-core. Il trace si
+# LANGSMITH_TRACING_V2, LANGCHAIN_TRACING_V2, LANGSMITH_TRACING ou LANGCHAIN_TRACING vaut
+# « true », dans cet ordre (0.14.0, utils.tracing_is_enabled) : LANGCHAIN_TRACING_V2=true
+# l'emporte sur le LANGSMITH_TRACING=false de l'image. Le moteur le coupe donc lui-même
+# (`langsmith.configure(enabled=False)`, qui passe avant l'environnement), et la CLI refuse
+# de démarrer avec une telle variable (ADR 008). Une analyse complète (graphe, doublures)
+# ne doit rien tenter, même sous des variables hostiles. Le témoin réactive le traçage
+# après la construction du service, avec une clé fictive : il prouve que le test verrait
+# un envoi.
 
 ANALYSE = """
 import json, socket, sys
@@ -287,13 +291,26 @@ if sys.argv[1] == "garde":
     socket.socket.connect_ex = refuse
 from doubles import ACTEUR_ANALYSTE, CONTRACT_TEXT
 from test_service import make_service
-make_service().analyse(CONTRACT_TEXT, contract_id="c-reseau", actor=ACTEUR_ANALYSTE)
+service = make_service()
+if sys.argv[2:] == ["temoin"]:  # contourne la défense du moteur : le test verrait l'envoi
+    import langsmith
+    langsmith.configure(enabled=True)
+service.analyse(CONTRACT_TEXT, contract_id="c-reseau", actor=ACTEUR_ANALYSTE)
 from langchain_core.tracers.langchain import wait_for_all_tracers
 wait_for_all_tracers()  # envoie ce qui attendrait encore, si un client existait
 print(json.dumps({"tentatives": attempts}))
 """
 TRACING = {"LANGSMITH_TRACING": "true", "LANGSMITH_API_KEY": "cle-fictive-de-test"}
-CONFIGURATIONS = {"sans variable": {}, "comme l'image": {"LANGSMITH_TRACING": "false"}}
+CONFIGURATIONS = {
+    "sans variable": {},
+    "comme l'image": {"LANGSMITH_TRACING": "false"},
+    # LANGCHAIN_TRACING_V2 l'emporte sur LANGSMITH_TRACING=false : coupé par le moteur
+    "variables hostiles": {
+        "LANGSMITH_TRACING": "false",
+        "LANGCHAIN_TRACING_V2": "true",
+        "LANGSMITH_API_KEY": "cle-fictive-de-test",
+    },
+}
 
 
 def without_langsmith(extra: dict[str, str]) -> dict[str, str]:
@@ -306,9 +323,9 @@ def without_langsmith(extra: dict[str, str]) -> dict[str, str]:
     return keep | extra
 
 
-def guarded(extra: dict[str, str]) -> list[str]:
+def guarded(extra: dict[str, str], *mode: str) -> list[str]:
     result = subprocess.run(
-        [sys.executable, "-c", ANALYSE, "garde"],
+        [sys.executable, "-c", ANALYSE, "garde", *mode],
         cwd=ROOT,
         env=without_langsmith(extra),
         capture_output=True,
@@ -326,14 +343,16 @@ def test_langsmith_n_envoie_rien_pendant_une_analyse(extra):
 
 
 def test_temoin_la_garde_voit_langsmith_quand_le_tracage_est_active():
-    assert guarded(TRACING)
+    assert guarded(TRACING, "temoin")
 
 
-def langsmith_sandboxed(extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def langsmith_sandboxed(
+    extra: dict[str, str], *mode: str
+) -> subprocess.CompletedProcess[str]:
     if shutil.which("sandbox-exec") is None:
         pytest.skip("bac à sable macOS (sandbox-exec) indisponible sur ce système")
     return subprocess.run(
-        ["sandbox-exec", "-p", SANDBOX, sys.executable, "-c", ANALYSE, "noyau"],
+        ["sandbox-exec", "-p", SANDBOX, sys.executable, "-c", ANALYSE, "noyau", *mode],
         cwd=ROOT,
         env=without_langsmith(extra),
         capture_output=True,
@@ -350,7 +369,7 @@ def test_langsmith_aucune_connexion_vue_par_le_noyau(extra):
 
 
 def test_temoin_le_noyau_tue_langsmith_quand_le_tracage_est_active():
-    assert langsmith_sandboxed(TRACING).returncode == -9
+    assert langsmith_sandboxed(TRACING, "temoin").returncode == -9
 
 
 # --- nombre de fils de calcul : aligné sur la limite CPU du pod -------------------------------
