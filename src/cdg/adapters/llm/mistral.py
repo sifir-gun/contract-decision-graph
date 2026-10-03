@@ -79,13 +79,19 @@ class MistralProvider:
         client=None,
     ):
         self._config = config
-        # server_url None : l'adresse du SDK, https://api.mistral.ai
-        self._client = client or Mistral(
-            api_key=api_key,
-            server_url=server_url,
-            timeout_ms=config.timeout_seconds * 1000,
-            retry_config=None,
-        )
+        if client is None:
+            # server_url None : l'adresse du SDK, https://api.mistral.ai
+            client = Mistral(
+                api_key=api_key,
+                server_url=server_url,
+                timeout_ms=config.timeout_seconds * 1000,
+                retry_config=None,
+            )
+            # télémétrie du SDK coupée (ADR 008) : sous MISTRAL_SDK_TELEMETRY, relue à
+            # chaque requête, elle tracerait prompts et réponses ; la CLI refuse déjà la
+            # variable. Le SDK lit ce réglage par getattr, sans le déclarer.
+            client.sdk_configuration.telemetry = False  # type: ignore[attr-defined]
+        self._client = client
 
     def structured(
         self, *, tier: Tier, system: str, user: str, schema: type[SchemaT], node: str

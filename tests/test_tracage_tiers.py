@@ -8,19 +8,30 @@ configurée du projet, jamais chez un tiers.
   avec l'une de ces variables, et le moteur coupe le traçage lui-même
   (`langsmith.configure(enabled=False)`, qui passe avant l'environnement).
 - SDK Mistral : MISTRAL_SDK_TELEMETRY (global, dedicated) tracerait prompts et réponses,
-  vers le traceur global ou vers api.mistral.ai : refusée de même.
+  vers le traceur global ou vers api.mistral.ai : refusée de même, et coupée par
+  l'adaptateur dans la configuration du client (le SDK relit la variable à chaque requête).
 Le refus nomme la variable, jamais sa valeur. Sans réseau : test_embeddings.py vérifie
 qu'une analyse n'ouvre aucune connexion, même sous ces variables.
 """
 
 import json
+import threading
 
 import langsmith.utils
 import pytest
 from langchain_core.tracers.context import _tracing_v2_is_enabled
+from mistral_factice import serve
+from mistralai.client import Mistral
+from mistralai.client._hooks.tracing import TracingHook
+from mistralai.extra.observability.telemetry import configure_telemetry_for_hook
 from web_helpers import memory_service
 
 from cdg import cli, settings
+from cdg.adapters.llm.mistral import MistralProvider
+from cdg.application import demo_set
+from cdg.application.extraction import LLMExtractor
+from cdg.domain import masking
+from cdg.domain.config import load_config
 
 REFUSED = {
     "LANGSMITH_TRACING_V2": "true",
@@ -85,3 +96,40 @@ def test_le_moteur_coupe_langsmith_meme_sous_variables_hostiles(monkeypatch):
     langsmith.utils.get_env_var.cache_clear()
     assert langsmith.utils.tracing_is_enabled() is False
     assert _tracing_v2_is_enabled() is False
+
+
+def tracing_hook(client: Mistral) -> TracingHook:
+    hooks = client.sdk_configuration._hooks.before_request_hooks
+    [hook] = [h for h in hooks if isinstance(h, TracingHook)]
+    return hook
+
+
+def test_le_client_mistral_coupe_sa_telemetrie_meme_sous_variable_hostile(monkeypatch):
+    """Deuxième défense après le refus au démarrage : une vraie requête du SDK, vers le
+    serveur factice, sous MISTRAL_SDK_TELEMETRY=dedicated, ne monte aucune télémétrie."""
+    monkeypatch.setenv("MISTRAL_SDK_TELEMETRY", "dedicated")
+    # si la coupure manquait, le SDK enverrait ici, sur un port fermé du poste, jamais à
+    # api.mistral.ai
+    monkeypatch.setenv("MISTRAL_OTLP_TRACES_ENDPOINT", "http://127.0.0.1:9/v1/traces")
+    # témoin : sans la coupure, la variable suffit à monter un provider du SDK
+    witness = TracingHook()
+    client = Mistral(api_key="cle-factice")
+    assert configure_telemetry_for_hook(
+        witness, client.sdk_configuration, respect_global_provider=True
+    )
+    witness._auto_telemetry_provider.shutdown()  # rien d'émis : file vide
+    server = serve("127.0.0.1", 0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        llm = MistralProvider(load_config().llm, api_key="cle-factice", server_url=url)
+        _, contracts = demo_set.load()
+        contract = contracts["demo-01-go-maintenance"]
+        LLMExtractor(llm)(masking.mask(contract.text(), contract.parties).text, [])
+    finally:
+        server.shutdown()
+        server.server_close()
+    hook = tracing_hook(llm._client)
+    assert hook._auto_telemetry_provider is None
+    assert not hook._telemetry_use_global_provider
+    assert not hook.tracing_enabled

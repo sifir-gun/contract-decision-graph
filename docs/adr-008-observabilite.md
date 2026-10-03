@@ -44,7 +44,7 @@ LangSmith, l'outil de traçage de LangChain, enverrait les traces chez un tiers,
 - **langsmith 0.14.0 est installé** : dépendance de `langchain-core`, donc de LangGraph. Son traçage s'active par variable d'environnement, et `LANGCHAIN_TRACING_V2=true` l'emporte sur `LANGSMITH_TRACING=false`, valeur que pose le `Dockerfile`.
 - **Refus au démarrage** : toute variable de traçage (`LANGSMITH_TRACING_V2`, `LANGCHAIN_TRACING_V2`, `LANGSMITH_TRACING`, `LANGCHAIN_TRACING`, `LANGSMITH_TRACING_MODE`, `LANGSMITH_OTEL_ENABLED`, `LANGSMITH_OTEL_ONLY`) autre qu'absente, vide ou `false` arrête la CLI (`TracageTiersRefuse`), qui nomme la variable, jamais sa valeur.
 - **Coupure dans le moteur** : `langsmith.configure(enabled=False)`, qui l'emporte sur l'environnement, à la construction du moteur LangGraph ; seul `adapters/langgraph/` importe `langsmith`.
-- **Télémétrie du SDK Mistral** (mistralai 2.10.1) : `MISTRAL_SDK_TELEMETRY` tracerait prompts et réponses, vers le provider global ou vers `api.mistral.ai`. Toute valeur autre qu'absente, vide ou `false` est refusée au démarrage, comme les variables de LangSmith.
+- **Télémétrie du SDK Mistral** (mistralai 2.10.1) : `MISTRAL_SDK_TELEMETRY` tracerait prompts et réponses, vers le provider global ou vers `api.mistral.ai`. Toute valeur autre qu'absente, vide ou `false` est refusée au démarrage, comme les variables de LangSmith. Seconde défense, puisque le SDK relit la variable à chaque requête : l'adaptateur coupe la télémétrie dans la configuration du client qu'il construit (réglage `telemetry`, que le SDK lit sans le déclarer) ; un test le vérifie par une vraie requête vers le serveur factice de Mistral, sous la variable.
 
 ### Destination : un réglage de lancement
 
