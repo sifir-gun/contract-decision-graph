@@ -1,7 +1,7 @@
 # ADR-008 : observabilité, OpenTelemetry vers un Langfuse auto-hébergé ; LangSmith écarté
 
-- **Statut** : accepté, le 03/10/2026 (branche `observabilite`, à la demande explicite du propriétaire ; deux PR au plus, périmètre figé, toute idée nouvelle au journal comme piste). Première version, avec la PR 1 (instrumentation) ; la PR 2 (Langfuse dans le cluster de test, règles réseau, scénario du cluster) la complétera.
-- **Portée** : les traces et les métriques de l'application (`ports/telemetry.py`, `adapters/otel/`), leur destination, leur confidentialité ; le traçage par des tiers (LangSmith, SDK Mistral), écarté.
+- **Statut** : accepté, le 03/10/2026, à la demande explicite du propriétaire ; deux PR, périmètre figé, toute idée nouvelle au journal comme piste. PR 1 (branche `observabilite`, PR #33) : l'instrumentation. PR 2 (branche `observabilite-langfuse`) : Langfuse sur le poste et dans le cluster de test, règles réseau, scénarios du cluster, chart.
+- **Portée** : les traces et les métriques de l'application (`ports/telemetry.py`, `adapters/otel/`), leur destination, leur confidentialité ; le traçage par des tiers (LangSmith, SDK Mistral), écarté ; Langfuse auto-hébergé, pour les tests (poste, cluster de la CI).
 
 ## Contexte
 
@@ -73,24 +73,57 @@ Le coût est calculé par le code, aux tarifs de `config/tarifs.yaml` (dollars p
 
 ### Langfuse, la destination retenue
 
-**Faits vérifiés le 02/10** : v4.50.0 (02/10/2026) ; licence MIT, sauf les dossiers `ee/` (édition commerciale : rétention, journal d'audit, masquage côté serveur). La réception OTLP, le coût et les tableaux de bord sont dans la partie MIT. Quatre avis de sécurité publiés, aucun ne touche la v4. Composants : web, worker, PostgreSQL ≥ 15, ClickHouse ≥ 25.12, Redis ≥ 7 et un stockage S3, obligatoire. Les données se lisent par `/api/public/v2/observations` (l'ancienne API des traces répond 404 en v4). Images amd64 et arm64, ni signées ni attestées. Appels sortants : télémétrie (coupée par `TELEMETRY_ENABLED=false`), vérification de mise à jour (non réglable), assistant.
+**Faits vérifiés le 02/10, puis dans le code du tag v4.50.0 le 03/10** : v4.50.0 (02/10/2026). Quatre avis de sécurité publiés, aucun ne touche la v4. Composants : web, worker, PostgreSQL ≥ 15, ClickHouse ≥ 25.12 (26.4 recommandée), Redis ≥ 7 ou Valkey ≥ 8 et un stockage S3, obligatoire ; la documentation de dimensionnement cite SeaweedFS parmi les stockages possibles. Les données se lisent par `/api/public/v2/observations` (l'ancienne API des traces répond 404 en v4). Images amd64 et arm64, ni signées ni attestées.
 
-**Mesuré sur le poste le 02/10** (compose officiel du tag v4.50.0, images figées par empreinte, à côté de sept conteneurs déjà en marche) : Langfuse seul prend 2,8 Go au pic du démarrage, 2,1 Go au repos, 2,3 Go en médiane et 2,5 Go au plus pendant l'envoi de 600 analyses (10 200 spans en 1 min 51 s, environ 40 fois le rythme réel). Au pic : web 951 Mio, ClickHouse 750, worker 647. Disque : 3,5 Go d'images, environ 150 Mo de données après 600 analyses (2,9 Ko par analyse dans ClickHouse).
+**La seule partie libre de Langfuse** (décision du propriétaire, 03/10). Le dépôt est sous licence MIT, sauf les dossiers `ee/`, `web/src/ee/` et `worker/src/ee/`, sous la licence « Enterprise » de `ee/LICENSE` : son usage exige une licence commerciale, sauf « for development and testing purposes » ; sa note précise que le cœur MIT « can be used and run without infringing » cette licence. Les images publiées contiennent ce code ; il reste inactif sans clé (`LANGFUSE_EE_LICENSE_KEY`, que le projet ne pose nulle part, tests à l'appui sur le poste et dans le cluster). La réception OTLP, le calcul du coût, les observations et les tableaux de bord sont dans la partie MIT. Restent écartées les fonctions de l'édition commerciale, dont **la rétention des données** (droit « data-retention », traitement dans `worker/src/ee/dataRetention/`) : sans elle, les traces s'accumulent (Limites).
 
-**Emplacement** (décision du propriétaire, 03/10) :
+**Appels sortants, relus dans le code du tag** : la télémétrie (PostHog) ne part plus avec `TELEMETRY_ENABLED=false` et sans clé de licence (`web/src/features/telemetry/index.ts`) ; l'état de `status.langfuse.com` n'est lu qu'en mode cloud ; l'assistant est coupé (`LANGFUSE_IN_APP_AGENT_ENABLED=false`) ; aucun SMTP, aucun fournisseur d'IA. La « vérification de mise à jour non réglable » notée le 02/10 n'est pas retrouvée dans le code du tag : rectifiée. Dans le cluster, les pods de Langfuse n'ont de toute façon aucune sortie hors du cluster.
 
-- un profil compose optionnel sur le poste (`observabilite`), lancé quand le cluster local est arrêté : Langfuse tient à côté de ce qui tourne déjà (4,3 Go en tout pour 6 Go admis), pas à côté du cluster k3d local (7 Go) ;
-- dans le cluster de test de la CI seulement, pour le scénario du cluster (runner de 16 Go) ;
-- stockage objet sur **SeaweedFS**, déjà utilisé dans le cluster, et non MinIO, écarté en phase Kubernetes (dépôt archivé) ; son bon fonctionnement avec Langfuse se vérifie sur le poste comme en CI ;
-- **la seule partie MIT de Langfuse** : aucune clé de licence, et un test vérifiera qu'aucune configuration du projet n'en pose ;
-- ClickHouse en un seul nœud, ce qui ne vaut que pour les tests ; ce qu'exigerait une production en haute disponibilité sera écrit avec la PR 2, d'après la documentation officielle ;
-- images de Langfuse ni signées ni attestées : l'exception à la vérification des signatures ne vaudra que pour les images de Langfuse utilisées en test (CI et profil du poste), jamais pour les images du produit.
+**Composition, la même sur le poste et dans le cluster de test** :
+
+| Composant | Image (figée par empreinte) | Licence |
+| --- | --- | --- |
+| Langfuse web et worker | `langfuse/langfuse` et `langfuse/langfuse-worker` 4.50.0 | MIT hors `ee/` |
+| ClickHouse | `clickhouse/clickhouse-server` 25.12.11.4, variante distroless | Apache-2.0 |
+| Valkey | `valkey/valkey` 8.1.10, alpine | BSD-3 |
+| PostgreSQL | l'image de la base du projet (`pgvector/pgvector:pg16`) | PostgreSQL |
+| Stockage S3 | SeaweedFS 4.47, celui du cluster de test | Apache-2.0 |
+
+- **Valkey plutôt que Redis** : depuis la 7.4, Redis est sous RSALv2 ou SSPLv1, licences non libres ; Langfuse accepte Valkey ≥ 8. Lancé sans root, sans le script d'entrée de l'image.
+- **ClickHouse sans root** (101), journaux système réduits (`docker/observabilite/clickhouse-journaux.xml`, le même fichier sur le poste et dans le cluster).
+- **Réglages** : inscription fermée, organisation, projet et clés posés au démarrage (`LANGFUSE_INIT_*`) ; dans le cluster, aucun utilisateur ; sur le poste, un compte pour l'interface de Langfuse. Événements bruts dans le seau `langfuse` (préfixe `events/`), ni médias ni exports.
+
+**Sur le poste : `compose.observabilite.yaml`**, à part de `docker-compose.yml`. La décision du 03/10 parlait d'un profil compose ; mais docker compose (5.0.2) exige les variables d'un profil même inactif : un profil dans le fichier de la base obligerait à poser les secrets de Langfuse pour lancer la base seule, ou à leur donner des valeurs vides, ce qui serait un repli silencieux (ClickHouse et Valkey sans mot de passe). Le fichier à part exige chaque secret. Seule l'interface de Langfuse est publiée, sur `127.0.0.1:3100` ; les autres services n'ont qu'un réseau interne, sans sortie ; SeaweedFS tire son identité S3 de `AWS_ACCESS_KEY_ID` et `AWS_SECRET_ACCESS_KEY` (SeaweedFS 4.47, `auth_credentials.go`). À lancer quand le cluster local est arrêté.
+
+**Dans le cluster de test de la CI** (`cluster/langfuse.yaml`, installé par `scripts/cluster.py` en profil `ci` seulement ; le profil local, 8 Go pour Docker, ne l'installe pas, et le dit) :
+
+- espace `cdg-observabilite`, Pod Security « restricted » : pods sans root ni privilège, ressources bornées, secrets par référence, données éphémères ;
+- règles réseau : refus par défaut ; DNS ; trafic interne ; web et worker vers SeaweedFS (8333) ; entrée des traces (3000) depuis l'interface de l'application seulement ; **aucune sortie hors du cluster** ;
+- dans SeaweedFS, un seau `langfuse` et une identité S3 limitée à ce seau (`Read:langfuse`, `Write:langfuse`, `List:langfuse`) ;
+- l'application reçoit `traces.destination` (chart : un service du cluster seulement, en mode réel, identité « aucune ») et ses clés en fichiers ; une règle réseau du chart ouvre la seule cible ;
+- deux scénarios : la trace d'une analyse lue par l'API de Langfuse, sans texte du contrat, avec ses événements bruts dans le seau ; les traces hors du cluster refusées par l'application, bloquées par le réseau (depuis l'interface et les pods de Langfuse) et par le proxy de sortie ;
+- mémoire de chaque conteneur (`kubectl top`) et disque éphémère de chaque pod relevés au repos et après les scénarios (`scripts/cluster.py mesure-langfuse`, étapes de diagnostic du job `cluster`) ; besoin disque du cluster au pire porté de 29,9 à 44,7 Go.
+
+**Exception aux signatures, pour les tests seulement** (décision du propriétaire, 03/10). Les images de Langfuse, de ClickHouse et de Valkey ne publient ni signature ni attestation cosign (vérifié sur Docker Hub le 03/10 : aucune étiquette `sha256-….sig` ni `.att`). `securite/exceptions-signatures.yaml` les nomme une à une, par étiquette et empreinte, avec la portée « tests » (CI et poste), un motif et 90 jours au plus ; `scripts/chaine.py` la contrôle, et l'installation du cluster refuse toute image sans signature qui n'y figure pas, ou dont l'exception a expiré. **Elle ne vaut jamais pour une image du produit** : l'application, ses images annexes et leurs bases restent vérifiées par leur signature, et un test refuse toute image des charts ou des `Dockerfile` dans l'exception. PostgreSQL et SeaweedFS sont les images déjà utilisées par le projet.
+
+**ClickHouse en un seul nœud : pour les tests seulement.** Sans Keeper ni réplication, `CLICKHOUSE_CLUSTER_ENABLED=false`, données éphémères. Ce qu'exigerait une production en haute disponibilité (documentations officielles relues le 03/10/2026 : langfuse.com, pages ClickHouse et Scaling ; clickhouse.com, ClickHouse Keeper) :
+
+- **ClickHouse en cluster** (`CLICKHOUSE_CLUSTER_ENABLED=true`, cluster nommé `default`), tables répliquées, **au moins trois réplicas** selon Langfuse ; le nombre de réplicas ne s'augmente pas en marche sans intervention ni interruption ;
+- **ClickHouse Keeper** pour coordonner la réplication : un quorum de trois nœuds, qui tolère la perte d'un seul ;
+- **dimensionnement** donné par Langfuse : ClickHouse 2 CPU et 8 Gio au moins (16 Gio de limite dans son chart), un grand volume dès le départ ; ClickHouse 26.4 recommandée ; sauvegardes et copie de données d'après la documentation de ClickHouse ;
+- **le reste de la composition aussi** : web et worker répliqués (2 CPU et 4 Gio chacun au minimum), PostgreSQL géré ou en haute disponibilité (CloudNativePG, comme la base de l'application), Valkey ou Redis en mode cluster sous forte charge, un stockage S3 lui-même redondant (SeaweedFS répliqué, ou un service S3) ;
+- **une rétention** : celle de Langfuse relève de son édition commerciale ; Langfuse suggère aussi un TTL de ClickHouse sur ses tables, et une durée de vie des événements dans le stockage (piste au journal).
+
+**Mesures.** Sur le poste, le 02/10 (compose officiel du tag v4.50.0, MinIO et Redis, à côté de sept conteneurs déjà en marche) : Langfuse seul prend 2,8 Go au pic du démarrage, 2,1 Go au repos, 2,3 Go en médiane et 2,5 Go au plus pendant l'envoi de 600 analyses (10 200 spans en 1 min 51 s, environ 40 fois le rythme réel) ; au pic, web 951 Mio, ClickHouse 750, worker 647 ; 3,5 Go d'images, environ 150 Mo de données après 600 analyses (2,9 Ko par analyse dans ClickHouse). Images de la composition retenue, compressées (registre, linux/amd64) : 1,14 Go (web 0,37, worker 0,36, ClickHouse 0,21, PostgreSQL 0,19, Valkey 0,02).
 
 ## Limites
 
-- **Un nom court** (sans point) est admis comme un service du cluster ; sur un poste, le domaine de recherche du résolveur DNS pourrait le compléter vers un hôte d'un autre réseau. Dans le cluster, les règles réseau de la PR 2 bornent ce qui est joignable.
+- **Un nom court** (sans point) est admis comme un service du cluster ; sur un poste, le domaine de recherche du résolveur DNS pourrait le compléter vers un hôte d'un autre réseau. Dans le cluster, les règles réseau bornent ce qui est joignable.
 - **L'identifiant du contrat sort** (`langfuse.session.id`), pour relier l'analyse et sa revue. Il est choisi par l'opérateur ou, par MCP, par l'assistant ; dans les traces, il doit suivre le format du domaine (lettres non accentuées, chiffres, `.`, `_`, `-`), sinon il est remplacé, même lors d'une revue où il vient de l'URL sans contrôle. Comme dans le journal d'audit, il ne doit pas porter le nom d'un client. Une adresse électronique n'est jamais une valeur admise.
-- **Les traces s'accumulent** : la rétention de Langfuse relève de son édition commerciale. Par défaut, elles ne contiennent aucune donnée personnelle ; avec `--traces-identite sub`, il faudrait les purger à la main.
+- **Les traces s'accumulent** : la rétention de Langfuse relève de son édition commerciale. Par défaut, elles ne contiennent aucune donnée personnelle ; avec `--traces-identite sub`, il faudrait les purger à la main. Un TTL de ClickHouse sur les tables de Langfuse, et une durée de vie des événements dans le stockage, sont des pistes.
+- **Langfuse n'est éprouvé que pour les tests** : un nœud ClickHouse, des données éphémères dans le cluster, un PostgreSQL sans réplication ; une production demanderait la composition en haute disponibilité décrite plus haut.
+- **Les deux scénarios des traces ne tournent que dans la CI** : le cluster local (près de 7 Go) et Langfuse (2,5 Go) ne tiennent pas ensemble dans les 8 Go de Docker du poste ; ils y sont sautés, motif à l'appui.
+- **Images de Langfuse, de ClickHouse et de Valkey sans signature** : une exception datée, revue au plus tard tous les 90 jours, limitée aux tests.
 - **Le coût est une estimation** aux tarifs relevés : la facture du fournisseur peut différer (remises, changement de prix). Les tarifs se relèvent avec leur source et leur date.
 - **Les variables `OTEL_*` lues par le SDK** quand une destination est configurée ne sont ni refusées ni contrôlées : elles ne sont pas à poser (piste au journal).
 - **Les métriques ne vont nulle part par défaut** : elles n'existent qu'avec `--metriques`.
@@ -105,3 +138,8 @@ Le coût est calculé par le code, aux tarifs de `config/tarifs.yaml` (dollars p
 - `tests/test_embeddings.py` : une analyse complète, en sous-processus, ne tente aucune connexion, même sous des variables de LangSmith hostiles (garde sur les sockets de Python, et bac à sable du noyau sur macOS) ; un témoin réactive le traçage et prouve que le test verrait un envoi.
 - `tests/test_observation_config.py` : tarifs et réglages d'export validés, chaque modèle de la configuration tarifé.
 - `tests/test_isolation.py` : `opentelemetry` confiné à `adapters/otel/`, `langsmith` à `adapters/langgraph/`.
+- `tests/test_chart_traces.py` : configuration montée complète (plus de `tarifs.yaml` masqué) ; aucune trace par défaut ; destination limitée à un service du cluster, en mode réel ; identité « aucune » par défaut ; clés en fichiers pour l'interface seule ; une sortie réseau vers la seule cible.
+- `tests/test_observabilite_poste.py` : le fichier compose du poste (images figées et communes, partie libre seule, secrets exigés, interface seule publiée, réseau interne).
+- `tests/test_langfuse_cluster.py` : le manifeste et l'installation dans le cluster (pods restreints, secrets par référence, partie libre seule, règles réseau sans sortie, identité S3 limitée, profil ci seulement, relevés de la CI).
+- `tests/test_exceptions_signatures.py` : l'exception aux signatures, exactement les images de la composition, jamais une image du produit, entrées mal formées ou expirées refusées.
+- `tests/test_cluster.py` (job `cluster`) : `test_trace_d_une_analyse_dans_langfuse`, `test_traces_hors_du_cluster_bloquees`.

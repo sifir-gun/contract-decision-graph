@@ -192,9 +192,14 @@ Sans `--demo`, l'analyse appelle le fournisseur LLM de la configuration (payant,
 
 Chaque analyse peut être tracée en OpenTelemetry : une trace par opération (analyse, revue, expiration, relance, reprise), une étape par nœud du graphe, et chaque appel au LLM avec son modèle, ses tokens, son coût, sa latence et sa tentative. La destination est un réglage de lancement, un Langfuse auto-hébergé, sur le poste ou dans le cluster seulement ; **sans destination, rien n'est envoyé nulle part.**
 
+Sur le poste, un Langfuse auto-hébergé (partie libre seule, MIT) se lance à part, cluster local arrêté ; ses secrets et les clés du projet viennent de `.env` ([.env.example](.env.example)) :
+
 ```bash
+docker compose -f compose.observabilite.yaml up -d
 uv run python -m cdg.cli --traces http://127.0.0.1:3100/api/public/otel mcp --demo --operateur poste-1
 ```
+
+Interface de Langfuse sur http://127.0.0.1:3100. Dans le cluster de test de la CI, Langfuse tourne dans son propre espace, sans aucune sortie hors du cluster, et deux scénarios vérifient la trace d'une analyse et le blocage de toute exportation.
 
 Les clés `LANGFUSE_PUBLIC_KEY` et `LANGFUSE_SECRET_KEY` viennent de `.env` ou des secrets montés. **Aucune trace ne contient de texte de contrat**, même masqué, ni prompt, ni réponse du LLM, ni, par défaut, d'identité (le `sub` de l'interface authentifiée seulement sur réglage) : des attributs en liste blanche, et un test qui cherche le texte des 13 contrats du jeu dans tout ce qui est émis. Si la destination est absente ou lente, l'analyse n'en est ni changée ni sensiblement ralentie. LangSmith est écarté, et son traçage refusé au démarrage : les traces partiraient chez un tiers ([ADR 008](docs/adr-008-observabilite.md)).
 
