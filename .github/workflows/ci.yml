@@ -374,7 +374,7 @@ jobs:
         # relevé, jamais bloquant : un échec reste signalé dans le job
         continue-on-error: true
         run: uv run --no-sync python scripts/cluster.py mesure-langfuse
-      - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, restauration)
+      - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, traces, restauration)
         run: uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
       - name: Langfuse après les scénarios, mémoire et disque (ADR 008)
         id: diagnostic-langfuse-apres

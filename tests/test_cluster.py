@@ -1,6 +1,7 @@
 """Scénarios sur le cluster de test k3d (ADR 005, PR C3 et D1), préparé par
 scripts/cluster.py : plusieurs nœuds, CloudNativePG avec sauvegardes vers SeaweedFS, proxy
-de sortie, serveur factice de Mistral, Traefik, Dex, application derrière oauth2-proxy.
+de sortie, serveur factice de Mistral, Traefik, Dex, application derrière oauth2-proxy, et,
+en profil ci, Langfuse, destination de ses traces (ADR 008).
 Marqueur `cluster`, option `--cluster=DOSSIER`, en un mot (voir
 tests/test_cluster_outillage.py).
 
@@ -1656,7 +1657,168 @@ def test_second_facteur_non_exige_averti_au_demarrage():
         assert "second facteur non exigé" in lines
 
 
-# --- 10. sauvegarde et restauration, puis désinstallation ----------------------------------
+# --- 10. traces vers Langfuse (ADR 008) -----------------------------------------------------
+
+OBSERVABILITY = CLUSTER.OBSERVABILITY
+# hors du cluster, même en https : refusée par l'application, bloquée par le réseau
+EXTERNAL_TRACES = "https://cloud.langfuse.com/api/public/otel"
+NODE_EGRESS = (
+    "const s = require('net').connect(443, '1.1.1.1');"
+    "s.setTimeout(5000, () => { console.log('refuse timeout'); process.exit(0); });"
+    "s.on('connect', () => { console.log('ouvert'); process.exit(0); });"
+    "s.on('error', (e) => { console.log('refuse ' + e.code); process.exit(0); });"
+)
+
+
+@pytest.fixture(scope="module")
+def langfuse(request) -> None:
+    """Langfuse n'est installé qu'en profil ci (mémoire du poste : ADR 008) ; en profil
+    local, les scénarios des traces sont sautés, motif à l'appui, jamais en silence."""
+    folder = Path(request.config.getoption("--cluster"))
+    profile = (folder / CLUSTER.PROFILE_FILE).read_text(encoding="utf-8").strip()
+    if profile == "local":
+        pytest.skip(
+            "profil local : Langfuse non installé (mémoire du poste) ; vérifié par le "
+            "job cluster de la CI (ADR 008)"
+        )
+    assert profile == "ci", profile
+
+
+def langfuse_keys() -> tuple[str, str]:
+    def key(name: str) -> str:
+        encoded = kubectl(
+            "get",
+            "secret",
+            "langfuse",
+            "-n",
+            OBSERVABILITY,
+            "-o",
+            f"jsonpath={{.data.{name}}}",
+        )
+        return base64.b64decode(encoded).decode()
+
+    return key("public-key"), key("secret-key")
+
+
+def observations(session: str) -> list[dict]:
+    """Observations des traces d'une session (l'identifiant du contrat), lues par l'API v2
+    de Langfuse 4, tous les groupes de champs : la session donne les traces (posée sur la
+    racine), chaque trace toutes ses observations."""
+    fields = "core,basic,time,io,metadata,model,usage,metrics,trace_context"
+    with forward(OBSERVABILITY, "svc/langfuse-web", 3000) as base:
+
+        def read(**filters: str) -> list[dict]:
+            response = httpx.get(
+                f"{base}/api/public/v2/observations",
+                params={**filters, "limit": 1000, "fields": fields},
+                auth=langfuse_keys(),
+                timeout=60,
+            )
+            assert response.status_code == 200, response.text
+            return response.json()["data"]
+
+        traces = {o["traceId"] for o in read(sessionId=session) if o["traceId"]}
+        return [o for trace in sorted(traces) for o in read(traceId=trace)]
+
+
+def test_trace_d_une_analyse_dans_langfuse(langfuse):
+    """Une analyse par l'interface (serveur factice : vrais appels du SDK) laisse sa trace
+    dans Langfuse : l'opération, les étapes du graphe, les appels au LLM avec modèle,
+    tokens et coût ; rien du contrat. Les événements bruts sont dans le seau de Langfuse,
+    sur SeaweedFS."""
+    from fuites import leaks
+
+    from cdg.application import demo_set
+
+    pod = web_pods()[0]["metadata"]["name"]
+    identifier = f"trace-{uuid.uuid4().hex[:8]}"
+    with interface(pod) as client:
+        response = analyse(client, GO, identifier)
+    assert response.status_code == 200, response.text
+
+    def found() -> list[dict]:
+        seen = observations(identifier)
+        names = {o.get("name") for o in seen}
+        return seen if {"cdg.analyse", "decision_gate"} <= names else []
+
+    seen = wait_for(found, "trace de l'analyse dans Langfuse", 300, 5)
+    names = [o["name"] for o in seen]
+    [root] = [o for o in seen if o["name"] == "cdg.analyse"]
+    assert root["isRootObservation"] is True
+    assert {"validate_input", "extract_clauses", "verify_extraction"} <= set(names)
+    assert names.count("analyst") == 4
+    calls = [o for o in seen if o["type"] == "GENERATION"]
+    assert calls, names
+    for call in calls:
+        assert call["name"].startswith("chat ") and call["model"], call
+        assert call["usageDetails"].get("input", 0) > 0, call
+        assert call["totalCost"] and call["totalCost"] > 0, call
+        assert call["input"] in (None, "", "null") and call["output"] in (
+            None,
+            "",
+            "null",
+        )
+    _, contracts = demo_set.load()
+    contract = contracts[GO]
+    dumped = json.dumps(seen, ensure_ascii=False)
+    assert leaks(contract.text(), dumped) == []
+    assert [p for p in contract.parties if p in dumped] == []
+    events = kubectl(
+        "exec",
+        "-n",
+        CLUSTER.STORAGE_NAMESPACE,
+        "deployment/seaweedfs",
+        "--",
+        "sh",
+        "-c",
+        f'echo "fs.ls /buckets/{CLUSTER.LANGFUSE_BUCKET}/events" | weed shell',
+    )
+    assert "cdg-traces" in events, events
+
+
+def test_traces_hors_du_cluster_bloquees(langfuse):
+    """Aucune exportation hors du cluster (ADR 008) : une destination externe est refusée
+    au lancement par l'application ; une sortie directe vers Internet est bloquée par les
+    règles réseau, depuis l'interface comme depuis les pods de Langfuse ; le proxy de
+    sortie refuse le domaine de Langfuse Cloud. L'export OTLP, lui, ignore le proxy."""
+    pod = web_pods()[0]["metadata"]["name"]
+    launched = subprocess.run(
+        KUBECTL
+        + ["exec", "-n", "cdg", pod, "-c", "web", "--", "python", "-m", "cdg.cli"]
+        + ["--traces", EXTERNAL_TRACES, "list"],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert launched.returncode != 0
+    assert "hors du poste et du cluster" in launched.stderr, launched.stderr
+    probe = EGRESS.replace('("1.1.1.1", 443)', '("cloud.langfuse.com", 443)').replace(
+        '"https://example.com/"', '"https://cloud.langfuse.com/"'
+    )
+    for kind in ("direct", "proxy"):
+        out = kubectl(
+            "exec", "-n", "cdg", pod, "-c", "web", "--", "python", "-c", probe, kind
+        )
+        assert out.startswith("refuse"), (kind, out)
+    assert "407" in kubectl(
+        "exec", "-n", "cdg", pod, "-c", "web", "--", "python", "-c", probe, "proxy"
+    )
+    for deployment in ("langfuse-web", "langfuse-worker"):
+        out = kubectl(
+            "exec",
+            "-n",
+            OBSERVABILITY,
+            f"deployment/{deployment}",
+            "--",
+            "node",
+            "-e",
+            NODE_EGRESS,
+        )
+        assert out.startswith("refuse"), (deployment, out)
+
+
+# --- 11. sauvegarde et restauration, puis désinstallation ----------------------------------
 
 
 def postgres_ready(name: str) -> bool:

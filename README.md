@@ -200,7 +200,7 @@ Les clés `LANGFUSE_PUBLIC_KEY` et `LANGFUSE_SECRET_KEY` viennent de `.env` ou d
 
 ## Déploiement Kubernetes
 
-Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue vingt-sept scénarios d'exploitation. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
+Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue vingt-neuf scénarios d'exploitation, dont deux sur les traces envoyées à Langfuse. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
 
 - **Application** : deux réplicas sur des nœuds différents ; pods non root, système de fichiers en lecture seule ; mise à jour progressive et arrêt propre ; migrations, indexation du corpus et contrôle de la configuration en tâches Helm. L'interface n'écoute que dans son pod : seul oauth2-proxy, à côté d'elle, la joint.
 - **PostgreSQL géré par CloudNativePG** : WAL archivés en continu, sauvegarde chaque nuit vers un stockage compatible S3 ; une restauration dans un nouveau cluster est vérifiée contre la tête du journal d'audit relevée avant la sauvegarde. Le greffon de sauvegarde exige cert-manager, en production aussi.
@@ -209,7 +209,7 @@ Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À
 - **Proxy de sortie** (Smokescreen, construit par le projet) : seules l'API de Mistral et le fournisseur d'identité sont joignables, et les règles réseau refusent toute sortie directe.
 - **Secrets en fichiers**, montés en lecture seule, jamais en variables d'environnement. Le mot de passe d'`app_role`, le rôle de l'application dans la base, tourne sans redémarrage : l'application relit le fichier à chaque nouvelle connexion.
 
-Les vingt-sept scénarios :
+Les vingt-neuf scénarios :
 
 1. deux réplicas, sur deux nœuds différents ;
 2. création simultanée d'un même contrat par les deux réplicas : un seul contrat, un seul scellement ;
@@ -237,7 +237,9 @@ Les vingt-sept scénarios :
 24. rôles et quatre yeux : qui a lancé l'analyse ne la tranche pas, ni l'analyste, et le relecteur n'analyse pas (403, tracés) ; enregistrement scellé avec les deux identités, sans aucun courriel ;
 25. décision par la CLI dans le cluster : refusée sans accès d'urgence, admise avec, scellée comme telle et tracée dans les journaux du pod ;
 26. second facteur non exigé : annoncé au démarrage (Dex n'en prouve aucun) ;
-27. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
+27. trace d'une analyse dans Langfuse, lue par son API : opération, étapes du graphe, appels au LLM avec modèle, tokens et coût, aucune fenêtre du texte du contrat ; événements bruts dans le seau de Langfuse, sur SeaweedFS ;
+28. traces hors du cluster : destination externe refusée au lancement, sortie directe bloquée depuis l'interface et depuis les pods de Langfuse, Langfuse Cloud refusé par le proxy ;
+29. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
 
 Profil local réduit : deux nœuds, une instance PostgreSQL ; Docker, kubectl, k3d 5.9.0 et helm 4.3.0 (versions de la CI, contrôlées par les scripts). Il demande près de 7 Go de mémoire à Docker (deux réplicas de 1,6 Go chacun et l'indexation du corpus, 2,9 Go au pic), et l'installation prend une vingtaine de minutes, surtout pour indexer le corpus. `./scripts/check.sh --sans-cluster` laisse le cluster à la CI.
 
