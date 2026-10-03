@@ -196,7 +196,7 @@ Chaque analyse peut être tracée en OpenTelemetry : une trace par opération (a
 uv run python -m cdg.cli --traces http://127.0.0.1:3100/api/public/otel mcp --demo --operateur poste-1
 ```
 
-Les clés `LANGFUSE_PUBLIC_KEY` et `LANGFUSE_SECRET_KEY` viennent de `.env` ou des secrets montés. **Aucune trace ne contient de texte de contrat**, même masqué, ni prompt, ni réponse du LLM, ni identité : des attributs en liste blanche, et un test qui cherche le texte des 13 contrats du jeu dans tout ce qui est émis. Si la destination est absente ou lente, l'analyse n'en est ni changée ni sensiblement ralentie. LangSmith est écarté, et son traçage refusé au démarrage : les traces partiraient chez un tiers ([ADR 008](docs/adr-008-observabilite.md)).
+Les clés `LANGFUSE_PUBLIC_KEY` et `LANGFUSE_SECRET_KEY` viennent de `.env` ou des secrets montés. **Aucune trace ne contient de texte de contrat**, même masqué, ni prompt, ni réponse du LLM, ni, par défaut, d'identité (le `sub` de l'interface authentifiée seulement sur réglage) : des attributs en liste blanche, et un test qui cherche le texte des 13 contrats du jeu dans tout ce qui est émis. Si la destination est absente ou lente, l'analyse n'en est ni changée ni sensiblement ralentie. LangSmith est écarté, et son traçage refusé au démarrage : les traces partiraient chez un tiers ([ADR 008](docs/adr-008-observabilite.md)).
 
 ## Déploiement Kubernetes
 
