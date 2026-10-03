@@ -191,6 +191,7 @@ def test_identite_par_defaut_aucune_sub_sur_reglage(keys, monkeypatch):
         "http://localhost:3100/api/public/otel",
         "http://langfuse-web:3000/api/public/otel",
         "http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel",
+        "http://langfuse-web.langfuse.svc:3000/api/public/otel",
         "https://langfuse.example.org/api/public/otel",
     ],
 )
@@ -202,6 +203,9 @@ def test_url_de_destination_admise(url):
     ("url", "motif"),
     [
         ("http://langfuse.example.org/api/public/otel", "https"),
+        # « .svc » au milieu d'un nom externe : pas un service du cluster
+        ("http://traces.svc.example.org/api/public/otel", "https"),
+        ("http://langfuse.svc.cluster.local.example.org/otel", "https"),
         ("https://pk:sk@langfuse.example.org/otel", "identifiants"),
         ("ftp://langfuse.example.org/otel", "https"),
         ("https://langfuse.example.org/otel?cle=x", "requête"),

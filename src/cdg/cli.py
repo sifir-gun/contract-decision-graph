@@ -867,8 +867,9 @@ def _warm_up(config: DecisionConfig, started: threading.Event) -> None:
 
 
 # hôtes où une destination en http clair est admise : le poste, ou un service interne au
-# cluster (nom court, ou en .svc) ; ailleurs, https
+# cluster (nom court, ou nom de service terminé par l'un de ces suffixes) ; ailleurs, https
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+CLUSTER_SUFFIXES = (".svc", ".svc.cluster.local")
 
 
 def _destination(value: str) -> str:
@@ -876,7 +877,7 @@ def _destination(value: str) -> str:
     le cluster ; ni identifiants, ni requête, ni fragment (les clés viennent des secrets)."""
     parts = urlsplit(value)
     host = parts.hostname or ""
-    internal = host in LOCAL_HOSTS or "." not in host or ".svc" in host
+    internal = host in LOCAL_HOSTS or "." not in host or host.endswith(CLUSTER_SUFFIXES)
     if parts.scheme not in ("http", "https") or not host:
         raise argparse.ArgumentTypeError(
             f"destination : une URL https attendue (http sur le poste ou dans le cluster)"
