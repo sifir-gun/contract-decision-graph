@@ -39,6 +39,9 @@ from cdg.domain.version import UNKNOWN
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCEPTIONS = ROOT / "securite" / "exceptions-vulnerabilites.yaml"
+# images sans signature vérifiable, admises pour les tests seulement (ADR 008)
+SIGNATURE_EXCEPTIONS = ROOT / "securite" / "exceptions-signatures.yaml"
+PINNED = re.compile(r"^[a-z0-9.-]+(:\d+)?(/[a-z0-9._-]+)+:[\w.-]+@sha256:[0-9a-f]{64}$")
 MAX_EXCEPTION = timedelta(days=90)  # durée de vie d'une exception, au plus
 GRYPE_DB = "cdg-grype-db"  # volume Docker : base de failles gardée entre deux scans
 
@@ -301,6 +304,37 @@ def _exception_rule(entry: dict[str, Any], today: date) -> dict[str, Any]:
         },
         "reason": reason,
     }
+
+
+def signature_exceptions(path: Path, today: date) -> dict[str, str]:
+    """Images admises sans signature, pour les tests seulement (ADR 008) : image par
+    étiquette et empreinte, portée « tests », motif, 90 jours au plus, non expirée ; une
+    entrée qui manque à l'une de ces règles lève, nommée."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    allowed: dict[str, str] = {}
+    for entry in data.get("exceptions") or []:
+        image = str(entry.get("image") or "?")
+        if not PINNED.match(image):
+            raise ValueError(f"exception {image} : image par étiquette et empreinte")
+        if entry.get("portee") != "tests":
+            raise ValueError(f"exception {image} : portée tests seulement (ADR 008)")
+        reason = str(entry.get("motif") or "").strip()
+        if not reason:
+            raise ValueError(f"exception {image} : motif absent")
+        decided, expires = entry.get("decidee"), entry.get("expire")
+        if not isinstance(decided, date) or not isinstance(expires, date):
+            raise TypeError(f"exception {image} : dates decidee et expire attendues")
+        if expires - decided > MAX_EXCEPTION:
+            raise ValueError(
+                f"exception {image} : plus de 90 jours entre décision et expiration"
+            )
+        if today > expires:
+            raise ValueError(
+                f"exception {image} expirée le {expires.isoformat()} : la revoir "
+                f"({SIGNATURE_EXCEPTIONS.relative_to(ROOT)})"
+            )
+        allowed[image] = reason
+    return allowed
 
 
 def grype_config(exceptions: Path, today: date) -> dict[str, Any]:
