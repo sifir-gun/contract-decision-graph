@@ -59,6 +59,11 @@ def test_modele_sans_tarif_signale(tmp_path):
         lambda d: d["tarifs"]["mistral-small-2603"].pop("source"),
         lambda d: d["tarifs"]["mistral-small-2603"].update(entree_usd_par_mtoken=-1),
         lambda d: d["export"].update(delai_export_s=0),
+        lambda d: d["export"].pop("lot_max"),
+        lambda d: d["export"].pop("intervalle_metriques_s"),
+        lambda d: d["export"].update(intervalle_metriques_s=0),
+        # un lot plus grand que la file : le SDK le refuserait
+        lambda d: d["export"].update(lot_max=4096, file_max=2048),
     ],
 )
 def test_reglage_manquant_inconnu_ou_invalide_refuse(tmp_path, change):

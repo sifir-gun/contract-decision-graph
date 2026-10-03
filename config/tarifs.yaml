@@ -34,4 +34,6 @@ export:
   delai_export_s: 2.0          # délai d'une requête d'export, nouvelles tentatives comprises
   delai_lot_ms: 1000           # attente avant l'envoi d'un lot
   file_max: 2048               # spans en attente au plus ; au-delà, les plus anciens sont abandonnés
+  lot_max: 512                 # spans par lot exporté au plus (celle du SDK), jamais plus que file_max
   delai_fermeture_s: 2.0       # à l'arrêt du processus, attente au plus de l'envoi des derniers lots
+  intervalle_metriques_s: 60   # métriques : un envoi par intervalle (avec --metriques seulement)

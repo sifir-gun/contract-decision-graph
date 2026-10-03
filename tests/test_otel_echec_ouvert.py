@@ -177,7 +177,9 @@ def test_destination_muette_analyse_et_arret_bornes(reference, mute, caplog):
 
 def test_file_pleine_spans_abandonnes_sans_blocage(reference, mute, caplog):
     expected, median = reference
-    cfg = config(delai_lot_ms=1, delai_export_s=2.0, delai_fermeture_s=0.3, file_max=2)
+    cfg = config(
+        delai_lot_ms=1, delai_export_s=2.0, delai_fermeture_s=0.3, file_max=2, lot_max=2
+    )
     telemetry = traced(mute.port, cfg)
     with caplog.at_level(logging.WARNING, logger="opentelemetry"):
         try:

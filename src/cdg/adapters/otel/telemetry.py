@@ -59,10 +59,6 @@ SERVICE = "contract-decision-graph"
 PROVIDERS = {"mistral": "mistral_ai", "anthropic": "anthropic"}
 IDENTITIES = ("aucune", "sub")
 Identity = Literal["aucune", "sub"]
-METRICS_INTERVAL_MS = 60_000
-# taille d'un lot exporté : celle du SDK, fixée par le code (le SDK la lirait dans
-# `OTEL_BSP_MAX_EXPORT_BATCH_SIZE`), jamais plus grande que la file, qu'il refuserait
-BATCH_MAX = 512
 log = logging.getLogger(__name__)
 
 
@@ -216,7 +212,7 @@ class OtelTelemetry:
                 }
                 span.set_attributes(checked("operation", values))
                 self._duration.record(
-                    time.monotonic() - start,
+                    rounded(time.monotonic() - start),
                     checked("metrique", {"cdg.operation": name, "cdg.etat": etat}),
                 )
                 _CURRENT.reset(token)
@@ -302,7 +298,7 @@ class OtelTelemetry:
                     self._used(span, usage, values, measures, state)
                 span.set_attributes(checked("appel", values))
                 self._llm_duration.record(
-                    time.monotonic() - start, checked("metrique", measures)
+                    rounded(time.monotonic() - start), checked("metrique", measures)
                 )
 
     def _used(
@@ -331,8 +327,11 @@ class OtelTelemetry:
                 tokens, checked("metrique", {**measures, "gen_ai.token.type": kind})
             )
         if cost is not None:
+            # arrondi de chaque mesure (arrondi unique) ; le total de la trace, lui,
+            # arrondit la somme exacte
             self._llm_cost.add(
-                cost, checked("metrique", {"gen_ai.request.model": usage.model})
+                rounded(cost),
+                checked("metrique", {"gen_ai.request.model": usage.model}),
             )
 
     # --- fermeture ------------------------------------------------------------------------
@@ -397,7 +396,8 @@ def build(
         processor = BatchSpanProcessor(
             exporter,
             max_queue_size=export.file_max,
-            max_export_batch_size=min(BATCH_MAX, export.file_max),
+            # passée par le code : le SDK la lirait dans OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+            max_export_batch_size=export.lot_max,
             schedule_delay_millis=export.delai_lot_ms,
             export_timeout_millis=export.delai_export_s * 1000,
         )
@@ -408,7 +408,7 @@ def build(
                 endpoint=metrics.rstrip("/") + "/v1/metrics",
                 timeout=export.delai_export_s,
             ),
-            export_interval_millis=METRICS_INTERVAL_MS,
+            export_interval_millis=export.intervalle_metriques_s * 1000,
             export_timeout_millis=export.delai_export_s * 1000,
         )
     return OtelTelemetry(

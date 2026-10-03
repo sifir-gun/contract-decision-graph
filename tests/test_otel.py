@@ -31,6 +31,7 @@ from opentelemetry.trace import (
 from pydantic import BaseModel
 
 from cdg.adapters.otel import attributes
+from cdg.adapters.otel import telemetry as adapter
 from cdg.adapters.otel.telemetry import Destination, OtelTelemetry, build
 from cdg.application.observation import (
     NoTelemetry,
@@ -416,6 +417,70 @@ def test_metriques_cout_et_duree():
     }
     [duration] = found["cdg.operation.duree"]["data"]["data_points"]
     assert duration["attributes"] == {"cdg.operation": "analyse", "cdg.etat": "termine"}
+
+
+def test_valeurs_des_metriques_arrondies():
+    """Arrondi unique (`domain/numeric.py`) pour chaque valeur émise : un coût d'un
+    token (1,5e-7 $) n'a pas six décimales."""
+    telemetry, _, reader = otel()
+    with telemetry.llm_call(provider="mistral", tier="main", node="n") as call:
+        call.done(usage(tokens_in=1, tokens_out=0))
+    data = json.loads(reader.get_metrics_data().to_json())
+    points = {
+        m["name"]: m["data"]["data_points"]
+        for rm in data["resource_metrics"]
+        for sm in rm["scope_metrics"]
+        for m in sm["metrics"]
+    }
+    [cost] = points["cdg.llm.cout"]
+    assert cost["value"] == 0.0
+    [duration] = points["gen_ai.client.operation.duration"]
+    assert duration["sum"] == round(duration["sum"], 6)
+
+
+def test_reglages_d_export_passes_au_sdk(monkeypatch):
+    """Tous les réglages de l'export viennent de `config/tarifs.yaml` (jamais d'une
+    variable `OTEL_*` ni d'une constante du code)."""
+    seen = {}
+    spans, metrics_ = adapter.BatchSpanProcessor, adapter.PeriodicExportingMetricReader
+
+    def processor(exporter, **kwargs):
+        seen["traces"] = kwargs
+        return spans(exporter, **kwargs)
+
+    def reader(exporter, **kwargs):
+        seen["metriques"] = kwargs
+        return metrics_(exporter, **kwargs)
+
+    monkeypatch.setattr(adapter, "BatchSpanProcessor", processor)
+    monkeypatch.setattr(adapter, "PeriodicExportingMetricReader", reader)
+    config = load_observability_config()
+    export = config.export.model_copy(
+        update={
+            "file_max": 16,
+            "lot_max": 7,
+            "delai_lot_ms": 250,
+            "delai_export_s": 1.5,
+            "intervalle_metriques_s": 5.0,
+        }
+    )
+    telemetry = build(
+        config.model_copy(update={"export": export}),
+        traces=Destination("http://127.0.0.1:9", "pk-lf-test", "sk-lf-test"),
+        metrics="http://127.0.0.1:9",
+        code=CODE,
+    )
+    telemetry.close()
+    assert seen["traces"] == {
+        "max_queue_size": 16,
+        "max_export_batch_size": 7,
+        "schedule_delay_millis": 250,
+        "export_timeout_millis": 1500.0,
+    }
+    assert seen["metriques"] == {
+        "export_interval_millis": 5000.0,
+        "export_timeout_millis": 1500.0,
+    }
 
 
 def test_modele_sans_tarif_cout_absent_et_journalise(caplog):

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cdg.domain.authorization import Actor
 from cdg.domain.config import LLMConfig
@@ -48,7 +48,18 @@ class ExportConfig(_Strict):
     delai_export_s: Annotated[float, Field(gt=0)]
     delai_lot_ms: Annotated[int, Field(gt=0)]
     file_max: Annotated[int, Field(gt=0)]
+    lot_max: Annotated[int, Field(gt=0)]
     delai_fermeture_s: Annotated[float, Field(gt=0)]
+    intervalle_metriques_s: Annotated[float, Field(gt=0)]
+
+    @model_validator(mode="after")
+    def _lot_dans_la_file(self) -> "ExportConfig":
+        if self.lot_max > self.file_max:
+            raise ValueError(
+                f"export.lot_max ({self.lot_max}) plus grand que export.file_max "
+                f"({self.file_max}) : le SDK refuserait la file"
+            )
+        return self
 
 
 class ObservabilityConfig(_Strict):
