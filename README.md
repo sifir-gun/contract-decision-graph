@@ -190,7 +190,7 @@ Sans `--demo`, l'analyse appelle le fournisseur LLM de la configuration (payant,
 
 ## Observabilité
 
-Chaque analyse peut être tracée en OpenTelemetry : une trace par opération (analyse, revue, expiration, relance, reprise), une étape par nœud du graphe, et chaque appel au LLM avec son modèle, ses tokens, son coût, sa latence et sa tentative. La destination est un réglage de lancement, un Langfuse auto-hébergé par exemple ; **sans destination, rien n'est envoyé nulle part.**
+Chaque analyse peut être tracée en OpenTelemetry : une trace par opération (analyse, revue, expiration, relance, reprise), une étape par nœud du graphe, et chaque appel au LLM avec son modèle, ses tokens, son coût, sa latence et sa tentative. La destination est un réglage de lancement, un Langfuse auto-hébergé, sur le poste ou dans le cluster seulement ; **sans destination, rien n'est envoyé nulle part.**
 
 ```bash
 uv run python -m cdg.cli --traces http://127.0.0.1:3100/api/public/otel mcp --demo --operateur poste-1

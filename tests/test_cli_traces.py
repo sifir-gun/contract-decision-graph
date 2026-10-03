@@ -193,29 +193,37 @@ def test_identite_par_defaut_aucune_sub_sur_reglage(keys, monkeypatch):
         "http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel",
         "http://langfuse-web.langfuse.svc:3000/api/public/otel",
         "http://[::1]:3100/api/public/otel",
-        "https://langfuse.example.org/api/public/otel",
+        "https://langfuse-web.langfuse.svc.cluster.local/api/public/otel",
+        "https://localhost:3443/api/public/otel",
     ],
 )
 def test_url_de_destination_admise(url):
     assert cli._destination(url) == url
 
 
+# souveraineté (décision du propriétaire, 03/10) : aucune destination hors du poste et du
+# cluster, même en https
+EXTERNAL = "hors du poste et du cluster"
+
+
 @pytest.mark.parametrize(
     ("url", "motif"),
     [
-        ("http://langfuse.example.org/api/public/otel", "https"),
+        ("https://langfuse.example.org/api/public/otel", EXTERNAL),
+        ("https://cloud.langfuse.com/api/public/otel", EXTERNAL),
+        ("http://langfuse.example.org/api/public/otel", EXTERNAL),
         # « .svc » au milieu d'un nom externe : pas un service du cluster
-        ("http://traces.svc.example.org/api/public/otel", "https"),
-        ("http://langfuse.svc.cluster.local.example.org/otel", "https"),
+        ("https://traces.svc.example.org/api/public/otel", EXTERNAL),
+        ("http://langfuse.svc.cluster.local.example.org/otel", EXTERNAL),
         # une adresse IP littérale, sous toutes ses formes, n'est pas un nom court
-        ("http://134744072:4318/otel", "https"),
-        ("http://0x08080808:4318/otel", "https"),
-        ("http://10.0.0.5:4318/otel", "https"),
-        ("http://[2001:db8::1]:4318/otel", "https"),
-        ("https://pk:sk@langfuse.example.org/otel", "identifiants"),
-        ("ftp://langfuse.example.org/otel", "https"),
-        ("https://langfuse.example.org/otel?cle=x", "requête"),
-        ("langfuse.example.org/otel", "https"),
+        ("http://134744072:4318/otel", EXTERNAL),
+        ("https://0x08080808:4318/otel", EXTERNAL),
+        ("http://10.0.0.5:4318/otel", EXTERNAL),
+        ("http://[2001:db8::1]:4318/otel", EXTERNAL),
+        ("http://pk:sk@langfuse-web:3000/otel", "identifiants"),
+        ("ftp://langfuse-web/otel", "URL http ou https"),
+        ("http://langfuse-web:3000/otel?cle=x", "requête"),
+        ("langfuse-web/otel", "URL http ou https"),
     ],
 )
 def test_url_de_destination_refusee(url, motif):

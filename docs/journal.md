@@ -2962,7 +2962,7 @@ Relecteur neuf sur toute la branche, en priorité sur la confidentialité des tr
 - **Réglages** : taille des lots et intervalle des métriques sortis du code vers `config/tarifs.yaml` ; valeurs des métriques arrondies par la fonction unique.
 - **Documentation** : variables `OTEL_*` lues par le SDK complétées ; redirection de la destination (le SDK la compte comme un succès) ; étape de la revue autour d'`interrupt()` ; identité « par défaut » dans le README ; `.env.example`.
 - **Pour la PR 2** : dans le cluster, le ConfigMap monté sur `/app/config` masquerait `config/tarifs.yaml`, et `--traces` y ferait échouer le démarrage. À corriger avec le chart.
-- **Soumis au propriétaire** : refuser dans l'application toute destination hors du poste et du cluster. Le code ne contrôle que le chiffrement ; la souveraineté ne repose aujourd'hui que sur les règles réseau de la PR 2.
+- **Souveraineté, décision du propriétaire (03/10)** : le code ne contrôlait que le chiffrement, et `https://cloud.langfuse.com` était admis ; la souveraineté ne reposait que sur les règles réseau de la PR 2. Désormais, partout, seule une destination sur le poste (adresse de bouclage, `localhost`) ou dans le cluster (nom court, `.svc`) est admise, en http ou en https.
 
 ### Pistes (hors périmètre, notées sans code)
 

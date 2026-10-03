@@ -868,9 +868,9 @@ def _warm_up(config: DecisionConfig, started: threading.Event) -> None:
     started.set()
 
 
-# hôtes où une destination en http clair est admise : le poste (adresse de bouclage, ou
-# localhost), ou un service interne au cluster (nom court, ou nom de service terminé par
-# l'un de ces suffixes) ; ailleurs, https
+# souveraineté (ADR 008, décision du 03/10) : une destination n'est admise que sur le poste
+# (adresse de bouclage, ou localhost) ou dans le cluster (nom court, ou nom de service
+# terminé par l'un de ces suffixes), en http ou en https ; jamais ailleurs
 CLUSTER_SUFFIXES = (".svc", ".svc.cluster.local")
 
 
@@ -895,16 +895,13 @@ def _internal(host: str) -> bool:
 
 
 def _destination(value: str) -> str:
-    """URL d'une destination OTLP (traces ou métriques) : https, sauf sur le poste ou dans
-    le cluster ; ni identifiants, ni requête, ni fragment (les clés viennent des secrets).
-    Un refus ne cite jamais l'URL, qui peut porter une clé."""
+    """URL d'une destination OTLP (traces ou métriques) : sur le poste ou dans le cluster
+    seulement, en http ou en https ; ni identifiants, ni requête, ni fragment (les clés
+    viennent des secrets). Un refus ne cite jamais l'URL, qui peut porter une clé."""
     parts = urlsplit(value)
     host = parts.hostname or ""
-    internal = _internal(host)
     if parts.scheme not in ("http", "https") or not host:
-        raise argparse.ArgumentTypeError(
-            "destination : une URL https attendue (http sur le poste ou dans le cluster)"
-        )
+        raise argparse.ArgumentTypeError("destination : une URL http ou https attendue")
     if parts.username is not None or parts.password is not None:
         raise argparse.ArgumentTypeError(
             "destination : pas d'identifiants dans l'URL (LANGFUSE_PUBLIC_KEY et "
@@ -914,9 +911,10 @@ def _destination(value: str) -> str:
         raise argparse.ArgumentTypeError(
             "destination : ni requête ni fragment dans l'URL"
         )
-    if parts.scheme == "http" and not internal:
+    if not _internal(host):
         raise argparse.ArgumentTypeError(
-            "destination hors du poste et du cluster : https exigé"
+            "destination hors du poste et du cluster refusée (ADR 008) : adresse de "
+            "bouclage, localhost, nom court ou service du cluster (.svc) seulement"
         )
     return value
 
@@ -1000,16 +998,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--traces",
         type=_destination,
         default=os.environ.get("CDG_TRACES") or None,
-        help="destination des traces OpenTelemetry (ou CDG_TRACES), par exemple "
-        "http://127.0.0.1:3100/api/public/otel pour Langfuse ; clés LANGFUSE_PUBLIC_KEY "
-        "et LANGFUSE_SECRET_KEY en secrets. Aucune par défaut : rien n'est envoyé (ADR 008)",
+        help="destination des traces OpenTelemetry (ou CDG_TRACES), sur le poste ou dans "
+        "le cluster seulement, par exemple http://127.0.0.1:3100/api/public/otel pour "
+        "Langfuse ; clés LANGFUSE_PUBLIC_KEY et LANGFUSE_SECRET_KEY en secrets. Aucune par "
+        "défaut : rien n'est envoyé (ADR 008)",
     )
     parser.add_argument(
         "--metriques",
         type=_destination,
         default=os.environ.get("CDG_METRIQUES") or None,
-        help="destination des métriques OpenTelemetry (ou CDG_METRIQUES) ; aucune par "
-        "défaut (Langfuse les reçoit et les jette : ses tableaux viennent des traces)",
+        help="destination des métriques OpenTelemetry (ou CDG_METRIQUES), sur le poste ou "
+        "dans le cluster seulement ; aucune par défaut (Langfuse les reçoit et les jette : "
+        "ses tableaux viennent des traces)",
     )
     parser.add_argument(
         "--traces-identite",
