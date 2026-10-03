@@ -2948,6 +2948,22 @@ Compose officiel du tag v4.50.0, images figées par empreinte, à côté de sept
 - **Défaut trouvé en écrivant la documentation, corrigé** : une destination en `http` était admise pour tout hôte contenant `.svc`, donc pour un hôte externe comme `traces.svc.example.org`, et les clés seraient parties en clair. Un service du cluster se reconnaît désormais à son suffixe.
 - **Nombre de tests** : la suite principale passe de 2 125 à 2 222.
 
+### Relecture de la branche avant la PR (03/10)
+
+Relecteur neuf sur toute la branche, en priorité sur la confidentialité des traces ; douze constats, reproduits pour la plupart par des scripts hors du dépôt. Suites, chacune dans son commit, avec un test qui échouait avant :
+
+- **Contexte d'un client MCP repris par les traces** (constat haut) : le middleware du SDK MCP installe le `traceparent` et le `tracestate` du `_meta` de la requête comme contexte courant. L'analyse devenait l'enfant d'une trace choisie par le client ; le `tracestate`, texte libre de plusieurs kilo-octets hors de toute liste blanche, partait dans chaque span ; un drapeau « non échantillonné » coupait l'enregistrement sans rien dire. Corrigé : chaque opération est une racine.
+- **http en clair vers l'extérieur** par une adresse IP littérale (`134744072`, soit 8.8.8.8, `0x08080808`, IPv6) : corrigé, seule une adresse de bouclage passe en http.
+- **Reprise des analyses interrompues** : une trace vide par minute et par réplica, et plusieurs contrats mêlés dans une même trace, tentatives comptées de l'un à l'autre. Corrigé : une trace par contrat repris, ouverte par le moteur, aucune sans reprise.
+- **Identifiant de session non validé** lors d'une revue (`jean.dupont@example.com` tapé dans l'URL sortait) ; « @ » admis dans les identifiants. Corrigé : format du domaine exigé, « @ » retiré.
+- **Refus de la destination** qui recopiaient l'URL, identifiants compris : corrigé.
+- **Télémétrie du SDK Mistral** protégée par une seule défense : l'adaptateur la coupe aussi. En reproduisant le défaut, le test, encore en échec, a pu tenter à la sortie du processus un envoi vers `api.mistral.ai` : spans d'une requête sur le contrat 01 du jeu (synthétique, masqué, public dans le dépôt), avec la clé fictive `cle-factice`. Le test redirige désormais le point d'envoi du SDK vers un port fermé du poste.
+- **Tests** : deux mutations passaient inaperçues (acteur de la revue perdu, garde du nom de modèle retirée) ; un test ne vérifiait rien ; le test des 13 contrats ne cherchait ni les prompts envoyés ni les réponses de l'explication. Corrigés ; les deux mutations sont détectées.
+- **Réglages** : taille des lots et intervalle des métriques sortis du code vers `config/tarifs.yaml` ; valeurs des métriques arrondies par la fonction unique.
+- **Documentation** : variables `OTEL_*` lues par le SDK complétées ; redirection de la destination (le SDK la compte comme un succès) ; étape de la revue autour d'`interrupt()` ; identité « par défaut » dans le README ; `.env.example`.
+- **Pour la PR 2** : dans le cluster, le ConfigMap monté sur `/app/config` masquerait `config/tarifs.yaml`, et `--traces` y ferait échouer le démarrage. À corriger avec le chart.
+- **Soumis au propriétaire** : refuser dans l'application toute destination hors du poste et du cluster. Le code ne contrôle que le chiffrement ; la souveraineté ne repose aujourd'hui que sur les règles réseau de la PR 2.
+
 ### Pistes (hors périmètre, notées sans code)
 
 - **Refuser au démarrage toute variable `OTEL_*`** quand une destination est configurée, comme les variables de traçage tiers : aucune ne change la destination, mais `OTEL_SDK_DISABLED` ou un échantillonneur coupent les traces sans rien dire, et des en-têtes s'ajoutent à l'export.
