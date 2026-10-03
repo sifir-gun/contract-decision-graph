@@ -2946,7 +2946,7 @@ Compose officiel du tag v4.50.0, images figées par empreinte, à côté de sept
 - **Écart de procédure, corrigé** : la tâche 5 a été commitée avec un test en échec (`test_secrets_du_chart_et_de_l_application_memes_noms`, liste des secrets à compléter), parce que la commande enchaînée lisait le code de sortie de `tail` au lieu de celui de pytest. Corrigé dans un commit à part ; le code de sortie de pytest est désormais lu explicitement.
 - **Fils d'export abandonnés entre deux tests** : `close()` les laisse finir en arrière-plan, et ils journalisaient dans la sortie capturée de `test_parite.py`, dont le JSON devenait illisible ; vu sous couverture seulement, par l'ordre des fichiers. Chaque test de l'échec ouvert attend désormais la fin de ses fils, et échoue s'ils survivent.
 - **Défaut trouvé en écrivant la documentation, corrigé** : une destination en `http` était admise pour tout hôte contenant `.svc`, donc pour un hôte externe comme `traces.svc.example.org`, et les clés seraient parties en clair. Un service du cluster se reconnaît désormais à son suffixe.
-- **Nombre de tests** : la suite principale passe de 2 125 à 2 222.
+- **Nombre de tests** : la suite principale passe de 2 125 à 2 252 (relecture comprise) ; le total, de 2 286 à 2 413.
 
 ### Relecture de la branche avant la PR (03/10)
 
