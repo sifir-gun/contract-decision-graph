@@ -2991,7 +2991,7 @@ Seconde et dernière PR du chantier (ADR 008), après la fusion de la PR 1 (PR #
 - **SeaweedFS 4.47** : une identité d'administration tirée de `AWS_ACCESS_KEY_ID` et `AWS_SECRET_ACCESS_KEY` (poste), et des actions limitées à un seau, `Read:langfuse` (cluster), lues dans `auth_credentials.go`. Il envoie aussi, par défaut, des statistiques anonymes à `telemetry.seaweedfs.com` (`-master.telemetry`, `weed/command/server.go`) : celui du cluster le faisait depuis la PR C3, sans règle réseau dans `cdg-stockage`. Trouvé par la relecture ; coupé, et l'espace a désormais ses règles réseau (refus par défaut, entrée S3 bornée, DNS seulement en sortie).
 - **Images sans signature** : Langfuse, ClickHouse et Valkey ne publient ni `sha256-….sig` ni `.att` sur Docker Hub (03/10).
 - **API v2 de Langfuse** : l'identifiant de session n'est porté que par la racine ; le scénario lit la session pour trouver la trace, puis la trace pour ses observations.
-- **Besoin disque du cluster de la CI** : 44,7 Go au pire avec Langfuse (29,9 sans) ; seuil du job porté à 45 Go.
+- **Besoin disque du cluster de la CI** : 48,6 Go au pire avec Langfuse, images et données (29,9 sans) ; seuil du job porté à 49 Go, espace revérifié après le nettoyage du runner ; job limité à 100 minutes.
 - **Écart de procédure, corrigé** : la tâche du chart a été commitée sans relancer toute la suite ; `tests/test_donnees_fictives.py` y lisait une URL à identifiants comme une adresse électronique. Corrigé dans un commit à part ; la suite entière tourne désormais avant chaque commit.
 - **Textes inexacts rencontrés** : « trois variantes » du chart (quatre avant cette PR, cinq après) ; rendus exacts.
 
@@ -2999,5 +2999,6 @@ Seconde et dernière PR du chantier (ADR 008), après la fusion de la PR 1 (PR #
 
 - **Rétention sans l'édition commerciale** : un TTL de ClickHouse sur les tables de Langfuse (que sa documentation de dimensionnement suggère), et une durée de vie des événements dans le seau (SeaweedFS).
 - **Refus des variables `OTEL_*`** quand une destination est configurée (décision du 03/10 : reste une piste).
-- **Signatures des autres images de test** (k3s, registre, SeaweedFS, Traefik, images de cert-manager et de CloudNativePG) : figées par empreinte seulement, comme avant cette PR.
+- **Signatures des autres images de test** (k3s, registre, SeaweedFS, PostgreSQL du projet, Traefik, images de cert-manager et de CloudNativePG) : figées par empreinte seulement, comme avant cette PR.
+- **Identité S3 des sauvegardes limitée à son seau** dans le cluster de test (elle peut lire celui de Langfuse).
 - **ClickHouse 26.4**, version recommandée par Langfuse 4, à la place du minimum 25.12.

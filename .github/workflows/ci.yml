@@ -286,7 +286,7 @@ jobs:
     needs: [image]
     runs-on: ubuntu-24.04
     # ingestion du corpus (60 min au plus, tâche Helm) et scénarios
-    timeout-minutes: 90
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -340,12 +340,12 @@ jobs:
           docker load --input "$RUNNER_TEMP/chaine-oauth2-proxy/image.tar"
       - name: Image de test du serveur factice, sur l'image de l'application
         run: docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
-      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 45 Go libres
+      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 49 Go libres
         id: installation-espace-disque
         env:
-          # besoin du cluster au pire, 44,7 Go avec Langfuse, calculé sur la taille des
-          # images (scripts/cluster.py, disk_need_gb ; ADR 005, ADR 008)
-          ESPACE_MIN_GO: "45"
+          # besoin du cluster au pire, 48,6 Go avec Langfuse et ses données, calculé sur
+          # la taille des images (scripts/cluster.py, disk_need_gb ; ADR 005, ADR 008)
+          ESPACE_MIN_GO: "49"
         run: |
           df -h /
           libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")
@@ -355,6 +355,8 @@ jobs:
           else
             echo "espace suffisant : ${libre} Go libres, ${ESPACE_MIN_GO} exigés ; aucun nettoyage"
           fi
+          libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")
+          if (( libre < ESPACE_MIN_GO )); then echo "espace insuffisant : ${libre} Go libres, ${ESPACE_MIN_GO} exigés" >&2; exit 1; fi
       - name: Aucun cluster d'un essai précédent
         run: uv run --no-sync python scripts/cluster.py detruire
       - name: Image publiée du modèle, signature et provenance vérifiées
@@ -391,6 +393,8 @@ jobs:
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg -l app.kubernetes.io/instance=cdg --all-containers --tail=200 || true
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n traefik -l app.kubernetes.io/name=traefik --tail=200 || true
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg-tests -l app=dex --tail=200 || true
+          kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg-observabilite -l 'app in (langfuse-web,langfuse-worker,langfuse-clickhouse)' --tail=200 || true
+          kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg-stockage -l app=seaweedfs --tail=100 || true
       - name: Espace disque restant, à comparer au besoin calculé
         id: diagnostic-espace-disque
         if: always()

@@ -234,6 +234,9 @@ IMAGE_SIZES_GB = {
     "langfuse": (1.14, 3.82),
 }
 DATA_GB = 1.0  # bases (trois instances au plus), WAL, sauvegardes : mesurés sous 1 Go
+# données de Langfuse, au pire : la somme des limites de ses volumes éphémères
+# (cluster/langfuse.yaml, 3 650 Mio), en Go
+LANGFUSE_DATA_GB = 3.83
 EVICTION_GB = 1.07  # seuil d'éviction des nœuds (1 Gi, KUBELET_ARGS)
 
 
@@ -250,7 +253,8 @@ def disk_need_gb(nodes: int, *, langfuse: bool) -> float:
     ours = [IMAGE_SIZES_GB[name] for name in ("modele", "application", "oauth2-proxy")]
     registry = sum(c for c, _ in ours)
     host = sum(u for _, u in ours) + IMAGE_SIZES_GB["application"][1]
-    return nodes * per_node + registry + host + DATA_GB + EVICTION_GB
+    data = DATA_GB + (LANGFUSE_DATA_GB if langfuse else 0.0)
+    return nodes * per_node + registry + host + data + EVICTION_GB
 
 
 def default_profile(environ: Mapping[str, str] = os.environ) -> str:

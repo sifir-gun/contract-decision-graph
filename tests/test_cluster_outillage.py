@@ -378,9 +378,13 @@ def test_besoin_de_disque_calcule_sur_la_taille_reelle_des_images():
     assert module.IMAGE_SIZES_GB["langfuse"] == (1.14, 3.82)
     nodes = module.PROFILES["ci"].agents + 1
     need = module.disk_need_gb(nodes, langfuse=True)
-    assert 44 < need < 45
+    assert 48 < need < 49
     assert module.disk_need_gb(nodes + 1, langfuse=True) - need == pytest.approx(12.68)
     assert module.disk_need_gb(nodes, langfuse=False) == pytest.approx(29.85)
+    # données de Langfuse au pire : les limites de ses volumes éphémères
+    sizes = re.findall(r"sizeLimit: (\d+)(Mi|Gi)", module.langfuse_manifest())
+    mib = sum(int(n) * (1024 if unit == "Gi" else 1) for n, unit in sizes)
+    assert module.LANGFUSE_DATA_GB == pytest.approx(mib * 2**20 / 1e9, abs=0.01)
 
 
 def test_runner_libere_les_outils_inutilises_sous_le_seuil_de_disque():
@@ -399,6 +403,12 @@ def test_runner_libere_les_outils_inutilises_sous_le_seuil_de_disque():
     need = module.disk_need_gb(module.PROFILES["ci"].agents + 1, langfuse=True)
     assert need <= threshold < need + 2
     lines = [line.strip() for line in space["run"].splitlines() if line.strip()]
+    # après le nettoyage, encore trop peu : échec explicite, pas un cluster évincé
+    assert lines[-2].startswith("libre=$(df --output=avail")
+    assert lines[-1] == (
+        'if (( libre < ESPACE_MIN_GO )); then echo "espace insuffisant : ${libre} Go '
+        'libres, ${ESPACE_MIN_GO} exigés" >&2; exit 1; fi'
+    )
     assert lines[0] == "df -h /"
     assert (
         'libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")' in lines
