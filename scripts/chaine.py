@@ -324,6 +324,12 @@ def signature_exceptions(path: Path, today: date) -> dict[str, str]:
         decided, expires = entry.get("decidee"), entry.get("expire")
         if not isinstance(decided, date) or not isinstance(expires, date):
             raise TypeError(f"exception {image} : dates decidee et expire attendues")
+        if decided > today:
+            raise ValueError(
+                f"exception {image} : décision à venir ({decided.isoformat()})"
+            )
+        if expires < decided:
+            raise ValueError(f"exception {image} : expiration avant sa décision")
         if expires - decided > MAX_EXCEPTION:
             raise ValueError(
                 f"exception {image} : plus de 90 jours entre décision et expiration"

@@ -17,7 +17,7 @@ name: cdg-observabilite
 
 x-langfuse-env: &langfuse-env
   DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?LANGFUSE_POSTGRES_PASSWORD absent, voir .env.example}@langfuse-postgres:5432/langfuse
-  NEXTAUTH_URL: http://localhost:3100
+  NEXTAUTH_URL: http://127.0.0.1:3100
   SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT absent, voir .env.example}
   ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?LANGFUSE_ENCRYPTION_KEY absent, voir .env.example}
   TELEMETRY_ENABLED: "false"
@@ -189,13 +189,17 @@ services:
     command:
       - |
         maitre=langfuse-seaweedfs:9333
+        joint=0
         for essai in $$(seq 30); do
-          if echo "s3.bucket.list" | weed shell -master=$$maitre > /tmp/seaux 2>&1; then break; fi
+          if echo "s3.bucket.list" | weed shell -master=$$maitre > /tmp/seaux 2>&1; then joint=1; break; fi
           sleep 2
         done
-        if grep -qw langfuse /tmp/seaux; then echo "seau langfuse présent"; exit 0; fi
+        if [ "$$joint" != 1 ]; then cat /tmp/seaux >&2; echo "SeaweedFS injoignable" >&2; exit 1; fi
+        # nom exact : « langfuse-seaweedfs » d'un message d'erreur ne vaut pas le seau
+        if awk '$$1 == "langfuse" { trouve = 1 } END { exit !trouve }' /tmp/seaux; then echo "seau langfuse présent"; exit 0; fi
         echo "s3.bucket.create -name langfuse" | weed shell -master=$$maitre
-        echo "s3.bucket.list" | weed shell -master=$$maitre | grep -qw langfuse
+        echo "s3.bucket.list" | weed shell -master=$$maitre > /tmp/seaux 2>&1
+        if ! awk '$$1 == "langfuse" { trouve = 1 } END { exit !trouve }' /tmp/seaux; then cat /tmp/seaux >&2; echo "seau langfuse absent après création" >&2; exit 1; fi
         echo "seau langfuse créé"
     networks: [interne]
 

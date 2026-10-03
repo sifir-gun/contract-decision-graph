@@ -639,7 +639,7 @@ def check_unsigned(images: Iterable[str], today: date) -> None:
     chaine = _chaine()
     try:
         allowed = chaine.signature_exceptions(chaine.SIGNATURE_EXCEPTIONS, today)
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise ClusterError(str(exc)) from exc
     missing = sorted(set(images) - set(allowed))
     if missing:

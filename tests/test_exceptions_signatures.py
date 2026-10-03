@@ -83,7 +83,12 @@ def test_jamais_une_image_du_produit():
         (lambda e: e.update(motif=" "), "motif"),
         (lambda e: e.update(image="docker.io/langfuse/langfuse:4.50.0"), "empreinte"),
         (lambda e: e.update(expire=date(2027, 3, 1)), "90 jours"),
-        (lambda e: e.update(expire=date(2026, 10, 1)), "expirée"),
+        (
+            lambda e: e.update(decidee=date(2026, 9, 1), expire=date(2026, 10, 1)),
+            "expirée",
+        ),
+        (lambda e: e.update(decidee=date(2026, 10, 10)), "à venir"),
+        (lambda e: e.update(expire=date(2026, 9, 1)), "avant sa décision"),
     ],
 )
 def test_exception_mal_formee_refusee(tmp_path, change, message):

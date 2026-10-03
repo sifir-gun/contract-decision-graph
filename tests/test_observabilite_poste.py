@@ -155,3 +155,41 @@ def test_aucun_secret_en_argument_ni_dans_une_sonde():
         ]
         for part in argv:
             assert "${" not in str(part), (name, part)
+
+
+def test_seau_cree_ou_echec_explicite():
+    """Le seau se cherche par son nom exact (« langfuse-seaweedfs » d'un message d'erreur
+    ne vaut pas « langfuse ») ; SeaweedFS injoignable ou seau absent après création :
+    échec du service, jamais un faux succès."""
+    script = services()["langfuse-seau"]["command"][0]
+    assert "grep -qw" not in script
+    assert script.count('awk \'$$1 == "langfuse"') == 2
+    assert script.count("exit 1") >= 2
+
+
+def test_secrets_d_exemple_vides_donc_refuses():
+    """Une valeur d'exemple (« a-remplacer ») passerait `${NOM:?}` : les secrets de
+    Langfuse sont vides dans .env.example, et docker compose refuse de démarrer tant
+    qu'ils ne sont pas posés."""
+    example = dict(
+        line.split("=", 1)
+        for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+    text = COMPOSE.read_text(encoding="utf-8")
+    required = set(re.findall(r"\$\{([A-Z0-9_]+):\?", text))
+    assert "LANGFUSE_ENCRYPTION_KEY" in required
+    for name in required - {"LANGFUSE_INIT_USER_EMAIL"}:
+        assert example[name] == "", name
+
+
+def test_adresse_de_l_interface_celle_du_port_publie():
+    variables = services()["langfuse-web"]["environment"]
+    assert variables["NEXTAUTH_URL"] == "http://127.0.0.1:3100"
+
+
+def test_aucun_fichier_d_environnement():
+    """Une variable venue d'un fichier d'environnement échapperait aux tests (clé de
+    licence comprise) : tout est écrit dans le fichier compose."""
+    for name, service in services().items():
+        assert "env_file" not in service, name

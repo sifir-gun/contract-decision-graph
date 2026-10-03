@@ -330,3 +330,28 @@ def test_aucun_secret_en_argument():
         for container in spec["containers"]:
             for part in [*container.get("command", []), *container.get("args", [])]:
                 assert "$(" not in part, (name, part)
+
+
+def test_aucune_variable_venue_d_ailleurs():
+    """envFrom ferait entrer des variables que les tests ne voient pas (clé de licence
+    comprise) : chaque variable est nommée dans le manifeste."""
+    for name, spec in pods().items():
+        for container in spec["containers"]:
+            assert "envFrom" not in container, name
+
+
+def test_exception_illisible_refusee_par_l_installation(monkeypatch):
+    """Toute erreur de l'exception (dates mal typées comprises) arrête l'installation par
+    une erreur nommée, jamais une trace brute."""
+    module = cluster()
+
+    class Chaine:
+        SIGNATURE_EXCEPTIONS = None
+
+        @staticmethod
+        def signature_exceptions(path, today):
+            raise TypeError("exception x : dates decidee et expire attendues")
+
+    monkeypatch.setattr(module, "_chaine", lambda: Chaine)
+    with pytest.raises(module.ClusterError, match="dates"):
+        module.check_unsigned(["x"], TODAY)
