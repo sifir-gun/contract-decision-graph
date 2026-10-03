@@ -56,6 +56,9 @@ PROVIDERS = {"mistral": "mistral_ai", "anthropic": "anthropic"}
 IDENTITIES = ("aucune", "sub")
 Identity = Literal["aucune", "sub"]
 METRICS_INTERVAL_MS = 60_000
+# taille d'un lot exporté : celle du SDK, fixée par le code (le SDK la lirait dans
+# `OTEL_BSP_MAX_EXPORT_BATCH_SIZE`), jamais plus grande que la file, qu'il refuserait
+BATCH_MAX = 512
 log = logging.getLogger(__name__)
 
 
@@ -372,6 +375,7 @@ def build(
         processor = BatchSpanProcessor(
             exporter,
             max_queue_size=export.file_max,
+            max_export_batch_size=min(BATCH_MAX, export.file_max),
             schedule_delay_millis=export.delai_lot_ms,
             export_timeout_millis=export.delai_export_s * 1000,
         )
