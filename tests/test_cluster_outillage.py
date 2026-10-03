@@ -374,10 +374,13 @@ def test_besoin_de_disque_calcule_sur_la_taille_reelle_des_images():
     assert module.IMAGE_SIZES_GB["oauth2-proxy"] == (0.02, 0.04)  # PR D1
     # images tierces : 0,78 Go, puis Traefik (0,055) et Dex (0,048) en PR D1
     assert module.IMAGE_SIZES_GB["tierces"] == (0.88, 2.64)
+    # Langfuse (ADR 008), en profil ci seulement : mesure du 03/10
+    assert module.IMAGE_SIZES_GB["langfuse"] == (1.14, 3.82)
     nodes = module.PROFILES["ci"].agents + 1
-    need = module.disk_need_gb(nodes)
-    assert 29 < need < 30
-    assert module.disk_need_gb(nodes + 1) - need == pytest.approx(7.72)
+    need = module.disk_need_gb(nodes, langfuse=True)
+    assert 44 < need < 45
+    assert module.disk_need_gb(nodes + 1, langfuse=True) - need == pytest.approx(12.68)
+    assert module.disk_need_gb(nodes, langfuse=False) == pytest.approx(29.85)
 
 
 def test_runner_libere_les_outils_inutilises_sous_le_seuil_de_disque():
@@ -393,8 +396,8 @@ def test_runner_libere_les_outils_inutilises_sous_le_seuil_de_disque():
     create = [s.get("run", "") for s in steps].index(f"{SCRIPT} creer")
     assert ids.index("installation-espace-disque") < create
     threshold = int(space["env"]["ESPACE_MIN_GO"])
-    assert threshold >= module.disk_need_gb(module.PROFILES["ci"].agents + 1)
-    assert threshold < module.disk_need_gb(module.PROFILES["ci"].agents + 1) + 2
+    need = module.disk_need_gb(module.PROFILES["ci"].agents + 1, langfuse=True)
+    assert need <= threshold < need + 2
     lines = [line.strip() for line in space["run"].splitlines() if line.strip()]
     assert lines[0] == "df -h /"
     assert (

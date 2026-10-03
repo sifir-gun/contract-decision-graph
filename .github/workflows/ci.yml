@@ -340,12 +340,12 @@ jobs:
           docker load --input "$RUNNER_TEMP/chaine-oauth2-proxy/image.tar"
       - name: Image de test du serveur factice, sur l'image de l'application
         run: docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
-      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 30 Go libres
+      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 45 Go libres
         id: installation-espace-disque
         env:
-          # besoin du cluster au pire, 29,9 Go, calculé sur la taille des images
-          # (scripts/cluster.py, disk_need_gb ; ADR 005)
-          ESPACE_MIN_GO: "30"
+          # besoin du cluster au pire, 44,7 Go avec Langfuse, calculé sur la taille des
+          # images (scripts/cluster.py, disk_need_gb ; ADR 005, ADR 008)
+          ESPACE_MIN_GO: "45"
         run: |
           df -h /
           libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")
@@ -369,8 +369,18 @@ jobs:
         run: uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
       - name: Composants, entrée, Dex, base, proxy, serveur factice, application
         run: uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
+      - name: Langfuse au repos, mémoire et disque (ADR 008)
+        id: diagnostic-langfuse-repos
+        # relevé, jamais bloquant : un échec reste signalé dans le job
+        continue-on-error: true
+        run: uv run --no-sync python scripts/cluster.py mesure-langfuse
       - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, restauration)
         run: uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
+      - name: Langfuse après les scénarios, mémoire et disque (ADR 008)
+        id: diagnostic-langfuse-apres
+        if: always()
+        continue-on-error: true
+        run: uv run --no-sync python scripts/cluster.py mesure-langfuse
       - name: Diagnostic en cas d'échec
         id: diagnostic-cluster
         if: failure()

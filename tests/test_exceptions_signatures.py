@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 from test_chaine_approvisionnement import chaine
+from test_cluster_outillage import cluster
 
 ROOT = Path(__file__).resolve().parents[1]
 TODAY = date(2026, 10, 3)
@@ -54,14 +55,16 @@ def test_exceptions_justifiees_datees_limitees_aux_tests():
 
 
 def test_exactement_les_images_de_la_composition_de_langfuse():
-    """Chaque image de Langfuse, de ClickHouse et de Valkey du poste est couverte ; rien
-    d'autre. PostgreSQL et SeaweedFS sont ceux du projet."""
+    """Chaque image de Langfuse, de ClickHouse et de Valkey du poste et du cluster est
+    couverte ; rien d'autre. PostgreSQL et SeaweedFS sont ceux du projet."""
     compose = yaml.safe_load(
         (ROOT / "compose.observabilite.yaml").read_text(encoding="utf-8")
     )["services"]
     used = {s["image"] for n, s in compose.items() if n in LANGFUSE_IMAGES}
     used.add(compose["langfuse-valkey"]["image"])
     assert used == set(exceptions())
+    unsigned = {k: v for k, v in cluster().LANGFUSE_IMAGES.items() if k != "POSTGRES"}
+    assert set(unsigned.values()) == set(exceptions())
 
 
 def test_jamais_une_image_du_produit():

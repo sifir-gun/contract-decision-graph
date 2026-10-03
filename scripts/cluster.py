@@ -34,10 +34,11 @@ import os
 import secrets
 import subprocess
 import sys
+import time
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,40 @@ SEAWEEDFS = (
     "docker.io/chrislusf/seaweedfs:4.47"
     "@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882"
 )
+
+# Langfuse, destination des traces (ADR 008) : profil ci seulement ; les mêmes images que
+# sur le poste (compose.observabilite.yaml). PostgreSQL : l'image de la base du projet ;
+# les autres, sans signature publiée, sont couvertes une à une par l'exception limitée aux
+# tests (securite/exceptions-signatures.yaml), vérifiée à l'installation.
+OBSERVABILITY = "cdg-observabilite"
+LANGFUSE_BUCKET = "langfuse"
+TRACES_URL = (
+    f"http://langfuse-web.{OBSERVABILITY}.svc.cluster.local:3000/api/public/otel"
+)
+LANGFUSE_IMAGES = {
+    "LANGFUSE_WEB": (
+        "docker.io/langfuse/langfuse:4.50.0"
+        "@sha256:3d2ae888a0e6edb41fdba6e7d5baca5e4baede3a870dac7970dadd9d925b018e"
+    ),
+    "LANGFUSE_WORKER": (
+        "docker.io/langfuse/langfuse-worker:4.50.0"
+        "@sha256:52f7fd41ded2f1a6acab13ff7cb1832d36dfe2cbf44adea402b7a09cfa4ce800"
+    ),
+    "CLICKHOUSE": (
+        "docker.io/clickhouse/clickhouse-server:25.12.11.4-distroless"
+        "@sha256:c77ffab1910984a1443408a1c21668613b33f5add5f493f7b4b34eb2fcd2154c"
+    ),
+    "VALKEY": (
+        "docker.io/valkey/valkey:8.1.10-alpine"
+        "@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507"
+    ),
+    "POSTGRES": (
+        "docker.io/pgvector/pgvector:pg16"
+        "@sha256:0a07c4114ba6d1d04effcce3385e9f5ce305eb02e56a3d35948a415a52f193ec"
+    ),
+}
+# profil de l'installation, écrit dans le dossier du cluster pour les scénarios
+PROFILE_FILE = "profil"
 
 
 class ClusterError(Exception):
@@ -155,16 +190,31 @@ IMAGES = {
 
 @dataclass(frozen=True)
 class Profile:
+    name: str
     agents: int
     postgres_instances: int
     web_memory_request: str
+    langfuse: bool  # destination des traces (ADR 008) : la CI seulement
 
 
-# CI : 1 serveur et 2 agents (runner de 16 Go) ; local réduit : 1 serveur et 1 agent, une
-# instance de base, requêtes de mémoire de l'interface abaissées (Docker Desktop, 8 Go)
+# CI : 1 serveur et 2 agents (runner de 16 Go), Langfuse ; local réduit : 1 serveur et 1
+# agent, une instance de base, requêtes de mémoire de l'interface abaissées, sans Langfuse
+# (Docker Desktop, 8 Go : le cluster en prend près de 7, Langfuse 2,5 de plus ; ADR 008)
 PROFILES = {
-    "ci": Profile(agents=2, postgres_instances=2, web_memory_request="2Gi"),
-    "local": Profile(agents=1, postgres_instances=1, web_memory_request="1Gi"),
+    "ci": Profile(
+        name="ci",
+        agents=2,
+        postgres_instances=2,
+        web_memory_request="2Gi",
+        langfuse=True,
+    ),
+    "local": Profile(
+        name="local",
+        agents=1,
+        postgres_instances=1,
+        web_memory_request="1Gi",
+        langfuse=False,
+    ),
 }
 
 
@@ -178,17 +228,25 @@ IMAGE_SIZES_GB = {
     "oauth2-proxy": (0.02, 0.04),  # PR D1 : binaire publié, distroless static
     # 0,78 Go, puis Traefik (0,055) et Dex (0,048) en PR D1 ; décompressées : le triple
     "tierces": (0.88, 2.64),
+    # Langfuse (ADR 008, mesure du 03/10, registre linux/amd64) : web 0,369, worker 0,359,
+    # ClickHouse 0,214, PostgreSQL 0,185, Valkey 0,017 ; décompressées : web 1,32 et
+    # worker 1,25 mesurés le 02/10, les autres au triple
+    "langfuse": (1.14, 3.82),
 }
 DATA_GB = 1.0  # bases (trois instances au plus), WAL, sauvegardes : mesurés sous 1 Go
 EVICTION_GB = 1.07  # seuil d'éviction des nœuds (1 Gi, KUBELET_ARGS)
 
 
-def disk_need_gb(nodes: int) -> float:
+def disk_need_gb(nodes: int, *, langfuse: bool) -> float:
     """Besoin du cluster, au pire, sur le disque de Docker : chaque image sur chaque nœud,
-    en couches compressées et en contenu décompressé ; nos images dans le registre local
-    (compressées) et sur l'hôte (décompressées, plus l'archive de l'application) ; les
-    données ; le seuil d'éviction."""
-    per_node = sum(c + u for c, u in IMAGE_SIZES_GB.values())
+    en couches compressées et en contenu décompressé (Langfuse en profil ci) ; nos images
+    dans le registre local (compressées) et sur l'hôte (décompressées, plus l'archive de
+    l'application) ; les données ; le seuil d'éviction."""
+    per_node = sum(
+        c + u
+        for name, (c, u) in IMAGE_SIZES_GB.items()
+        if langfuse or name != "langfuse"
+    )
     ours = [IMAGE_SIZES_GB[name] for name in ("modele", "application", "oauth2-proxy")]
     registry = sum(c for c, _ in ours)
     host = sum(u for _, u in ours) + IMAGE_SIZES_GB["application"][1]
@@ -471,12 +529,13 @@ def generated(
     return {key: base64.b64decode(data[key]).decode() for key in generators}
 
 
-def _namespaces() -> None:
+def _namespaces(profile: Profile) -> None:
     for namespace, level in (
         (NAMESPACE, "restricted"),
         (TESTS_NAMESPACE, "restricted"),
         (STORAGE_NAMESPACE, "baseline"),
         ("traefik", "restricted"),  # PR D1 : contexte de sécurité du chart, conforme
+        *([(OBSERVABILITY, "restricted")] if profile.langfuse else []),
     ):
         labels = {
             f"pod-security.kubernetes.io/{mode}": level
@@ -497,16 +556,34 @@ def _manifest(name: str, **images: str) -> str:
     return text
 
 
-def _storage(access: str, secret: str) -> None:
-    config = {
-        "identities": [
+def s3_identities(
+    cdg: tuple[str, str], langfuse: tuple[str, str] | None
+) -> dict[str, Any]:
+    """Identités S3 de SeaweedFS : celle des sauvegardes, et celle de Langfuse, limitée à
+    son seau (ADR 008)."""
+    identities: list[dict[str, Any]] = [
+        {
+            "name": "cdg",
+            "credentials": [{"accessKey": cdg[0], "secretKey": cdg[1]}],
+            "actions": ["Admin", "Read", "Write", "List", "Tagging"],
+        }
+    ]
+    if langfuse is not None:
+        identities.append(
             {
-                "name": "cdg",
-                "credentials": [{"accessKey": access, "secretKey": secret}],
-                "actions": ["Admin", "Read", "Write", "List", "Tagging"],
+                "name": "langfuse",
+                "credentials": [{"accessKey": langfuse[0], "secretKey": langfuse[1]}],
+                "actions": [
+                    f"{action}:{LANGFUSE_BUCKET}"
+                    for action in ("Read", "Write", "List")
+                ],
             }
-        ]
-    }
+        )
+    return {"identities": identities}
+
+
+def _storage(cdg: tuple[str, str], langfuse: tuple[str, str] | None) -> None:
+    config = s3_identities(cdg, langfuse)
     _secret(STORAGE_NAMESPACE, "seaweedfs-s3", {"s3.json": json.dumps(config)})
     kubectl(
         "apply",
@@ -535,6 +612,82 @@ def _storage(access: str, secret: str) -> None:
         f'echo "s3.bucket.create -name {BUCKET}" | weed shell',
         what="seau des sauvegardes",
     )
+    if langfuse is not None:
+        kubectl(
+            "exec",
+            "-n",
+            STORAGE_NAMESPACE,
+            "deployment/seaweedfs",
+            "--",
+            "sh",
+            "-c",
+            f'echo "s3.bucket.create -name {LANGFUSE_BUCKET}" | weed shell',
+            what="seau de Langfuse",
+        )
+
+
+# --- Langfuse, destination des traces (ADR 008) -----------------------------------------------
+
+
+def langfuse_manifest() -> str:
+    return _manifest("langfuse.yaml", **LANGFUSE_IMAGES)
+
+
+def check_unsigned(images: Iterable[str], today: date) -> None:
+    """Images tirées sans vérification de signature : chacune dans l'exception limitée aux
+    tests, non expirée ; sinon, rien n'est installé."""
+    chaine = _chaine()
+    try:
+        allowed = chaine.signature_exceptions(chaine.SIGNATURE_EXCEPTIONS, today)
+    except ValueError as exc:
+        raise ClusterError(str(exc)) from exc
+    missing = sorted(set(images) - set(allowed))
+    if missing:
+        raise ClusterError(
+            "image sans signature hors de l'exception des tests "
+            f"(securite/exceptions-signatures.yaml) : {', '.join(missing)}"
+        )
+
+
+def _langfuse(keys: dict[str, str]) -> None:
+    check_unsigned(
+        [image for name, image in LANGFUSE_IMAGES.items() if name != "POSTGRES"],
+        _chaine().today(),
+    )
+    _secret(OBSERVABILITY, "langfuse", keys)
+    configuration = (
+        ROOT / "docker" / "observabilite" / "clickhouse-journaux.xml"
+    ).read_text(encoding="utf-8")
+    manifest = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": "langfuse-clickhouse", "namespace": OBSERVABILITY},
+        "data": {"journaux.xml": configuration},
+    }
+    kubectl("apply", "-f", "-", stdin=json.dumps(manifest), what="ClickHouse")
+    kubectl("apply", "-f", "-", stdin=langfuse_manifest(), what="Langfuse")
+    for deployment in (
+        "langfuse-postgres",
+        "langfuse-clickhouse",
+        "langfuse-valkey",
+        "langfuse-worker",
+        "langfuse-web",
+    ):
+        kubectl(
+            "wait",
+            "--for=condition=Available",
+            f"deployment/{deployment}",
+            "-n",
+            OBSERVABILITY,
+            f"--timeout={WAIT}",
+            what=f"{deployment} disponible",
+        )
+    _secret(
+        NAMESPACE,
+        "cdg-langfuse",
+        {"public-key": keys["public-key"], "secret-key": keys["secret-key"]},
+    )
+    print("Langfuse prêt : traces de l'application vers " + TRACES_URL)
 
 
 # --- authentification et entrée réseau (PR D1, ADR 005) --------------------------------------
@@ -754,10 +907,54 @@ def _dex(client_secret: str) -> None:
         )
 
 
+def ephemeral_usage(summary: dict[str, Any], namespace: str) -> dict[str, int]:
+    """Disque éphémère (octets) des pods d'un espace de noms, dans les statistiques d'un
+    nœud que publie son kubelet (`/stats/summary`) : volumes emptyDir, journaux et couche
+    inscriptible."""
+    usage: dict[str, int] = {}
+    for pod in summary.get("pods", []):
+        reference = pod.get("podRef", {})
+        used = pod.get("ephemeral-storage", {}).get("usedBytes")
+        if reference.get("namespace") == namespace and used is not None:
+            usage[reference["name"]] = int(used)
+    return usage
+
+
+def measure_langfuse() -> None:
+    """Relevé du job cluster (ADR 008), au repos et après les scénarios : mémoire de chaque
+    conteneur de Langfuse (kubectl top ; les métriques de k3s arrivent en une minute
+    environ) et disque éphémère de chaque pod."""
+    for attempt in range(12):
+        try:
+            print(
+                kubectl(
+                    "top", "pods", "-n", OBSERVABILITY, "--containers", what="mémoire"
+                )
+            )
+            break
+        except ClusterError:
+            if attempt == 11:
+                raise
+            time.sleep(10)
+    nodes = kubectl("get", "nodes", "-o", "name", what="nœuds").split()
+    usage: dict[str, int] = {}
+    for node in nodes:
+        raw = kubectl(
+            "get",
+            "--raw",
+            f"/api/v1/nodes/{node.split('/', 1)[1]}/proxy/stats/summary",
+            what=f"statistiques de {node}",
+        )
+        usage |= ephemeral_usage(json.loads(raw), OBSERVABILITY)
+    for pod, used in sorted(usage.items()):
+        print(f"disque éphémère {pod} : {used / 1e6:.1f} Mo")
+    print(f"disque éphémère de Langfuse : {sum(usage.values()) / 1e6:.1f} Mo")
+
+
 def install(profile: Profile, folder: Path) -> None:
     images = json.loads((folder / "images.json").read_text(encoding="utf-8"))
     _apply_components()
-    _namespaces()
+    _namespaces(profile)
     # entrée (PR D1) : autorité de test, noms de test, Traefik figé
     _authority()
     _dns()
@@ -771,7 +968,32 @@ def install(profile: Profile, folder: Path) -> None:
             "ACCESS_SECRET_KEY": lambda: secrets.token_urlsafe(32),
         },
     )
-    _storage(s3["ACCESS_KEY_ID"], s3["ACCESS_SECRET_KEY"])
+    langfuse = (
+        generated(
+            OBSERVABILITY,
+            "langfuse",
+            {
+                "postgres-password": lambda: secrets.token_hex(24),
+                "clickhouse-password": lambda: secrets.token_hex(24),
+                "valkey-password": lambda: secrets.token_hex(24),
+                "s3-access-key-id": lambda: secrets.token_hex(16),
+                "s3-secret-access-key": lambda: secrets.token_hex(32),
+                "nextauth-secret": lambda: secrets.token_hex(32),
+                "salt": lambda: secrets.token_hex(32),
+                "encryption-key": lambda: secrets.token_hex(32),  # 64 hexadécimaux
+                "public-key": lambda: "pk-lf-" + secrets.token_hex(16),
+                "secret-key": lambda: "sk-lf-" + secrets.token_hex(16),
+            },
+        )
+        if profile.langfuse
+        else None
+    )
+    _storage(
+        (s3["ACCESS_KEY_ID"], s3["ACCESS_SECRET_KEY"]),
+        (langfuse["s3-access-key-id"], langfuse["s3-secret-access-key"])
+        if langfuse
+        else None,
+    )
     _secret(NAMESPACE, "cdg-s3", s3)
     # rôle géré par CloudNativePG (chart cdg-postgres) : Secret basic-auth, rechargé
     # aussitôt qu'il change (rotation) ; l'application en lit la clé password
@@ -865,6 +1087,13 @@ def install(profile: Profile, folder: Path) -> None:
         WAIT,
         what="proxy de sortie",
     )
+    if langfuse is not None:
+        _langfuse(langfuse)
+    else:
+        print(
+            "Langfuse : NON INSTALLÉ (profil local) ; seul le job cluster de la CI le vérifie"
+        )
+    traces = ["--set", f"traces.destination={TRACES_URL}"] if langfuse else []
     application, modele = images["application"], images["modele"]
     oauth2 = images["oauth2-proxy"]
     helm(
@@ -890,11 +1119,13 @@ def install(profile: Profile, folder: Path) -> None:
         f"authentification.image.repository={oauth2['repository']}",
         "--set",
         f"authentification.image.digest={oauth2['digest']}",
+        *traces,
         "--wait",
         "--timeout",
         APPLICATION_WAIT,
         what="application",
     )
+    (folder / PROFILE_FILE).write_text(profile.name + "\n", encoding="utf-8")
     print("cluster installé : entrée, Dex, base, serveur factice, proxy, application")
 
 
@@ -919,6 +1150,7 @@ def main(argv: list[str] | None = None) -> int:
     images = commands.add_parser("images")
     images.add_argument("--dossier", type=Path, required=True)
     commands.add_parser("detruire")
+    commands.add_parser("mesure-langfuse", help="mémoire et disque de Langfuse")
     args = parser.parse_args(argv)
     try:
         if args.commande == "creer":
@@ -929,6 +1161,8 @@ def main(argv: list[str] | None = None) -> int:
             push_images(args.dossier)
         elif args.commande == "installer":
             install(PROFILES[args.profil], args.dossier)
+        elif args.commande == "mesure-langfuse":
+            measure_langfuse()
         else:
             destroy()
     except ClusterError as exc:
