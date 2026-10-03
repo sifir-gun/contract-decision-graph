@@ -41,11 +41,12 @@ class Telemetry(Protocol):
         self,
         node: str,
         *,
-        attempt: int,
+        attempt: int | None,
         domain: str | None,
         passthrough: tuple[type[BaseException], ...] = (),
     ) -> AbstractContextManager[None]:
-        """Une étape par nœud ; `passthrough` : exceptions de contrôle (interruption du
+        """Une étape par nœud ; `attempt` : rang de l'exécution du nœud (None hors d'une
+        exécution du graphe) ; `passthrough` : exceptions de contrôle (interruption du
         graphe), qui ferment l'étape sans la marquer en échec."""
         ...
 

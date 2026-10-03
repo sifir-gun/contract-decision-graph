@@ -8,16 +8,18 @@ La version du code est lue au lancement par la racine de composition, jamais dev
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Protocol
 
 from pydantic import BaseModel
 
+from cdg.application.observation import NoTelemetry
 from cdg.domain.explanation import Draft, ExplanationRequest
 from cdg.domain.models import Clause, Domain, RetrievalTrace, Usage
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
+from cdg.ports.telemetry import Telemetry
 
 
 class ExtractionResult(BaseModel):
@@ -72,3 +74,5 @@ class Deps:
     clock: Clock
     explainer: Explainer | TemplateOnly
     code_version: CodeVersion  # scellée avec l'analyse et avec le scellement
+    # une étape par nœud (ADR 008) ; sans destination, rien
+    telemetry: Telemetry = field(default_factory=NoTelemetry)

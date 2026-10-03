@@ -37,6 +37,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from cdg.application import ingestion
+from cdg.application.observation import NoTelemetry
 from cdg.domain import audit, authorization, policy
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
@@ -45,6 +46,7 @@ from cdg.domain.models import Clause, Usage
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.engine import ContractEngine, ThreadError
+from cdg.ports.telemetry import Telemetry
 
 # état d'un contrat, lu dans son statut
 WAITING, DONE, REJECTED, RUNNING = "en_attente", "termine", "rejete", "en_cours"
@@ -108,6 +110,15 @@ def _retained(verdicts: Sequence[Mapping[str, Any]]) -> list[str]:
     return list(dict.fromkeys(references))
 
 
+def _actor_of(answer: Mapping[str, Any]) -> Actor | None:
+    """Acteur d'une réponse humaine, pour sa trace ; None si elle est mal formée (la
+    politique du graphe la refusera et la redemandera)."""
+    try:
+        return Actor.model_validate(answer.get("acteur"))
+    except ValidationError:
+        return None
+
+
 class FourEyesRefused(Exception):
     """Revue refusée par les quatre yeux, ou décision et expiration refusées à un canal
     qui ne décide jamais (serveur MCP), avant le graphe (premier contrôle ; la politique
@@ -122,6 +133,8 @@ class ContractService:
     today: Callable[[], date]  # date d'analyse par défaut : jour légal en France
     now: Callable[[], datetime]  # horloge de l'expiration
     code_version: CodeVersion  # du processus : rejeu fidèle ou réévaluation
+    # une trace par opération (ADR 008) ; sans destination, rien
+    telemetry: Telemetry = field(default_factory=NoTelemetry, compare=False)
     # verrou unique des modifications : analyse, décision humaine, expiration
     _writes: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
@@ -140,15 +153,29 @@ class ContractService:
             contract_id
         )  # à la création seulement : l'existant reste lisible
         on = analysis_date if analysis_date is not None else self.today()
-        with self._writes:
-            return self.engine.run(contract_id, raw_text, parties, on, actor)
+        with (
+            self.telemetry.operation(
+                "analyse", contract_id=contract_id, actor=actor
+            ) as finish,
+            self._writes,
+        ):
+            status = self.engine.run(contract_id, raw_text, parties, on, actor)
+            finish(status)
+            return status
 
     def decide(self, thread_id: str, answer: Mapping[str, Any]) -> dict[str, Any]:
         """Réponse humaine brute : validée par la politique dans le graphe, redemandée
         avec son motif si elle est mal formée ou refusée."""
-        with self._writes:
+        with (
+            self.telemetry.operation(
+                "revue", contract_id=thread_id, actor=_actor_of(answer)
+            ) as finish,
+            self._writes,
+        ):
             self._four_eyes(thread_id, answer)
-            return self.engine.resume(thread_id, dict(answer))
+            status = self.engine.resume(thread_id, dict(answer))
+            finish(status)
+            return status
 
     def _four_eyes(self, thread_id: str, answer: Mapping[str, Any]) -> None:
         """Premier contrôle des quatre yeux, pour les deux portes : l'acteur de l'analyse,
@@ -245,7 +272,12 @@ class ContractService:
         target = contract_id if contract_id is not None else f"{thread_id}-relance"
         check_contract_id(target)
         values = self.engine.values(thread_id)
-        with self._writes:
+        with (
+            self.telemetry.operation(
+                "relance", contract_id=target, actor=actor
+            ) as finish,
+            self._writes,
+        ):
             status = self.engine.run(
                 target,
                 values["raw_text"],
@@ -254,6 +286,7 @@ class ContractService:
                 actor,
                 relaunch_of=thread_id,
             )
+            finish(status)
         return {
             **status,
             # pour le relecteur : seule la configuration a changé
@@ -272,12 +305,13 @@ class ContractService:
     def expire(
         self, older_than: timedelta, actor: Actor
     ) -> tuple[datetime, list[dict[str, Any]]]:
-        refused = authorization.decision_refused(actor)  # premier contrôle
-        if refused:
-            raise FourEyesRefused(refused)
-        with self._writes:
-            now = self.now()  # après l'attente du verrou : l'heure de l'expiration
-            return now, self.engine.expire(older_than, now, actor)
+        with self.telemetry.operation("expiration", contract_id=None, actor=actor):
+            refused = authorization.decision_refused(actor)  # premier contrôle
+            if refused:
+                raise FourEyesRefused(refused)
+            with self._writes:
+                now = self.now()  # après l'attente du verrou : l'heure de l'expiration
+                return now, self.engine.expire(older_than, now, actor)
 
     def config_check(self) -> dict[str, Any]:
         """Contrats en attente d'une revue analysés sous une autre configuration que la
@@ -309,7 +343,10 @@ class ContractService:
     def resume_interrupted(self) -> list[dict[str, Any]]:
         """Reprise des analyses interrompues : une modification, sous le verrou du
         service. Lancée en arrière-plan par l'interface en mode réel (ADR 005)."""
-        with self._writes:
+        with (
+            self.telemetry.operation("reprise", contract_id=None, actor=None),
+            self._writes,
+        ):
             return self.engine.resume_interrupted()
 
     def journal(self) -> list[dict[str, Any]]:

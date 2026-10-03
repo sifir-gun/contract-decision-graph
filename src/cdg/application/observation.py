@@ -124,7 +124,7 @@ class NoTelemetry:
         self,
         node: str,
         *,
-        attempt: int,
+        attempt: int | None,
         domain: str | None,
         passthrough: tuple[type[BaseException], ...] = (),
     ) -> Iterator[None]:
@@ -143,14 +143,14 @@ class ObservedProvider:
     latence, coût et rang de l'appel ; jamais le prompt ni la réponse."""
 
     def __init__(self, inner: LLMProvider, telemetry: Telemetry) -> None:
-        self._inner, self._telemetry = inner, telemetry
+        self.inner, self._telemetry = inner, telemetry  # le fournisseur enveloppé
         self.name = inner.name
 
     def structured(
         self, *, tier: Tier, system: str, user: str, schema: type[SchemaT], node: str
     ) -> tuple[SchemaT, Usage]:
         with self._telemetry.llm_call(provider=self.name, tier=tier, node=node) as call:
-            result, usage = self._inner.structured(
+            result, usage = self.inner.structured(
                 tier=tier, system=system, user=user, schema=schema, node=node
             )
             call.done(usage)

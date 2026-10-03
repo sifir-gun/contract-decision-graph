@@ -206,7 +206,7 @@ class OtelTelemetry:
         self,
         node: str,
         *,
-        attempt: int,
+        attempt: int | None,
         domain: str | None,
         passthrough: tuple[type[BaseException], ...] = (),
     ) -> Iterator[None]:

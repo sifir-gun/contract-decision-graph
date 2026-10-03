@@ -20,6 +20,7 @@ from doubles import (
 
 from cdg import cli
 from cdg.application.explanation import LLMExplainer
+from cdg.application.observation import ObservedProvider
 from cdg.domain.config import load_config
 from cdg.domain.models import REQUIRED_KINDS, Clause
 
@@ -656,7 +657,10 @@ def test_run_explication_par_le_llm_de_l_analyse(monkeypatch, tmp_path):
         cli.fastembed, "FastembedEmbedder", lambda config, cache_dir: HashEmbedder()
     )
     deps = cli.build_deps(load_config(), CODE)
-    assert isinstance(deps.explainer, LLMExplainer) and deps.explainer.provider is llm
+    # le même fournisseur que l'analyse, enveloppé pour la télémétrie (ADR 008)
+    assert isinstance(deps.explainer, LLMExplainer)
+    assert isinstance(deps.explainer.provider, ObservedProvider)
+    assert deps.explainer.provider.inner is llm
 
 
 def test_tests_sans_cle_d_api_par_defaut():

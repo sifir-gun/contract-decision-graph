@@ -46,6 +46,7 @@ from cdg.application import demo_set, evaluation, ingestion
 from cdg.application.deps import Deps, Explainer, TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
+from cdg.application.observation import NoTelemetry, ObservedProvider
 from cdg.application.service import ContractService
 from cdg.domain import audit, authorization, expiry
 from cdg.domain.authorization import Actor
@@ -54,6 +55,7 @@ from cdg.domain.models import Decision
 from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
+from cdg.ports.telemetry import Telemetry
 
 # date d'analyse : jour légal en France, où s'appliquent les textes du corpus
 LEGAL_TIMEZONE = ZoneInfo("Europe/Paris")
@@ -65,6 +67,9 @@ def today() -> date:
 
 # taille du pool d'app_role : option --connexions, ou CDG_CONNEXIONS (main)
 POOL = {"size": connexions.DEFAULT_SIZE}
+# télémétrie du processus (ADR 008), construite par main d'après --traces et
+# --metriques ; sans destination, rien n'est créé ni envoyé
+TELEMETRY: dict[str, Telemetry] = {"processus": NoTelemetry()}
 # fils de calcul et taille des lots de l'embedder : options --fils-embedding et
 # --lot-embedding, ou CDG_FILS_EMBEDDING et CDG_LOT_EMBEDDING (main)
 EMBEDDER_THREADS: dict[str, int | None] = {"threads": None, "batch_size": None}
@@ -177,7 +182,8 @@ def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
     Le fournisseur d'abord : une clé d'API absente échoue avant tout chargement de
     modèle et avant la création du thread.
     """
-    llm = build_provider(config.llm)
+    telemetry = TELEMETRY["processus"]
+    llm = ObservedProvider(build_provider(config.llm), telemetry)
     retriever = rag_store.PgvectorRetriever(
         app_pool(), process_embedder(config), config.crag.search
     )
@@ -188,6 +194,7 @@ def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
         clock=now,
         explainer=LLMExplainer(llm),
         code_version=code,
+        telemetry=telemetry,
     )
 
 
@@ -214,7 +221,9 @@ def resume_explainer(config: DecisionConfig) -> Explainer | TemplateOnly:
     var = API_KEY_VARS[config.llm.provider]
     if not settings.secret(var):
         return TemplateOnly(f"clé d'API absente ({var}) : explication par le gabarit")
-    return LLMExplainer(build_provider(config.llm))
+    return LLMExplainer(
+        ObservedProvider(build_provider(config.llm), TELEMETRY["processus"])
+    )
 
 
 def review_deps(
@@ -231,6 +240,7 @@ def review_deps(
         clock=now,
         explainer=explainer,
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
 
 
@@ -335,6 +345,7 @@ def build_service(config: DecisionConfig) -> ContractService:
         today=lambda: today(),
         now=lambda: now(),
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
 
 
@@ -360,6 +371,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
         clock=now,
         explainer=DEMO_EXPLAINER,
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
     engine = LangGraphEngine(
         config,
@@ -380,6 +392,7 @@ def demo_service(config: DecisionConfig) -> ContractService:
         today=lambda: expected_on,
         now=lambda: now(),
         code_version=code,
+        telemetry=TELEMETRY["processus"],
     )
 
 

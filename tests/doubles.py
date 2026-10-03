@@ -395,9 +395,11 @@ def make_deps(
     clock=fixed_clock,
     explainer=TEMPLATE,
     code_version=CODE,
+    telemetry=None,
 ) -> Deps:
     """Dépendances de test : doublures, journal d'audit en mémoire, horloge fixe,
-    explication par le gabarit, version du code des tests."""
+    explication par le gabarit, version du code des tests ; télémétrie : aucune par
+    défaut."""
     return Deps(
         extractor=extractor if extractor is not None else FixedExtractor(clauses()),
         crag=crag if crag is not None else FakeCrag(),
@@ -405,6 +407,7 @@ def make_deps(
         clock=clock,
         explainer=explainer,
         code_version=code_version,
+        **({} if telemetry is None else {"telemetry": telemetry}),
     )
 
 
