@@ -342,11 +342,9 @@ class ContractService:
 
     def resume_interrupted(self) -> list[dict[str, Any]]:
         """Reprise des analyses interrompues : une modification, sous le verrou du
-        service. Lancée en arrière-plan par l'interface en mode réel (ADR 005)."""
-        with (
-            self.telemetry.operation("reprise", contract_id=None, actor=None),
-            self._writes,
-        ):
+        service. Lancée en arrière-plan par l'interface en mode réel (ADR 005). Une trace
+        par analyse reprise, ouverte par le moteur, contrat par contrat (ADR 008)."""
+        with self._writes:
             return self.engine.resume_interrupted()
 
     def journal(self) -> list[dict[str, Any]]:

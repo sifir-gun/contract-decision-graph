@@ -708,6 +708,7 @@ def resume_interrupted(
     limit: int,
     config: DecisionConfig,
     thread_ids: set[str] | None = None,
+    telemetry: Telemetry = _NO_TELEMETRY,
 ) -> list[dict]:
     """Reprend depuis leur dernier checkpoint les threads restés en cours (un processus
     arrêté ou mort au milieu d'une analyse), chacun sous son verrou, relu sous le verrou.
@@ -722,7 +723,10 @@ def resume_interrupted(
     cumulées, sont citées toutes deux.
 
     `thread_ids` restreint la reprise, comme pour l'expiration : les tests ne touchent
-    jamais aux autres threads de la base. La CLI et l'interface n'en passent pas."""
+    jamais aux autres threads de la base. La CLI et l'interface n'en passent pas.
+
+    Une trace par analyse reprise (ADR 008), ouverte sous le verrou une fois la reprise
+    décidée : aucune quand il n'y a rien à reprendre."""
     current = audit.config_hash(config)
     found = set(list_threads(graph))
     if thread_ids is not None:
@@ -735,28 +739,33 @@ def resume_interrupted(
             with hold(thread_id):
                 if not _in_progress(graph, thread_id):
                     continue  # fini entre-temps
-                attempt = record(thread_id)
-                snapshot = graph.get_state(_thread(thread_id))
-                analysed_with = snapshot.values.get("config_hash")
-                failures = resumption.escalation_failures(
-                    snapshot.next, attempt, limit, analysed_with, current
-                )
-                if failures:
-                    _escalate_interrupted(
-                        graph,
-                        thread_id,
-                        failures,
-                        resumption.config_change(analysed_with, current),
-                        resumption.escalation_record(
-                            attempt, limit, analysed_with, current
-                        ),
+                with telemetry.operation(
+                    "reprise", contract_id=thread_id, actor=None
+                ) as finish:
+                    attempt = record(thread_id)
+                    snapshot = graph.get_state(_thread(thread_id))
+                    analysed_with = snapshot.values.get("config_hash")
+                    failures = resumption.escalation_failures(
+                        snapshot.next, attempt, limit, analysed_with, current
                     )
-                else:
-                    log.info(
-                        "reprise %d de l'analyse interrompue %s", attempt, thread_id
-                    )
-                    graph.invoke(None, _thread(thread_id), durability=DURABILITY)
-                resumed.append(thread_status(graph, thread_id))
+                    if failures:
+                        _escalate_interrupted(
+                            graph,
+                            thread_id,
+                            failures,
+                            resumption.config_change(analysed_with, current),
+                            resumption.escalation_record(
+                                attempt, limit, analysed_with, current
+                            ),
+                        )
+                    else:
+                        log.info(
+                            "reprise %d de l'analyse interrompue %s", attempt, thread_id
+                        )
+                        graph.invoke(None, _thread(thread_id), durability=DURABILITY)
+                    status = thread_status(graph, thread_id)
+                    finish(status)
+                resumed.append(status)
         except ContractBusy:
             continue  # en cours dans un autre processus
     return resumed

@@ -195,14 +195,17 @@ class LangGraphEngine:
             )
 
     def resume_interrupted(self) -> list[dict[str, Any]]:
-        # les dépendances d'une analyse : la reprise refait les étapes interrompues
-        with self._open(self._deps.run()) as graph:
+        # les dépendances d'une analyse : la reprise refait les étapes interrompues ;
+        # une trace par analyse reprise (ADR 008)
+        deps = self._deps.run()
+        with self._open(deps) as graph:
             return orchestrator.resume_interrupted(
                 graph,
                 hold=self._locks.hold,
                 record=self._resumes.record,
                 limit=self._config.interrupted.max_resumes,
                 config=self._config,
+                telemetry=deps.telemetry,
             )
 
 

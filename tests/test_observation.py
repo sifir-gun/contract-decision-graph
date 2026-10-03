@@ -13,7 +13,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from doubles import CODE, CONTRACT_TEXT, clauses
+from doubles import CODE, CONTRACT_TEXT, clauses, faithful_explanation
 from fuites import leaks
 from mcp_helpers import MCP_ACTOR, session
 from observation_helpers import ANALYSTE, CONFIG, service, tarifs_de_test
@@ -143,6 +143,52 @@ def test_analystes_en_parallele_dans_la_meme_trace(otel):
         "conformite",
         "operationnel",
     }
+
+
+def interrupted(telemetry, ids):
+    """Analyses arrêtées au milieu de l'explication (processus tué), à reprendre."""
+    svc, (_, explain_llm) = service(
+        telemetry, found=clauses(responsabilite_fournisseur=50)
+    )
+
+    def crash(user):
+        raise KeyboardInterrupt
+
+    explain_llm.responses["explain"] = [crash] * len(ids) + [
+        faithful_explanation
+    ] * len(ids)
+    for contract_id in ids:
+        with pytest.raises(KeyboardInterrupt):
+            svc.analyse(CONTRACT_TEXT, contract_id=contract_id, actor=ANALYSTE)
+    return svc
+
+
+def test_une_trace_par_analyse_reprise(otel):
+    telemetry, exporter, _ = otel
+    svc = interrupted(telemetry, ("c-a", "c-b"))
+    exporter.clear()
+    assert len(svc.resume_interrupted()) == 2
+    roots = sorted(
+        (root_of(spans) for spans in traces(exporter).values()),
+        key=lambda r: r.attributes["langfuse.session.id"],
+    )
+    assert [
+        (r.name, r.attributes["langfuse.session.id"], r.attributes["cdg.etat"])
+        for r in roots
+    ] == [("cdg.reprise", "c-a", "termine"), ("cdg.reprise", "c-b", "termine")]
+    # chaque contrat compte ses propres tentatives
+    assert [
+        s.attributes["cdg.tentative"]
+        for s in exporter.get_finished_spans()
+        if s.name.startswith("chat")
+    ] == [1, 1]
+
+
+def test_rien_a_reprendre_aucune_trace(otel):
+    telemetry, exporter, _ = otel
+    svc, _ = service(telemetry)
+    assert svc.resume_interrupted() == []
+    assert exporter.get_finished_spans() == ()
 
 
 def test_interruption_de_la_revue_n_est_pas_un_echec(otel):
