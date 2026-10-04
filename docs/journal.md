@@ -2969,3 +2969,53 @@ Relecteur neuf sur toute la branche, en priorité sur la confidentialité des tr
 - **Refuser au démarrage toute variable `OTEL_*`** quand une destination est configurée, comme les variables de traçage tiers : aucune ne change la destination, mais `OTEL_SDK_DISABLED` ou un échantillonneur coupent les traces sans rien dire, et des en-têtes s'ajoutent à l'export.
 - **Pseudonymiser l'identifiant du contrat** dans les traces (une empreinte) : il est choisi par l'opérateur et pourrait, par erreur, porter le nom d'un client.
 - **Purge des traces** : la rétention de Langfuse relève de son édition commerciale ; une purge par son API, ou par ClickHouse, serait à écrire si le `sub` était un jour émis.
+
+## 2026-10-03 · Observabilité, PR 2 : Langfuse sur le poste et dans le cluster de la CI (branche `observabilite-langfuse`)
+
+Seconde et dernière PR du chantier (ADR 008), après la fusion de la PR 1 (PR #33).
+
+### Décisions du propriétaire (03/10)
+
+- **Contenu de la PR** : Langfuse auto-hébergé avec SeaweedFS (poste et cluster de la CI), règles réseau et les deux scénarios du cluster, correction de la ConfigMap qui masquait `config/tarifs.yaml`, `--traces-identite` désactivé par défaut dans le chart, tests de licence (partie libre seule) et de l'exception de signature limitée aux images de test, documentation finale (ADR 008 : partie libre, haute disponibilité de ClickHouse). Relecteur neuf avant la PR, en priorité sur la confidentialité et la souveraineté ; arrêt pour la fusion.
+- **Variables `OTEL_*` qui peuvent couper les traces** (`OTEL_SDK_DISABLED`, échantillonneur) : leur refus au démarrage **reste une piste**.
+- **Disque de la VM Docker** (4,7 Go libres sur 110) : le propriétaire vide lui-même le cache de construction (`docker builder prune -f`) avant l'essai réel de Langfuse sur le poste.
+
+### Faits et pièges
+
+- **Profil compose impossible sans repli** : docker compose 5.0.2 interpole les variables d'un profil même inactif (`${VAR:?}` d'un service du profil fait échouer `docker compose up` de la base). D'où `compose.observabilite.yaml`, à part, plutôt qu'un profil de `docker-compose.yml` : la forme de la décision change, pas son fond.
+- **Redis 7.4 n'est plus libre** (RSALv2 ou SSPLv1, `LICENSE.txt` du tag 7.4.11) : Valkey 8.1.10 (BSD-3), que Langfuse accepte. L'image alpine démarre en root : lancée directement en 999, sans son script d'entrée.
+- **Rétention** : `LANGFUSE_INIT_PROJECT_RETENTION` existe dans le schéma d'initialisation, mais n'agit qu'avec le droit « data-retention » d'une offre payante, et son traitement vit dans `worker/src/ee/` : hors de la partie libre.
+- **Licence `ee/`** : usage réservé aux détenteurs d'une licence, « except for development and testing purposes » ; les images publiées contiennent ce code, inactif sans clé.
+- **Appels sortants** relus dans le code du tag : télémétrie coupée par `TELEMETRY_ENABLED=false` sans clé de licence ; `status.langfuse.com` en mode cloud seulement. La vérification de mise à jour notée le 02/10, que j'avais d'abord dite introuvable, existe bien (`checkUpdate`, vers `langfuse.com`, non réglable) : trouvée par la relecture. Sur le poste, l'interface de Langfuse est publiée par un réseau sans traduction d'adresse, sans résolveur pour les noms d'Internet.
+- **ClickHouse 25.12.11.4 distroless** (101:101), le minimum de Langfuse 4 ; la documentation recommande 26.4. Sondes par `/ping`, sans shell.
+- **SeaweedFS 4.47** : une identité d'administration tirée de `AWS_ACCESS_KEY_ID` et `AWS_SECRET_ACCESS_KEY` (poste), et des actions limitées à un seau, `Read:langfuse` (cluster), lues dans `auth_credentials.go`. Il envoie aussi, par défaut, des statistiques anonymes à `telemetry.seaweedfs.com` (`-master.telemetry`, `weed/command/server.go`) : celui du cluster le faisait depuis la PR C3, sans règle réseau dans `cdg-stockage`. Trouvé par la relecture ; coupé, et l'espace a désormais ses règles réseau (refus par défaut, entrée S3 bornée, DNS seulement en sortie).
+- **Images sans signature** : Langfuse, ClickHouse et Valkey ne publient ni `sha256-….sig` ni `.att` sur Docker Hub (03/10).
+- **API v2 de Langfuse** : l'identifiant de session n'est porté que par la racine ; le scénario lit la session pour trouver la trace, puis la trace pour ses observations.
+- **Besoin disque du cluster de la CI** : 48,7 Go au pire avec Langfuse, images et données (29,9 sans) ; seuil du job porté à 49 Go, espace revérifié après le nettoyage du runner ; job limité à 100 minutes.
+- **Nombre de tests** : la suite principale passe de 2 252 à 2 300 (relecture comprise), les tests du rendu des charts de 101 à 113, les scénarios du cluster de 27 à 29 ; le total, de 2 413 à 2 475.
+- **Écart de procédure, corrigé** : la tâche du chart a été commitée sans relancer toute la suite ; `tests/test_donnees_fictives.py` y lisait une URL à identifiants comme une adresse électronique. Corrigé dans un commit à part ; la suite entière tourne désormais avant chaque commit.
+- **Textes inexacts rencontrés** : « trois variantes » du chart (quatre avant cette PR, cinq après) ; rendus exacts.
+
+### Essai réel sur le poste (04/10)
+
+Dans les limites fixées le 02/10 : rien d'arrêté de ce qui tournait, mémoire de la VM Docker surveillée toutes les 5 s (arrêt des seuls conteneurs de l'essai au-delà de 5,5 Go, jamais atteint), secrets générés dans le bloc-notes, projet compose à part (`cdg-obs-essai`), tout ce qui a été créé supprimé ensuite (conteneurs, volumes, réseaux, images tirées pour l'essai). Disque libéré par le propriétaire (`docker builder prune -f`) : de 4,7 à 26,8 Go libres.
+
+- **Ce qui fonctionne** : PostgreSQL, ClickHouse distroless avec ses journaux réduits (`<log remove="1"/>` accepté), Valkey avec sa configuration écrite au démarrage, SeaweedFS et son identité tirée de l'environnement ; seau `langfuse` créé (service `langfuse-seau`, code 0) ; 50 migrations de ClickHouse et celles de PostgreSQL appliquées ; organisation, projet, clés et compte posés ; worker en marche sur Valkey (files BullMQ traitées). `HOSTNAME=0.0.0.0` : Next.js écoute sur `0.0.0.0:3000`.
+- **Ce qui n'aboutit pas** : l'interface de Langfuse accepte les connexions et ne répond jamais, ni à sa sonde, ni à `/`, ni en 5 minutes. Diagnostic : initialisation terminée (dernière requête : l'appartenance du compte à l'organisation) ; aucun appel sortant ni dépendance en attente (connexions établies vers Valkey et PostgreSQL seulement) ; fils de libuv et moteur de Prisma au repos ; fil principal en espace utilisateur, sans appel système, et qui ne rend la main ni à `Runtime.evaluate` ni à une pause de l'inspecteur : pris dans du code natif. Le Mac était bridé : `kernel_task` à 217 % du processeur, charge de 27 à 30 sur 8 cœurs, pression processeur de 82 % dans la VM, qui n'obtenait qu'environ un cœur. Hypothèse retirée : le résolveur coupé (même blocage sans lui). Cause non établie ; la CI, sur une machine saine, éprouve la même composition.
+- **Faits sur la sortie** : avec le résolveur coupé, `langfuse.com` ne se résout plus (`EAI_AGAIN` en 5,3 s), les noms internes en 27 ms ; le réseau publié sans traduction d'adresse n'empêche pas une connexion vers 1.1.1.1:443 sur Docker Desktop. L'ADR et le fichier compose le disent ; couper toute sortie du web sur le poste demanderait un relais (piste).
+- **Mesures** : VM de 1 982 à 4 391 Mo au plus pendant le démarrage, sans trafic ; web 946 Mio, ClickHouse 614, worker 597, SeaweedFS 105, PostgreSQL 84, Valkey 13 ; données 81 Mo ; images décompressées 3,87 Go pour la composition (besoin disque du cluster recalculé : 48,7 Go).
+
+### Scan des images de test (04/10)
+
+- **Premier scan** (Syft et Grype figés du projet, exceptions vides) : Valkey sans faille ; Langfuse web et worker, une haute corrigeable chacun, la même (`deepmerge-ts` 7.1.5, GHSA-ggr8-5vv4-36mx, CVE-2026-40345 : épuisement de pile sur des graphes d'objets récursifs, corrigé en 8.0.0), et des moyennes et basses (`uuid`, `@ai-sdk/provider-utils`) ; ClickHouse distroless, `libc6` 2.41-12+deb13u3 : CVE-2026-5450 (critique) et CVE-2026-5928 (haute), corrigées en deb13u4.
+- **Décision du propriétaire** : scan bloquant dans le job `cluster`, à chaque pull request, avant la création du cluster ; `check.sh --sans-cluster` inchangé. Exceptions dans un fichier propre aux tests, pour qu'elles ne couvrent jamais le produit. La commande (`chaine.py images-de-test`) tire chaque image de l'exception de signatures, l'inventorie, la scanne, puis la retire si elle n'était pas déjà là ; essayée sur le poste : quatre images, trois exceptions, code 0.
+
+### Pistes (hors périmètre, notées sans code)
+
+- **Rescan hebdomadaire des images de test** : le job `cluster` ne tourne pas le lundi.
+- **Sortie de Langfuse web sur le poste** : seul un relais (le web sur le seul réseau interne, un petit relais TCP publié) couperait aussi la sortie par adresse sur Docker Desktop.
+- **Rétention sans l'édition commerciale** : un TTL de ClickHouse sur les tables de Langfuse (que sa documentation de dimensionnement suggère), et une durée de vie des événements dans le seau (SeaweedFS).
+- **Refus des variables `OTEL_*`** quand une destination est configurée (décision du 03/10 : reste une piste).
+- **Signatures des autres images de test** (k3s, registre, SeaweedFS, PostgreSQL du projet, Traefik, images de cert-manager et de CloudNativePG) : figées par empreinte seulement, comme avant cette PR.
+- **Identité S3 des sauvegardes limitée à son seau** dans le cluster de test (elle peut lire celui de Langfuse).
+- **ClickHouse 26.4**, version recommandée par Langfuse 4, à la place du minimum 25.12.

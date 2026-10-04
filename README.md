@@ -192,15 +192,20 @@ Sans `--demo`, l'analyse appelle le fournisseur LLM de la configuration (payant,
 
 Chaque analyse peut être tracée en OpenTelemetry : une trace par opération (analyse, revue, expiration, relance, reprise), une étape par nœud du graphe, et chaque appel au LLM avec son modèle, ses tokens, son coût, sa latence et sa tentative. La destination est un réglage de lancement, un Langfuse auto-hébergé, sur le poste ou dans le cluster seulement ; **sans destination, rien n'est envoyé nulle part.**
 
+Sur le poste, un Langfuse auto-hébergé (partie libre seule, MIT) se lance à part, cluster local arrêté ; ses secrets et les clés du projet viennent de `.env` ([.env.example](.env.example)) :
+
 ```bash
+docker compose -f compose.observabilite.yaml up -d
 uv run python -m cdg.cli --traces http://127.0.0.1:3100/api/public/otel mcp --demo --operateur poste-1
 ```
+
+Interface de Langfuse sur http://127.0.0.1:3100. Dans le cluster de test de la CI, Langfuse tourne dans son propre espace, sans aucune sortie hors du cluster, et deux scénarios vérifient la trace d'une analyse et le blocage de toute exportation.
 
 Les clés `LANGFUSE_PUBLIC_KEY` et `LANGFUSE_SECRET_KEY` viennent de `.env` ou des secrets montés. **Aucune trace ne contient de texte de contrat**, même masqué, ni prompt, ni réponse du LLM, ni, par défaut, d'identité (le `sub` de l'interface authentifiée seulement sur réglage) : des attributs en liste blanche, et un test qui cherche le texte des 13 contrats du jeu dans tout ce qui est émis. Si la destination est absente ou lente, l'analyse n'en est ni changée ni sensiblement ralentie. LangSmith est écarté, et son traçage refusé au démarrage : les traces partiraient chez un tiers ([ADR 008](docs/adr-008-observabilite.md)).
 
 ## Déploiement Kubernetes
 
-Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue vingt-sept scénarios d'exploitation. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
+Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue vingt-neuf scénarios d'exploitation, dont deux sur les traces envoyées à Langfuse. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
 
 - **Application** : deux réplicas sur des nœuds différents ; pods non root, système de fichiers en lecture seule ; mise à jour progressive et arrêt propre ; migrations, indexation du corpus et contrôle de la configuration en tâches Helm. L'interface n'écoute que dans son pod : seul oauth2-proxy, à côté d'elle, la joint.
 - **PostgreSQL géré par CloudNativePG** : WAL archivés en continu, sauvegarde chaque nuit vers un stockage compatible S3 ; une restauration dans un nouveau cluster est vérifiée contre la tête du journal d'audit relevée avant la sauvegarde. Le greffon de sauvegarde exige cert-manager, en production aussi.
@@ -209,7 +214,7 @@ Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À
 - **Proxy de sortie** (Smokescreen, construit par le projet) : seules l'API de Mistral et le fournisseur d'identité sont joignables, et les règles réseau refusent toute sortie directe.
 - **Secrets en fichiers**, montés en lecture seule, jamais en variables d'environnement. Le mot de passe d'`app_role`, le rôle de l'application dans la base, tourne sans redémarrage : l'application relit le fichier à chaque nouvelle connexion.
 
-Les vingt-sept scénarios :
+Les vingt-neuf scénarios :
 
 1. deux réplicas, sur deux nœuds différents ;
 2. création simultanée d'un même contrat par les deux réplicas : un seul contrat, un seul scellement ;
@@ -237,7 +242,9 @@ Les vingt-sept scénarios :
 24. rôles et quatre yeux : qui a lancé l'analyse ne la tranche pas, ni l'analyste, et le relecteur n'analyse pas (403, tracés) ; enregistrement scellé avec les deux identités, sans aucun courriel ;
 25. décision par la CLI dans le cluster : refusée sans accès d'urgence, admise avec, scellée comme telle et tracée dans les journaux du pod ;
 26. second facteur non exigé : annoncé au démarrage (Dex n'en prouve aucun) ;
-27. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
+27. trace d'une analyse dans Langfuse, lue par son API : opération, étapes du graphe, appels au LLM avec modèle, tokens et coût, aucune fenêtre du texte du contrat ; événements bruts dans le seau de Langfuse, sur SeaweedFS ;
+28. traces hors du cluster : destination externe refusée au lancement, sortie directe bloquée depuis l'interface et depuis les pods de Langfuse, Langfuse Cloud refusé par le proxy ;
+29. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
 
 Profil local réduit : deux nœuds, une instance PostgreSQL ; Docker, kubectl, k3d 5.9.0 et helm 4.3.0 (versions de la CI, contrôlées par les scripts). Il demande près de 7 Go de mémoire à Docker (deux réplicas de 1,6 Go chacun et l'indexation du corpus, 2,9 Go au pic), et l'installation prend une vingtaine de minutes, surtout pour indexer le corpus. `./scripts/check.sh --sans-cluster` laisse le cluster à la CI.
 
@@ -319,7 +326,7 @@ Le CRAG justifie chaque constat par une référence du corpus : encore faut-il q
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP, OpenTelemetry), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 413 tests automatisés, joués par la CI : à chaque pull request, 2 252 dans la suite principale (PostgreSQL comprise), 101 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 27 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP, OpenTelemetry), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 475 tests automatisés, joués par la CI : à chaque pull request, 2 300 dans la suite principale (PostgreSQL comprise), 113 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 29 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.

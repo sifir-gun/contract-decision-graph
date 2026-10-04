@@ -1,0 +1,39 @@
+# Failles admises dans les images de test sans signature (ADR 008, décision du 04/10/2026) :
+# la composition de Langfuse, sur le poste et dans le cluster de test de la CI, scannée à
+# chaque pull request par le job cluster (scripts/chaine.py images-de-test). À part de
+# exceptions-vulnerabilites.yaml : ces exceptions ne couvrent jamais une image du produit,
+# scannée contre ses propres exceptions (tests/test_scan_images_de_test.py).
+#
+# Même format et mêmes règles que pour le produit : faille, paquet (nom, type, version),
+# motif, dates ; 90 jours au plus ; une exception expirée fait échouer le scan.
+portee: tests (images de la composition de Langfuse, jamais le produit)
+exceptions:
+  - vulnerabilite: GHSA-ggr8-5vv4-36mx
+    paquet: {nom: deepmerge-ts, type: npm, version: 7.1.5}
+    motif: >-
+      CVE-2026-40345, épuisement de pile en fusionnant des graphes d'objets récursifs
+      (déni de service), corrigé en 8.0.0. Dans Langfuse web et worker 4.50.0, que le projet
+      ne construit pas ; images de test seulement, joignables depuis l'application seule
+      (cluster) ou le poste (127.0.0.1), et du JSON ne peut pas exprimer de cycle. À revoir
+      à la version suivante de Langfuse.
+    decidee: 2026-10-04
+    expire: 2026-12-31
+  - vulnerabilite: CVE-2026-5450
+    paquet: {nom: libc6, type: deb, version: 2.41-12+deb13u3}
+    motif: >-
+      glibc : débordement d'un octet du tas avec la famille scanf et une conversion %mc de
+      largeur supérieure à 1024, corrigé en 2.41-12+deb13u4. Dans ClickHouse 25.12.11.4
+      distroless, que le projet ne construit pas ; usage improbable par ClickHouse ; image de
+      test seulement, sans sortie ni entrée hors de Langfuse. À revoir à la prochaine
+      publication de l'image.
+    decidee: 2026-10-04
+    expire: 2026-12-31
+  - vulnerabilite: CVE-2026-5928
+    paquet: {nom: libc6, type: deb, version: 2.41-12+deb13u3}
+    motif: >-
+      glibc : lecture avant le tampon par ungetwc sur un flux en caractères larges d'un jeu
+      à recouvrements, corrigé en 2.41-12+deb13u4. Dans ClickHouse 25.12.11.4 distroless,
+      que le projet ne construit pas ; usage improbable ; image de test seulement. À revoir
+      à la prochaine publication de l'image.
+    decidee: 2026-10-04
+    expire: 2026-12-31

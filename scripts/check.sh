@@ -102,6 +102,7 @@ else
     docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
     uv run --no-sync python scripts/cluster.py detruire
     uv run --no-sync python scripts/cluster.py tirer-modele
+    uv run --no-sync python scripts/chaine.py images-de-test --dossier "$RUNNER_TEMP/images-de-test"
     uv run --no-sync python scripts/cluster.py creer
     uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
     uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"

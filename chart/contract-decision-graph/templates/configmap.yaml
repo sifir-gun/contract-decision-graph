@@ -11,3 +11,7 @@ data:
   # de celle de l'image ; son empreinte, posée dans l'état de chaque contrat, est scellée
   decision.yaml: |-
     {{- default (.Files.Get "files/decision.yaml") .Values.configuration.decision | nindent 4 }}
+  # tarifs des modèles et réglages de l'export des traces (config/tarifs.yaml, ADR 008) :
+  # le montage remplace tout /app/config de l'image, rien n'en doit manquer
+  tarifs.yaml: |-
+    {{- .Files.Get "files/tarifs.yaml" | nindent 4 }}

@@ -6,7 +6,8 @@ de sortie ; mêmes commandes en CI (job `chart`) et en local (`scripts/check.sh`
 1. helm à la version figée (installé en CI depuis l'archive officielle vérifiée par son
    empreinte ; sur le poste, par Homebrew) ;
 2. `helm lint --strict` de chaque variante : schéma des valeurs, gabarits ;
-3. rendu de chaque variante (réel, démonstration, repli par copie) dans DOSSIER ;
+3. rendu de chaque variante (réel, démonstration, repli par copie, entrée authentifiée,
+   traces) dans DOSSIER ;
 4. kubeconform : chaque manifeste rendu contre les schémas de Kubernetes, en mode strict ;
 5. kube-linter, sur chaque variante à part : bonnes pratiques ; toute exception est
    justifiée sur l'objet concerné (annotation `ignore-check.kube-linter.io/…`) ou, si
@@ -62,6 +63,15 @@ VARIANTS: dict[str, list[str]] = {
         *AUTH,
         "--set",
         "ingress.active=true",
+    ],
+    # traces vers Langfuse, service du cluster (ADR 008)
+    "traces": [
+        *AUTH,
+        "--set",
+        (
+            "traces.destination="
+            "http://langfuse-web.cdg-observabilite.svc.cluster.local:3000/api/public/otel"
+        ),
     ],
 }
 # proxy de sortie (PR C3) : l'empreinte de l'image n'a pas de valeur par défaut avant la

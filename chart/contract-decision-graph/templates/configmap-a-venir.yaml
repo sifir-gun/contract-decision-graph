@@ -21,4 +21,6 @@ metadata:
 data:
   decision.yaml: |-
     {{- default (.Files.Get "files/decision.yaml") .Values.configuration.decision | nindent 4 }}
+  tarifs.yaml: |-
+    {{- .Files.Get "files/tarifs.yaml" | nindent 4 }}
 {{- end }}

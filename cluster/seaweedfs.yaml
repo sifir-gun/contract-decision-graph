@@ -1,6 +1,65 @@
 # Stockage objet compatible S3 du cluster de test (ADR 005, PR C3 : SeaweedFS, MinIO étant
-# archivé) : reçoit les sauvegardes de la base. Test seulement ; en production, un stockage
-# S3 géré. Identités S3 : Secret seaweedfs-s3, créé par scripts/cluster.py.
+# archivé) : reçoit les sauvegardes de la base et, en profil ci, les événements bruts de
+# Langfuse (ADR 008). Test seulement ; en production, un stockage S3 géré. Identités S3 :
+# Secret seaweedfs-s3, créé par scripts/cluster.py. Télémétrie coupée (SeaweedFS 4.47 envoie
+# par défaut des statistiques à telemetry.seaweedfs.com) ; aucune sortie hors du cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: refus-par-defaut
+  namespace: cdg-stockage
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: entree-s3
+  namespace: cdg-stockage
+spec:
+  podSelector:
+    matchLabels:
+      app: seaweedfs
+  policyTypes: [Ingress]
+  ingress:
+    # la base et son greffon de sauvegarde, Langfuse
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cdg
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cdg-observabilite
+      ports:
+        - port: 8333
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sortie-dns
+  namespace: cdg-stockage
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,6 +89,7 @@ spec:
             - -s3
             - -s3.port=8333
             - -s3.config=/configuration/s3.json
+            - -master.telemetry=false
           ports:
             - name: s3
               containerPort: 8333

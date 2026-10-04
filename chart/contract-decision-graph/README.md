@@ -44,7 +44,11 @@ Avant chaque mise à jour, la tâche de contrôle de configuration refuse de dé
 | `ressources.reel` | 1 CPU / 2 Gi, limite 2 CPU / 4 Gi | Mesurées (`scripts/mesure_memoire.py`, puis dans le cluster : 2,65 Gio au chargement du modèle) ; la limite CPU fixe les fils de l'embedder. |
 | `embedding.lot` | `16` | Taille des lots d'embeddings : 2,9 Gio au pic de l'ingestion (fastembed en prend 256 par défaut). |
 | `llm.adresseApi` | vide | Adresse de l'API de Mistral ; vide, celle du SDK. Le proxy ne laisse passer que Mistral. |
-| `configuration.decision` | vide | Autre configuration de décision, en texte ; vide, `files/decision.yaml`. |
+| `configuration.decision` | vide | Autre configuration de décision, en texte ; vide, `files/decision.yaml`. La ConfigMap porte aussi `files/tarifs.yaml` (tarifs et export des traces). |
+| `traces.destination` | vide | Point d'entrée OTLP des traces (Langfuse : `…/api/public/otel`), un service du cluster seulement (`….svc` ou `….svc.cluster.local`), en mode réel ; vide, aucune trace (ADR 008). |
+| `traces.identite` | `aucune` | `sub` émet le `sub` pseudonyme de l'interface ; Langfuse sans sa partie commerciale ne supprime jamais les traces (conservation, RGPD). |
+| `traces.secret` | `cdg-langfuse` | Secret existant des clés du projet Langfuse (`public-key`, `secret-key`), montées en fichiers pour l'interface seule. |
+| `traces.cible` | `cdg-observabilite`, `app.kubernetes.io/name: langfuse-web`, 3000 | Espace de noms, sélecteur et port de Langfuse : la seule sortie réseau ouverte pour les traces. |
 | `authentification.active` | `true` | oauth2-proxy en conteneur annexe natif, démarré avant l'interface, arrêté après elle ; l'interface vérifie le jeton de chaque requête (`web --identite en-tetes`). Exige `emetteur` (HTTPS), `clientId` (audience) et `ingress.hote` (adresse publique) ; image d'oauth2-proxy : l'index publié par défaut, signature et provenance vérifiées. |
 | `authentification.session` | `8h`, revalidée toutes les `5m` | Durée de la session d'oauth2-proxy et revalidation auprès du fournisseur. |
 | `authentification.roles` | `cdg-analystes`, `cdg-relecteurs` | Groupes du jeton qui donnent les rôles analyste (analyse) et relecteur (revue, expiration) ; jamais vides. |

@@ -169,7 +169,7 @@ jobs:
             | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP" linux-amd64/helm
           sudo install -m 0755 "$RUNNER_TEMP/linux-amd64/helm" /usr/local/bin/helm
-      - name: Validation statique (helm lint, kubeconform, kube-linter) des trois variantes
+      - name: Validation statique (helm lint, kubeconform, kube-linter) de chaque variante
         run: uv run --no-sync python scripts/chart.py verifier --dossier "$RUNNER_TEMP/chart"
       - name: Garanties du chart rendu (sécurité, empreintes, réseau, tâches, arrêt propre)
         run: uv run --no-sync pytest -m chart --chart
@@ -286,7 +286,7 @@ jobs:
     needs: [image]
     runs-on: ubuntu-24.04
     # ingestion du corpus (60 min au plus, tâche Helm) et scénarios
-    timeout-minutes: 90
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -340,12 +340,12 @@ jobs:
           docker load --input "$RUNNER_TEMP/chaine-oauth2-proxy/image.tar"
       - name: Image de test du serveur factice, sur l'image de l'application
         run: docker build --file docker/mistral-factice/Dockerfile --build-arg APPLICATION=cdg:verification --tag cdg-mistral-factice:verification .
-      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 30 Go libres
+      - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 49 Go libres
         id: installation-espace-disque
         env:
-          # besoin du cluster au pire, 29,9 Go, calculé sur la taille des images
-          # (scripts/cluster.py, disk_need_gb ; ADR 005)
-          ESPACE_MIN_GO: "30"
+          # besoin du cluster au pire, 48,7 Go avec Langfuse et ses données, calculé sur
+          # la taille des images (scripts/cluster.py, disk_need_gb ; ADR 005, ADR 008)
+          ESPACE_MIN_GO: "49"
         run: |
           df -h /
           libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")
@@ -355,6 +355,8 @@ jobs:
           else
             echo "espace suffisant : ${libre} Go libres, ${ESPACE_MIN_GO} exigés ; aucun nettoyage"
           fi
+          libre=$(df --output=avail --block-size=1G / | tail -n 1 | tr -d " ")
+          if (( libre < ESPACE_MIN_GO )); then echo "espace insuffisant : ${libre} Go libres, ${ESPACE_MIN_GO} exigés" >&2; exit 1; fi
       - name: Aucun cluster d'un essai précédent
         run: uv run --no-sync python scripts/cluster.py detruire
       - name: Image publiée du modèle, signature et provenance vérifiées
@@ -363,14 +365,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: uv run --no-sync python scripts/cluster.py tirer-modele
+      - name: Images de test sans signature (Langfuse) tirées, inventoriées, scannées
+        # bloquant, contre les exceptions des tests seulement (ADR 008) ; avant le cluster,
+        # qui récupère ensuite le disque (images et archives retirées)
+        run: uv run --no-sync python scripts/chaine.py images-de-test --dossier "$RUNNER_TEMP/images-de-test"
       - name: Cluster k3d de trois nœuds, registre local
         run: uv run --no-sync python scripts/cluster.py creer
       - name: Images poussées dans le registre local, tirées par empreinte
         run: uv run --no-sync python scripts/cluster.py images --dossier "$RUNNER_TEMP/cluster"
       - name: Composants, entrée, Dex, base, proxy, serveur factice, application
         run: uv run --no-sync python scripts/cluster.py installer --dossier "$RUNNER_TEMP/cluster"
-      - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, restauration)
+      - name: Langfuse au repos, mémoire et disque (ADR 008)
+        id: diagnostic-langfuse-repos
+        # relevé, jamais bloquant : un échec reste signalé dans le job
+        continue-on-error: true
+        run: uv run --no-sync python scripts/cluster.py mesure-langfuse
+      - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, traces, restauration)
         run: uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
+      - name: Langfuse après les scénarios, mémoire et disque (ADR 008)
+        id: diagnostic-langfuse-apres
+        if: always()
+        continue-on-error: true
+        run: uv run --no-sync python scripts/cluster.py mesure-langfuse
       - name: Diagnostic en cas d'échec
         id: diagnostic-cluster
         if: failure()
@@ -381,6 +397,8 @@ jobs:
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg -l app.kubernetes.io/instance=cdg --all-containers --tail=200 || true
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n traefik -l app.kubernetes.io/name=traefik --tail=200 || true
           kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg-tests -l app=dex --tail=200 || true
+          kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg-observabilite -l 'app in (langfuse-web,langfuse-worker,langfuse-clickhouse)' --tail=200 || true
+          kubectl --kubeconfig "$KC" --context k3d-cdg logs -n cdg-stockage -l app=seaweedfs --tail=100 || true
       - name: Espace disque restant, à comparer au besoin calculé
         id: diagnostic-espace-disque
         if: always()

@@ -19,6 +19,7 @@
     "proxy",
     "dns",
     "taches",
+    "traces",
     "configuration",
     "espaceDeNoms",
     "authentification",
@@ -517,6 +518,66 @@
             },
             "passerOutre": {
               "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "traces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destination",
+        "identite",
+        "secret",
+        "clePublique",
+        "cleSecrete",
+        "cible"
+      ],
+      "properties": {
+        "destination": {
+          "type": "string",
+          "description": "service du cluster seulement (ADR 008) : ni identifiants, ni requête",
+          "pattern": "^(|https?://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\\.svc(\\.cluster\\.local)?(:[0-9]{1,5})?(/[^?#@\\s]*)?)$"
+        },
+        "identite": {
+          "type": "string",
+          "enum": [
+            "aucune",
+            "sub"
+          ]
+        },
+        "secret": {
+          "$ref": "#/definitions/nomSecret"
+        },
+        "clePublique": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cleSecrete": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cible": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "espaceDeNoms",
+            "selecteur",
+            "port"
+          ],
+          "properties": {
+            "espaceDeNoms": {
+              "type": "string",
+              "minLength": 1
+            },
+            "selecteur": {
+              "$ref": "#/definitions/selecteur"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
             }
           }
         }

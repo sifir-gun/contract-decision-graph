@@ -203,6 +203,24 @@ taches:
     active: true
     passerOutre: false
 
+# Traces OpenTelemetry (ADR 008) : aucune destination par défaut, rien n'est envoyé.
+# Destination : un service du cluster seulement (Langfuse auto-hébergé), en mode réel ;
+# l'export OTLP ne passe pas par le proxy de sortie (urllib3 ignore HTTPS_PROXY) : une règle
+# réseau ouvre la seule cible. Clés dans un Secret existant, montées en fichiers pour
+# l'interface seule. Identité : aucune par défaut ; « sub » émettrait le sub pseudonyme,
+# que Langfuse sans sa partie commerciale ne supprime jamais (conservation, RGPD).
+traces:
+  destination: ""
+  identite: aucune
+  secret: cdg-langfuse
+  clePublique: public-key
+  cleSecrete: secret-key
+  cible:
+    espaceDeNoms: cdg-observabilite
+    selecteur:
+      app.kubernetes.io/name: langfuse-web
+    port: 3000
+
 # Configuration de décision : par défaut files/decision.yaml, copie de config/decision.yaml
 # (un test vérifie qu'elles sont identiques). Une autre configuration se passe ici, en texte.
 configuration:

@@ -1,0 +1,42 @@
+# Images sans signature vérifiable, admises pour les tests seulement (ADR 008, décision du
+# 03/10/2026) : la composition de Langfuse, destination des traces, sur le poste
+# (compose.observabilite.yaml) et dans le cluster de test de la CI (cluster/langfuse.yaml).
+# Jamais une image du produit : l'application, ses images annexes et leurs bases restent
+# vérifiées par leur signature (scripts/chaine.py bases, cosign, attestations GitHub) ;
+# tests/test_exceptions_signatures.py le garde. PostgreSQL et SeaweedFS sont les images
+# déjà utilisées par le projet.
+#
+# Chaque entrée : l'image par étiquette et empreinte, la portée (tests), le motif, les
+# dates ; 90 jours au plus entre décision et expiration. Une exception expirée fait échouer
+# l'installation du cluster de test : la revoir (nouvelle version, signature publiée).
+exceptions:
+  - image: docker.io/langfuse/langfuse:4.50.0@sha256:3d2ae888a0e6edb41fdba6e7d5baca5e4baede3a870dac7970dadd9d925b018e
+    portee: tests
+    motif: >-
+      Langfuse ne publie ni signature cosign ni attestation pour ses images (vérifié sur
+      Docker Hub le 02/10 et le 03/10/2026 : aucune étiquette sha256-….sig ni .att).
+      Figée par empreinte, tirée de Docker Hub.
+    decidee: 2026-10-03
+    expire: 2026-12-31
+  - image: docker.io/langfuse/langfuse-worker:4.50.0@sha256:52f7fd41ded2f1a6acab13ff7cb1832d36dfe2cbf44adea402b7a09cfa4ce800
+    portee: tests
+    motif: >-
+      Langfuse ne publie ni signature cosign ni attestation pour ses images (vérifié sur
+      Docker Hub le 02/10 et le 03/10/2026). Figée par empreinte, tirée de Docker Hub.
+    decidee: 2026-10-03
+    expire: 2026-12-31
+  - image: docker.io/clickhouse/clickhouse-server:25.12.11.4-distroless@sha256:c77ffab1910984a1443408a1c21668613b33f5add5f493f7b4b34eb2fcd2154c
+    portee: tests
+    motif: >-
+      ClickHouse de Langfuse. Aucune signature cosign ni attestation publiée pour cette
+      image (Docker Hub, 03/10/2026). Variante distroless, figée par empreinte.
+    decidee: 2026-10-03
+    expire: 2026-12-31
+  - image: docker.io/valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+    portee: tests
+    motif: >-
+      File et cache de Langfuse, à la place de Redis 7.4 (licences RSALv2/SSPLv1). Aucune
+      signature cosign ni attestation publiée pour cette image (Docker Hub, 03/10/2026).
+      Figée par empreinte, lancée sans root.
+    decidee: 2026-10-03
+    expire: 2026-12-31

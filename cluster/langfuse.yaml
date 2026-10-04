@@ -1,0 +1,601 @@
+# Langfuse dans le cluster de test de la CI (ADR 008), destination des traces de
+# l'application : web, worker, ClickHouse, Valkey et PostgreSQL, dans l'espace
+# cdg-observabilite (Pod Security « restricted ») ; stockage S3 dans le SeaweedFS du
+# cluster (seau et identité réservés). Installé par scripts/cluster.py, en profil ci
+# seulement. Partie libre seule (MIT hors ee/) : aucune clé de licence ; télémétrie,
+# assistant et inscription coupés ; aucun utilisateur. Images figées par empreinte, sans
+# signature publiée : exception limitée aux tests (securite/exceptions-signatures.yaml).
+# Données éphémères (emptyDir) : un cluster de test.
+#
+# Règles réseau : refus par défaut ; DNS ; trafic interne à l'espace ; web et worker vers
+# SeaweedFS (8333) ; entrée du web (3000) depuis l'interface de l'application seulement.
+# Aucune sortie hors du cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: refus-par-defaut
+  namespace: cdg-observabilite
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: interne
+  namespace: cdg-observabilite
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stockage
+  namespace: cdg-observabilite
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [langfuse-web, langfuse-worker]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cdg-stockage
+          podSelector:
+            matchLabels:
+              app: seaweedfs
+      ports:
+        - port: 8333
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: entree-des-traces
+  namespace: cdg-observabilite
+spec:
+  podSelector:
+    matchLabels:
+      app: langfuse-web
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cdg
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: contract-decision-graph
+              app.kubernetes.io/instance: cdg
+              app.kubernetes.io/component: web
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-web
+  namespace: cdg-observabilite
+spec:
+  selector:
+    app: langfuse-web
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-postgres
+  namespace: cdg-observabilite
+spec:
+  selector:
+    app: langfuse-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-clickhouse
+  namespace: cdg-observabilite
+spec:
+  selector:
+    app: langfuse-clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: http
+    - name: natif
+      port: 9000
+      targetPort: natif
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-valkey
+  namespace: cdg-observabilite
+spec:
+  selector:
+    app: langfuse-valkey
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-postgres
+  namespace: cdg-observabilite
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: langfuse-postgres
+  template:
+    metadata:
+      labels:
+        app: langfuse-postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          # l'image de la base du projet (docker-compose.yml), sans root
+          image: ${POSTGRES}
+          env:
+            - name: POSTGRES_USER
+              value: langfuse
+            - name: POSTGRES_DB
+              value: langfuse
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: postgres-password}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "langfuse", "-d", "langfuse"]
+            periodSeconds: 3
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: donnees
+              mountPath: /var/lib/postgresql/data
+            - name: socket
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: donnees
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: socket
+          emptyDir:
+            sizeLimit: 1Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-clickhouse
+  namespace: cdg-observabilite
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: langfuse-clickhouse
+  template:
+    metadata:
+      labels:
+        app: langfuse-clickhouse
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clickhouse
+          # un seul nœud, sans Keeper ni réplication : pour les tests (ADR 008)
+          image: ${CLICKHOUSE}
+          env:
+            - name: CLICKHOUSE_DB
+              value: default
+            - name: CLICKHOUSE_USER
+              value: langfuse
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: clickhouse-password}
+          ports:
+            - name: http
+              containerPort: 8123
+            - name: natif
+              containerPort: 9000
+          readinessProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {cpu: "2", memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            # docker-init écrit l'utilisateur dans la configuration au démarrage
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: donnees
+              mountPath: /var/lib/clickhouse
+            - name: journaux
+              mountPath: /var/log/clickhouse-server
+            - name: configuration
+              mountPath: /etc/clickhouse-server/config.d/journaux.xml
+              subPath: journaux.xml
+              readOnly: true
+      volumes:
+        - name: donnees
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: journaux
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: configuration
+          configMap:
+            name: langfuse-clickhouse
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-valkey
+  namespace: cdg-observabilite
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: langfuse-valkey
+  template:
+    metadata:
+      labels:
+        app: langfuse-valkey
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          # Valkey (BSD-3) plutôt que Redis 7.4 (RSALv2/SSPLv1) ; sans le script d'entrée.
+          # Mot de passe par l'environnement, jamais en argument (le kubelet développerait
+          # $(…) dans la table des processus) : fichier de configuration écrit au
+          # démarrage dans un volume en mémoire, puis valkey-server
+          image: ${VALKEY}
+          command: ["sh", "-ec"]
+          args:
+            - |
+              umask 077
+              printf 'requirepass %s\nmaxmemory-policy noeviction\ndir /data\n' "$REDISCLI_AUTH" > /etc/valkey/valkey.conf
+              exec valkey-server /etc/valkey/valkey.conf
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: valkey-password}
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            tcpSocket: {port: valkey}
+            periodSeconds: 3
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: donnees
+              mountPath: /data
+            - name: configuration
+              mountPath: /etc/valkey
+      volumes:
+        - name: donnees
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: configuration
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: cdg-observabilite
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app: langfuse-worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # l'image déclare l'utilisateur expressjs, nommé (UID 1001) : runAsNonRoot exige
+        # un utilisateur numérique pour le vérifier
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ${LANGFUSE_WORKER}
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: postgres-password}
+            - name: DATABASE_URL
+              value: postgresql://langfuse:$(POSTGRES_PASSWORD)@langfuse-postgres:5432/langfuse
+            - name: NEXTAUTH_URL
+              value: http://langfuse-web.cdg-observabilite.svc.cluster.local:3000
+            - name: SALT
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: salt}
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: encryption-key}
+            - name: TELEMETRY_ENABLED
+              value: "false"
+            - name: LANGFUSE_IN_APP_AGENT_ENABLED
+              value: "false"
+            - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
+              value: "false"
+            - name: CLICKHOUSE_MIGRATION_URL
+              value: clickhouse://langfuse-clickhouse:9000
+            - name: CLICKHOUSE_URL
+              value: http://langfuse-clickhouse:8123
+            - name: CLICKHOUSE_USER
+              value: langfuse
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: clickhouse-password}
+            - name: CLICKHOUSE_CLUSTER_ENABLED
+              value: "false"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+              value: langfuse
+            - name: LANGFUSE_S3_EVENT_UPLOAD_PREFIX
+              value: events/
+            - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+              value: us-east-1
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+              value: http://seaweedfs.cdg-stockage.svc.cluster.local:8333
+            - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+              value: "true"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: s3-access-key-id}
+            - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: s3-secret-access-key}
+            - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
+              value: "false"
+            - name: REDIS_HOST
+              value: langfuse-valkey
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_AUTH
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: valkey-password}
+          ports:
+            - name: http
+              containerPort: 3030
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-web
+  namespace: cdg-observabilite
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langfuse-web
+  template:
+    metadata:
+      labels:
+        app: langfuse-web
+        # étiquette que vise la règle de sortie du chart de l'application (traces.cible)
+        app.kubernetes.io/name: langfuse-web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # l'image déclare l'utilisateur nextjs, nommé (UID 1001) : runAsNonRoot exige un
+        # utilisateur numérique pour le vérifier
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ${LANGFUSE_WEB}
+          env:
+            # Next.js écoute sur $HOSTNAME, que le moteur de conteneurs pose au nom du
+            # pod : toutes les adresses du pod, pour la redirection de port et les sondes
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: postgres-password}
+            - name: DATABASE_URL
+              value: postgresql://langfuse:$(POSTGRES_PASSWORD)@langfuse-postgres:5432/langfuse
+            - name: NEXTAUTH_URL
+              value: http://langfuse-web.cdg-observabilite.svc.cluster.local:3000
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: nextauth-secret}
+            - name: SALT
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: salt}
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: encryption-key}
+            - name: TELEMETRY_ENABLED
+              value: "false"
+            - name: LANGFUSE_IN_APP_AGENT_ENABLED
+              value: "false"
+            - name: LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES
+              value: "false"
+            - name: AUTH_DISABLE_SIGNUP
+              value: "true"
+            - name: CLICKHOUSE_MIGRATION_URL
+              value: clickhouse://langfuse-clickhouse:9000
+            - name: CLICKHOUSE_URL
+              value: http://langfuse-clickhouse:8123
+            - name: CLICKHOUSE_USER
+              value: langfuse
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: clickhouse-password}
+            - name: CLICKHOUSE_CLUSTER_ENABLED
+              value: "false"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_BUCKET
+              value: langfuse
+            - name: LANGFUSE_S3_EVENT_UPLOAD_PREFIX
+              value: events/
+            - name: LANGFUSE_S3_EVENT_UPLOAD_REGION
+              value: us-east-1
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT
+              value: http://seaweedfs.cdg-stockage.svc.cluster.local:8333
+            - name: LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE
+              value: "true"
+            - name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: s3-access-key-id}
+            - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: s3-secret-access-key}
+            - name: LANGFUSE_S3_BATCH_EXPORT_ENABLED
+              value: "false"
+            - name: REDIS_HOST
+              value: langfuse-valkey
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_AUTH
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: valkey-password}
+            # organisation, projet et clés posés au démarrage ; aucun utilisateur
+            - name: LANGFUSE_INIT_ORG_ID
+              value: cdg
+            - name: LANGFUSE_INIT_ORG_NAME
+              value: contract-decision-graph
+            - name: LANGFUSE_INIT_PROJECT_ID
+              value: cdg-traces
+            - name: LANGFUSE_INIT_PROJECT_NAME
+              value: traces
+            - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: public-key}
+            - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: langfuse, key: secret-key}
+          ports:
+            - name: http
+              containerPort: 3000
+          startupProbe:
+            # migrations de PostgreSQL et de ClickHouse au démarrage
+            httpGet: {path: /api/public/health, port: http}
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet: {path: /api/public/ready, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /api/public/health, port: http}
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {cpu: "2", memory: 1536Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
