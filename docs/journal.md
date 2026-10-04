@@ -2992,6 +2992,7 @@ Seconde et dernière PR du chantier (ADR 008), après la fusion de la PR 1 (PR #
 - **Images sans signature** : Langfuse, ClickHouse et Valkey ne publient ni `sha256-….sig` ni `.att` sur Docker Hub (03/10).
 - **API v2 de Langfuse** : l'identifiant de session n'est porté que par la racine ; le scénario lit la session pour trouver la trace, puis la trace pour ses observations.
 - **Besoin disque du cluster de la CI** : 48,7 Go au pire avec Langfuse, images et données (29,9 sans) ; seuil du job porté à 49 Go, espace revérifié après le nettoyage du runner ; job limité à 100 minutes.
+- **Nombre de tests** : la suite principale passe de 2 252 à 2 300 (relecture comprise), les tests du rendu des charts de 101 à 113, les scénarios du cluster de 27 à 29 ; le total, de 2 413 à 2 475.
 - **Écart de procédure, corrigé** : la tâche du chart a été commitée sans relancer toute la suite ; `tests/test_donnees_fictives.py` y lisait une URL à identifiants comme une adresse électronique. Corrigé dans un commit à part ; la suite entière tourne désormais avant chaque commit.
 - **Textes inexacts rencontrés** : « trois variantes » du chart (quatre avant cette PR, cinq après) ; rendus exacts.
 
