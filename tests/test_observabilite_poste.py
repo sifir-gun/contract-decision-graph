@@ -129,8 +129,9 @@ def test_web_ecoute_sur_toutes_les_adresses_du_conteneur():
 def test_interface_publiee_sans_sortie_vers_internet():
     """Langfuse web vérifie ses mises à jour auprès de langfuse.com à chaque page
     authentifiée (`checkUpdate`, hors mode cloud, non réglable). Seul service sur un
-    réseau publié, il n'en sort pas : réseau sans traduction d'adresse (le port publié
-    reste joignable du poste), et aucun résolveur pour les noms d'Internet."""
+    réseau publié : aucun résolveur pour les noms d'Internet (vérifié le 04/10 :
+    EAI_AGAIN), et un réseau sans traduction d'adresse, qui coupe aussi la sortie par
+    adresse sur un Docker Linux (sur Docker Desktop, sans effet : vérifié le 04/10)."""
     networks = compose()["networks"]
     assert networks["poste"] == {
         "driver_opts": {"com.docker.network.bridge.enable_ip_masquerade": "false"}

@@ -374,12 +374,12 @@ def test_besoin_de_disque_calcule_sur_la_taille_reelle_des_images():
     assert module.IMAGE_SIZES_GB["oauth2-proxy"] == (0.02, 0.04)  # PR D1
     # images tierces : 0,78 Go, puis Traefik (0,055) et Dex (0,048) en PR D1
     assert module.IMAGE_SIZES_GB["tierces"] == (0.88, 2.64)
-    # Langfuse (ADR 008), en profil ci seulement : mesure du 03/10
-    assert module.IMAGE_SIZES_GB["langfuse"] == (1.14, 3.82)
+    # Langfuse (ADR 008), en profil ci seulement : registre le 03/10, poste le 04/10
+    assert module.IMAGE_SIZES_GB["langfuse"] == (1.14, 3.87)
     nodes = module.PROFILES["ci"].agents + 1
     need = module.disk_need_gb(nodes, langfuse=True)
     assert 48 < need < 49
-    assert module.disk_need_gb(nodes + 1, langfuse=True) - need == pytest.approx(12.68)
+    assert module.disk_need_gb(nodes + 1, langfuse=True) - need == pytest.approx(12.73)
     assert module.disk_need_gb(nodes, langfuse=False) == pytest.approx(29.85)
     # données de Langfuse au pire : les limites de ses volumes éphémères
     sizes = re.findall(r"sizeLimit: (\d+)(Mi|Gi)", module.langfuse_manifest())

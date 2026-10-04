@@ -228,10 +228,10 @@ IMAGE_SIZES_GB = {
     "oauth2-proxy": (0.02, 0.04),  # PR D1 : binaire publié, distroless static
     # 0,78 Go, puis Traefik (0,055) et Dex (0,048) en PR D1 ; décompressées : le triple
     "tierces": (0.88, 2.64),
-    # Langfuse (ADR 008, mesure du 03/10, registre linux/amd64) : web 0,369, worker 0,359,
-    # ClickHouse 0,214, PostgreSQL 0,185, Valkey 0,017 ; décompressées : web 1,32 et
-    # worker 1,25 mesurés le 02/10, les autres au triple
-    "langfuse": (1.14, 3.82),
+    # Langfuse (ADR 008, registre linux/amd64, 03/10) : web 0,369, worker 0,359, ClickHouse
+    # 0,214, PostgreSQL 0,185, Valkey 0,017 ; décompressées, mesurées sur le poste le
+    # 04/10 : web 1,319, worker 1,246, ClickHouse 0,733, PostgreSQL 0,531, Valkey 0,042
+    "langfuse": (1.14, 3.87),
 }
 DATA_GB = 1.0  # bases (trois instances au plus), WAL, sauvegardes : mesurés sous 1 Go
 # données de Langfuse, au pire : la somme des limites de ses volumes éphémères
