@@ -343,7 +343,7 @@ jobs:
       - name: Espace disque (14 Go garantis) ; outils préinstallés inutilisés retirés sous 49 Go libres
         id: installation-espace-disque
         env:
-          # besoin du cluster au pire, 48,6 Go avec Langfuse et ses données, calculé sur
+          # besoin du cluster au pire, 48,7 Go avec Langfuse et ses données, calculé sur
           # la taille des images (scripts/cluster.py, disk_need_gb ; ADR 005, ADR 008)
           ESPACE_MIN_GO: "49"
         run: |
@@ -365,6 +365,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: uv run --no-sync python scripts/cluster.py tirer-modele
+      - name: Images de test sans signature (Langfuse) tirées, inventoriées, scannées
+        # bloquant, contre les exceptions des tests seulement (ADR 008) ; avant le cluster,
+        # qui récupère ensuite le disque (images et archives retirées)
+        run: uv run --no-sync python scripts/chaine.py images-de-test --dossier "$RUNNER_TEMP/images-de-test"
       - name: Cluster k3d de trois nœuds, registre local
         run: uv run --no-sync python scripts/cluster.py creer
       - name: Images poussées dans le registre local, tirées par empreinte

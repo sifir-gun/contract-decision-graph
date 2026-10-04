@@ -41,6 +41,8 @@ ROOT = Path(__file__).resolve().parents[1]
 EXCEPTIONS = ROOT / "securite" / "exceptions-vulnerabilites.yaml"
 # images sans signature vérifiable, admises pour les tests seulement (ADR 008)
 SIGNATURE_EXCEPTIONS = ROOT / "securite" / "exceptions-signatures.yaml"
+# failles admises dans ces images de test, jamais dans le produit (ADR 008)
+TEST_EXCEPTIONS = ROOT / "securite" / "exceptions-vulnerabilites-tests.yaml"
 PINNED = re.compile(r"^[a-z0-9.-]+(:\d+)?(/[a-z0-9._-]+)+:[\w.-]+@sha256:[0-9a-f]{64}$")
 MAX_EXCEPTION = timedelta(days=90)  # durée de vie d'une exception, au plus
 GRYPE_DB = "cdg-grype-db"  # volume Docker : base de failles gardée entre deux scans
@@ -402,6 +404,52 @@ def scan(
     return 0
 
 
+def scan_test_images(folder: Path, *, today: date, run: Run = subprocess.run) -> int:
+    """Images de test sans signature (exception limitée aux tests, ADR 008) : chacune
+    tirée, inventoriée, scannée contre les exceptions des tests, puis retirée si elle
+    n'était pas déjà là ; la première faille critique ou haute corrigeable non couverte
+    arrête tout, l'image nommée."""
+    images = sorted(signature_exceptions(SIGNATURE_EXCEPTIONS, today))
+    for image in images:
+        target = folder / image.split("/")[-1].split(":")[0]
+        present = run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if present.returncode != 0:
+            pulled = run(
+                ["docker", "pull", image], capture_output=True, text=True, check=False
+            )
+            if pulled.returncode != 0:
+                print(
+                    f"tirage impossible : {image}\n{pulled.stderr.strip()}",
+                    file=sys.stderr,
+                )
+                return 1
+        code = inventory(image, target, run=run)
+        (target / "image.tar").unlink(
+            missing_ok=True
+        )  # disque du runner, pour le cluster
+        if code == 0:
+            code = scan(target, TEST_EXCEPTIONS, today=today, run=run)
+        if present.returncode != 0:
+            run(
+                ["docker", "image", "rm", image],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        if code != 0:
+            print(f"image de test refusée : {image}", file=sys.stderr)
+            return code
+    print(
+        f"images de test : {len(images)} scannées, sans faille critique ou haute corrigeable non couverte"
+    )
+    return 0
+
+
 # --- révision fournie à la construction ----------------------------------------------------
 
 
@@ -487,6 +535,10 @@ def main(argv: list[str] | None = None) -> int:
     inventory_ = commands.add_parser("inventaire", help="inventaire (Syft)")
     inventory_.add_argument("image")
     inventory_.add_argument("--dossier", type=Path, required=True)
+    tests_ = commands.add_parser(
+        "images-de-test", help="images de test sans signature : inventaire et scan"
+    )
+    tests_.add_argument("--dossier", type=Path, required=True)
     scan_ = commands.add_parser("scan", help="failles connues (Grype)")
     scan_.add_argument("--dossier", type=Path, required=True)
     scan_.add_argument("--exceptions", type=Path, default=EXCEPTIONS)
@@ -498,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.commande == "inventaire":
         return inventory(args.image, args.dossier)
+    if args.commande == "images-de-test":
+        return scan_test_images(args.dossier, today=today())
     return scan(args.dossier, args.exceptions, today=today())
 
 
