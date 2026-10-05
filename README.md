@@ -220,7 +220,7 @@ Les vingt-neuf scénarios :
 2. création simultanée d'un même contrat par les deux réplicas : un seul contrat, un seul scellement ;
 3. arrêt d'un pod pendant une analyse : l'analyse se termine ;
 4. pod tué pendant une analyse : l'autre réplica la reprend, et elle n'est scellée qu'une fois ;
-5. mise à jour progressive : aucune réponse perdue par la sonde de santé du service ;
+5. mise à jour progressive : aucune réponse perdue par la sonde de santé du service, de son admission par les règles réseau à la fin de la mise à jour (chronique conservée comme artefact de la CI) ;
 6. retour arrière à la révision précédente, sans perte ;
 7. sortie directe vers Internet refusée par les règles réseau ;
 8. domaine autre que l'API de Mistral refusé par le proxy ;
@@ -326,7 +326,7 @@ Le CRAG justifie chaque constat par une référence du corpus : encore faut-il q
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP, OpenTelemetry), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 515 tests automatisés, joués par la CI : à chaque pull request, 2 340 dans la suite principale (PostgreSQL comprise), 113 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 29 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP, OpenTelemetry), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 524 tests automatisés, joués par la CI : à chaque pull request, 2 348 dans la suite principale (PostgreSQL comprise), 114 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 29 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.

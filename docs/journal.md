@@ -3043,7 +3043,7 @@ Petite PR de documentation après la fusion de la PR 34 ; le chantier de l'obser
 
 ## 2026-10-05 · Enquête : une requête perdue pendant la mise à jour progressive (branche `enquete-mise-a-jour`)
 
-La promesse d'une mise à jour sans interruption n'est pas toujours tenue : `test_mise_a_jour_sans_interruption` a échoué 2 fois sur 11 exécutions du job `cluster` depuis le 03/10 (une connexion refusée sur environ 2 000 requêtes de la sonde), jamais avant. L'étiquette `v1.3` (05/10) le signale comme défaut connu.
+La promesse d'une mise à jour sans interruption n'est pas toujours tenue : `test_mise_a_jour_sans_interruption` a échoué 2 fois sur 11 exécutions du job `cluster` depuis le 03/10 (une connexion refusée sur environ 2 000 requêtes de la sonde). L'étiquette `v1.3` (05/10) le signale comme défaut connu. Rectificatif du 05/10 : ce n'était pas nouveau, l'ADR 005 consignait déjà une requête perdue le 30/09 (`9c7580e`, 1 sur 2 071, « échec isolé, non expliqué ») ; « jamais avant le 03/10 », écrit ici et dans la note de la release `v1.3`, est faux.
 
 ### Décisions du propriétaire (05/10)
 
@@ -3085,12 +3085,20 @@ Horodatage relatif au début de la boucle de la sonde (11:46:59.841 UTC) :
 - +0,26 s et +0,47 s : premières réponses des deux pods ; ensuite, plus aucun échec.
 - **La mise à jour elle-même n'a rien perdu** : premier pod neuf créé à +23,6 s, prêt à +34,0 s ; ancien pod mis en arrêt à +34,1 s, retiré du trafic aussitôt (dernière réponse à +34,1 s), puis le second, de +44,5 s à +56,7 s ; 2 055 requêtes, un seul échec, celui de la naissance de la sonde.
 
-**Cause établie** : la sonde du scénario est un pod neuf, et sa première requête part avant que kube-router n'ait admis son adresse dans les sources autorisées par les règles réseau (`…-web`, entrée depuis les pods de test sur le port des sondes) ; le refus par défaut de l'espace rejette le paquet (`REJECT`), ce que le client voit comme « Connection refused ». Le défaut est dans le scénario (il compte avant d'être admis), non dans la mise à jour progressive. Piste 1 écartée (aucun pod en arrêt au moment du refus), piste 2 écartée (aucun pod n'entrait dans la tranche), aucun refus de kube-proxy. Les quatre échecs connus tombent à la naissance de la sonde : n°1 dans les deux exécutions instrumentées, premières secondes les 03 et 04/10. Ce qui a rendu l'échec plus fréquent depuis le 03/10 n'est pas établi (0 sur une vingtaine d'exécutions avant, 2 sur 11 ensuite, puis 2 sur 2 avec la charge des relevés) : la course existait avant.
+**Cause établie** : la sonde du scénario est un pod neuf, et sa première requête part avant que kube-router n'ait admis son adresse dans les sources autorisées par les règles réseau (`…-web`, entrée depuis les pods de test sur le port des sondes) ; le refus par défaut de l'espace rejette le paquet (`REJECT`), ce que le client voit comme « Connection refused ». Le défaut est dans le scénario (il compte avant d'être admis), non dans la mise à jour progressive. Piste 1 écartée (aucun pod en arrêt au moment du refus), piste 2 écartée (aucun pod n'entrait dans la tranche), aucun refus de kube-proxy. Les quatre échecs connus tombent à la naissance de la sonde : n°1 dans les deux exécutions instrumentées, premières secondes les 03 et 04/10. Ce qui a rendu l'échec plus fréquent depuis le 03/10 n'est pas établi (2 sur 11 depuis le 03/10, 2 sur 2 avec la charge des relevés) ; la course existait avant : première occurrence connue le 30/09 (ADR 005).
 
-### Correction proposée (en attente de validation du propriétaire)
+### Correction proposée
 
 - **Dans le scénario seulement**, aucun changement du produit : la sonde commence par une phase d'admission, hors décompte, où elle interroge le service jusqu'à avoir reçu une réponse de chacun des pods attendus (deux), en 60 secondes au plus, sinon échec explicite (« sonde jamais admise ») ; les refus de cette phase sont rapportés, jamais comptés ; elle écrit alors une ligne « sonde admise » et ouvre le décompte. Le scénario attend cette ligne avant `helm upgrade` (au lieu d'une pause de 10 secondes). Critère inchangé : zéro requête perdue, de l'admission à la fin de la mise à jour.
 - **Instrumentation** : garder `instance` dans les réponses de santé et la sonde détaillée ; garder la chronique, mais ne l'écrire qu'en cas d'échec (à décider).
+
+### Décisions du propriétaire (05/10) et correction
+
+- **Correction validée telle que proposée** : phase d'admission non comptée, bornée à 60 secondes avec échec explicite (« sonde jamais admise », son bilan à l'appui) ; `helm upgrade` lancé seulement après la ligne « sonde admise » ; critère inchangé. Les refus de la phase d'admission sont rapportés dans la chronique, jamais comptés.
+- **Point de départ stable**, ajouté pour que la borne de 60 secondes ait un sens : le scénario attend deux pods prêts avant de créer la sonde (le scénario précédent tue un pod, dont le remplaçant peut encore charger son modèle) ; une réponse de chacun des deux est exigée pour l'admission.
+- **Instrumentation gardée** : le nom du pod dans les réponses de santé, sur le port des sondes seulement, jamais sur l'interface publique (vérifié : interface, service `-sante` en ClusterIP sans entrée, port ouvert aux seuls pods de test) ; la sonde détaillée. La chronique est écrite à chaque exécution et conservée comme artefact de la CI (`chronique-mise-a-jour`, 30 jours), imprimée seulement en cas d'échec.
+- **Avant la fusion** : le job `cluster` relancé deux fois sur la PR après la correction, pour montrer que le scénario est stable.
+- **Ensuite, à part, une PR chacune** : la source des refus vers `cdg-postgres-1` toutes les dix secondes (cause présentée avant de changer une règle réseau) ; l'échec du job `cluster` de la PR Dependabot d'`anthropic` 1.11.0.
 
 ### Fait signalé en passant
 
@@ -3099,4 +3107,4 @@ Horodatage relatif au début de la boucle de la sonde (11:46:59.841 UTC) :
 
 ### Nombre de tests
 
-- La suite principale passe de 2 300 à 2 340 (réponse de santé, chronique et sonde vérifiées sans cluster) ; le total, de 2 475 à 2 515.
+- La suite principale passe de 2 300 à 2 348 (réponse de santé, chronique et sonde vérifiées sans cluster), les tests du rendu des charts de 113 à 114 (port de santé jamais publié) ; le total, de 2 475 à 2 524.
