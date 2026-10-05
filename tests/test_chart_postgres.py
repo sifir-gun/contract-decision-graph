@@ -129,6 +129,10 @@ def test_profil_de_test_stockage_objet_dans_le_cluster():
     }
 
 
+INSTANCES = {"podSelector": {"matchLabels": {"cnpg.io/cluster": "cdg-postgres"}}}
+CNPG_SYSTEM = {"matchLabels": {"kubernetes.io/metadata.name": "cnpg-system"}}
+
+
 @pytest.mark.chart
 def test_regles_reseau_de_postgresql(rendu):
     [policy] = of_kind(rendu, "NetworkPolicy")
@@ -136,36 +140,73 @@ def test_regles_reseau_de_postgresql(rendu):
         "matchLabels": {"cnpg.io/cluster": "cdg-postgres"}
     }
     assert policy["spec"]["policyTypes"] == ["Ingress", "Egress"]
-    ingress = {
-        tuple(p["port"] for p in rule["ports"]): rule["from"]
+    ingress = [
+        (sorted(p["port"] for p in rule["ports"]), rule["from"])
         for rule in policy["spec"]["ingress"]
-    }
-    # 5432 : l'application (interface et tâches) et les autres instances (réplication)
-    assert ingress[(5432,)] == [
-        {
-            "podSelector": {
-                "matchLabels": {"app.kubernetes.io/name": "contract-decision-graph"}
-            }
-        },
-        {"podSelector": {"matchLabels": {"cnpg.io/cluster": "cdg-postgres"}}},
     ]
-    # 8000 : état de l'instance, lu par l'opérateur
-    assert ingress[(8000,)] == [
-        {
-            "namespaceSelector": {
-                "matchLabels": {"kubernetes.io/metadata.name": "cnpg-system"}
-            }
-        }
+    assert ingress == [
+        # 5432 : l'application (interface et tâches) et les autres instances (réplication)
+        (
+            [5432],
+            [
+                {
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "contract-decision-graph"
+                        }
+                    }
+                },
+                INSTANCES,
+            ],
+        ),
+        # 8000 : état de l'instance, lu par l'opérateur
+        ([8000], [{"namespaceSelector": CNPG_SYSTEM}]),
+        # 5432 : l'opérateur, et lui seul dans son espace (documentation de
+        # CloudNativePG, décision du 05/10)
+        (
+            [5432],
+            [
+                {
+                    "namespaceSelector": CNPG_SYSTEM,
+                    "podSelector": {
+                        "matchLabels": {"app.kubernetes.io/name": "cloudnative-pg"}
+                    },
+                }
+            ],
+        ),
+        # 8000 : les autres instances du même cluster, pour la vérification d'isolement
+        # de la sonde de vie du primaire (CloudNativePG 1.30.1, /failsafe), refusée
+        # toutes les dix secondes jusqu'au 05/10
+        ([8000], [INSTANCES]),
     ]
     egress = policy["spec"]["egress"]
     ports = [sorted(p["port"] for p in rule["ports"]) for rule in egress]
     assert [53, 53] in ports  # DNS, UDP et TCP
-    assert [5432] in ports  # réplication vers les autres instances
     assert [443, 6443] in ports  # serveur d'API de Kubernetes (gestionnaire d'instance)
+    # vers les autres instances : réplication (5432), puis vérification d'isolement
+    # (8000), dans une règle à part
+    peers = [
+        (rule.get("to"), sorted(p["port"] for p in rule["ports"])) for rule in egress
+    ]
+    assert ([INSTANCES], [5432]) in peers
+    assert ([INSTANCES], [8000]) in peers
     assert ports[-1] == [443]  # stockage objet, par défaut sur Internet (S3)
     [block] = egress[-1]["to"]
     assert block["ipBlock"]["cidr"] == "0.0.0.0/0"
     assert "10.0.0.0/8" in block["ipBlock"]["except"]
+
+
+@pytest.mark.chart
+def test_port_8000_jamais_ouvert_a_l_application(rendu):
+    # l'état des instances n'est lu que par l'opérateur et par les autres instances
+    [policy] = of_kind(rendu, "NetworkPolicy")
+    for rule in policy["spec"]["ingress"]:
+        if [p["port"] for p in rule["ports"]] == [8000]:
+            for peer in rule["from"]:
+                labels = peer.get("podSelector", {}).get("matchLabels", {})
+                assert "app.kubernetes.io/name" not in labels or (
+                    labels["app.kubernetes.io/name"] != "contract-decision-graph"
+                )
 
 
 @pytest.mark.chart
