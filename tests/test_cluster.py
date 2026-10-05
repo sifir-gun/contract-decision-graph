@@ -31,6 +31,7 @@ import httpx
 import jwt
 import pytest
 import yaml
+from chronique import SONDE, Chronique
 from test_chaine_approvisionnement import chaine
 
 pytestmark = pytest.mark.cluster
@@ -475,21 +476,8 @@ def _submit_ignoring_errors(pod: str, thread: str) -> None:
 
 # --- 3. mise à jour sans interruption, 4. retour arrière ----------------------------------
 
-# chaque échec, daté (UTC) et nommé (délai, refus, code HTTP), pour le diagnostic
-PROBER = """
-import json, time, urllib.request
-url = "http://cdg-contract-decision-graph-sante:8081/sante/pret"
-end, ok, ko, failures = time.monotonic() + {duration}, 0, 0, []
-while time.monotonic() < end:
-    try:
-        ok += urllib.request.urlopen(url, timeout=2).status == 200
-    except Exception as exc:
-        ko += 1
-        stamp = time.strftime("%H:%M:%S", time.gmtime())
-        failures.append(f"{{stamp}} {{type(exc).__name__}} {{exc}}"[:200])
-    time.sleep(0.2)
-print(json.dumps({{"ok": ok, "ko": ko, "echecs": failures[:20]}}))
-"""
+# service des sondes, visé par la sonde de la mise à jour (tests/chronique.py)
+SANTE = "cdg-contract-decision-graph-sante"
 
 
 def _prober(images: dict, name: str, duration: int) -> None:
@@ -519,7 +507,13 @@ def _prober(images: dict, name: str, duration: int) -> None:
                 {
                     "name": "sonde",
                     "image": f"{factice_image['repository']}@{factice_image['digest']}",
-                    "command": ["python", "-c", PROBER.format(duration=duration)],
+                    "command": [
+                        "python",
+                        "-c",
+                        SONDE.format(
+                            url=f"http://{SANTE}:8081/sante/pret", duree=duration
+                        ),
+                    ],
                     "resources": {
                         "requests": {"cpu": "50m", "memory": "64Mi"},
                         "limits": {"cpu": "500m", "memory": "128Mi"},
@@ -551,47 +545,55 @@ def _deployment_args() -> list[str]:
     return deployment["spec"]["template"]["spec"]["containers"][0]["args"]
 
 
-def test_mise_a_jour_sans_interruption(images):
+def test_mise_a_jour_sans_interruption(images, capsys):
     """Mise à jour progressive (un pod de plus, jamais un de moins, pause avant l'arrêt) :
-    aucune requête perdue sur le service, pendant toute la mise à jour."""
+    aucune requête perdue sur le service, pendant toute la mise à jour. Chronique
+    (tests/chronique.py) écrite à chaque exécution, réussie ou non : enquête du 05/10
+    sur une requête perdue, 2 fois sur 11, dans les premières secondes de la sonde."""
     name, duration = f"sonde-{uuid.uuid4().hex[:6]}", 420
-    _prober(images, name, duration)
-    time.sleep(10)
-    start = time.monotonic()
-    upgraded = helm(
-        "upgrade",
-        "cdg",
-        str(ROOT / "chart" / "contract-decision-graph"),
-        "--namespace",
-        "cdg",
-        "--reuse-values",
-        *SANS_INGESTION,
-        "--set",
-        "web.repriseIntervalle=16",
-        "--wait",
-        "--timeout",
-        "900s",
-    )
-    assert upgraded.returncode == 0, upgraded.stderr
-    # la sonde a couvert toute la mise à jour
-    assert time.monotonic() - start < duration - 10, (
-        "mise à jour plus longue que la sonde"
-    )
-    assert "16" in _deployment_args()
-    wait_for(
-        lambda: (
-            json.loads(kubectl("get", "pod", "-n", "cdg", name, "-o", "json"))[
-                "status"
-            ]["phase"]
-            in {"Succeeded", "Failed"}
-        ),
-        "fin de la sonde",
-        600,
-        5,
-    )
+    with Chronique(KUBECTL, "cdg", SANTE) as suivi:
+        _prober(images, name, duration)
+        time.sleep(10)
+        start = time.monotonic()
+        upgraded = helm(
+            "upgrade",
+            "cdg",
+            str(ROOT / "chart" / "contract-decision-graph"),
+            "--namespace",
+            "cdg",
+            "--reuse-values",
+            *SANS_INGESTION,
+            "--set",
+            "web.repriseIntervalle=16",
+            "--wait",
+            "--timeout",
+            "900s",
+        )
+        assert upgraded.returncode == 0, upgraded.stderr
+        # la sonde a couvert toute la mise à jour
+        assert time.monotonic() - start < duration - 10, (
+            "mise à jour plus longue que la sonde"
+        )
+        assert "16" in _deployment_args()
+        wait_for(
+            lambda: (
+                json.loads(kubectl("get", "pod", "-n", "cdg", name, "-o", "json"))[
+                    "status"
+                ]["phase"]
+                in {"Succeeded", "Failed"}
+            ),
+            "fin de la sonde",
+            600,
+            5,
+        )
     counts = json.loads(kubectl("logs", "-n", "cdg", name).strip().splitlines()[-1])
     kubectl("delete", "pod", "-n", "cdg", name, "--wait=false")
-    assert counts["ok"] > 500 and counts["ko"] == 0, counts
+    with capsys.disabled():
+        print("\n" + "\n".join(suivi.rapport(counts, name)))
+    lost = {"ok": counts["ok"], "ko": counts["ko"], "echecs": counts["echecs"]}
+    assert counts["ok"] > 500 and counts["ko"] == 0, lost
+    # une chronique inutilisable est dite : l'enquête en dépend
+    assert not suivi.lacunes(), suivi.lacunes()
 
 
 def test_retour_arriere():
