@@ -72,6 +72,35 @@ def test_setup_database_idempotent(pg):
     assert grants(pg, "checkpoints") == {"SELECT", "INSERT", "UPDATE"}
 
 
+def test_setup_database_jamais_sans_droits_pour_une_session_d_app_role(pg, monkeypatch):
+    """setup-db retire puis rend les droits d'app_role : jamais une fenêtre où une autre
+    session d'app_role est refusée. Vu le 05/10 (deux suites de tests sur la base
+    locale) ; dans le cluster, setup-db est la tâche pre-upgrade, lancée pendant que les
+    anciens pods servent. Juste après le retrait, une session d'app_role concurrente
+    lit encore la table."""
+    execute = psycopg.Connection.execute
+    seen: list[str] = []
+
+    def probing(self, query, *args, **kwargs):
+        result = execute(self, query, *args, **kwargs)
+        text = query.as_string(self) if hasattr(query, "as_string") else str(query)
+        if text.startswith("REVOKE ALL ON checkpoints"):
+            # lecture bornée : une attente sur un verrou serait un autre défaut, dit
+            with psycopg.connect(pg.app, autocommit=True) as other:
+                execute(other, "SET statement_timeout = '5s'")
+                try:
+                    execute(other, "SELECT count(*) FROM checkpoints")
+                    seen.append("lu")
+                except psycopg.errors.InsufficientPrivilege:
+                    seen.append("refusé")
+        return result
+
+    monkeypatch.setattr(psycopg.Connection, "execute", probing)
+    checkpointer.setup_database(pg.admin)
+    assert seen == ["lu"]
+    assert grants(pg, "checkpoints") == {"SELECT", "INSERT", "UPDATE"}
+
+
 # --- Cycle complet avec les seuls droits d'app_role ---------------------------------------
 
 

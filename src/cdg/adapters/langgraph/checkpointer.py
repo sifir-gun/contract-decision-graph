@@ -152,8 +152,13 @@ def setup_database(admin_conninfo: Conninfo) -> None:
         # open_saver passe une connexion, jamais un pool
         if not isinstance(conn, Connection):
             raise TypeError(f"connexion psycopg attendue, reçu {type(conn).__name__}")
-        for statement in _CHECKPOINT_GRANTS:
-            conn.execute(statement.format(role=sql.Identifier(APP_ROLE)))
+        # retrait et octroi dans une seule transaction : aucune session d'app_role ne voit
+        # la table sans droits (le 05/10, en autocommit, une autre session était refusée
+        # entre les deux ; dans le cluster, setup-db est la tâche pre-upgrade, lancée
+        # pendant que les anciens pods servent)
+        with conn.transaction():
+            for statement in _CHECKPOINT_GRANTS:
+                conn.execute(statement.format(role=sql.Identifier(APP_ROLE)))
 
 
 def delete_thread(conninfo: Conninfo, thread_id: str) -> None:
