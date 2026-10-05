@@ -3108,3 +3108,39 @@ Horodatage relatif au début de la boucle de la sonde (11:46:59.841 UTC) :
 ### Nombre de tests
 
 - La suite principale passe de 2 300 à 2 348 (réponse de santé, chronique et sonde vérifiées sans cluster), les tests du rendu des charts de 113 à 114 (port de santé jamais publié) ; le total, de 2 475 à 2 524.
+
+## 2026-10-05 · Enquête : clés de Dex injoignables, 503 à la première requête vers des pods neufs (branche `enquete-fournisseur`)
+
+Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production` échoue sur un 503 de l'interface, « L'identité ne peut pas être vérifiée pour le moment » (`ProviderUnavailable`) ; les 28 autres scénarios passent. Premier échec connu de ce scénario.
+
+### Décisions du propriétaire (05/10)
+
+- Enquête à part, même méthode que pour la mise à jour progressive : instrumenter (type de l'erreur dans le journal d'accès, journaux du proxy relevés avant sa remise en état), puis cause établie avant toute correction.
+- Contrairement à la sonde de la PR 42, ce défaut peut toucher de vrais utilisateurs : après un redémarrage ou un retour arrière, un pod neuf de l'interface qui échoue à lire les clés de Dex renvoie un 503. Si la cause est un pod neuf pas encore admis par les règles réseau, la correction relèvera probablement du produit. Pistes à évaluer une fois la cause établie, sans les appliquer d'office : charger les clés au démarrage avant que le pod se déclare prêt, ou une reprise bornée de leur lecture ; l'échec doit rester explicite.
+- Le job `cluster` relancé jusqu'à un échec instrumenté, cinq exécutions au plus ; si aucune n'échoue, le dire.
+
+### Constats (journaux du job)
+
+- La requête refusée est la première requête authentifiée vers des pods de l'interface recréés environ 25 secondes plus tôt par le retour arrière : leur cache des clés est vide.
+- Elle passe par le proxy de sortie que le scénario vient de mettre aux valeurs de production : ses pods (`6dd4bdb8fb`) n'ont que quelques secondes, et disparaissent avec la remise en état, leurs journaux avec eux.
+- La lecture des clés n'est pas reprise : un seul échec réseau donne le 503 (`Retry-After: 30`). Le journal d'accès ne disait que « fournisseur_injoignable », sans le type de l'erreur que le vérificateur calculait pourtant.
+
+### Pistes à départager
+
+1. Le proxy, pod neuf, pas encore admis par les règles réseau du nœud de Traefik (devant Dex) : même mécanisme que la sonde de la PR 42, du côté du proxy.
+2. Le pod de l'interface pas encore admis à joindre le pod neuf du proxy.
+3. Une indisponibilité ponctuelle de Dex ou de Traefik.
+
+### Instrumentation
+
+- **Journal d'accès** : `fournisseur_injoignable` porte une `cause`, l'erreur réseau par son type et au plus un code, jamais par son message (`oidc.cause_reseau` : `URLError/ConnectionRefusedError`, `URLError/OSError tunnel 502` pour un refus du proxy à l'ouverture du tunnel, `HTTPError 503`…), lue sous l'erreur de PyJWT 2.15.1, qui enchaîne l'erreur d'origine.
+- **Scénario** : chronique des pods de l'interface et du proxy (nœud, adresse, prêt, arrêt), de leurs événements, de la tranche d'adresses du service du proxy, des refus et des adresses entrant dans les ensembles de kube-router sur chaque nœud ; journaux du proxy de production et place des pods du proxy et de Traefik relevés avant sa remise en état. Écrite à chaque exécution dans l'artefact de la CI (`proxy-production.txt`), imprimée en cas d'échec ; l'artefact, qui porte désormais deux chroniques, devient `chroniques-du-cluster` (au lieu de `chronique-mise-a-jour`).
+
+### Fait trouvé en passant : une fenêtre sans droits dans `setup-db`
+
+- Pendant la vérification locale de la PR 43, `tests/test_verify.py` a échoué une fois sur `permission denied for table checkpoints` (PostgreSQL local, 21:31:15), puis a passé seul. `setup_database` (`adapters/langgraph/checkpointer.py`) retire tous les droits d'`app_role` sur les tables du checkpointer, puis les rend, en deux commandes en autocommit : entre les deux, une autre session d'`app_role` est refusée. La fixture de session `pg` l'exécute au début de chaque session de tests : deux suites lancées en même temps sur la base locale se gênent.
+- La même fenêtre existe dans le cluster : `setup-db` est la tâche Helm `pre-upgrade`, lancée pendant que les anciens pods servent. Une analyse qui écrit son point de reprise à cet instant échouerait. À présenter au propriétaire avant toute correction (piste : retirer et rendre les droits dans une seule transaction).
+
+### Nombre de tests
+
+- La suite principale passe de 2 348 à 2 360 (cause de l'injoignabilité, chronologie sans sonde) ; le total, de 2 524 à 2 536.
