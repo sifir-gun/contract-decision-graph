@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -28,66 +29,133 @@ from chronique import (
 # --- la sonde, lancée ici comme dans son pod -------------------------------------------
 
 
-def serveur(code: int, instance: str):
+def serveur(code: int = 200, instances=("pod-a",), ferme_apres: int | None = None):
+    """Serveur de santé factice : répond `code`, en nommant tour à tour `instances` ;
+    après `ferme_apres` réponses, il ferme son port (les connexions sont refusées)."""
+    served = []
+
     class Sante(BaseHTTPRequestHandler):
         def do_GET(self):
-            body = json.dumps({"statut": "pret", "instance": instance}).encode()
+            name = instances[len(served) % len(instances)]
+            served.append(name)
+            body = json.dumps({"statut": "pret", "instance": name}).encode()
             self.send_response(code)
             self.send_header("content-type", "application/json")
             self.end_headers()
             self.wfile.write(body)
+            if ferme_apres is not None and len(served) == ferme_apres:
+                threading.Thread(target=close, daemon=True).start()
 
         def log_message(self, *args):
             pass
+
+    def close():
+        httpd.shutdown()
+        httpd.server_close()
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Sante)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd
 
 
-def sonder(url: str) -> dict:
+def port_ferme() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]  # libéré : plus personne n'écoute
+
+
+def sonder(port: int, *, attendus: int = 1, admission: float = 5, duree: float = 1):
+    """La sonde, lancée ici : (code de sortie, lignes écrites, bilan)."""
+    code = SONDE.format(
+        url=f"http://127.0.0.1:{port}/sante/pret",
+        duree=duree,
+        attendus=attendus,
+        admission=admission,
+    )
     result = subprocess.run(
-        [sys.executable, "-c", SONDE.format(url=url, duree=1)],
+        [sys.executable, "-c", code],
         capture_output=True,
         text=True,
         timeout=30,
-        check=True,
+        check=False,
     )
-    return json.loads(result.stdout.strip().splitlines()[-1])
+    lines = result.stdout.strip().splitlines()
+    return result.returncode, lines, json.loads(lines[-1])
 
 
-def test_sonde_note_l_instance_qui_repond():
-    httpd = serveur(200, "pod-a")
+def test_sonde_admise_apres_une_reponse_de_chaque_pod_attendu():
+    httpd = serveur(instances=("pod-a", "pod-b"))
     try:
-        counts = sonder(f"http://127.0.0.1:{httpd.server_address[1]}/sante/pret")
+        code, lines, counts = sonder(httpd.server_address[1], attendus=2)
     finally:
         httpd.shutdown()
+    assert code == 0 and lines[0] == "sonde admise"
+    assert counts["admise"] is True
+    assert counts["admission"]["instances"] == ["pod-a", "pod-b"]
+    assert counts["admission"]["nombre"] == 0
+    assert counts["debut"] <= counts["admission"]["fin"] <= counts["decompte"]
     assert counts["ok"] >= 3 and counts["ko"] == 0
     first, last, answered = counts["instances"]["pod-a"]
-    assert answered == counts["ok"] and counts["debut"] <= first <= last
+    assert counts["decompte"] <= first <= last and answered >= 1
 
 
-def test_sonde_note_chaque_refus_horodate_avec_son_errno():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]  # libéré : plus personne n'écoute
-    counts = sonder(f"http://127.0.0.1:{port}/sante/pret")
-    assert counts["ok"] == 0 and counts["ko"] >= 3
-    failure = counts["echecs"][0]
-    assert failure["type"] == "ConnectionRefusedError"
-    assert failure["errno"] == errno.ECONNREFUSED
-    assert failure["n"] == 1 and failure["t"] >= counts["debut"]
+def test_refus_avant_l_admission_rapportes_jamais_comptes():
+    port = port_ferme()
+
+    def open_later():
+        time.sleep(0.7)  # la sonde trouve d'abord le port fermé, comme au 05/10
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), serveur().RequestHandlerClass)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    threading.Thread(target=open_later, daemon=True).start()
+    code, _, counts = sonder(port)
+    assert code == 0 and counts["admise"] is True
+    assert counts["admission"]["nombre"] >= 1
+    refused = counts["admission"]["refus"][0]
+    assert (refused["type"], refused["errno"]) == (
+        "ConnectionRefusedError",
+        errno.ECONNREFUSED,
+    )
+    assert counts["ko"] == 0 and counts["ok"] >= 3  # rapportés, jamais comptés
+
+
+def test_sonde_jamais_admise_echoue_explicitement():
+    code, lines, counts = sonder(port_ferme(), admission=1)
+    assert code == 1 and "sonde admise" not in lines
+    assert counts["admise"] is False and counts["nombre"] >= 3
+    assert counts["refus"][0]["type"] == "ConnectionRefusedError"
+
+
+def test_sonde_jamais_admise_sans_tous_les_pods():
+    # un seul des deux pods attendus répond : jamais admise, et elle le dit
+    httpd = serveur(instances=("pod-a",))
+    try:
+        code, _, counts = sonder(httpd.server_address[1], attendus=2, admission=1)
+    finally:
+        httpd.shutdown()
+    assert code == 1 and counts["admise"] is False and counts["vus"] == ["pod-a"]
+
+
+def test_sonde_compte_chaque_echec_apres_l_admission_avec_son_errno():
+    # admise, puis le port se ferme : chaque refus du décompte est daté, numéroté, typé
+    httpd = serveur(ferme_apres=2)
+    code, _, counts = sonder(httpd.server_address[1])
+    assert code == 0 and counts["ko"] >= 2
+    # à la fermeture, une connexion en cours peut être réinitialisée ; puis refus
+    assert all(f["t"] >= counts["decompte"] for f in counts["echecs"])
+    refused = [f for f in counts["echecs"] if f["type"] == "ConnectionRefusedError"]
+    assert refused and refused[0]["errno"] == errno.ECONNREFUSED
 
 
 def test_sonde_nomme_le_pod_d_une_reponse_en_erreur():
-    httpd = serveur(503, "pod-en-arret")
+    httpd = serveur(503, ("pod-en-arret",))
     try:
-        counts = sonder(f"http://127.0.0.1:{httpd.server_address[1]}/sante/pret")
+        code, _, counts = sonder(httpd.server_address[1], admission=1)
     finally:
         httpd.shutdown()
-    failure = counts["echecs"][0]
-    assert (failure["type"], failure["code"]) == ("HTTPError", 503)
-    assert failure["instance"] == "pod-en-arret"
+    refused = counts["refus"][0]
+    assert code == 1 and (refused["type"], refused["code"]) == ("HTTPError", 503)
+    assert refused["instance"] == "pod-en-arret"
 
 
 # --- flux de kubectl ------------------------------------------------------------------
@@ -307,7 +375,7 @@ def test_rapport_horodate_relatif_a_la_sonde_avec_ses_echecs_et_le_resume():
     }
     lines = rapport(events, pods, probe, "sonde-abc", ["agent-0 : relevé lent"])
     text = "\n".join(lines)
-    assert "22:39:21.000 (+0.00 s) sonde : début de la boucle" in text
+    assert "22:39:21.000 (+0.00 s) sonde : début, phase d'admission" in text
     assert "22:39:21.600 (+0.60 s) ÉCHEC n°3 : ConnectionRefusedError errno 111" in text
     # dans l'ordre du temps, relatif au début de la sonde
     assert text.index("(-0.40 s) pod sonde-abc : adresse 10.42.2.9") < text.index(
@@ -515,12 +583,81 @@ def test_suivi_sans_aucun_objet_est_une_lacune(tmp_path):
 
 
 def test_sonde_note_sa_propre_adresse():
-    httpd = serveur(200, "pod-a")
+    httpd = serveur()
     try:
-        counts = sonder(f"http://127.0.0.1:{httpd.server_address[1]}/sante/pret")
+        _, _, counts = sonder(httpd.server_address[1])
     finally:
         httpd.shutdown()
     assert counts["adresse"] == "127.0.0.1"
+
+
+def test_rapport_montre_l_admission_hors_decompte():
+    probe = {
+        "admise": True,
+        "ok": 2000,
+        "ko": 0,
+        "debut": START,
+        "decompte": START + 0.6,
+        "admission": {
+            "debut": START,
+            "fin": START + 0.5,
+            "nombre": 1,
+            "instances": ["web-a", "web-b"],
+            "refus": [
+                {
+                    "t": START + 0.01,
+                    "n": 1,
+                    "type": "ConnectionRefusedError",
+                    "errno": 111,
+                    "code": None,
+                }
+            ],
+        },
+        "echecs": [],
+        "instances": {},
+    }
+    text = "\n".join(rapport([], {}, probe, "sonde-abc", []))
+    assert "admission : 1 refus, non compté, admise à +0.50 s (web-a, web-b)" in text
+    assert (
+        "(+0.01 s) refus d'admission n°1, non compté : ConnectionRefusedError errno 111"
+    ) in text
+    assert "(+0.00 s) sonde : début, phase d'admission" in text
+    assert "(+0.60 s) sonde : admise, début du décompte" in text
+
+
+def test_rapport_d_une_sonde_jamais_admise():
+    probe = {
+        "admise": False,
+        "debut": START,
+        "nombre": 300,
+        "vus": ["web-a"],
+        "refus": [],
+    }
+    text = "\n".join(rapport([], {}, probe, "sonde-abc", []))
+    assert "sonde jamais admise : 300 refus, pods vus : web-a" in text
+
+
+def test_chronique_ecrite_dans_un_fichier_a_chaque_execution(tmp_path):
+    from chronique import Chronique
+
+    suivi = Chronique([], "cdg", "sante")
+    suivi._add(Evenement(START + 1, "pod", "web-a", "prêt"))
+    target = tmp_path / "chroniques" / "mise-a-jour.txt"
+    probe = {"ok": 1, "ko": 0, "debut": START, "echecs": [], "instances": {}}
+    lines = suivi.ecrire(target, probe, "sonde-abc")
+    assert target.read_text(encoding="utf-8") == "\n".join(lines) + "\n"
+    assert any("pod web-a : prêt" in line for line in lines)
+
+
+def test_chronique_ecrite_meme_sans_bilan_de_la_sonde(tmp_path):
+    # scénario interrompu avant la fin de la sonde : la chronique est écrite quand même
+    from chronique import Chronique
+
+    suivi = Chronique([], "cdg", "sante")
+    suivi._add(Evenement(START + 1, "pod", "web-a", "prêt"))
+    lines = suivi.ecrire(tmp_path / "mise-a-jour.txt", None, "sonde-abc")
+    assert lines[0].startswith("=== chronique : sonde sonde-abc sans bilan")
+    assert any("(+0.00 s) pod web-a : prêt" in line for line in lines)
 
 
 def test_rapport_prend_l_adresse_donnee_par_la_sonde():

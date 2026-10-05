@@ -402,3 +402,16 @@ def test_ingestion_avec_les_fils_de_l_option(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.conninfo, "admin_conninfo", lambda: "base-de-test")
     assert cli.main(["--fils-embedding", "2", "ingest"]) == 0
     assert seen == [2]
+
+
+def test_nom_du_pod_jamais_sur_l_interface_publique(served, monkeypatch):
+    # décision du 05/10 : le nom du pod reste sur le port des sondes, interne au cluster
+    from cdg import cli
+
+    monkeypatch.setattr(cli.socket, "gethostname", lambda: INSTANCE)
+    assert cli.main(["web", "--demo", "--port-sante", "8081"]) == 0
+    web = TestClient(served["app"])
+    for path in ["/", "/sante/vie", "/sante/pret", "/journal"]:
+        response = web.get(path)
+        assert INSTANCE not in response.text, path
+        assert INSTANCE not in str(response.headers), path

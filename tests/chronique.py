@@ -26,29 +26,32 @@ import time
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Self
 
-# la sonde, lancée par `python -c` dans son pod : une requête toutes les 0,2 s pendant
-# `duree` secondes ; chaque réponse nomme le pod qui l'a rendue (`instance`) ; chaque
-# échec est daté (horloge du nœud), numéroté et typé (errno, code HTTP, pod s'il répond)
+# la sonde, lancée par `python -c` dans son pod, en deux phases :
+# - admission, hors décompte : un pod neuf n'est admis par les règles réseau qu'après la
+#   synchronisation de kube-router que déclenche sa nouvelle adresse (cause établie le
+#   05/10 : sa première requête partait avant). La sonde interroge le service jusqu'à une
+#   réponse de chacun des `attendus` pods, en `admission` secondes au plus ; sinon, bilan
+#   « admise : false » et code 1. Les refus de cette phase sont rapportés, jamais comptés ;
+#   la ligne « sonde admise » ouvre le décompte, et le scénario l'attend ;
+# - décompte, `duree` secondes : une requête toutes les 0,2 s ; chaque réponse nomme le
+#   pod qui l'a rendue (`instance`) ; chaque échec est daté (horloge du nœud), numéroté et
+#   typé (errno, code HTTP, pod s'il répond).
 SONDE = """
-import json, socket, time, urllib.error, urllib.parse, urllib.request
-url, end = "{url}", time.monotonic() + {duree}
-debut, ok, ko, n, echecs, instances = time.time(), 0, 0, 0, [], {{}}
-while time.monotonic() < end:
-    n += 1
+import json, socket, sys, time, urllib.error, urllib.parse, urllib.request
+url, attendus = "{url}", {attendus}
+
+def essai(n):
     instant = time.time()
     try:
         with urllib.request.urlopen(url, timeout=2) as reponse:
             statut, corps = reponse.status, reponse.read()
         if statut != 200:
             raise urllib.error.HTTPError(url, statut, "statut", None, None)
-        ok += 1
-        nom = json.loads(corps).get("instance", "?")
-        vu = instances.setdefault(nom, [instant, instant, 0])
-        vu[1], vu[2] = instant, vu[2] + 1
+        return instant, json.loads(corps).get("instance", "?"), None
     except Exception as exc:
-        ko += 1
         # le refus d'une connexion est la raison d'une URLError ; une HTTPError, elle,
         # porte le code et la réponse du pod
         http = isinstance(exc, urllib.error.HTTPError)
@@ -61,6 +64,37 @@ while time.monotonic() < end:
                 echec["instance"] = json.loads(exc.read()).get("instance")
             except ValueError:
                 echec["instance"] = "illisible"
+        return instant, None, echec
+
+debut, limite = time.time(), time.monotonic() + {admission}
+vus, refus, n = set(), [], 0
+while len(vus) < attendus:
+    if time.monotonic() > limite:
+        print(json.dumps({{"admise": False, "debut": debut, "nombre": len(refus),
+                          "vus": sorted(vus), "refus": refus[:20]}}))
+        sys.exit(1)
+    n += 1
+    instant, nom, echec = essai(n)
+    if echec is None:
+        vus.add(nom)
+    else:
+        refus.append(echec)
+    time.sleep(0.2)
+admission = {{"debut": debut, "fin": time.time(), "nombre": len(refus),
+             "instances": sorted(vus), "refus": refus[:20]}}
+print("sonde admise", flush=True)
+
+decompte, end = time.time(), time.monotonic() + {duree}
+ok, ko, n, echecs, instances = 0, 0, 0, [], {{}}
+while time.monotonic() < end:
+    n += 1
+    instant, nom, echec = essai(n)
+    if echec is None:
+        ok += 1
+        vu = instances.setdefault(nom, [instant, instant, 0])
+        vu[1], vu[2] = instant, vu[2] + 1
+    else:
+        ko += 1
         echecs.append(echec)
     time.sleep(0.2)
 # adresse de la sonde, relevée après la boucle pour ne rien changer à son début : une
@@ -73,7 +107,8 @@ try:
         adresse = udp.getsockname()[0]
 except OSError:
     pass
-print(json.dumps({{"ok": ok, "ko": ko, "debut": debut, "adresse": adresse,
+print(json.dumps({{"admise": True, "ok": ok, "ko": ko, "debut": debut,
+                  "decompte": decompte, "adresse": adresse, "admission": admission,
                   "echecs": echecs[:20], "instances": instances}}))
 """
 
@@ -218,6 +253,17 @@ def _heure(instant: float) -> str:
 _CDG = re.compile(r"namespace: cdg(?![\w-])|« cdg/")
 
 
+def _echec(failure: dict) -> str:
+    text = failure["type"]
+    if failure.get("errno") is not None:
+        text += f" errno {failure['errno']}"
+    if failure.get("code") is not None:
+        text += f" code {failure['code']}"
+    if failure.get("instance"):
+        text += f" instance {failure['instance']}"
+    return text
+
+
 def rapport(
     evenements: list[Evenement],
     pods: dict[str, dict],
@@ -242,7 +288,7 @@ def rapport(
     probe_ip = (pods.get(nom_sonde) or {}).get("ip") or sonde.get("adresse")
     if probe_ip:
         owners[probe_ip] = nom_sonde
-    rows: list[tuple[float, str]] = [(start, "sonde : début de la boucle")]
+    rows: list[tuple[float, str]] = [(start, "sonde : début, phase d'admission")]
     outside, admitted = 0, []
     for event in evenements:
         if event.source == "ensemble":
@@ -268,25 +314,42 @@ def rapport(
         else:
             text = f"{event.source} {event.objet} : {event.texte}"
         rows.append((event.instant, text))
-    for failure in sonde["echecs"]:
-        text = f"ÉCHEC n°{failure['n']} : {failure['type']}"
-        if failure.get("errno") is not None:
-            text += f" errno {failure['errno']}"
-        if failure.get("code") is not None:
-            text += f" code {failure['code']}"
-        if failure.get("instance"):
-            text += f" instance {failure['instance']}"
-        rows.append((failure["t"], text))
-    for name, (first, last, _) in sonde["instances"].items():
+    for failure in sonde.get("echecs", []):
+        rows.append((failure["t"], f"ÉCHEC n°{failure['n']} : {_echec(failure)}"))
+    for name, (first, last, _) in sonde.get("instances", {}).items():
         rows.append((first, f"sonde : première réponse de {name}"))
         rows.append((last, f"sonde : dernière réponse de {name}"))
+    # admission, hors décompte : ses refus sont montrés, jamais comptés
+    admission = sonde.get("admission") or (
+        sonde if sonde.get("admise") is False else None
+    )
+    for failure in (admission or {}).get("refus", []):
+        text = f"refus d'admission n°{failure['n']}, non compté : {_echec(failure)}"
+        rows.append((failure["t"], text))
+    if sonde.get("decompte") is not None:
+        rows.append((sonde["decompte"], "sonde : admise, début du décompte"))
 
+    if "ok" in sonde:
+        state = f"(ok {sonde['ok']}, ko {sonde['ko']})"
+    elif sonde.get("admise") is False:
+        state = "jamais admise"
+    else:
+        state = "sans bilan (scénario interrompu avant la fin de la sonde)"
     lines = [
-        (
-            f"=== chronique : sonde {nom_sonde} (ok {sonde['ok']}, ko {sonde['ko']}), "
-            f"début {_heure(start)} UTC ==="
-        )
+        f"=== chronique : sonde {nom_sonde} {state}, début {_heure(start)} UTC ==="
     ]
+    if sonde.get("admise") is False:
+        seen = ", ".join(sonde["vus"]) or "aucun"
+        lines.append(
+            f"sonde jamais admise : {sonde['nombre']} refus, pods vus : {seen}"
+        )
+    elif sonde.get("admission"):
+        count = admission["nombre"]
+        lines.append(
+            f"admission : {count} refus, non compté{'s' if count > 1 else ''}, "
+            f"admise à {admission['fin'] - start:+.2f} s "
+            f"({', '.join(admission['instances'])})"
+        )
     if probe_ip is None:
         lines.append("adresse de la sonde inconnue")
     else:
@@ -303,7 +366,7 @@ def rapport(
             f"adresse de la sonde {probe_ip} dans les ensembles de kube-router : "
             f"{nodes or 'jamais vue'}"
         )
-    for name, (first, last, answered) in sorted(sonde["instances"].items()):
+    for name, (first, last, answered) in sorted(sonde.get("instances", {}).items()):
         lines.append(
             f"{name} : {answered} réponses, de {first - start:+.2f} s "
             f"à {last - start:+.2f} s"
@@ -414,6 +477,19 @@ class Chronique:
         with self._lock:
             events = list(self.evenements)
         return rapport(events, self.pods, sonde, nom_sonde, self.erreurs)
+
+    def ecrire(self, chemin: Path, sonde: dict | None, nom_sonde: str) -> list[str]:
+        """Chronique écrite dans `chemin` (artefact de la CI, à chaque exécution), et
+        rendue. Sans bilan de la sonde (scénario interrompu avant sa fin), elle part
+        du premier relevé."""
+        if sonde is None:
+            with self._lock:
+                first = min((e.instant for e in self.evenements), default=time.time())
+            sonde = {"debut": first}
+        lines = self.rapport(sonde, nom_sonde)
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return lines
 
     def _start(self, target, *args) -> None:
         thread = threading.Thread(target=target, args=args, daemon=True)
