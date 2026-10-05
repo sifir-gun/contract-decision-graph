@@ -3040,3 +3040,30 @@ Petite PR de documentation après la fusion de la PR 34 ; le chantier de l'obser
 
 - **Échec du job `cluster` sur `main` après la fusion de la PR 33** (03/10, 20:13) : `test_mise_a_jour_sans_interruption`, une connexion refusée sur 2 081 requêtes de la sonde pendant la mise à jour progressive ; les 26 autres scénarios passés. La publication des images de ce commit a donc été sautée. L'échec n'est pas reproduit sur la PR 34 (29 scénarios passés), mais revient sur la PR 35 elle-même (04/10, 22:39:21 : une connexion refusée sur 2 073), qui ne change que de la documentation. Avant le 03/10, le scénario passait à chaque exécution ; depuis, il a échoué 2 fois sur 5. Aucun lien établi avec la PR 33 (sans destination, sa télémétrie ne fait rien à l'arrêt) ni avec Langfuse (absent le 03/10). Hypothèses à départager par des relevés dans le cluster : un pod en arrêt qui ferme son port de santé alors qu'un nœud le route encore ; un pod neuf ajouté au service avant que les règles réseau de k3s ne l'admettent (un rejet donne aussi « connexion refusée »). À examiner à part ; l'Auto-fix ne surveille que les pull requests, pas `main`.
 
+
+## 2026-10-05 · Refus vers `cdg-postgres-1` toutes les dix secondes (branche `refus-postgres`)
+
+Trouvé par la chronique du scénario de mise à jour (branche `enquete-mise-a-jour`) : toutes les dix secondes, un refus de kube-router dans la chaîne de `cdg-postgres-1`.
+
+### Décisions du propriétaire (05/10)
+
+- Identifier la source, et présenter la cause avant de changer une règle réseau.
+- Correction validée : le port 8000 entre instances du même cluster, en entrée et en sortie, dans une règle à part ; tests du chart ; scénario qui vérifie que l'avertissement a disparu ; relevé temporaire retiré.
+- L'opérateur vers les instances sur le 5432 : suivre la documentation de CloudNativePG, en limitant l'ouverture aux seuls pods de l'opérateur. « L'absence de refus prouve seulement que ce chemin n'a pas été emprunté dans nos tests, pas qu'il est inutile : c'est le même raisonnement qui a caché le défaut du port 8000. »
+
+### Cause établie
+
+- **Code installé** (CloudNativePG 1.30.1, `pkg/management/postgres/webserver/probes/liveness.go` et `pinger.go`) : à chaque sonde de vie (toutes les 10 s par défaut), le gestionnaire d'instance du primaire joint chacune des autres instances à `https://<ip>:8000/failsafe` (vérification d'isolement, active par défaut), même quand l'API répond ; en échec, il écrit un avertissement et la sonde réussit tant que l'API répond.
+- **Relevé dans le cluster** (PR 43, job `cluster` du 05/10, relevé temporaire avant les scénarios) : `cdg-postgres-1` primaire, `cdg-postgres-2` réplica ; 30 avertissements en 5 minutes dans le journal du primaire, un toutes les dix secondes, aucun dans celui du réplica : `Get "https://10.42.2.9:8000/failsafe": dial tcp 10.42.2.9:8000: connect: connection refused`.
+- **Nos règles** (`chart/cdg-postgres`) n'ouvraient entre instances que le 5432 : la connexion était rejetée dès la sortie du primaire, d'où le refus dans sa seule chaîne.
+- **Gravité** : un composant légitime bloqué à tort. Sans effet tant que l'API répond ; l'API injoignable, le primaire ne pouvait pas joindre ses pairs, se serait cru isolé et arrêté à tort, alors que la vérification sert à n'arrêter qu'un primaire vraiment isolé.
+
+### Correction
+
+- **Règles** : en entrée, les autres instances sur le 8000 et les seuls pods de l'opérateur sur le 5432 (`reseau.operateurPods`), chacune dans sa règle ; en sortie, les autres instances sur le 8000, à part de la réplication. Le 8000 reste ouvert à tout l'espace de l'opérateur, comme avant (le restreindre à ses pods : piste, après avoir vérifié que le greffon de sauvegarde ne s'en sert pas).
+- **Tests** : règles du chart, port 8000 jamais ouvert à l'application ; scénario du cluster (30 au lieu de 29) : vérification d'isolement active, deux instances au moins, et aucun avertissement de connectivité dans le journal du primaire sur 25 secondes.
+- Relevé temporaire retiré du workflow.
+
+### Nombre de tests
+
+- Tests du rendu des charts : de 113 à 114 ; scénarios du cluster : de 29 à 30 ; total : de 2 475 à 2 477.
