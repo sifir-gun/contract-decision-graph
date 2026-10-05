@@ -3019,3 +3019,24 @@ Dans les limites fixées le 02/10 : rien d'arrêté de ce qui tournait, mémoire
 - **Signatures des autres images de test** (k3s, registre, SeaweedFS, PostgreSQL du projet, Traefik, images de cert-manager et de CloudNativePG) : figées par empreinte seulement, comme avant cette PR.
 - **Identité S3 des sauvegardes limitée à son seau** dans le cluster de test (elle peut lire celui de Langfuse).
 - **ClickHouse 26.4**, version recommandée par Langfuse 4, à la place du minimum 25.12.
+
+## 2026-10-04 · Observabilité : mesures de Langfuse dans la CI (branche `mesures-langfuse`)
+
+Petite PR de documentation après la fusion de la PR 34 ; le chantier de l'observabilité se termine avec elle, puis l'étiquette `v1.3`.
+
+### Décisions du propriétaire (04/10)
+
+- Reporter dans l'ADR 008 et ici les mesures de mémoire et de disque de Langfuse relevées par le job `cluster` de la CI ; noter que l'interface de Langfuse n'a pas été vérifiée sur le poste (Mac bridé pendant l'essai), mais qu'elle l'est en CI.
+- Après la fusion : étiquette `v1.3` sur `main`, avec une release courte (traces OpenTelemetry sans texte de contrat, LangSmith écarté, Langfuse auto-hébergé dans le cluster de test, télémétrie de SeaweedFS coupée). Chantier terminé ensuite.
+
+### Mesures du job `cluster` (PR 34, 04/10)
+
+- **Scénarios** : 29 passés sur 29, dont `test_trace_d_une_analyse_dans_langfuse` et `test_traces_hors_du_cluster_bloquees` : l'interface de Langfuse, que l'essai du poste n'avait pas pu vérifier, répond et rend la trace d'une analyse par son API v2, sans texte du contrat.
+- **Mémoire** (`kubectl top`) : au repos, web 849 Mio, worker 484, ClickHouse 355, PostgreSQL 50, Valkey 11, soit 1 749 Mio ; après les scénarios, web 876, worker 520, ClickHouse 802, PostgreSQL 52, Valkey 12, soit 2 262 Mio. ClickHouse dépasse sa requête (768 Mio) après les scénarios, sous sa limite (2 Gio).
+- **Disque** : éphémère de Langfuse, 79 Mo au repos, 80 Mo après (PostgreSQL 72 Mo) ; runner, 85 Go libres au départ, 55 après les scénarios.
+- **Durées** : scan des quatre images de test, 5 minutes ; installation du cluster, Langfuse compris, 7 minutes ; scénarios, 24 minutes ; job, 39 minutes.
+
+### Défaut signalé, non corrigé ici
+
+- **Échec du job `cluster` sur `main` après la fusion de la PR 33** (03/10, 20:13) : `test_mise_a_jour_sans_interruption`, une connexion refusée sur 2 081 requêtes de la sonde pendant la mise à jour progressive ; les 26 autres scénarios passés. La publication des images de ce commit a donc été sautée. L'échec n'est pas reproduit sur la PR 34 (29 scénarios passés), mais revient sur la PR 35 elle-même (04/10, 22:39:21 : une connexion refusée sur 2 073), qui ne change que de la documentation. Avant le 03/10, le scénario passait à chaque exécution ; depuis, il a échoué 2 fois sur 5. Aucun lien établi avec la PR 33 (sans destination, sa télémétrie ne fait rien à l'arrêt) ni avec Langfuse (absent le 03/10). Hypothèses à départager par des relevés dans le cluster : un pod en arrêt qui ferme son port de santé alors qu'un nœud le route encore ; un pod neuf ajouté au service avant que les règles réseau de k3s ne l'admettent (un rejet donne aussi « connexion refusée »). À examiner à part ; l'Auto-fix ne surveille que les pull requests, pas `main`.
+
