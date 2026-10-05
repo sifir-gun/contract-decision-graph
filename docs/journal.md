@@ -3061,7 +3061,7 @@ Trouvé par la chronique du scénario de mise à jour (branche `enquete-mise-a-j
 ### Correction
 
 - **Règles** : en entrée, les autres instances sur le 8000 et les seuls pods de l'opérateur sur le 5432 (`reseau.operateurPods`), chacune dans sa règle ; en sortie, les autres instances sur le 8000, à part de la réplication. Le 8000 reste ouvert à tout l'espace de l'opérateur, comme avant (le restreindre à ses pods : piste, après avoir vérifié que le greffon de sauvegarde ne s'en sert pas).
-- **Tests** : règles du chart, port 8000 jamais ouvert à l'application ; scénario du cluster (30 au lieu de 29) : vérification d'isolement active, deux instances au moins, et aucun avertissement de connectivité dans le journal du primaire sur 25 secondes.
+- **Tests** : règles du chart, port 8000 jamais ouvert à l'application ; scénario du cluster (30 au lieu de 29) : vérification d'isolement active, et aucun avertissement de connectivité dans le journal du primaire sur 25 secondes ; sauté en profil local, motif à l'appui (une seule instance PostgreSQL).
 - Relevé temporaire retiré du workflow.
 
 ### Nombre de tests
