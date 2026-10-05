@@ -10,7 +10,9 @@ logique métier : chaque sonde lit un état que lui donne la racine de compositi
 GET et HEAD ; jamais en cache. Une vérification qui échoue ne rend que sa raison, jamais
 son message (qui pourrait citer une chaîne de connexion) ; le journal n'en garde que le
 type. Pas de liste d'hôtes admis : le kubelet appelle l'adresse du pod, et ces pages ne
-disent rien d'autre que « oui » ou « non, pour telle raison ».
+disent rien d'autre que « oui » ou « non, pour telle raison », et l'instance qui répond :
+le nom d'hôte, celui du pod dans le cluster (la sonde du scénario de mise à jour sait
+ainsi quel pod a répondu).
 """
 
 import logging
@@ -44,15 +46,19 @@ def _passes(name: str, check: Callable[[], bool]) -> bool:
         return False
 
 
-def create_health_app(checks: Checks) -> FastAPI:
+def create_health_app(checks: Checks, *, instance: str) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     def answer(status: str, reasons: list[str]) -> JSONResponse:
         if reasons:
             refused = "pas_pret" if status == "pret" else status
-            content: dict[str, object] = {"statut": refused, "raisons": reasons}
+            content: dict[str, object] = {
+                "statut": refused,
+                "raisons": reasons,
+                "instance": instance,
+            }
             return JSONResponse(content, status_code=503, headers=HEADERS)
-        return JSONResponse({"statut": status}, headers=HEADERS)
+        return JSONResponse({"statut": status, "instance": instance}, headers=HEADERS)
 
     @app.api_route("/sante/vie", methods=METHODS)
     def alive() -> JSONResponse:

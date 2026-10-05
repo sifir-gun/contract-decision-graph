@@ -168,7 +168,8 @@ def test_port_des_sondes_occupe_l_interface_ne_demarre_pas():
     )
     failures: list[server.PortBusy] = []
     with occupied() as busy:
-        probes = server.Probes(sante.create_health_app(checks), "127.0.0.1", busy)
+        app = sante.create_health_app(checks, instance="pod-de-test")
+        probes = server.Probes(app, "127.0.0.1", busy)
         main, health = server.servers(
             create_app(memory_service()),
             "127.0.0.1",

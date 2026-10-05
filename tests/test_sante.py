@@ -1,6 +1,8 @@
 """Sondes de santé (phase Kubernetes, point 3) : vie, démarrage, disponibilité, sur un
 port à part, sans logique métier ni donnée, en GET comme en HEAD. L'interface répondait
-405 à HEAD / et n'avait aucun point de santé."""
+405 à HEAD / et n'avait aucun point de santé. Chaque réponse nomme l'instance qui répond
+(le pod, dans le cluster) : la sonde du scénario de mise à jour sait quel pod a répondu
+(enquête du 05/10 sur une requête perdue)."""
 
 import threading
 
@@ -10,6 +12,7 @@ from fastapi.testclient import TestClient
 from cdg.adapters.web import sante
 
 PROBES = ["/sante/vie", "/sante/demarrage", "/sante/pret"]
+INSTANCE = "cdg-contract-decision-graph-5cc5d9fc99-jtzz9"
 
 
 class State:
@@ -29,7 +32,8 @@ class State:
 def probe(state: State) -> TestClient:
     # l'hôte des sondes du kubelet est l'adresse du pod : aucune liste d'hôtes admis
     return TestClient(
-        sante.create_health_app(state.checks()), base_url="http://10.42.0.7:8081"
+        sante.create_health_app(state.checks(), instance=INSTANCE),
+        base_url="http://10.42.0.7:8081",
     )
 
 
@@ -65,7 +69,20 @@ def test_demarrage_attend_le_modele():
 def test_disponibilite_dit_pourquoi_sans_donnee(state, reason):
     response = probe(state).get("/sante/pret")
     assert response.status_code == 503
-    assert response.json() == {"statut": "pas_pret", "raisons": [reason]}
+    assert response.json() == {
+        "statut": "pas_pret",
+        "raisons": [reason],
+        "instance": INSTANCE,
+    }
+
+
+@pytest.mark.parametrize(
+    "state",
+    [State(), State(started=False), State(database=False), State(draining=True)],
+)
+@pytest.mark.parametrize("path", PROBES)
+def test_chaque_reponse_nomme_l_instance_qui_repond(state, path):
+    assert probe(state).get(path).json()["instance"] == INSTANCE
 
 
 def test_une_base_qui_echoue_rend_pas_pret_sans_le_message(caplog):
@@ -73,7 +90,7 @@ def test_une_base_qui_echoue_rend_pas_pret_sans_le_message(caplog):
         raise RuntimeError("mot de passe de la base : ne doit jamais sortir")
 
     checks = sante.Checks(started=lambda: True, database=broken, draining=lambda: False)
-    web = TestClient(sante.create_health_app(checks))
+    web = TestClient(sante.create_health_app(checks, instance=INSTANCE))
     response = web.get("/sante/pret")
     assert response.status_code == 503
     assert "mot de passe" not in response.text + caplog.text
@@ -97,7 +114,7 @@ def test_sondes_simultanees_sans_blocage():
     checks = sante.Checks(
         started=lambda: True, database=slow_database, draining=lambda: False
     )
-    web = TestClient(sante.create_health_app(checks))
+    web = TestClient(sante.create_health_app(checks, instance=INSTANCE))
     # la vie ne dépend pas de la base : elle répond pendant qu'une disponibilité attend
     ready = threading.Thread(target=lambda: web.get("/sante/pret"))
     ready.start()
@@ -129,7 +146,9 @@ def test_deux_serveurs_reels_chacun_ses_routes():
 
     ui, health = free_port(), free_port()
     probes = server.Probes(
-        sante.create_health_app(State().checks()), "127.0.0.1", health
+        sante.create_health_app(State().checks(), instance=INSTANCE),
+        "127.0.0.1",
+        health,
     )
     main, probe_server = server.servers(
         create_app(memory_service()),
@@ -164,7 +183,8 @@ def test_serveurs_sans_mandataire_ni_banniere_sondes_sans_journal_d_acces():
     from cdg.adapters import journaux
     from cdg.adapters.web import server
 
-    probes = server.Probes(sante.create_health_app(State().checks()), "0.0.0.0", 8081)
+    app = sante.create_health_app(State().checks(), instance=INSTANCE)
+    probes = server.Probes(app, "0.0.0.0", 8081)
     main, health = server.servers(
         object(), "127.0.0.1", 8000, log_config=journaux.config("texte"), probes=probes
     )
@@ -212,6 +232,16 @@ def test_cli_demo_sondes_pretes_sans_base_ni_modele(served):
     web = TestClient(probes.app)
     assert web.get("/sante/demarrage").status_code == 200
     assert web.get("/sante/pret").status_code == 200
+
+
+def test_cli_sondes_nommees_par_le_nom_d_hote(served, monkeypatch):
+    # dans le cluster, le nom d'hôte du conteneur est le nom du pod
+    from cdg import cli
+
+    monkeypatch.setattr(cli.socket, "gethostname", lambda: INSTANCE)
+    assert cli.main(["web", "--demo", "--port-sante", "8081"]) == 0
+    web = TestClient(served["probes"].app)
+    assert web.get("/sante/vie").json() == {"statut": "vivant", "instance": INSTANCE}
 
 
 def test_cli_reel_pret_apres_chargement_du_modele_et_base_joignable(
