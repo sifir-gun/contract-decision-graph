@@ -32,7 +32,7 @@ from typing import Any, Self
 # `duree` secondes ; chaque réponse nomme le pod qui l'a rendue (`instance`) ; chaque
 # échec est daté (horloge du nœud), numéroté et typé (errno, code HTTP, pod s'il répond)
 SONDE = """
-import json, time, urllib.error, urllib.request
+import json, socket, time, urllib.error, urllib.parse, urllib.request
 url, end = "{url}", time.monotonic() + {duree}
 debut, ok, ko, n, echecs, instances = time.time(), 0, 0, 0, [], {{}}
 while time.monotonic() < end:
@@ -63,8 +63,18 @@ while time.monotonic() < end:
                 echec["instance"] = "illisible"
         echecs.append(echec)
     time.sleep(0.2)
-print(json.dumps({{"ok": ok, "ko": ko, "debut": debut, "echecs": echecs[:20],
-                  "instances": instances}}))
+# adresse de la sonde, relevée après la boucle pour ne rien changer à son début : une
+# socket UDP connectée n'envoie aucun paquet
+# (en échec : None, que le rapport dit « inconnue » ; le bilan est écrit quoi qu'il arrive)
+cible, adresse = urllib.parse.urlsplit(url), None
+try:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        udp.connect((cible.hostname, cible.port))
+        adresse = udp.getsockname()[0]
+except OSError:
+    pass
+print(json.dumps({{"ok": ok, "ko": ko, "debut": debut, "adresse": adresse,
+                  "echecs": echecs[:20], "instances": instances}}))
 """
 
 # relevé d'un nœud k3d : règles du filtre avec leurs compteurs, puis ensembles d'adresses
@@ -82,15 +92,31 @@ class Evenement:
     depuis: float | None = None  # relevé précédent : le fait date d'entre les deux
 
 
+class FluxIllisible(Exception):
+    """Fin d'un flux de kubectl sur un objet incomplet ou un texte qui n'est pas du
+    JSON."""
+
+
 def objets_json(lignes: Iterable[str]) -> Iterator[dict]:
-    """Objets successifs de `kubectl get --watch -o json` : chacun indenté, fermé par
-    une accolade seule en début de ligne."""
-    tampon: list[str] = []
+    """Objets successifs de `kubectl get --watch --output-watch-events -o json` :
+    kubectl 1.36.4 écrit chaque événement en JSON compact, sur une ligne (cli-runtime,
+    `printers/json.go`, cas `WatchEvent`) ; un objet indenté sur plusieurs lignes est lu
+    aussi. Un reste illisible à la fin du flux lève `FluxIllisible`, jamais tu."""
+    decoder = json.JSONDecoder()
+    tampon = ""
     for ligne in lignes:
-        tampon.append(ligne)
-        if ligne.rstrip("\n") == "}":
-            yield json.loads("".join(tampon))
-            tampon = []
+        tampon += ligne
+        if not ligne.rstrip().endswith("}"):
+            continue
+        texte = tampon.strip()
+        try:
+            obj, fin = decoder.raw_decode(texte)
+        except json.JSONDecodeError:
+            continue  # objet sur plusieurs lignes : la suite arrive
+        yield obj
+        tampon = texte[fin:]
+    if tampon.strip():
+        raise FluxIllisible(tampon.strip()[:80])
 
 
 def etat_pod(pod: dict) -> dict[str, Any]:
@@ -212,7 +238,10 @@ def rapport(
         for name, p in pods.items()
         if p.get("ip") and p.get("composant") in ("web", "test")
     }
-    probe_ip = (pods.get(nom_sonde) or {}).get("ip")
+    # l'adresse que la sonde donne d'elle-même, à défaut de celle de son pod
+    probe_ip = (pods.get(nom_sonde) or {}).get("ip") or sonde.get("adresse")
+    if probe_ip:
+        owners[probe_ip] = nom_sonde
     rows: list[tuple[float, str]] = [(start, "sonde : début de la boucle")]
     outside, admitted = 0, []
     for event in evenements:
@@ -310,6 +339,7 @@ class Chronique:
         self._watches: list[subprocess.Popen[str]] = []
         self._releves: dict[str, int] = {}
         self._slices: dict[str, str] = {}
+        self._recus: dict[str, int] = {}  # objets reçus par suivi
         self.evenements: list[Evenement] = []
         self.pods: dict[str, dict] = {}
         self.erreurs: list[str] = []
@@ -352,6 +382,7 @@ class Chronique:
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
             )
             self._watches.append(process)
+            self._recus[what] = 0
             self._start(self._follow, what, process, handle)
         for item in nodes["items"]:
             node = item["metadata"]["name"]
@@ -368,13 +399,16 @@ class Chronique:
         for node, count in self._releves.items():
             if count == 0:
                 self._error(f"{node} : aucun relevé")
+        for what, count in self._recus.items():
+            if count == 0:
+                self._error(f"suivi des {what} : aucun objet reçu")
 
     def lacunes(self) -> list[str]:
         """Ce qui rend la chronique inutilisable : un nœud jamais relevé, un suivi
-        interrompu. Un relevé manqué de temps à autre est seulement noté."""
-        return [
-            e for e in self.erreurs if e.endswith("aucun relevé") or "interrompu" in e
-        ]
+        interrompu, muet ou illisible. Un relevé manqué de temps à autre, un objet
+        inattendu, sont seulement notés."""
+        fatal = ("aucun relevé", "interrompu", "aucun objet reçu", "flux illisible")
+        return [e for e in self.erreurs if any(word in e for word in fatal)]
 
     def rapport(self, sonde: dict, nom_sonde: str) -> list[str]:
         with self._lock:
@@ -397,14 +431,17 @@ class Chronique:
 
     def _follow(self, what: str, process: subprocess.Popen[str], handle) -> None:
         assert process.stdout is not None and process.stderr is not None
-        for obj in objets_json(process.stdout):
-            try:
-                handle(obj, time.time())
-            # un objet inattendu (événement ERROR de kubectl) : noté, le suivi continue
-            except (KeyError, TypeError, AttributeError) as exc:
-                self._error(
-                    f"suivi des {what} : objet illisible ({type(exc).__name__})"
-                )
+        try:
+            for obj in objets_json(process.stdout):
+                self._recus[what] += 1
+                try:
+                    handle(obj, time.time())
+                # un objet inattendu (événement ERROR de kubectl) : noté, suivi poursuivi
+                except (KeyError, TypeError, AttributeError) as exc:
+                    name = type(exc).__name__
+                    self._error(f"suivi des {what} : objet illisible ({name})")
+        except FluxIllisible as exc:
+            self._error(f"suivi des {what} : flux illisible ({exc})")
         if not self._stop.is_set():
             detail = process.stderr.read().strip().splitlines()[:1]
             self._error(f"suivi des {what} interrompu : {' '.join(detail) or '?'}")

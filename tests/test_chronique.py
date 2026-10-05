@@ -93,11 +93,32 @@ def test_sonde_nomme_le_pod_d_une_reponse_en_erreur():
 # --- flux de kubectl ------------------------------------------------------------------
 
 
-def test_flux_de_kubectl_objet_par_objet():
-    first = {"type": "ADDED", "object": {"metadata": {"name": "a"}}}
-    second = {"type": "MODIFIED", "object": {"metadata": {"name": "b"}}}
-    text = json.dumps(first, indent=4) + "\n" + json.dumps(second, indent=4) + "\n"
-    assert list(objets_json(text.splitlines(keepends=True))) == [first, second]
+FIRST = {"type": "ADDED", "object": {"metadata": {"name": "a"}}}
+SECOND = {"type": "MODIFIED", "object": {"metadata": {"name": "b"}}}
+
+
+def test_flux_de_kubectl_un_evenement_par_ligne_compacte():
+    # kubectl 1.36.4, --output-watch-events : chaque événement en JSON compact, sur une
+    # ligne (cli-runtime, printers/json.go, cas WatchEvent) ; le 05/10, un lecteur qui
+    # attendait du JSON indenté n'a rien reconnu, sans le dire
+    text = json.dumps(FIRST) + "\n" + json.dumps(SECOND) + "\n"
+    assert list(objets_json(text.splitlines(keepends=True))) == [FIRST, SECOND]
+
+
+def test_flux_indente_lu_aussi():
+    text = json.dumps(FIRST, indent=4) + "\n" + json.dumps(SECOND, indent=4) + "\n"
+    assert list(objets_json(text.splitlines(keepends=True))) == [FIRST, SECOND]
+
+
+@pytest.mark.parametrize("tail", ['{"type": "ADDED", "obj', "Warning: illisible\n"])
+def test_flux_tronque_ou_illisible_jamais_tu(tail):
+    from chronique import FluxIllisible
+
+    text = json.dumps(FIRST) + "\n" + tail
+    flux = objets_json(text.splitlines(keepends=True))
+    assert next(flux) == FIRST
+    with pytest.raises(FluxIllisible):
+        next(flux)
 
 
 # --- pods -----------------------------------------------------------------------------
@@ -343,7 +364,7 @@ import json, sys, time
 args = sys.argv[1:]
 def watch(*events):
     for event in events:
-        print(json.dumps(event, indent=4), flush=True)
+        print(json.dumps(event), flush=True)  # une ligne, comme kubectl
     time.sleep(60)
 if "nodes" in args:
     print(json.dumps({"items": [{"metadata": {"name": "noeud-1"}}]}))
@@ -477,3 +498,45 @@ def test_tranche_notee_seulement_quand_elle_change():
     for kind in ("ADDED", "MODIFIED", "DELETED"):
         suivi._slice({"type": kind, "object": endpoint_slice}, START)
     assert [e.texte for e in suivi.evenements] == ["web-a 10.42.0.5 prêt", "supprimée"]
+
+
+def test_suivi_sans_aucun_objet_est_une_lacune(tmp_path):
+    from chronique import Chronique
+
+    silent = KUBECTL.replace(
+        'elif "events" in args:\n    watch(',
+        'elif "events" in args:\n    watch()\n    (',
+    )
+    kubectl, docker = factices(tmp_path, DOCKER)
+    (tmp_path / "kubectl.py").write_text(silent, encoding="utf-8")
+    with Chronique(kubectl, "cdg", "sante", docker=docker, intervalle=0.1) as suivi:
+        attendre(lambda: any(e.source == "tranche" for e in suivi.evenements))
+    assert suivi.lacunes() == ["suivi des événements : aucun objet reçu"]
+
+
+def test_sonde_note_sa_propre_adresse():
+    httpd = serveur(200, "pod-a")
+    try:
+        counts = sonder(f"http://127.0.0.1:{httpd.server_address[1]}/sante/pret")
+    finally:
+        httpd.shutdown()
+    assert counts["adresse"] == "127.0.0.1"
+
+
+def test_rapport_prend_l_adresse_donnee_par_la_sonde():
+    # sans le suivi des pods, l'adresse que la sonde donne d'elle-même suffit
+    events = [
+        Evenement(START + 0.9, "ensemble", "agent-1", "+ KUBE-SRC-A", "10.42.2.9")
+    ]
+    probe = {
+        "ok": 1,
+        "ko": 0,
+        "debut": START,
+        "adresse": "10.42.2.9",
+        "echecs": [],
+        "instances": {},
+    }
+    text = "\n".join(rapport(events, {}, probe, "sonde-abc", []))
+    assert "adresse de la sonde 10.42.2.9 dans les ensembles de kube-router" in text
+    assert "agent-1 à +0.90 s" in text
+    assert "ensemble agent-1 : + KUBE-SRC-A 10.42.2.9 (sonde-abc)" in text
