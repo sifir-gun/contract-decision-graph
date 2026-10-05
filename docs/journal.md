@@ -3070,10 +3070,15 @@ La promesse d'une mise à jour sans interruption n'est pas toujours tenue : `tes
 - **Chronique** (`tests/chronique.py`, `Chronique`) : pendant tout le scénario, l'état des pods de l'espace `cdg` (nœud, adresse, prêt, arrêt) et leurs événements Kubernetes, la tranche d'adresses du service des sondes et, sur chaque nœud, deux fois par seconde, les règles `REJECT` dont le compteur augmente (kube-router, kube-proxy) et les adresses qui entrent dans les ensembles de kube-router ou en sortent. Écrite dans le journal du job à chaque exécution, réussie ou non. Le moment où l'adresse de la sonde est admise sur chaque nœud est daté à un relevé près ; un refus suivi d'une synchronisation en moins d'un relevé peut échapper aux compteurs.
 - **Conditions inchangées**, sauf la charge des relevés (un `docker exec` par nœud toutes les demi-secondes).
 
+### Premier échec instrumenté (05/10, PR 42, première exécution)
+
+- **Le fait** : une connexion refusée sur 2 055 (`ConnectionRefusedError`, errno 111), et c'est la **toute première requête de la sonde** (n°1, à +0,00 s, 10:37:23.460 UTC) ; la suivante réussit à +0,23 s, et toutes les autres ensuite. Les deux anciens pods répondent jusqu'à +36 s et +47 s, les deux neufs à partir de +36 s et +47 s : aucun pod n'était en arrêt au moment du refus (piste 1 écartée pour cet échec). Aucun refus de kube-proxy (« has no endpoints ») relevé, dont la chaîne n'est jamais renommée.
+- **Défaut de l'instrumentation, le mien** : les suivis de kubectl n'ont rien enregistré, sans le dire. Avec `--output-watch-events`, kubectl 1.36.4 écrit chaque événement en JSON compact, sur une ligne (cli-runtime, `printers/json.go`, cas `WatchEvent`) ; le lecteur attendait du JSON indenté, écrit de mémoire au lieu d'être vérifié dans le code. Faute des adresses des pods, le rapport a aussi écarté les entrées dans les ensembles de kube-router, pourtant relevées. Corrigé : lecture ligne à ligne (indenté accepté aussi), un flux illisible ou muet devient une lacune qui fait échouer le scénario, et la sonde donne sa propre adresse, relevée après sa boucle (socket UDP connectée, aucun paquet).
+
 ### Fait signalé en passant
 
 - Le job `cluster` de la PR Dependabot d'`anthropic` 1.11.0 (05/10) a échoué avant les scénarios, à l'étape qui pousse les images dans le registre local ; son journal n'était pas lisible (`BlobNotFound`). Sans rapport avec ce défaut ; non examiné ici.
 
 ### Nombre de tests
 
-- La suite principale passe de 2 300 à 2 334 (réponse de santé, chronique et sonde vérifiées sans cluster) ; le total, de 2 475 à 2 509.
+- La suite principale passe de 2 300 à 2 340 (réponse de santé, chronique et sonde vérifiées sans cluster) ; le total, de 2 475 à 2 515.
