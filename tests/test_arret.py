@@ -104,7 +104,9 @@ def test_ordre_d_arret_rend_pas_pret():
     checks = sante.Checks(
         started=lambda: True, database=lambda: True, draining=stopping.is_set
     )
-    response = TestClient(sante.create_health_app(checks)).get("/sante/pret")
+    response = TestClient(sante.create_health_app(checks, instance="pod")).get(
+        "/sante/pret"
+    )
     assert (
         response.status_code == 503 and "arret en cours" in response.json()["raisons"]
     )

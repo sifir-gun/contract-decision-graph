@@ -367,6 +367,29 @@ def test_entree_de_l_interface_depuis_traefik_seulement(auth):
     assert source["podSelector"]["matchLabels"] == {"app.kubernetes.io/name": "traefik"}
 
 
+def test_port_de_sante_jamais_publie(auth):
+    """Les réponses de santé nomment le pod (décision du 05/10) : leur port reste interne,
+    service ClusterIP à part, aucune entrée vers lui, ouvert aux seuls pods de test."""
+    sante = named(auth, "Service", "-sante")
+    assert sante["spec"]["type"] == "ClusterIP"
+    for ingress in of_kind(auth, "Ingress"):
+        for rule in ingress["spec"]["rules"]:
+            for path in rule["http"]["paths"]:
+                backend = path["backend"]["service"]
+                assert backend["name"] != sante["metadata"]["name"]
+    for service in of_kind(auth, "Service"):
+        if service is not sante:
+            for port in service["spec"]["ports"]:
+                assert port["targetPort"] not in ("sante", 8081), service
+    policy = named(auth, "NetworkPolicy", "-web")
+    for rule in policy["spec"]["ingress"]:
+        if any(port["port"] in ("sante", 8081) for port in rule["ports"]):
+            [source] = rule["from"]
+            assert set(source) == {"podSelector"}  # dans l'espace de noms seulement
+            labels = source["podSelector"]["matchLabels"]
+            assert labels["app.kubernetes.io/component"] == "test"
+
+
 # --- rôles et second facteur (PR D2) -------------------------------------------------------
 
 

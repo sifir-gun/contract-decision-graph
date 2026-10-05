@@ -31,6 +31,7 @@ import httpx
 import jwt
 import pytest
 import yaml
+from chronique import SONDE, Chronique
 from test_chaine_approvisionnement import chaine
 
 pytestmark = pytest.mark.cluster
@@ -475,21 +476,17 @@ def _submit_ignoring_errors(pod: str, thread: str) -> None:
 
 # --- 3. mise à jour sans interruption, 4. retour arrière ----------------------------------
 
-# chaque échec, daté (UTC) et nommé (délai, refus, code HTTP), pour le diagnostic
-PROBER = """
-import json, time, urllib.request
-url = "http://cdg-contract-decision-graph-sante:8081/sante/pret"
-end, ok, ko, failures = time.monotonic() + {duration}, 0, 0, []
-while time.monotonic() < end:
-    try:
-        ok += urllib.request.urlopen(url, timeout=2).status == 200
-    except Exception as exc:
-        ko += 1
-        stamp = time.strftime("%H:%M:%S", time.gmtime())
-        failures.append(f"{{stamp}} {{type(exc).__name__}} {{exc}}"[:200])
-    time.sleep(0.2)
-print(json.dumps({{"ok": ok, "ko": ko, "echecs": failures[:20]}}))
-"""
+# service des sondes, visé par la sonde de la mise à jour (tests/chronique.py)
+SANTE = "cdg-contract-decision-graph-sante"
+# phase d'admission de la sonde, hors décompte (cause établie le 05/10) : une réponse de
+# chacun des deux réplicas, en 60 secondes au plus
+ADMISSION = 60
+
+
+@pytest.fixture(scope="module")
+def chroniques(request) -> Path:
+    """Chroniques des scénarios, écrites à chaque exécution : artefact de la CI."""
+    return Path(request.config.getoption("--cluster")) / "chroniques"
 
 
 def _prober(images: dict, name: str, duration: int) -> None:
@@ -519,7 +516,16 @@ def _prober(images: dict, name: str, duration: int) -> None:
                 {
                     "name": "sonde",
                     "image": f"{factice_image['repository']}@{factice_image['digest']}",
-                    "command": ["python", "-c", PROBER.format(duration=duration)],
+                    "command": [
+                        "python",
+                        "-c",
+                        SONDE.format(
+                            url=f"http://{SANTE}:8081/sante/pret",
+                            duree=duration,
+                            attendus=2,
+                            admission=ADMISSION,
+                        ),
+                    ],
                     "resources": {
                         "requests": {"cpu": "50m", "memory": "64Mi"},
                         "limits": {"cpu": "500m", "memory": "128Mi"},
@@ -534,6 +540,26 @@ def _prober(images: dict, name: str, duration: int) -> None:
         },
     }
     kubectl("apply", "-f", "-", stdin=json.dumps(pod))
+
+
+def _admitted(name: str) -> bool:
+    """Vrai quand la sonde a écrit « sonde admise » ; une sonde terminée sans l'avoir
+    écrit n'a jamais été admise : échec explicite, avec son bilan."""
+    logs = subprocess.run(
+        KUBECTL + ["logs", "-n", "cdg", name],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if logs.returncode != 0:  # conteneur pas encore démarré
+        return False
+    if "sonde admise" in logs.stdout.splitlines():
+        return True
+    pod = json.loads(kubectl("get", "pod", "-n", "cdg", name, "-o", "json"))
+    if pod["status"]["phase"] in {"Succeeded", "Failed"}:
+        pytest.fail(f"sonde jamais admise : {logs.stdout.strip()[-2000:]}")
+    return False
 
 
 def _deployment_args() -> list[str]:
@@ -551,47 +577,68 @@ def _deployment_args() -> list[str]:
     return deployment["spec"]["template"]["spec"]["containers"][0]["args"]
 
 
-def test_mise_a_jour_sans_interruption(images):
+def test_mise_a_jour_sans_interruption(images, capsys, chroniques):
     """Mise à jour progressive (un pod de plus, jamais un de moins, pause avant l'arrêt) :
-    aucune requête perdue sur le service, pendant toute la mise à jour."""
+    aucune requête perdue sur le service, de l'admission de la sonde à la fin de la mise
+    à jour. Cause établie le 05/10 de l'échec intermittent : la sonde, pod neuf, comptait
+    avant que kube-router ne l'admette ; elle s'admet d'abord, hors décompte (refus
+    rapportés, jamais comptés), et la mise à jour ne part qu'ensuite. Chronique écrite à
+    chaque exécution (artefact de la CI), imprimée en cas d'échec."""
     name, duration = f"sonde-{uuid.uuid4().hex[:6]}", 420
-    _prober(images, name, duration)
-    time.sleep(10)
-    start = time.monotonic()
-    upgraded = helm(
-        "upgrade",
-        "cdg",
-        str(ROOT / "chart" / "contract-decision-graph"),
-        "--namespace",
-        "cdg",
-        "--reuse-values",
-        *SANS_INGESTION,
-        "--set",
-        "web.repriseIntervalle=16",
-        "--wait",
-        "--timeout",
-        "900s",
-    )
-    assert upgraded.returncode == 0, upgraded.stderr
-    # la sonde a couvert toute la mise à jour
-    assert time.monotonic() - start < duration - 10, (
-        "mise à jour plus longue que la sonde"
-    )
-    assert "16" in _deployment_args()
-    wait_for(
-        lambda: (
-            json.loads(kubectl("get", "pod", "-n", "cdg", name, "-o", "json"))[
-                "status"
-            ]["phase"]
-            in {"Succeeded", "Failed"}
-        ),
-        "fin de la sonde",
-        600,
-        5,
-    )
-    counts = json.loads(kubectl("logs", "-n", "cdg", name).strip().splitlines()[-1])
-    kubectl("delete", "pod", "-n", "cdg", name, "--wait=false")
-    assert counts["ok"] > 500 and counts["ko"] == 0, counts
+    suivi, counts, passed = Chronique(KUBECTL, "cdg", SANTE), None, False
+    try:
+        # point de départ stable : le pod remplacé par le scénario précédent a démarré
+        wait_for(lambda: len(web_pods()) == 2, "deux pods prêts avant la sonde")
+        with suivi:
+            _prober(images, name, duration)
+            wait_for(
+                lambda: _admitted(name), "admission de la sonde", ADMISSION + 60, 1
+            )
+            start = time.monotonic()
+            upgraded = helm(
+                "upgrade",
+                "cdg",
+                str(ROOT / "chart" / "contract-decision-graph"),
+                "--namespace",
+                "cdg",
+                "--reuse-values",
+                *SANS_INGESTION,
+                "--set",
+                "web.repriseIntervalle=16",
+                "--wait",
+                "--timeout",
+                "900s",
+            )
+            assert upgraded.returncode == 0, upgraded.stderr
+            # la sonde a couvert toute la mise à jour
+            assert time.monotonic() - start < duration - 10, (
+                "mise à jour plus longue que la sonde"
+            )
+            assert "16" in _deployment_args()
+            wait_for(
+                lambda: (
+                    json.loads(kubectl("get", "pod", "-n", "cdg", name, "-o", "json"))[
+                        "status"
+                    ]["phase"]
+                    in {"Succeeded", "Failed"}
+                ),
+                "fin de la sonde",
+                600,
+                5,
+            )
+        logs = kubectl("logs", "-n", "cdg", name)
+        counts = json.loads(logs.strip().splitlines()[-1])
+        kubectl("delete", "pod", "-n", "cdg", name, "--wait=false")
+        lost = {"ok": counts["ok"], "ko": counts["ko"], "echecs": counts["echecs"]}
+        assert counts["ok"] > 500 and counts["ko"] == 0, lost
+        # une chronique inutilisable est dite : le diagnostic en dépend
+        assert not suivi.lacunes(), suivi.lacunes()
+        passed = True
+    finally:
+        lines = suivi.ecrire(chroniques / "mise-a-jour.txt", counts, name)
+        if not passed:
+            with capsys.disabled():
+                print("\n" + "\n".join(lines))
 
 
 def test_retour_arriere():
