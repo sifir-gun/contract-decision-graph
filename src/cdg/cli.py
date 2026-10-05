@@ -853,9 +853,9 @@ def _probes(
         database=(lambda: True) if args.demo else lambda: connexions.ping(app_pool()),
         draining=stopping.is_set,
     )
-    return web_server.Probes(
-        sante.create_health_app(checks), args.hote_sante, args.port_sante
-    )
+    # dans le cluster, le nom d'hôte est celui du pod : la réponse dit qui a répondu
+    health = sante.create_health_app(checks, instance=socket.gethostname())
+    return web_server.Probes(health, args.hote_sante, args.port_sante)
 
 
 def _warm_up(config: DecisionConfig, started: threading.Event) -> None:

@@ -3041,6 +3041,74 @@ Petite PR de documentation après la fusion de la PR 34 ; le chantier de l'obser
 - **Échec du job `cluster` sur `main` après la fusion de la PR 33** (03/10, 20:13) : `test_mise_a_jour_sans_interruption`, une connexion refusée sur 2 081 requêtes de la sonde pendant la mise à jour progressive ; les 26 autres scénarios passés. La publication des images de ce commit a donc été sautée. L'échec n'est pas reproduit sur la PR 34 (29 scénarios passés), mais revient sur la PR 35 elle-même (04/10, 22:39:21 : une connexion refusée sur 2 073), qui ne change que de la documentation. Avant le 03/10, le scénario passait à chaque exécution ; depuis, il a échoué 2 fois sur 5. Aucun lien établi avec la PR 33 (sans destination, sa télémétrie ne fait rien à l'arrêt) ni avec Langfuse (absent le 03/10). Hypothèses à départager par des relevés dans le cluster : un pod en arrêt qui ferme son port de santé alors qu'un nœud le route encore ; un pod neuf ajouté au service avant que les règles réseau de k3s ne l'admettent (un rejet donne aussi « connexion refusée »). À examiner à part ; l'Auto-fix ne surveille que les pull requests, pas `main`.
 
 
+## 2026-10-05 · Enquête : une requête perdue pendant la mise à jour progressive (branche `enquete-mise-a-jour`)
+
+La promesse d'une mise à jour sans interruption n'est pas toujours tenue : `test_mise_a_jour_sans_interruption` a échoué 2 fois sur 11 exécutions du job `cluster` depuis le 03/10 (une connexion refusée sur environ 2 000 requêtes de la sonde). L'étiquette `v1.3` (05/10) le signale comme défaut connu. Rectificatif du 05/10 : ce n'était pas nouveau, l'ADR 005 consignait déjà une requête perdue le 30/09 (`9c7580e`, 1 sur 2 071, « échec isolé, non expliqué ») ; « jamais avant le 03/10 », écrit ici et dans la note de la release `v1.3`, est faux.
+
+### Décisions du propriétaire (05/10)
+
+- Ce n'est pas une fonctionnalité nouvelle : c'est une promesse du projet. Le critère reste zéro requête perdue.
+- Instrumenter avant de corriger : la réponse de santé indique le pod qui a répondu ; la sonde enregistre, pour chaque requête perdue, l'heure, le type d'échec et le pod visé quand c'est possible ; pendant la mise à jour, les changements des EndpointSlices du service et les événements des pods sont consignés, horodatés.
+- Relancer le scénario en CI autant qu'il faut pour obtenir au moins un échec instrumenté, départager les pistes, présenter la cause établie et la correction proposée, puis s'arrêter pour validation avant de corriger. Branche et PR à part.
+
+### Constats avant l'instrumentation (journaux des deux échecs)
+
+- **L'heure de l'échec** : les deux fois, la connexion refusée tombe dans les toutes premières secondes de la sonde (03/10, 20:27:42 ; 04/10, 22:39:21), avant ou au tout début de `helm upgrade`. Les conteneurs du premier pod neuf de la mise à jour ne démarrent que 23 à 25 secondes plus tard (20:28:05, 22:39:44) : aucun pod n'était encore en arrêt du fait de la mise à jour.
+- **Ce qui bouge à ce moment-là** : la sonde vient de naître ; et le pod de remplacement du scénario précédent (pod tué pendant une analyse) démarre, créé entre une minute et quelques secondes avant l'échec. Le scénario de mise à jour n'attend pas deux pods prêts avant de lancer sa sonde.
+- **Le mécanisme, lu dans le code installé** (kube-router 2.6.3-k3s1, celui de k3s 1.36.4) : un paquet que les règles réseau n'admettent pas est rejeté par `REJECT` (ICMP « port injoignable »), ce que le client voit comme « Connection refused », le symptôme observé ; chaque changement d'adresse d'un pod déclenche une synchronisation complète, une seule à la fois ; les chaînes de chaque pod sont renommées à chaque synchronisation (leurs compteurs repartent de zéro).
+
+### Pistes à départager
+
+1. **Un pod en arrêt ferme son port alors qu'il reçoit encore du trafic** (piste du propriétaire) : peu compatible avec l'heure des deux échecs, sans être exclue.
+2. **Un pod neuf admis dans le service avant que les règles réseau ne l'autorisent** (piste du propriétaire) : le pod de remplacement du scénario précédent devient prêt à ce moment-là.
+3. **La sonde neuve, pas encore admise par les règles des pods qu'elle vise** (variante de la piste 2, du côté du client) : tant que kube-router n'a pas ajouté son adresse aux ensembles des sources admises sur le nœud d'un pod de l'interface, ses paquets y sont rejetés. Ce serait un défaut du scénario (sa sonde compte avant d'être admise), non de la mise à jour.
+
+### Instrumentation
+
+- **Réponse de santé** : chaque sonde (`/sante/vie`, `/sante/demarrage`, `/sante/pret`) renvoie `instance`, le nom d'hôte, celui du pod dans le cluster.
+- **Sonde** (`tests/chronique.py`, `SONDE`) : chaque échec daté à la milliseconde, numéroté, typé (`ConnectionRefusedError` et son errno, code HTTP, pod qui répond en erreur) ; réponses comptées pod par pod, avec la première et la dernière.
+- **Chronique** (`tests/chronique.py`, `Chronique`) : pendant tout le scénario, l'état des pods de l'espace `cdg` (nœud, adresse, prêt, arrêt) et leurs événements Kubernetes, la tranche d'adresses du service des sondes et, sur chaque nœud, deux fois par seconde, les règles `REJECT` dont le compteur augmente (kube-router, kube-proxy) et les adresses qui entrent dans les ensembles de kube-router ou en sortent. Écrite dans le journal du job à chaque exécution, réussie ou non. Le moment où l'adresse de la sonde est admise sur chaque nœud est daté à un relevé près ; un refus suivi d'une synchronisation en moins d'un relevé peut échapper aux compteurs.
+- **Conditions inchangées**, sauf la charge des relevés (un `docker exec` par nœud toutes les demi-secondes).
+
+### Premier échec instrumenté (05/10, PR 42, première exécution)
+
+- **Le fait** : une connexion refusée sur 2 055 (`ConnectionRefusedError`, errno 111), et c'est la **toute première requête de la sonde** (n°1, à +0,00 s, 10:37:23.460 UTC) ; la suivante réussit à +0,23 s, et toutes les autres ensuite. Les deux anciens pods répondent jusqu'à +36 s et +47 s, les deux neufs à partir de +36 s et +47 s : aucun pod n'était en arrêt au moment du refus (piste 1 écartée pour cet échec). Aucun refus de kube-proxy (« has no endpoints ») relevé, dont la chaîne n'est jamais renommée.
+- **Défaut de l'instrumentation, le mien** : les suivis de kubectl n'ont rien enregistré, sans le dire. Avec `--output-watch-events`, kubectl 1.36.4 écrit chaque événement en JSON compact, sur une ligne (cli-runtime, `printers/json.go`, cas `WatchEvent`) ; le lecteur attendait du JSON indenté, écrit de mémoire au lieu d'être vérifié dans le code. Faute des adresses des pods, le rapport a aussi écarté les entrées dans les ensembles de kube-router, pourtant relevées. Corrigé : lecture ligne à ligne (indenté accepté aussi), un flux illisible ou muet devient une lacune qui fait échouer le scénario, et la sonde donne sa propre adresse, relevée après sa boucle (socket UDP connectée, aucun paquet).
+
+### Second échec instrumenté : la cause (05/10, PR 42, chronique complète)
+
+Horodatage relatif au début de la boucle de la sonde (11:46:59.841 UTC) :
+
+- −0,37 s : pod de la sonde placé sur `k3d-cdg-agent-0` ; −0,11 s : conteneur démarré ; −0,10 s : son adresse (10.42.0.12) publiée par l'API. Les deux pods de l'interface sont prêts et dans la tranche du service depuis avant la sonde (−0,22 s).
+- **+0,00 s : requête n°1 refusée** (`ConnectionRefusedError`, errno 111), 0,1 s après la naissance de la sonde.
+- L'adresse de la sonde entre dans les ensembles de sources de kube-router sur les trois nœuds au relevé de +0,08 s (absente de celui de −0,44 s ; publiée à −0,10 s) : la synchronisation déclenchée par la nouvelle adresse se termine pendant cette fenêtre, la requête n°1 est partie avant.
+- +0,26 s et +0,47 s : premières réponses des deux pods ; ensuite, plus aucun échec.
+- **La mise à jour elle-même n'a rien perdu** : premier pod neuf créé à +23,6 s, prêt à +34,0 s ; ancien pod mis en arrêt à +34,1 s, retiré du trafic aussitôt (dernière réponse à +34,1 s), puis le second, de +44,5 s à +56,7 s ; 2 055 requêtes, un seul échec, celui de la naissance de la sonde.
+
+**Cause établie** : la sonde du scénario est un pod neuf, et sa première requête part avant que kube-router n'ait admis son adresse dans les sources autorisées par les règles réseau (`…-web`, entrée depuis les pods de test sur le port des sondes) ; le refus par défaut de l'espace rejette le paquet (`REJECT`), ce que le client voit comme « Connection refused ». Le défaut est dans le scénario (il compte avant d'être admis), non dans la mise à jour progressive. Piste 1 écartée (aucun pod en arrêt au moment du refus), piste 2 écartée (aucun pod n'entrait dans la tranche), aucun refus de kube-proxy. Les quatre échecs connus tombent à la naissance de la sonde : n°1 dans les deux exécutions instrumentées, premières secondes les 03 et 04/10. Ce qui a rendu l'échec plus fréquent depuis le 03/10 n'est pas établi (2 sur 11 depuis le 03/10, 2 sur 2 avec la charge des relevés) ; la course existait avant : première occurrence connue le 30/09 (ADR 005).
+
+### Correction proposée
+
+- **Dans le scénario seulement**, aucun changement du produit : la sonde commence par une phase d'admission, hors décompte, où elle interroge le service jusqu'à avoir reçu une réponse de chacun des pods attendus (deux), en 60 secondes au plus, sinon échec explicite (« sonde jamais admise ») ; les refus de cette phase sont rapportés, jamais comptés ; elle écrit alors une ligne « sonde admise » et ouvre le décompte. Le scénario attend cette ligne avant `helm upgrade` (au lieu d'une pause de 10 secondes). Critère inchangé : zéro requête perdue, de l'admission à la fin de la mise à jour.
+- **Instrumentation** : garder `instance` dans les réponses de santé et la sonde détaillée ; garder la chronique, mais ne l'écrire qu'en cas d'échec (à décider).
+
+### Décisions du propriétaire (05/10) et correction
+
+- **Correction validée telle que proposée** : phase d'admission non comptée, bornée à 60 secondes avec échec explicite (« sonde jamais admise », son bilan à l'appui) ; `helm upgrade` lancé seulement après la ligne « sonde admise » ; critère inchangé. Les refus de la phase d'admission sont rapportés dans la chronique, jamais comptés.
+- **Point de départ stable**, ajouté pour que la borne de 60 secondes ait un sens : le scénario attend deux pods prêts avant de créer la sonde (le scénario précédent tue un pod, dont le remplaçant peut encore charger son modèle) ; une réponse de chacun des deux est exigée pour l'admission.
+- **Instrumentation gardée** : le nom du pod dans les réponses de santé, sur le port des sondes seulement, jamais sur l'interface publique (vérifié : interface, service `-sante` en ClusterIP sans entrée, port ouvert aux seuls pods de test) ; la sonde détaillée. La chronique est écrite à chaque exécution et conservée comme artefact de la CI (`chronique-mise-a-jour`, 30 jours), imprimée seulement en cas d'échec.
+- **Avant la fusion** : le job `cluster` relancé deux fois sur la PR après la correction, pour montrer que le scénario est stable.
+- **Ensuite, à part, une PR chacune** : la source des refus vers `cdg-postgres-1` toutes les dix secondes (cause présentée avant de changer une règle réseau) ; l'échec du job `cluster` de la PR Dependabot d'`anthropic` 1.11.0.
+
+### Fait signalé en passant
+
+- Les deux exécutions montrent, toutes les dix secondes, un refus de kube-router vers `cdg-postgres-1` (espace `cdg`, nœud `k3d-cdg-agent-1`), d'une source non identifiée ; sans effet sur les scénarios. Non examiné ici.
+- Le job `cluster` de la PR Dependabot d'`anthropic` 1.11.0 (05/10) a échoué avant les scénarios, à l'étape qui pousse les images dans le registre local ; son journal n'était pas lisible (`BlobNotFound`). Sans rapport avec ce défaut ; non examiné ici.
+
+### Nombre de tests
+
+- La suite principale passe de 2 300 à 2 348 (réponse de santé, chronique et sonde vérifiées sans cluster), les tests du rendu des charts de 113 à 114 (port de santé jamais publié) ; le total, de 2 475 à 2 524.
+
 ## 2026-10-05 · Refus vers `cdg-postgres-1` toutes les dix secondes (branche `refus-postgres`)
 
 Trouvé par la chronique du scénario de mise à jour (branche `enquete-mise-a-jour`) : toutes les dix secondes, un refus de kube-router dans la chaîne de `cdg-postgres-1`.
@@ -3066,4 +3134,4 @@ Trouvé par la chronique du scénario de mise à jour (branche `enquete-mise-a-j
 
 ### Nombre de tests
 
-- Tests du rendu des charts : de 113 à 114 ; scénarios du cluster : de 29 à 30 ; total : de 2 475 à 2 477.
+- Tests du rendu des charts : un de plus (115 avec celui de la PR 42) ; scénarios du cluster : de 29 à 30 ; total, après la fusion de la PR 42 : de 2 524 à 2 526.
