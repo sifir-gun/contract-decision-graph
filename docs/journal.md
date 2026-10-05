@@ -3135,3 +3135,26 @@ Trouvé par la chronique du scénario de mise à jour (branche `enquete-mise-a-j
 ### Nombre de tests
 
 - Tests du rendu des charts : un de plus (115 avec celui de la PR 42) ; scénarios du cluster : de 29 à 30 ; total, après la fusion de la PR 42 : de 2 524 à 2 526.
+
+## 2026-10-06 · `setup-db` en une transaction, et la dernière ligne de `check.sh` (branche `setup-db-transaction`)
+
+### Décisions du propriétaire (06/10)
+
+- La cause est établie (journal du 05/10, enquête sur les clés de Dex, « fait trouvé en passant ») : une PR à part, après la fusion de la PR 43. D'abord un test qui reproduit le refus pendant `setup-db` (une session `app_role` concurrente), puis la correction : retirer et rendre les droits dans une seule transaction.
+- Méthode : « c'est la deuxième fois que tu pousses après un `check.sh` en échec, en lisant le code de sortie d'une autre commande. Rends l'erreur impossible plutôt que de compter sur l'attention » : `check.sh` écrit lui-même sa dernière ligne sans ambiguïté et garde son code de sortie même derrière un tube ; règle dans CLAUDE.md : on ne pousse qu'après avoir lu cette ligne.
+
+### `setup-db`
+
+- **Test d'abord** (`test_setup_database_jamais_sans_droits_pour_une_session_d_app_role`) : juste après le retrait des droits, une session d'`app_role` concurrente lit `checkpoints`, lecture bornée à 5 secondes pour qu'une attente sur un verrou soit dite. Avant la correction : refusée, de façon déterministe.
+- **Correction** : retrait et octroi dans une seule transaction (`conn.transaction()`, psycopg 3.3.6) ; les autres sessions voient les anciens droits jusqu'à la validation, sans attendre (le test passe en moins d'une seconde).
+- **Portée** : la base locale, où deux suites de tests se croisaient, et le cluster, où `setup-db` est la tâche Helm `pre-upgrade`, lancée pendant que les anciens pods servent.
+
+### `check.sh`
+
+- Un piège de sortie écrit la dernière ligne, quoi qu'il arrive : « check.sh : SUCCÈS » ou « check.sh : ÉCHEC, code N » ; il reprend le nettoyage du dossier temporaire (un second piège aurait remplacé le premier). Le code de sortie reste celui de l'échec ; `set -euo pipefail` arrête le script sur un échec dans un tube.
+- Test : une option inconnue donne le code 2 et la ligne « check.sh : ÉCHEC, code 2 » ; la fonction de sortie, appelée avec 0, écrit « check.sh : SUCCÈS ».
+- CLAUDE.md : on ne pousse qu'après avoir lu cette ligne, jamais le code d'une commande qui englobe `check.sh` ; une seule suite de tests à la fois sur la base locale.
+
+### Nombre de tests
+
+- La suite principale passe de 2 348 à 2 350 ; le total, de 2 526 à 2 528.
