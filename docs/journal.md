@@ -3109,6 +3109,33 @@ Horodatage relatif au début de la boucle de la sonde (11:46:59.841 UTC) :
 
 - La suite principale passe de 2 300 à 2 348 (réponse de santé, chronique et sonde vérifiées sans cluster), les tests du rendu des charts de 113 à 114 (port de santé jamais publié) ; le total, de 2 475 à 2 524.
 
+## 2026-10-05 · Refus vers `cdg-postgres-1` toutes les dix secondes (branche `refus-postgres`)
+
+Trouvé par la chronique du scénario de mise à jour (branche `enquete-mise-a-jour`) : toutes les dix secondes, un refus de kube-router dans la chaîne de `cdg-postgres-1`.
+
+### Décisions du propriétaire (05/10)
+
+- Identifier la source, et présenter la cause avant de changer une règle réseau.
+- Correction validée : le port 8000 entre instances du même cluster, en entrée et en sortie, dans une règle à part ; tests du chart ; scénario qui vérifie que l'avertissement a disparu ; relevé temporaire retiré.
+- L'opérateur vers les instances sur le 5432 : suivre la documentation de CloudNativePG, en limitant l'ouverture aux seuls pods de l'opérateur. « L'absence de refus prouve seulement que ce chemin n'a pas été emprunté dans nos tests, pas qu'il est inutile : c'est le même raisonnement qui a caché le défaut du port 8000. »
+
+### Cause établie
+
+- **Code installé** (CloudNativePG 1.30.1, `pkg/management/postgres/webserver/probes/liveness.go` et `pinger.go`) : à chaque sonde de vie (toutes les 10 s par défaut), le gestionnaire d'instance du primaire joint chacune des autres instances à `https://<ip>:8000/failsafe` (vérification d'isolement, active par défaut), même quand l'API répond ; en échec, il écrit un avertissement et la sonde réussit tant que l'API répond.
+- **Relevé dans le cluster** (PR 43, job `cluster` du 05/10, relevé temporaire avant les scénarios) : `cdg-postgres-1` primaire, `cdg-postgres-2` réplica ; 30 avertissements en 5 minutes dans le journal du primaire, un toutes les dix secondes, aucun dans celui du réplica : `Get "https://10.42.2.9:8000/failsafe": dial tcp 10.42.2.9:8000: connect: connection refused`.
+- **Nos règles** (`chart/cdg-postgres`) n'ouvraient entre instances que le 5432 : la connexion était rejetée dès la sortie du primaire, d'où le refus dans sa seule chaîne.
+- **Gravité** : un composant légitime bloqué à tort. Sans effet tant que l'API répond ; l'API injoignable, le primaire ne pouvait pas joindre ses pairs, se serait cru isolé et arrêté à tort, alors que la vérification sert à n'arrêter qu'un primaire vraiment isolé.
+
+### Correction
+
+- **Règles** : en entrée, les autres instances sur le 8000 et les seuls pods de l'opérateur sur le 5432 (`reseau.operateurPods`), chacune dans sa règle ; en sortie, les autres instances sur le 8000, à part de la réplication. Le 8000 reste ouvert à tout l'espace de l'opérateur, comme avant (le restreindre à ses pods : piste, après avoir vérifié que le greffon de sauvegarde ne s'en sert pas).
+- **Tests** : règles du chart, port 8000 jamais ouvert à l'application ; scénario du cluster (30 au lieu de 29) : vérification d'isolement active, et aucun avertissement de connectivité dans le journal du primaire sur 25 secondes ; sauté en profil local, motif à l'appui (une seule instance PostgreSQL).
+- Relevé temporaire retiré du workflow.
+
+### Nombre de tests
+
+- Tests du rendu des charts : un de plus (115 avec celui de la PR 42) ; scénarios du cluster : de 29 à 30 ; total, après la fusion de la PR 42 : de 2 524 à 2 526.
+
 ## 2026-10-05 · Enquête : clés de Dex injoignables, 503 à la première requête vers des pods neufs (branche `enquete-fournisseur`)
 
 Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production` échoue sur un 503 de l'interface, « L'identité ne peut pas être vérifiée pour le moment » (`ProviderUnavailable`) ; les 28 autres scénarios passent. Premier échec connu de ce scénario.
@@ -3143,4 +3170,4 @@ Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d
 
 ### Nombre de tests
 
-- La suite principale passe de 2 348 à 2 360 (cause de l'injoignabilité, chronologie sans sonde) ; le total, de 2 524 à 2 536.
+- La suite principale passe de 2 348 à 2 360 (cause de l'injoignabilité, chronologie sans sonde) ; le total, après la fusion de la PR 43, de 2 526 à 2 538.

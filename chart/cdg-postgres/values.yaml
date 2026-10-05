@@ -64,6 +64,10 @@ reseau:
     app.kubernetes.io/name: contract-decision-graph
   # espace de noms de l'opérateur, qui lit l'état des instances (port 8000)
   operateur: cnpg-system
+  # pods de l'opérateur, seuls de son espace admis sur le port de PostgreSQL (5432),
+  # comme le demande la documentation de CloudNativePG (étiquette de son manifeste)
+  operateurPods:
+    app.kubernetes.io/name: cloudnative-pg
   # serveur d'API de Kubernetes : le gestionnaire d'instance le consulte (443 par le
   # service kubernetes, 6443 après traduction vers le nœud qui le porte)
   portsApi: [443, 6443]

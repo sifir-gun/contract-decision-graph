@@ -35,6 +35,28 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
+    # l'opérateur sur le port de PostgreSQL, comme le demande la documentation de
+    # CloudNativePG, et lui seul dans son espace de noms (décision du 05/10)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.reseau.operateur }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.reseau.operateurPods | nindent 14 }}
+      ports:
+        - port: 5432
+          protocol: TCP
+    # vérification d'isolement de la sonde de vie du primaire (CloudNativePG 1.30.1,
+    # https://<instance>:8000/failsafe, toutes les dix secondes) : les autres instances
+    # du même cluster, à part de la réplication
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ .Values.nom }}
+      ports:
+        - port: 8000
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:
@@ -54,6 +76,14 @@ spec:
               cnpg.io/cluster: {{ .Values.nom }}
       ports:
         - port: 5432
+          protocol: TCP
+    # vérification d'isolement de la sonde de vie du primaire, vers les autres instances
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ .Values.nom }}
+      ports:
+        - port: 8000
           protocol: TCP
     # serveur d'API : son adresse (nœud, service kubernetes) dépend du cluster
     - ports:

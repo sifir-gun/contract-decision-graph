@@ -205,7 +205,7 @@ Les clés `LANGFUSE_PUBLIC_KEY` et `LANGFUSE_SECRET_KEY` viennent de `.env` ou d
 
 ## Déploiement Kubernetes
 
-Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue vingt-neuf scénarios d'exploitation, dont deux sur les traces envoyées à Langfuse. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
+Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À chaque pull request, la CI les installe sur un cluster k3s de trois nœuds (k3d), avec un serveur factice à la place de l'API de Mistral, puis joue trente scénarios d'exploitation, dont deux sur les traces envoyées à Langfuse. Choix, sources et exceptions : [ADR 005](docs/adr-005-kubernetes.md) ; procédures : [exploitation](docs/exploitation.md).
 
 - **Application** : deux réplicas sur des nœuds différents ; pods non root, système de fichiers en lecture seule ; mise à jour progressive et arrêt propre ; migrations, indexation du corpus et contrôle de la configuration en tâches Helm. L'interface n'écoute que dans son pod : seul oauth2-proxy, à côté d'elle, la joint.
 - **PostgreSQL géré par CloudNativePG** : WAL archivés en continu, sauvegarde chaque nuit vers un stockage compatible S3 ; une restauration dans un nouveau cluster est vérifiée contre la tête du journal d'audit relevée avant la sauvegarde. Le greffon de sauvegarde exige cert-manager, en production aussi.
@@ -214,7 +214,7 @@ Trois charts Helm : l'application, sa base PostgreSQL et son proxy de sortie. À
 - **Proxy de sortie** (Smokescreen, construit par le projet) : seules l'API de Mistral et le fournisseur d'identité sont joignables, et les règles réseau refusent toute sortie directe.
 - **Secrets en fichiers**, montés en lecture seule, jamais en variables d'environnement. Le mot de passe d'`app_role`, le rôle de l'application dans la base, tourne sans redémarrage : l'application relit le fichier à chaque nouvelle connexion.
 
-Les vingt-neuf scénarios :
+Les trente scénarios :
 
 1. deux réplicas, sur deux nœuds différents ;
 2. création simultanée d'un même contrat par les deux réplicas : un seul contrat, un seul scellement ;
@@ -225,26 +225,27 @@ Les vingt-neuf scénarios :
 7. sortie directe vers Internet refusée par les règles réseau ;
 8. domaine autre que l'API de Mistral refusé par le proxy ;
 9. adresse d'API autre que Mistral : échec explicite, décision escaladée en revue humaine ;
-10. rotation du mot de passe d'`app_role` : ancien refusé, nouvelles connexions sans redémarrage, mot de passe absent des journaux de tous les conteneurs et des tâches ;
-11. mise à jour refusée tant qu'un contrat attend sous l'ancienne configuration ;
-12. oauth2-proxy, conteneur annexe natif, démarre avant l'interface et s'arrête après elle ;
-13. connexion par le navigateur, à travers Traefik et Dex, sans écran d'accord : cookie de session `Secure`, `HttpOnly`, `SameSite=Lax` ;
-14. formulaire obtenu d'un réplica, accepté par l'autre (clés partagées), refusé une fois altéré ;
-15. en-têtes d'identité et jeton forgés (signé par une clé d'attaquant, avec un `kid` et un `sub` réels), depuis un autre pod : refusés ;
-16. interface joignable par Traefik seulement, ni oauth2-proxy ni l'interface en direct depuis un autre pod ;
-17. HTTP redirigé vers HTTPS, HSTS, envoi trop gros refusé à l'entrée (413) ;
-18. TLS 1.1 refusé par le serveur, TLS 1.2 et 1.3 acceptés ;
-19. limites de débit séparées par client : l'un est limité (429), l'autre non, et Traefik voit l'adresse de chacun ;
-20. rotation des clés du fournisseur : nouveau jeton accepté, ancien refusé et tracé ;
-21. déconnexion : une nouvelle connexion est exigée ;
-22. session expirée : l'ancien cookie, rejoué, ne donne plus accès ;
-23. journaux sans courriel, jeton ni cookie ; connexions tracées par le seul identifiant du fournisseur (`sub`) ;
-24. rôles et quatre yeux : qui a lancé l'analyse ne la tranche pas, ni l'analyste, et le relecteur n'analyse pas (403, tracés) ; enregistrement scellé avec les deux identités, sans aucun courriel ;
-25. décision par la CLI dans le cluster : refusée sans accès d'urgence, admise avec, scellée comme telle et tracée dans les journaux du pod ;
-26. second facteur non exigé : annoncé au démarrage (Dex n'en prouve aucun) ;
-27. trace d'une analyse dans Langfuse, lue par son API : opération, étapes du graphe, appels au LLM avec modèle, tokens et coût, aucune fenêtre du texte du contrat ; événements bruts dans le seau de Langfuse, sur SeaweedFS ;
-28. traces hors du cluster : destination externe refusée au lancement, sortie directe bloquée depuis l'interface et depuis les pods de Langfuse, Langfuse Cloud refusé par le proxy ;
-29. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
+10. instances de la base qui se joignent sur le port 8000 : la vérification d'isolement de la sonde de vie du primaire aboutit, sans avertissement ;
+11. rotation du mot de passe d'`app_role` : ancien refusé, nouvelles connexions sans redémarrage, mot de passe absent des journaux de tous les conteneurs et des tâches ;
+12. mise à jour refusée tant qu'un contrat attend sous l'ancienne configuration ;
+13. oauth2-proxy, conteneur annexe natif, démarre avant l'interface et s'arrête après elle ;
+14. connexion par le navigateur, à travers Traefik et Dex, sans écran d'accord : cookie de session `Secure`, `HttpOnly`, `SameSite=Lax` ;
+15. formulaire obtenu d'un réplica, accepté par l'autre (clés partagées), refusé une fois altéré ;
+16. en-têtes d'identité et jeton forgés (signé par une clé d'attaquant, avec un `kid` et un `sub` réels), depuis un autre pod : refusés ;
+17. interface joignable par Traefik seulement, ni oauth2-proxy ni l'interface en direct depuis un autre pod ;
+18. HTTP redirigé vers HTTPS, HSTS, envoi trop gros refusé à l'entrée (413) ;
+19. TLS 1.1 refusé par le serveur, TLS 1.2 et 1.3 acceptés ;
+20. limites de débit séparées par client : l'un est limité (429), l'autre non, et Traefik voit l'adresse de chacun ;
+21. rotation des clés du fournisseur : nouveau jeton accepté, ancien refusé et tracé ;
+22. déconnexion : une nouvelle connexion est exigée ;
+23. session expirée : l'ancien cookie, rejoué, ne donne plus accès ;
+24. journaux sans courriel, jeton ni cookie ; connexions tracées par le seul identifiant du fournisseur (`sub`) ;
+25. rôles et quatre yeux : qui a lancé l'analyse ne la tranche pas, ni l'analyste, et le relecteur n'analyse pas (403, tracés) ; enregistrement scellé avec les deux identités, sans aucun courriel ;
+26. décision par la CLI dans le cluster : refusée sans accès d'urgence, admise avec, scellée comme telle et tracée dans les journaux du pod ;
+27. second facteur non exigé : annoncé au démarrage (Dex n'en prouve aucun) ;
+28. trace d'une analyse dans Langfuse, lue par son API : opération, étapes du graphe, appels au LLM avec modèle, tokens et coût, aucune fenêtre du texte du contrat ; événements bruts dans le seau de Langfuse, sur SeaweedFS ;
+29. traces hors du cluster : destination externe refusée au lancement, sortie directe bloquée depuis l'interface et depuis les pods de Langfuse, Langfuse Cloud refusé par le proxy ;
+30. sauvegarde, restauration vérifiée par `verify --expect-head`, puis désinstallation : plus aucune ressource de la release, hormis une tâche en échec gardée pour le diagnostic et le certificat de l'entrée, que suppriment des commandes documentées.
 
 Profil local réduit : deux nœuds, une instance PostgreSQL ; Docker, kubectl, k3d 5.9.0 et helm 4.3.0 (versions de la CI, contrôlées par les scripts). Il demande près de 7 Go de mémoire à Docker (deux réplicas de 1,6 Go chacun et l'indexation du corpus, 2,9 Go au pic), et l'installation prend une vingtaine de minutes, surtout pour indexer le corpus. `./scripts/check.sh --sans-cluster` laisse le cluster à la CI.
 
@@ -326,7 +327,7 @@ Le CRAG justifie chaque constat par une référence du corpus : encore faut-il q
 
 ## Architecture en bref
 
-Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP, OpenTelemetry), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 536 tests automatisés, joués par la CI : à chaque pull request, 2 360 dans la suite principale (PostgreSQL comprise), 114 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 29 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
+Architecture inspirée de l'hexagonale (ports et adaptateurs) : `domain/` (règles pures, décision, vérification, audit), `ports/` (interfaces), `application/` (nœuds, extraction, CRAG), `adapters/` (LangGraph, PostgreSQL, Mistral et Anthropic, fastembed, interface web, serveur MCP, OpenTelemetry), `cli.py` pour l'assemblage. La CLI, l'interface web et le serveur MCP passent par le même service applicatif. Le sens des dépendances et le confinement de chaque bibliothèque sont vérifiés par des tests. 2 538 tests automatisés, joués par la CI : à chaque pull request, 2 360 dans la suite principale (PostgreSQL comprise), 115 sur le rendu des charts, 20 sur l'image de l'application, 4 sur le proxy de sortie, 4 sur l'image d'oauth2-proxy et les 30 scénarios du cluster ; 5 sur l'image du modèle, par son propre workflow, quand elle change. À part, 101 tests avec le vrai modèle, payants, lancés à la main.
 
 - [ADR 001 : fan-out et décision déterministe](docs/adr-001-fan-out.md). Les quatre analystes sont des outils bornés, pas des agents autonomes. Le découpage se justifie par l'audit par domaine, pas par la qualité ; le gain de latence mesuré est modeste : au mieux une seconde par contrat.
 - [ADR 002 : ports et adaptateurs](docs/adr-002-ports-et-adaptateurs.md). Couches, règles de dépendance, et un écart assumé : le flux vit dans le graphe LangGraph.
