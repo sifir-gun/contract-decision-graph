@@ -725,6 +725,26 @@ def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
         assert restored.returncode == 0, restored.stderr
 
 
+def test_instances_de_la_base_se_joignent_pour_la_verification_d_isolement():
+    """Vérification d'isolement de la sonde de vie du primaire (CloudNativePG 1.30.1,
+    probes/liveness.go et pinger.go) : à chaque sonde, toutes les dix secondes, le
+    primaire joint les autres instances sur leur port 8000 (/failsafe), même quand l'API
+    répond. Nos règles réseau la refusaient jusqu'au 05/10, sans effet visible : un
+    avertissement de niveau info, toutes les dix secondes ; mais, l'API injoignable, le
+    primaire se serait cru isolé et arrêté à tort. Elle doit aboutir."""
+    cluster = json.loads(
+        kubectl("get", "cluster", "cdg-postgres", "-n", "cdg", "-o", "json")
+    )
+    liveness = cluster["spec"].get("probes", {}).get("liveness", {})
+    assert liveness.get("isolationCheck", {}).get("enabled") is True, liveness
+    assert cluster["spec"]["instances"] >= 2
+    name = primary()
+    time.sleep(25)  # deux sondes de vie au moins, une toutes les dix secondes
+    logs = kubectl("logs", "-n", "cdg", name, "-c", "postgres", "--since=25s")
+    refused = [line for line in logs.splitlines() if "Instance connectivity" in line]
+    assert not refused, refused[:2]
+
+
 # --- 6. rotation du mot de passe d'app_role, absent de tous les journaux -----------------
 
 APPLICATION_SECRET = "cdg-base-application"
