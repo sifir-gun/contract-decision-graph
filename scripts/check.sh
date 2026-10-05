@@ -27,6 +27,22 @@
 # authentifié).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# dernière ligne, écrite par check.sh lui-même quoi qu'il arrive (décision du 06/10 : deux
+# pushes après un échec lu par le code d'une autre commande) : « check.sh : SUCCÈS » ou
+# « check.sh : ÉCHEC, code N » ; on ne pousse qu'après l'avoir lue. Le code de sortie
+# reste celui de l'échec ; pipefail : un échec dans un tube arrête le script.
+NETTOYER=""
+fin() {
+    if [[ -n "$NETTOYER" ]]; then
+        rm -rf "$NETTOYER"
+    fi
+    if [[ "$1" -eq 0 ]]; then
+        echo "check.sh : SUCCÈS"
+    else
+        echo "check.sh : ÉCHEC, code $1"
+    fi
+}
+trap 'fin $?' EXIT
 SANS_CLUSTER=false
 for option in "$@"; do
     case "$option" in
@@ -39,7 +55,7 @@ for option in "$@"; do
 done
 if [[ -z "${RUNNER_TEMP:-}" ]]; then
     RUNNER_TEMP="$(mktemp -d)"
-    trap 'rm -rf "$RUNNER_TEMP"' EXIT # l'image sauvegardée pèse plusieurs centaines de Mo
+    NETTOYER="$RUNNER_TEMP" # l'image sauvegardée pèse plusieurs centaines de Mo
 fi
 
 echo "==> dépendances, strictement depuis uv.lock (tous groupes)"
