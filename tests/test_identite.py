@@ -8,10 +8,12 @@ Un faux fournisseur OIDC, local, sert la découverte et les clés publiques ; le
 signés ici, par la bibliothèque de chiffrement du projet."""
 
 import base64
+import http.client
 import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError, URLError
 
 import jwt
 import pytest
@@ -42,6 +44,7 @@ class Provider:
         self.algorithms = ["RS256"]
         self.jwks_fetches = 0
         self.issuer_override: str | None = None
+        self.keys_status = 200  # code rendu pour les clés (panne simulée sinon)
         provider = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -56,6 +59,10 @@ class Provider:
                         "id_token_signing_alg_values_supported": provider.algorithms,
                         "end_session_endpoint": f"{provider.issuer}/logout",
                     }
+                elif self.path == "/keys" and provider.keys_status != 200:
+                    self.send_response(provider.keys_status)
+                    self.end_headers()
+                    return
                 elif self.path == "/keys":
                     provider.jwks_fetches += 1
                     body = {
@@ -283,8 +290,55 @@ def test_emetteur_de_la_decouverte_different_refuse(provider):
 
 def test_fournisseur_injoignable_distinct_d_un_jeton_refuse(provider):
     verifier = oidc.OidcVerifier("http://127.0.0.1:9", AUDIENCE)  # rien n'y écoute
-    with pytest.raises(ProviderUnavailable):
+    with pytest.raises(ProviderUnavailable) as raised:
         verifier.verify(provider.token())
+    # la cause, par son type seulement (enquête du 05/10 : un 503 sans cause connue)
+    assert raised.value.cause == "URLError/ConnectionRefusedError"
+
+
+def test_cles_injoignables_disent_leur_cause(provider, verifier):
+    provider.keys_status = 503
+    with pytest.raises(ProviderUnavailable) as raised:
+        verifier.verify(provider.token())
+    assert raised.value.cause == "HTTPError 503"
+
+
+TUNNEL = "Tunnel connection failed: 502 Bad Gateway, ne pas citer"
+
+
+@pytest.mark.parametrize(
+    ("error", "cause"),
+    [
+        (
+            URLError(ConnectionRefusedError(111, "refusé")),
+            "URLError/ConnectionRefusedError",
+        ),
+        (URLError(OSError(TUNNEL)), "URLError/OSError tunnel 502"),
+        (URLError(TimeoutError("délai")), "URLError/TimeoutError"),
+        (URLError("raison en texte"), "URLError/str"),
+        (TimeoutError("délai"), "TimeoutError"),
+        (http.client.RemoteDisconnected("fermé"), "RemoteDisconnected"),
+        (OSError("autre"), "OSError"),
+    ],
+)
+def test_cause_par_le_type_jamais_par_le_message(error, cause):
+    assert oidc.cause_reseau(error) == cause
+
+
+def test_cause_d_une_erreur_http_par_son_code():
+    error = HTTPError("http://fournisseur.example.org/keys", 503, "indispo", None, None)
+    assert oidc.cause_reseau(error) == "HTTPError 503"
+
+
+def test_cause_lue_sous_l_erreur_de_pyjwt():
+    # PyJWT 2.15.1 enchaîne l'erreur réseau d'origine (raise ... from e)
+    try:
+        try:
+            raise URLError(ConnectionRefusedError(111, "refusé"))
+        except URLError as inner:
+            raise jwt.exceptions.PyJWKClientConnectionError("échec") from inner
+    except jwt.exceptions.PyJWKClientConnectionError as error:
+        assert oidc.cause_reseau(error) == "URLError/ConnectionRefusedError"
 
 
 def test_fin_de_session_du_fournisseur_lue_dans_la_decouverte(provider, verifier):

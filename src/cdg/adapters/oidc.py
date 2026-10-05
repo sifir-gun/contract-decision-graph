@@ -8,12 +8,13 @@ redirection.
 
 import http.client
 import json
+import re
 import ssl
 import threading
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import jwt
 from jwt import PyJWKClient
@@ -43,6 +44,27 @@ _DECODE_ERRORS: tuple[tuple[type[Exception], str], ...] = (
     (errors.DecodeError, "jeton_illisible"),
     (errors.InvalidTokenError, "jeton_invalide"),
 )
+
+
+# refus du proxy de sortie à l'ouverture du tunnel (http.client, `_tunnel`) : seul son code
+# est gardé
+_TUNNEL = re.compile(r"^Tunnel connection failed: (\d{3})\b")
+
+
+def cause_reseau(error: BaseException) -> str:
+    """L'erreur réseau d'un accès au fournisseur, par son type et au plus un code (HTTP,
+    tunnel du proxy) : jamais son message, qui peut citer une adresse (journal des
+    accès). Sous une erreur de PyJWT, l'erreur d'origine (PyJWT 2.15.1 l'enchaîne)."""
+    if isinstance(error, errors.PyJWKClientConnectionError) and error.__cause__:
+        error = error.__cause__
+    if isinstance(error, HTTPError):
+        return f"HTTPError {error.code}"
+    if not isinstance(error, URLError):
+        return type(error).__name__
+    reason = error.reason
+    cause = f"URLError/{type(reason).__name__}"
+    tunnel = _TUNNEL.match(str(reason)) if isinstance(reason, OSError) else None
+    return f"{cause} tunnel {tunnel[1]}" if tunnel else cause
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -76,7 +98,8 @@ class OidcVerifier:
                 data = json.load(response)
         except (URLError, TimeoutError, http.client.HTTPException, OSError) as exc:
             raise ProviderUnavailable(
-                f"fournisseur d'identité injoignable : {type(exc).__name__}"
+                f"fournisseur d'identité injoignable : {type(exc).__name__}",
+                cause=cause_reseau(exc),
             ) from None
         if not isinstance(data, dict):
             raise identity.IdentityConfigurationError(
@@ -128,8 +151,10 @@ class OidcVerifier:
             raise IdentityRejected("algorithme_refuse")
         try:
             key = provider.keys.get_signing_key_from_jwt(token)
-        except errors.PyJWKClientConnectionError:
-            raise ProviderUnavailable("clés du fournisseur injoignables") from None
+        except errors.PyJWKClientConnectionError as exc:
+            raise ProviderUnavailable(
+                "clés du fournisseur injoignables", cause=cause_reseau(exc)
+            ) from None
         except (errors.PyJWKClientError, errors.PyJWKError):
             raise IdentityRejected("cle_inconnue") from None
         except errors.PyJWTError:

@@ -371,7 +371,10 @@ class FakeVerifier:
 
     def verify(self, token: str) -> Identity:
         if self.unavailable:
-            raise ProviderUnavailable("fournisseur d'identité injoignable (doublure)")
+            raise ProviderUnavailable(
+                "fournisseur d'identité injoignable (doublure)",
+                cause="URLError/ConnectionRefusedError",
+            )
         if token not in self.identities:
             raise IdentityRejected("signature_invalide")
         return self.identities[token]
