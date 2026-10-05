@@ -709,67 +709,136 @@ IDENTITY_EGRESS = (
 )
 
 
-def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(images):
+def _journaux_du_proxy() -> str:
+    """Journaux des pods du proxy de sortie, horodatés, relevés avant sa remise en état
+    (ses pods de production disparaissent avec elle). Un échec du relevé est écrit,
+    jamais tu, et ne masque pas celui du scénario."""
+    result = subprocess.run(
+        KUBECTL
+        + ["logs", "-n", "cdg", "-l", "app.kubernetes.io/instance=cdg-proxy"]
+        + ["--all-containers", "--timestamps", "--prefix", "--tail=-1"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        return f"relevé des journaux du proxy impossible : {result.stderr.strip()}"
+    # où sont les pods du proxy et de Traefik (nœud, adresse) : l'admission d'un pod neuf
+    # se lit sur le nœud de celui qu'il joint
+    placement = subprocess.run(
+        KUBECTL
+        + ["get", "pods", "-o", "wide", "-n", "cdg", "-l"]
+        + ["app.kubernetes.io/instance=cdg-proxy"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    traefik = subprocess.run(
+        KUBECTL + ["get", "pods", "-o", "wide", "-n", "traefik"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    return "\n".join(
+        [
+            result.stdout,
+            "--- pods du proxy",
+            placement.stdout or placement.stderr,
+            "--- pods de Traefik",
+            traefik.stdout or traefik.stderr,
+        ]
+    )
+
+
+def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
+    images, capsys, chroniques
+):
     """Proxy aux valeurs de production (api.mistral.ai et le fournisseur d'identité,
     seulement) : l'analyse, pointée sur le serveur factice, échoue explicitement (rapport
-    d'échec, ESCALADE, revue humaine) ; il ne reçoit aucune requête."""
+    d'échec, ESCALADE, revue humaine) ; il ne reçoit aucune requête. Enquête du 05/10
+    (503, clés de Dex injoignables à la première requête vers des pods neufs) :
+    chronique des pods de l'interface et du proxy, journaux du proxy de production
+    relevés avant sa remise en état ; écrites à chaque exécution (artefact de la CI),
+    imprimées en cas d'échec."""
     proxy = images["proxy"]
     chart = str(ROOT / "chart" / "cdg-proxy")
-    production = helm(
-        "upgrade",
-        "cdg-proxy",
-        chart,
-        "--namespace",
-        "cdg",
-        "--set",
-        f"image.repository={proxy['repository']}",
-        "--set",
-        f"image.digest={proxy['digest']}",
-        *IDENTITY_EGRESS,
-        "--wait",
-        "--timeout",
-        "300s",
-    )
-    assert production.returncode == 0, production.stderr
+    suivi, logs, passed = Chronique(KUBECTL, "cdg", "cdg-proxy"), "", False
+    start = time.time()
     try:
-        before = factice()["recues"]
-        pod, thread = (
-            web_pods()[0]["metadata"]["name"],
-            f"bloque-{uuid.uuid4().hex[:8]}",
-        )
-        with interface(pod) as client:
-            assert analyse(client, GO, thread).status_code == 303  # vers le dossier
-        assert factice()["recues"] == before
-        code, dossier = cli(pod, "show", thread)
-        assert code == 0, dossier
-        status = dossier["status"]
-        [failure] = status["failure_report"]["failures"]
-        assert failure["node"] == "extract_clauses"
-        assert "407" in failure["message"]
-        assert "denied to host 'mistral-factice." in failure["message"]
-        assert (status["proposed_decision"], dossier["etat"]) == (
-            "ESCALADE",
-            "en_attente",
-        )
-        seal_if_pending(pod, thread)
+        with suivi:
+            production = helm(
+                "upgrade",
+                "cdg-proxy",
+                chart,
+                "--namespace",
+                "cdg",
+                "--set",
+                f"image.repository={proxy['repository']}",
+                "--set",
+                f"image.digest={proxy['digest']}",
+                *IDENTITY_EGRESS,
+                "--wait",
+                "--timeout",
+                "300s",
+            )
+            assert production.returncode == 0, production.stderr
+            try:
+                before = factice()["recues"]
+                pod, thread = (
+                    web_pods()[0]["metadata"]["name"],
+                    f"bloque-{uuid.uuid4().hex[:8]}",
+                )
+                with interface(pod) as client:
+                    assert analyse(client, GO, thread).status_code == 303  # au dossier
+                assert factice()["recues"] == before
+                code, dossier = cli(pod, "show", thread)
+                assert code == 0, dossier
+                status = dossier["status"]
+                [failure] = status["failure_report"]["failures"]
+                assert failure["node"] == "extract_clauses"
+                assert "407" in failure["message"]
+                assert "denied to host 'mistral-factice." in failure["message"]
+                assert (status["proposed_decision"], dossier["etat"]) == (
+                    "ESCALADE",
+                    "en_attente",
+                )
+                seal_if_pending(pod, thread)
+            finally:
+                logs = _journaux_du_proxy()
+                restored = helm(
+                    "upgrade",
+                    "cdg-proxy",
+                    chart,
+                    "--namespace",
+                    "cdg",
+                    "--values",
+                    str(ROOT / "cluster" / "valeurs-proxy.yaml"),
+                    "--set",
+                    f"image.repository={proxy['repository']}",
+                    "--set",
+                    f"image.digest={proxy['digest']}",
+                    "--wait",
+                    "--timeout",
+                    "300s",
+                )
+                assert restored.returncode == 0, restored.stderr
+        # une chronique inutilisable est dite : le diagnostic en dépend
+        assert not suivi.lacunes(), suivi.lacunes()
+        passed = True
     finally:
-        restored = helm(
-            "upgrade",
-            "cdg-proxy",
-            chart,
-            "--namespace",
-            "cdg",
-            "--values",
-            str(ROOT / "cluster" / "valeurs-proxy.yaml"),
-            "--set",
-            f"image.repository={proxy['repository']}",
-            "--set",
-            f"image.digest={proxy['digest']}",
-            "--wait",
-            "--timeout",
-            "300s",
+        lines = suivi.ecrire_chronologie(
+            chroniques / "proxy-production.txt",
+            start,
+            ("web", "proxy-de-sortie"),
+            "proxy de sortie en configuration de production",
+            annexe=logs,
         )
-        assert restored.returncode == 0, restored.stderr
+        if not passed:
+            with capsys.disabled():
+                print("\n" + "\n".join(lines) + "\n--- journaux du proxy\n" + logs)
 
 
 # --- 6. rotation du mot de passe d'app_role, absent de tous les journaux -----------------

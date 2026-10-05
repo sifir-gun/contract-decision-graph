@@ -264,6 +264,75 @@ def _echec(failure: dict) -> str:
     return text
 
 
+def _lignes(
+    evenements: list[Evenement], owners: dict[str, str], start: float
+) -> tuple[list[tuple[float, str]], int]:
+    """Lignes datées de la chronique, et le nombre de refus hors de l'espace cdg.
+    Ensembles d'adresses : seulement les adresses de `owners` ; refus : en entier dans
+    l'espace cdg, comptés ailleurs."""
+    rows: list[tuple[float, str]] = []
+    outside = 0
+    for event in evenements:
+        if event.source == "ensemble":
+            if event.adresse not in owners:
+                continue
+            text = (
+                f"ensemble {event.objet} : {event.texte} {event.adresse} "
+                f"({owners[event.adresse]})"
+            )
+            if event.depuis is not None:
+                text += f", depuis {event.depuis - start:+.2f} s"
+        elif event.source == "refus":
+            if not _CDG.search(event.texte):
+                outside += int(event.texte.split()[0])
+                continue
+            text = f"refus {event.objet} : {event.texte}"
+            if event.depuis is not None:
+                text += f", depuis {event.depuis - start:+.2f} s"
+        elif event.source == "evenement":
+            text = f"événement {event.objet} : {event.texte}"
+        else:
+            text = f"{event.source} {event.objet} : {event.texte}"
+        rows.append((event.instant, text))
+    return rows, outside
+
+
+def _proprietaires(
+    pods: dict[str, dict], composants: tuple[str, ...]
+) -> dict[str, str]:
+    return {
+        p["ip"]: name
+        for name, p in pods.items()
+        if p.get("ip") and p.get("composant") in composants
+    }
+
+
+def chronologie(
+    evenements: list[Evenement],
+    pods: dict[str, dict],
+    debut: float,
+    composants: tuple[str, ...],
+    erreurs: list[str],
+    titre: str,
+) -> list[str]:
+    """Chronique d'un scénario sans sonde (enquête du 05/10 sur les clés de Dex
+    injoignables) : datée en UTC et relativement à `debut` ; ensembles d'adresses
+    limités aux pods des `composants`."""
+    rows, outside = _lignes(evenements, _proprietaires(pods, composants), debut)
+    lines = [
+        f"=== chronique : {titre}, début {_heure(debut)} UTC ===",
+        f"refus hors de l'espace cdg : {outside}",
+    ]
+    if erreurs:
+        lines.append("relevés incomplets : " + " ; ".join(erreurs))
+    lines.append("--- chronique")
+    lines.extend(
+        f"{_heure(instant)} ({instant - debut:+.2f} s) {text}"
+        for instant, text in sorted(rows)
+    )
+    return lines
+
+
 def rapport(
     evenements: list[Evenement],
     pods: dict[str, dict],
@@ -279,41 +348,18 @@ def rapport(
     def when(instant: float) -> str:
         return f"{_heure(instant)} ({instant - start:+.2f} s)"
 
-    owners = {
-        p["ip"]: name
-        for name, p in pods.items()
-        if p.get("ip") and p.get("composant") in ("web", "test")
-    }
+    owners = _proprietaires(pods, ("web", "test"))
     # l'adresse que la sonde donne d'elle-même, à défaut de celle de son pod
     probe_ip = (pods.get(nom_sonde) or {}).get("ip") or sonde.get("adresse")
     if probe_ip:
         owners[probe_ip] = nom_sonde
-    rows: list[tuple[float, str]] = [(start, "sonde : début, phase d'admission")]
-    outside, admitted = 0, []
-    for event in evenements:
-        if event.source == "ensemble":
-            if event.adresse not in owners:
-                continue
-            text = (
-                f"ensemble {event.objet} : {event.texte} {event.adresse} "
-                f"({owners[event.adresse]})"
-            )
-            if event.depuis is not None:
-                text += f", depuis {event.depuis - start:+.2f} s"
-            if event.adresse == probe_ip and event.texte.startswith("+"):
-                admitted.append(event)
-        elif event.source == "refus":
-            if not _CDG.search(event.texte):
-                outside += int(event.texte.split()[0])
-                continue
-            text = f"refus {event.objet} : {event.texte}"
-            if event.depuis is not None:
-                text += f", depuis {event.depuis - start:+.2f} s"
-        elif event.source == "evenement":
-            text = f"événement {event.objet} : {event.texte}"
-        else:
-            text = f"{event.source} {event.objet} : {event.texte}"
-        rows.append((event.instant, text))
+    rows, outside = _lignes(evenements, owners, start)
+    rows.append((start, "sonde : début, phase d'admission"))
+    admitted = [
+        e
+        for e in evenements
+        if e.source == "ensemble" and e.adresse == probe_ip and e.texte.startswith("+")
+    ]
     for failure in sonde.get("echecs", []):
         rows.append((failure["t"], f"ÉCHEC n°{failure['n']} : {_echec(failure)}"))
     for name, (first, last, _) in sonde.get("instances", {}).items():
@@ -489,6 +535,26 @@ class Chronique:
         lines = self.rapport(sonde, nom_sonde)
         chemin.parent.mkdir(parents=True, exist_ok=True)
         chemin.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return lines
+
+    def ecrire_chronologie(
+        self,
+        chemin: Path,
+        debut: float,
+        composants: tuple[str, ...],
+        titre: str,
+        annexe: str = "",
+    ) -> list[str]:
+        """Chronique d'un scénario sans sonde, écrite dans `chemin` (artefact de la CI)
+        avec son annexe (journaux relevés par le scénario), et rendue."""
+        with self._lock:
+            events = list(self.evenements)
+        lines = chronologie(events, self.pods, debut, composants, self.erreurs, titre)
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        text = "\n".join(lines) + "\n"
+        if annexe:
+            text += "--- annexe\n" + annexe.rstrip("\n") + "\n"
+        chemin.write_text(text, encoding="utf-8")
         return lines
 
     def _start(self, target, *args) -> None:

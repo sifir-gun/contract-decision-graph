@@ -677,3 +677,52 @@ def test_rapport_prend_l_adresse_donnee_par_la_sonde():
     assert "adresse de la sonde 10.42.2.9 dans les ensembles de kube-router" in text
     assert "agent-1 à +0.90 s" in text
     assert "ensemble agent-1 : + KUBE-SRC-A 10.42.2.9 (sonde-abc)" in text
+
+
+# --- chronologie d'un autre scénario (enquête du 05/10 : clés de Dex injoignables) ------
+
+
+def test_chronologie_des_pods_choisis_sans_sonde():
+    from chronique import chronologie
+
+    pods = {
+        "cdg-proxy-a": {"composant": "proxy-de-sortie", "ip": "10.42.1.20"},
+        "web-a": {"composant": "web", "ip": "10.42.0.5"},
+        "pg-1": {"composant": "database", "ip": "10.42.1.3"},
+    }
+    events = [
+        Evenement(START + 2, "ensemble", "agent-1", "+ KUBE-SRC-T", "10.42.1.20"),
+        Evenement(START + 3, "ensemble", "agent-0", "+ KUBE-SRC-P", "10.42.1.3"),
+        Evenement(START + 1, "pod", "cdg-proxy-a", "prêt"),
+        Evenement(
+            START + 4,
+            "refus",
+            "agent-0",
+            "+3 KUBE-POD-FW-Y « rule to REJECT traffic destined for POD "
+            "name:langfuse-web-1 namespace: cdg-observabilite »",
+        ),
+    ]
+    lines = chronologie(
+        events, pods, START, ("web", "proxy-de-sortie"), [], "proxy de production"
+    )
+    text = "\n".join(lines)
+    assert lines[0] == "=== chronique : proxy de production, début 22:39:21.000 UTC ==="
+    assert "(+1.00 s) pod cdg-proxy-a : prêt" in text
+    assert "(+2.00 s) ensemble agent-1 : + KUBE-SRC-T 10.42.1.20 (cdg-proxy-a)" in text
+    assert "10.42.1.3" not in text  # ni la sonde ni un pod choisi
+    assert "refus hors de l'espace cdg : 3" in text
+    assert text.index("pod cdg-proxy-a : prêt") < text.index("ensemble agent-1")
+
+
+def test_chronologie_ecrite_avec_son_annexe(tmp_path):
+    from chronique import Chronique
+
+    suivi = Chronique([], "cdg", "cdg-proxy")
+    suivi._add(Evenement(START + 1, "pod", "cdg-proxy-a", "prêt"))
+    target = tmp_path / "chroniques" / "proxy-production.txt"
+    lines = suivi.ecrire_chronologie(
+        target, START, ("proxy-de-sortie",), "proxy", annexe="CONNECT dex.cdg.test"
+    )
+    written = target.read_text(encoding="utf-8")
+    assert written.startswith("\n".join(lines))
+    assert "--- annexe\nCONNECT dex.cdg.test\n" in written
