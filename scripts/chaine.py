@@ -275,8 +275,9 @@ def inventory(image: str, folder: Path, *, run: Run = subprocess.run) -> int:
     return 0
 
 
-def _exception_rule(entry: dict[str, Any], today: date) -> dict[str, Any]:
-    """Règle d'exception de Grype, après contrôle : justifiée, datée, non expirée."""
+def _exception_rule(entry: dict[str, Any], today: date, source: Path) -> dict[str, Any]:
+    """Règle d'exception de Grype, après contrôle : justifiée, datée, non expirée ; une
+    exception expirée nomme son fichier, `source` (produit ou images de test)."""
     name = entry.get("vulnerabilite") or "?"
     package = entry.get("paquet") or {}
     for field in ("nom", "type", "version"):
@@ -295,7 +296,7 @@ def _exception_rule(entry: dict[str, Any], today: date) -> dict[str, Any]:
     if today > expires:
         raise ValueError(
             f"exception {name} expirée le {expires.isoformat()} : la revoir "
-            f"({EXCEPTIONS.relative_to(ROOT)})"
+            f"({source.relative_to(ROOT) if source.is_relative_to(ROOT) else source})"
         )
     return {
         "vulnerability": name,
@@ -348,7 +349,7 @@ def signature_exceptions(path: Path, today: date) -> dict[str, str]:
 def grype_config(exceptions: Path, today: date) -> dict[str, Any]:
     data = yaml.safe_load(exceptions.read_text(encoding="utf-8")) or {}
     entries = data.get("exceptions") or []
-    return {"ignore": [_exception_rule(entry, today) for entry in entries]}
+    return {"ignore": [_exception_rule(entry, today, exceptions) for entry in entries]}
 
 
 def scan(

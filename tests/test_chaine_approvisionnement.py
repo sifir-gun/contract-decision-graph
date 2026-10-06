@@ -383,6 +383,17 @@ def test_exception_expiree_ou_incomplete_refusee(tmp_path, changes, message):
         module.scan(tmp_path, exceptions(tmp_path, **changes), today=TODAY, run=ok)
 
 
+@pytest.mark.parametrize(
+    "name", ["exceptions-vulnerabilites.yaml", "exceptions-vulnerabilites-tests.yaml"]
+)
+def test_exception_expiree_nomme_le_fichier_ou_la_revoir(name):
+    """Le message nomme le fichier de l'exception expirée : il nommait toujours celui
+    du produit, même pour une exception des images de test (signalé le 06/10)."""
+    module = chaine()
+    with pytest.raises(ValueError, match=re.escape(f"(securite/{name})")):
+        module.grype_config(ROOT / "securite" / name, date(2030, 1, 1))
+
+
 def test_inventaire_et_scan_apres_la_construction_en_ci_et_en_local():
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
