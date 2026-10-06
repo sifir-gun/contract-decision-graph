@@ -31,7 +31,7 @@ import httpx
 import jwt
 import pytest
 import yaml
-from chronique import SONDE, Chronique
+from chronique import SONDE, Chronique, retraits_avant_arret
 from test_chaine_approvisionnement import chaine
 
 pytestmark = pytest.mark.cluster
@@ -709,48 +709,31 @@ IDENTITY_EGRESS = (
 )
 
 
-def _journaux_du_proxy() -> str:
-    """Journaux des pods du proxy de sortie, horodatés, relevés avant sa remise en état
-    (ses pods de production disparaissent avec elle). Un échec du relevé est écrit,
-    jamais tu, et ne masque pas celui du scénario."""
-    result = subprocess.run(
-        KUBECTL
-        + ["logs", "-n", "cdg", "-l", "app.kubernetes.io/instance=cdg-proxy"]
-        + ["--all-containers", "--timestamps", "--prefix", "--tail=-1"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    if result.returncode != 0:
-        return f"relevé des journaux du proxy impossible : {result.stderr.strip()}"
-    # où sont les pods du proxy et de Traefik (nœud, adresse) : l'admission d'un pod neuf
-    # se lit sur le nœud de celui qu'il joint
-    placement = subprocess.run(
-        KUBECTL
-        + ["get", "pods", "-o", "wide", "-n", "cdg", "-l"]
-        + ["app.kubernetes.io/instance=cdg-proxy"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    traefik = subprocess.run(
-        KUBECTL + ["get", "pods", "-o", "wide", "-n", "traefik"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    return "\n".join(
-        [
-            result.stdout,
-            "--- pods du proxy",
-            placement.stdout or placement.stderr,
-            "--- pods de Traefik",
-            traefik.stdout or traefik.stderr,
-        ]
-    )
+# Smokescreen (commit 6c44698, `runServer`) écrit ce message à l'ordre d'arrêt, puis ferme
+# son port (http.Server.Shutdown, Go 1.26.8)
+PROXY = "proxy-de-sortie"
+ARRET_DU_PROXY = "quitting gracefully"
+
+
+def _arrets_du_proxy_attendus(suivi: Chronique, delai: float) -> None:
+    """Attend que chaque pod du proxy dont l'arrêt a été demandé écrive qu'il s'arrête,
+    après sa pause avant l'arrêt, dans la limite de `delai` ; au-delà, la preuve le dit,
+    pod par pod."""
+    deadline = time.monotonic() + delai
+    while time.monotonic() < deadline:
+        stopped = {
+            e.objet
+            for e in list(suivi.evenements)
+            if e.source == "pod"
+            and e.texte == "arrêt demandé"
+            and (suivi.pods.get(e.objet) or {}).get("composant") == PROXY
+        }
+        if all(
+            any(ARRET_DU_PROXY in line for line in list(suivi.journaux.get(pod, [])))
+            for pod in stopped
+        ):
+            return
+        time.sleep(0.5)
 
 
 def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
@@ -758,15 +741,34 @@ def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
 ):
     """Proxy aux valeurs de production (api.mistral.ai et le fournisseur d'identité,
     seulement) : l'analyse, pointée sur le serveur factice, échoue explicitement (rapport
-    d'échec, ESCALADE, revue humaine) ; il ne reçoit aucune requête. Enquête du 05/10
-    (503, clés de Dex injoignables à la première requête vers des pods neufs) :
-    chronique des pods de l'interface et du proxy, journaux du proxy de production
-    relevés avant sa remise en état ; écrites à chaque exécution (artefact de la CI),
-    imprimées en cas d'échec."""
+    d'échec, ESCALADE, revue humaine) ; il ne reçoit aucune requête. Enquête du 05 et
+    06/10 (503, clés de Dex injoignables juste après la mise à jour du proxy) : Smokescreen
+    ferme son port dès l'ordre d'arrêt, et kube-proxy retirait l'ancien pod des règles du
+    service jusqu'à 1,47 s plus tard. Preuve de la pause avant l'arrêt : à chacune des deux
+    mises à jour du proxy, chaque ancien pod a quitté les règles du service sur tous les
+    nœuds avant que Smokescreen s'arrête (relevés de kube-proxy et journaux suivis de la
+    chronique, écrite à chaque exécution dans l'artefact de la CI, imprimée en cas
+    d'échec)."""
     proxy = images["proxy"]
     chart = str(ROOT / "chart" / "cdg-proxy")
-    suivi, logs, passed = Chronique(KUBECTL, "cdg", "cdg-proxy"), "", False
+    values = (ROOT / "chart" / "cdg-proxy" / "values.yaml").read_text(encoding="utf-8")
+    pause = yaml.safe_load(values)["pauseAvantArret"]
+    suivi = Chronique(KUBECTL, "cdg", "cdg-proxy", journaux=(PROXY,))
+    proof: list[tuple[bool, str]] = []
+    passed = False
     start = time.time()
+
+    def bilan() -> list[tuple[bool, str]]:
+        return retraits_avant_arret(
+            list(suivi.evenements),
+            dict(suivi.pods),
+            {pod: list(lines) for pod, lines in suivi.journaux.items()},
+            suivi.noeuds,
+            PROXY,
+            ARRET_DU_PROXY,
+            start,
+        )
+
     try:
         with suivi:
             production = helm(
@@ -807,7 +809,6 @@ def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
                 )
                 seal_if_pending(pod, thread)
             finally:
-                logs = _journaux_du_proxy()
                 restored = helm(
                     "upgrade",
                     "cdg-proxy",
@@ -825,20 +826,38 @@ def test_adresse_d_api_autre_que_mistral_bloquee_en_configuration_de_production(
                     "300s",
                 )
                 assert restored.returncode == 0, restored.stderr
-        # une chronique inutilisable est dite : le diagnostic en dépend
+                # les anciens pods de la remise en état s'arrêtent après leur pause
+                _arrets_du_proxy_attendus(suivi, pause + 30)
+        # une chronique inutilisable est dite : la preuve en dépend
         assert not suivi.lacunes(), suivi.lacunes()
+        proof = bilan()
+        # deux mises à jour, deux anciens pods chacune : jamais une preuve vide
+        assert len(proof) == 4, proof
+        assert all(ok for ok, _ in proof), [text for ok, text in proof if not ok]
         passed = True
     finally:
+        found = proof or bilan()
+        logs = "\n".join(
+            f"[{name}] {line}"
+            for name, lines in sorted(suivi.journaux.items())
+            for line in lines
+        )
+        annex = (
+            "preuve (retrait des règles du service avant l'arrêt de Smokescreen) :\n"
+            + "\n".join(text for _, text in found)
+            + "\n--- journaux du proxy, suivis\n"
+            + logs
+        )
         lines = suivi.ecrire_chronologie(
             chroniques / "proxy-production.txt",
             start,
-            ("web", "proxy-de-sortie"),
+            ("web", PROXY),
             "proxy de sortie en configuration de production",
-            annexe=logs,
+            annexe=annex,
         )
         if not passed:
             with capsys.disabled():
-                print("\n" + "\n".join(lines) + "\n--- journaux du proxy\n" + logs)
+                print("\n" + "\n".join(lines) + "\n--- annexe\n" + annex)
 
 
 @pytest.fixture(scope="module")
