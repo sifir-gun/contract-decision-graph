@@ -11,7 +11,10 @@ horodatés à l'horloge du runner (celle des nœuds k3d et de la sonde : même n
   d'adresses (ipset) de kube-router ou en sortent, et les destinations du service suivi
   dans les règles de kube-proxy (enquête du 06/10 : le proxy de sortie ferme son port
   dès l'ordre d'arrêt ; un pod sorti de ces règles ne reçoit plus de nouvelle connexion
-  du service).
+  du service) ;
+- au besoin, les journaux des pods d'un composant, suivis dès qu'ils sont prêts : ils
+  restent lisibles après la disparition du pod (preuve du 06/10, qu'un ancien pod du proxy
+  quitte les règles du service sur tous les nœuds avant que Smokescreen s'arrête).
 
 kube-router (2.6.3-k3s1, celui de k3s 1.36.4) refuse par REJECT (ICMP « port
 injoignable » : « Connection refused » pour le client), dans une chaîne par pod renommée
@@ -295,6 +298,81 @@ def _adresse(destination: str) -> str:
     return destination.rpartition(":")[0].strip("[]")
 
 
+def instant_journal(ligne: str) -> tuple[float, str] | None:
+    """Instant et texte d'une ligne de `kubectl logs --timestamps` (RFC 3339, en UTC) ;
+    None pour une ligne sans horodatage."""
+    stamp, _, text = ligne.partition(" ")
+    try:
+        return datetime.fromisoformat(stamp).timestamp(), text
+    except ValueError:
+        return None
+
+
+def retraits_avant_arret(
+    evenements: list[Evenement],
+    pods: dict[str, dict],
+    journaux: dict[str, list[str]],
+    noeuds: list[str],
+    composant: str,
+    motif: str,
+    debut: float,
+) -> list[tuple[bool, str]]:
+    """Pour chaque pod du composant dont l'arrêt a été demandé : à l'instant où son
+    journal dit `motif` (le port fermé), la dernière règle relevée pour son adresse est un
+    retrait, sur chaque nœud ; un relevé daté au plus tard, donc une preuve, pas une
+    estimation. Un pod sans adresse, ou dont le journal ne dit jamais `motif`, échoue."""
+    stopped = sorted(
+        {
+            e.objet
+            for e in evenements
+            if e.source == "pod"
+            and e.texte == "arrêt demandé"
+            and (pods.get(e.objet) or {}).get("composant") == composant
+        }
+    )
+    results = []
+    for name in stopped:
+        address = pods[name].get("ip")
+        if not address:
+            results.append((False, f"{name} : adresse inconnue"))
+            continue
+        who = f"{name} {address}"
+        ends = [
+            found[0]
+            for found in map(instant_journal, journaux.get(name, []))
+            if found is not None and motif in found[1]
+        ]
+        if not ends:
+            results.append((False, f"{who} : arrêt jamais vu dans ses journaux"))
+            continue
+        end = min(ends)
+        late, removed = [], []
+        for node in noeuds:
+            seen = sorted(
+                (e.instant, e.texte[0])
+                for e in evenements
+                if e.source == "service"
+                and e.objet == node
+                and e.adresse == address
+                and e.instant < end
+            )
+            if not seen or seen[-1][1] != "-":
+                late.append(node)
+            else:
+                removed.append(seen[-1][0])
+        stop = f"{end - debut:+.2f} s"
+        if late:
+            text = f"encore dans les règles du service de {', '.join(late)} à l'arrêt"
+            results.append((False, f"{who} : {text} ({stop})"))
+        else:
+            last = f"{max(removed) - debut:+.2f} s"
+            text = f"retiré des règles du service sur {len(removed)} nœuds"
+            results.append(
+                (True, f"{who} : {text} au plus tard à {last} ; arrêt à {stop}")
+            )
+    return results
+
+
 def _heure(instant: float) -> str:
     return datetime.fromtimestamp(instant, UTC).strftime("%H:%M:%S.%f")[:-3]
 
@@ -494,10 +572,13 @@ class Chronique:
         *,
         docker: list[str] | None = None,
         intervalle: float = 0.5,
+        journaux: tuple[str, ...] = (),
     ):
         self._kubectl, self._espace, self._service = kubectl, espace, service
         self._docker = docker if docker is not None else ["docker"]
         self._intervalle = intervalle
+        self._journaux = journaux  # composants dont les journaux sont suivis
+        self.journaux: dict[str, list[str]] = {}  # lignes horodatées, par pod
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._threads: list[threading.Thread] = []
@@ -557,7 +638,9 @@ class Chronique:
 
     def __exit__(self, *exc: object) -> None:
         self._stop.set()
-        for process in self._watches:
+        with self._lock:
+            processes = list(self._watches)
+        for process in processes:
             process.terminate()
         for thread in self._threads:
             thread.join(15)
@@ -567,6 +650,10 @@ class Chronique:
         for what, count in self._recus.items():
             if count == 0:
                 self._error(f"suivi des {what} : aucun objet reçu")
+
+    @property
+    def noeuds(self) -> list[str]:
+        return list(self._releves)
 
     def lacunes(self) -> list[str]:
         """Ce qui rend la chronique inutilisable : un nœud jamais relevé, un suivi
@@ -651,6 +738,36 @@ class Chronique:
             self._add(Evenement(instant, "pod", name, change))
         with self._lock:
             self.pods[name] = state
+            # journaux suivis dès que le pod est prêt : son conteneur tourne
+            follow = (
+                state["composant"] in self._journaux
+                and state["pret"]
+                and name not in self.journaux
+                and not self._stop.is_set()
+            )
+            if follow:
+                self.journaux[name] = []
+        if follow:
+            self._start(self._logs, name)
+
+    def _logs(self, name: str) -> None:
+        process = subprocess.Popen(
+            self._kubectl
+            + ["logs", "-f", "--timestamps", "--all-containers", "-n", self._espace]
+            + [name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        with self._lock:
+            self._watches.append(process)
+        assert process.stdout is not None and process.stderr is not None
+        for line in process.stdout:
+            with self._lock:
+                self.journaux[name].append(line.rstrip("\n"))
+        if process.wait() != 0 and not self._stop.is_set():
+            detail = process.stderr.read().strip().splitlines()[:1]
+            self._error(f"journaux de {name} : {' '.join(detail) or '?'}")
 
     def _k8s_event(self, event: dict, instant: float) -> None:
         obj = event["object"]

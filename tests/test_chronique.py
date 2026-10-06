@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -21,11 +22,13 @@ from chronique import (
     decouper_releve,
     destinations,
     etat_pod,
+    instant_journal,
     membres,
     nouveaux_refus,
     objets_json,
     rapport,
     resume_tranche,
+    retraits_avant_arret,
     transitions,
 )
 
@@ -485,7 +488,12 @@ def watch(*events):
     for event in events:
         print(json.dumps(event), flush=True)  # une ligne, comme kubectl
     time.sleep(60)
-if "nodes" in args:
+if args[0] == "logs":
+    # suivi continu, horodaté : sinon, refusé comme une commande inattendue
+    if args[1:3] != ["-f", "--timestamps"]:
+        sys.exit(2)
+    print("2026-10-04T22:39:31.004061371Z " + json.dumps({"msg": "quitting gracefully"}))
+elif "nodes" in args:
     print(json.dumps({"items": [{"metadata": {"name": "noeud-1"}}]}))
 elif "pods" in args:
     pod = {"metadata": {"name": "web-a", "labels": {"app.kubernetes.io/component": "web"}},
@@ -569,6 +577,32 @@ def test_chronique_releve_pods_evenements_tranche_refus_et_ensembles(tmp_path):
     assert routed.depuis is not None and routed.depuis < routed.instant
     assert suivi.pods["web-a"]["ip"] == "10.42.0.5"
     assert suivi.erreurs == []
+
+
+def test_chronique_suit_les_journaux_des_pods_choisis_une_fois_prets(tmp_path):
+    """Les journaux d'un pod du composant choisi, suivis dès qu'il est prêt : ils restent
+    lisibles après sa disparition (un ancien pod du proxy part avec les siens)."""
+    from chronique import Chronique
+
+    kubectl, docker = factices(tmp_path, DOCKER)
+    with Chronique(
+        kubectl, "cdg", "sante", docker=docker, intervalle=0.1, journaux=("web",)
+    ) as suivi:
+        attendre(lambda: suivi.journaux.get("web-a"))
+    assert suivi.journaux["web-a"] == [
+        '2026-10-04T22:39:31.004061371Z {"msg": "quitting gracefully"}'
+    ]
+    assert suivi.noeuds == ["noeud-1"]
+    assert suivi.erreurs == []
+
+
+def test_journaux_suivis_seulement_pour_les_composants_choisis(tmp_path):
+    from chronique import Chronique
+
+    kubectl, docker = factices(tmp_path, DOCKER)
+    with Chronique(kubectl, "cdg", "sante", docker=docker, intervalle=0.1) as suivi:
+        attendre(lambda: any(e.texte == "prêt" for e in suivi.evenements))
+    assert suivi.journaux == {}
 
 
 def test_chronique_dit_quand_un_noeud_ne_peut_etre_releve(tmp_path):
@@ -816,6 +850,112 @@ def test_chronologie_dit_quand_kube_proxy_retire_un_pod_du_service():
         "22:39:26.000 (+5.00 s) service agent-1 : + cdg/cdg-proxy:proxy -> "
         "10.42.9.9:4750"
     ) in lines
+
+
+def test_instant_d_une_ligne_horodatee_par_kubectl():
+    line = '2026-10-04T22:39:31.004061371Z {"msg": "quitting gracefully"}'
+    when, text = instant_journal(line)
+    assert when == pytest.approx(START + 10.004061, abs=1e-6)
+    assert text == '{"msg": "quitting gracefully"}'
+    assert instant_journal("sans horodatage") is None
+
+
+# --- preuve : un ancien pod du proxy quitte le service partout avant de s'arrêter ----------
+
+PROXY = {
+    "cdg-proxy-a": {"composant": "proxy-de-sortie", "ip": "10.42.0.8"},
+    "cdg-proxy-x": {"composant": "proxy-de-sortie", "ip": None},
+    "web-a": {"composant": "web", "ip": "10.42.0.5"},
+}
+NOEUDS = ["agent-0", "agent-1"]
+ARRET = "quitting gracefully"
+
+
+def regle(t: float, node: str, sens: str, ip: str = "10.42.0.8") -> Evenement:
+    # vue au relevé de START + t, faite depuis le précédent, une demi-seconde plus tôt
+    text = f"{sens} cdg/cdg-proxy:proxy -> {ip}:4750"
+    return Evenement(START + t, "service", node, text, ip, START + t - 0.5)
+
+
+def ligne(t: float, message: str) -> str:
+    stamp = datetime.fromtimestamp(START + t, UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return stamp + " " + json.dumps({"msg": message})
+
+
+def bilan(events, logs):
+    return retraits_avant_arret(
+        events, PROXY, logs, NOEUDS, "proxy-de-sortie", ARRET, START
+    )
+
+
+def test_ancien_pod_retire_du_service_partout_avant_l_arret_de_smokescreen():
+    events = [
+        Evenement(START + 1, "pod", "cdg-proxy-a", "arrêt demandé"),
+        Evenement(START + 1, "pod", "web-a", "arrêt demandé"),  # pas un pod du proxy
+        regle(2.0, "agent-0", "-"),
+        regle(2.2, "agent-1", "-"),
+    ]
+    logs = {"cdg-proxy-a": [ligne(0, "starting"), ligne(11, ARRET)]}
+    assert bilan(events, logs) == [
+        (
+            True,
+            (
+                "cdg-proxy-a 10.42.0.8 : retiré des règles du service sur 2 nœuds au "
+                "plus tard à +2.20 s ; arrêt à +11.00 s"
+            ),
+        )
+    ]
+
+
+# toujours dans les règles d'agent-1 quand Smokescreen s'arrête
+ENCORE = (
+    "cdg-proxy-a 10.42.0.8 : encore dans les règles du service de agent-1 à l'arrêt "
+    "(+11.00 s)"
+)
+
+
+@pytest.mark.parametrize(
+    ("rules", "expected"),
+    [
+        # retiré après l'arrêt sur un nœud : la fenêtre n'est pas fermée
+        (
+            [regle(2.0, "agent-0", "-"), regle(12.0, "agent-1", "-")],
+            ENCORE,
+        ),
+        # jamais retiré d'un nœud
+        (
+            [regle(2.0, "agent-0", "-")],
+            ENCORE,
+        ),
+        # retiré, puis remis avant l'arrêt
+        (
+            [
+                regle(2.0, "agent-0", "-"),
+                regle(2.0, "agent-1", "-"),
+                regle(5.0, "agent-1", "+"),
+            ],
+            ENCORE,
+        ),
+    ],
+)
+def test_ancien_pod_encore_dans_le_service_a_l_arret_dit(rules, expected):
+    events = [Evenement(START + 1, "pod", "cdg-proxy-a", "arrêt demandé"), *rules]
+    logs = {"cdg-proxy-a": [ligne(11, ARRET)]}
+    assert bilan(events, logs) == [(False, expected)]
+
+
+def test_arret_jamais_vu_ou_adresse_inconnue_dits():
+    events = [
+        Evenement(START + 1, "pod", "cdg-proxy-a", "arrêt demandé"),
+        Evenement(START + 1, "pod", "cdg-proxy-x", "arrêt demandé"),
+        regle(2.0, "agent-0", "-"),
+        regle(2.0, "agent-1", "-"),
+    ]
+    logs = {"cdg-proxy-a": [ligne(0, "starting")]}
+    assert bilan(events, logs) == [
+        (False, "cdg-proxy-a 10.42.0.8 : arrêt jamais vu dans ses journaux"),
+        (False, "cdg-proxy-x : adresse inconnue"),
+    ]
 
 
 def test_chronologie_ecrite_avec_son_annexe(tmp_path):
