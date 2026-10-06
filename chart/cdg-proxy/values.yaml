@@ -12,6 +12,12 @@ image:
 replicas: 2
 port: 4750
 
+# Pause avant l'arrêt, en secondes : le temps d'être retiré des règles du service avant
+# que Smokescreen ferme son port (enquête du 05 et 06/10 : jusqu'à 1,47 s mesurées). Même
+# valeur que l'interface (web.pauseAvantArret), une seule règle ; 30 s s'y ajoutent pour
+# les tunnels ouverts (ADR 005).
+pauseAvantArret: 10
+
 # Liste d'accès : seuls ces domaines passent (Smokescreen, politique « enforce »). Sans
 # certificat client, toute requête prend la règle par défaut.
 domainesAutorises:

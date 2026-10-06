@@ -4,7 +4,8 @@ Sans helm : sa liste d'accès par défaut ne laisse passer que l'API de Mistral.
 (marqueur `chart`) : pods restreints, image par empreinte obligatoire, configuration DNS
 recommandée (`ndots: "2"`, le proxy résout api.mistral.ai), liste d'accès et plages
 refusées, règles réseau (entrée : les seuls pods de l'application ; sortie : le DNS et le
-port 443 hors des adresses privées), disponibilité et relance sur changement.
+port 443 hors des adresses privées), disponibilité et relance sur changement, pause avant
+l'arrêt (le temps d'être retiré du service, enquête du 05 et 06/10).
 """
 
 import ipaddress
@@ -229,6 +230,38 @@ def test_disponibilite_repartition_sans_bloquer_la_mise_a_jour(rendu):
     assert spread["maxSkew"] == 1
     budget = named(rendu, "PodDisruptionBudget", "cdg-proxy")
     assert budget["spec"]["minAvailable"] == 1
+
+
+@pytest.mark.chart
+def test_pause_avant_l_arret_le_temps_d_etre_retire_du_service(rendu):
+    """Enquête du 05 et 06/10 : Smokescreen ferme son port dès l'ordre d'arrêt, et
+    kube-proxy retire l'ancien pod des règles du service jusqu'à 1,47 s plus tard (trois
+    exécutions) : une connexion envoyée entre-temps est refusée. Pause avant l'arrêt,
+    action native sans shell (image distroless), puis 30 s laissées aux tunnels ouverts,
+    le délai par défaut de Kubernetes jusque-là."""
+    spec = named(rendu, "Deployment", "cdg-proxy")["spec"]["template"]["spec"]
+    [container] = spec["containers"]
+    assert container["lifecycle"] == {"preStop": {"sleep": {"seconds": 10}}}
+    assert spec["terminationGracePeriodSeconds"] == 10 + 30
+
+
+def test_meme_pause_avant_l_arret_que_l_application():
+    """Une seule règle pour les pods derrière un service : la pause du proxy est celle de
+    l'interface (décision du 06/10)."""
+    app = yaml.safe_load(
+        (ROOT / "chart" / "contract-decision-graph" / "values.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert values()["pauseAvantArret"] == app["web"]["pauseAvantArret"] == 10
+
+
+@pytest.mark.chart
+def test_pause_reglable_le_delai_d_arret_suit():
+    docs = render("--set", "pauseAvantArret=15")
+    spec = named(docs, "Deployment", "cdg-proxy")["spec"]["template"]["spec"]
+    assert spec["containers"][0]["lifecycle"]["preStop"]["sleep"]["seconds"] == 15
+    assert spec["terminationGracePeriodSeconds"] == 15 + 30
 
 
 @pytest.mark.chart
