@@ -3,7 +3,8 @@ composition de Langfuse, celles de l'exception de signatures, scannées à chaqu
 request par le job `cluster`, avant la création du cluster. Bloquant, comme pour le
 produit, mais contre un fichier d'exceptions propre aux tests, qui ne couvre jamais une
 image du produit. Chaque image est tirée, inventoriée, scannée, puis retirée si elle
-n'était pas déjà là (le disque du runner sert ensuite au cluster).
+n'était pas déjà là (le disque du runner sert ensuite au cluster). Toutes les images
+passent avant l'échec, qui les nomme toutes (décision du 06/10).
 """
 
 import subprocess
@@ -21,11 +22,13 @@ COMMAND = 'uv run --no-sync python scripts/chaine.py images-de-test --dossier "$
 
 class Runner:
     """Exécutant factice : note chaque commande ; une image est « présente » si son nom
-    est dans `present`, un scan « échoue » sur les images de `failing`."""
+    est dans `present`, un scan « échoue » sur les images de `failing`, un tirage sur
+    celles de `unpullable`."""
 
-    def __init__(self, present=(), failing=()):
+    def __init__(self, present=(), failing=(), unpullable=()):
         self.commands: list[list[str]] = []
         self.present, self.failing = set(present), set(failing)
+        self.unpullable = set(unpullable)
         self.scanned: list[str] = []
 
     def __call__(self, command, **kwargs):
@@ -37,6 +40,8 @@ class Runner:
             image = self.scanned[-1]
             code = 2 if image in self.failing else 0
             return subprocess.CompletedProcess(command, code, "", "")
+        if command[:2] == ["docker", "pull"] and command[2] in self.unpullable:
+            return subprocess.CompletedProcess(command, 1, "", "registre injoignable")
         if command[:2] == ["docker", "save"]:
             self.scanned.append(command[2])
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -60,12 +65,34 @@ def test_chaque_image_tiree_inventoriee_scannee_puis_retiree(tmp_path):
     assert len(grype) == len(images())
 
 
-def test_faille_non_couverte_arrete_tout(tmp_path, capsys):
+def test_faille_non_couverte_n_arrete_pas_les_autres_images(tmp_path, capsys):
+    """Décision du 06/10 : la liste complète des images refusées, pas la première
+    seulement (le 06/10, l'arrêt sur le worker de Langfuse laissait l'image web non
+    scannée)."""
     module = chaine()
-    runner = Runner(failing={images()[0]})
+    first, *_, last = images()
+    runner = Runner(failing={first, last})
     assert module.scan_test_images(tmp_path, today=TODAY, run=runner) == 1
-    assert runner.scanned == images()[:1]
-    assert images()[0] in capsys.readouterr().err
+    assert runner.scanned == images()
+    err = capsys.readouterr().err
+    assert f"image de test refusée : {first}" in err
+    assert f"image de test refusée : {last}" in err
+    assert err.rstrip().endswith(
+        f"images de test refusées : 2 sur {len(images())} ({first}, {last})"
+    )
+
+
+def test_tirage_impossible_n_arrete_pas_les_autres_images(tmp_path, capsys):
+    module = chaine()
+    first = images()[0]
+    runner = Runner(unpullable={first})
+    assert module.scan_test_images(tmp_path, today=TODAY, run=runner) == 1
+    assert runner.scanned == images()[1:]
+    err = capsys.readouterr().err
+    assert f"tirage impossible : {first}\nregistre injoignable" in err
+    assert err.rstrip().endswith(
+        f"images de test refusées : 1 sur {len(images())} ({first})"
+    )
 
 
 def test_exceptions_des_tests_a_part_justifiees_datees():
