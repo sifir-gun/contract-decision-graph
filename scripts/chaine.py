@@ -407,9 +407,12 @@ def scan(
 def scan_test_images(folder: Path, *, today: date, run: Run = subprocess.run) -> int:
     """Images de test sans signature (exception limitée aux tests, ADR 008) : chacune
     tirée, inventoriée, scannée contre les exceptions des tests, puis retirée si elle
-    n'était pas déjà là ; la première faille critique ou haute corrigeable non couverte
-    arrête tout, l'image nommée."""
+    n'était pas déjà là. Toutes passent avant l'échec (décision du 06/10 : la liste
+    complète, pas la première seulement) ; une faille critique ou haute corrigeable non
+    couverte, ou une image qui ne peut être tirée, la refuse, et le bilan nomme chaque
+    image refusée."""
     images = sorted(signature_exceptions(SIGNATURE_EXCEPTIONS, today))
+    refused: list[str] = []
     for image in images:
         target = folder / image.split("/")[-1].split(":")[0]
         present = run(
@@ -427,7 +430,8 @@ def scan_test_images(folder: Path, *, today: date, run: Run = subprocess.run) ->
                     f"tirage impossible : {image}\n{pulled.stderr.strip()}",
                     file=sys.stderr,
                 )
-                return 1
+                refused.append(image)
+                continue
         code = inventory(image, target, run=run)
         (target / "image.tar").unlink(
             missing_ok=True
@@ -443,7 +447,14 @@ def scan_test_images(folder: Path, *, today: date, run: Run = subprocess.run) ->
             )
         if code != 0:
             print(f"image de test refusée : {image}", file=sys.stderr)
-            return code
+            refused.append(image)
+    if refused:
+        print(
+            f"images de test refusées : {len(refused)} sur {len(images)} "
+            f"({', '.join(refused)})",
+            file=sys.stderr,
+        )
+        return 1
     print(
         f"images de test : {len(images)} scannées, sans faille critique ou haute corrigeable non couverte"
     )
