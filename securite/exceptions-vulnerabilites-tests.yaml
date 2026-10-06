@@ -37,3 +37,18 @@ exceptions:
       à la prochaine publication de l'image.
     decidee: 2026-10-04
     expire: 2026-12-31
+  - vulnerabilite: GHSA-68fv-2mgg-jv7q
+    paquet: {nom: source-map-js, type: npm, version: 1.2.1}
+    motif: >-
+      CVE-2026-93749, blocage de la boucle d'événements par un décalage de ligne démesuré
+      dans une carte de sources indexée (déni de service), corrigé en 1.2.2. Seulement dans
+      Langfuse worker 4.50.0 (scan complet du 06/10 : ni l'image web, ni ClickHouse, ni
+      Valkey), que le projet ne construit pas : dépendance transitive de next (par
+      next-auth, dans @langfuse/shared) et de magicast (par c12). Ni le code du worker ni
+      @langfuse/shared ne l'importent, ni postcss, magicast ou c12 ; le worker ne lance que
+      node worker/dist/index.js : aucune carte de sources lue, d'où qu'elle vienne. Image
+      de test seulement ; dans le cluster, le worker n'accepte que les pods de son espace.
+      Sortie : la mise à jour de Langfuse (4.53.0 ou suivante, qui embarque 1.2.2), d'ici
+      le 13/10 ; 30 jours au plus (décision du 06/10).
+    decidee: 2026-10-06
+    expire: 2026-11-05
