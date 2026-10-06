@@ -3158,3 +3158,34 @@ Trouvé par la chronique du scénario de mise à jour (branche `enquete-mise-a-j
 ### Nombre de tests
 
 - La suite principale passe de 2 348 à 2 350 ; le total, de 2 526 à 2 528.
+
+## 2026-10-06 · Scan des images de test : toutes les images, et `source-map-js` dans Langfuse worker (branche `scan-images-de-test`)
+
+Relance du job `cluster` de la PR 44 (06/10, 14:07) : échec avant la création du cluster, au scan des images de test. Langfuse worker 4.50.0 est refusé pour `source-map-js` 1.2.1 (GHSA-68fv-2mgg-jv7q, CVE-2026-93749, haute, corrigée en 1.2.2) : avis publié le 18/09, absent de la base de Grype lors du passage de la veille au soir. Aucun lien avec la PR 44 ; tous les jobs `cluster` échouent de même, `main` comprise. Le scan s'arrêtait à la première image refusée : l'image web et les suivantes restaient sans verdict.
+
+### Décisions du propriétaire (06/10)
+
+- Exception pour débloquer, dans une PR à part, avant tout le reste : le scan passe toutes les images avant d'échouer, pour la liste complète ; motif établi dans le code de Langfuse 4.50.0 (le worker lit-il des cartes de sources venues de l'extérieur ?) avant d'écrire l'exception ; exception limitée aux images de test, 30 jours au plus, sortie par la mise à jour de Langfuse. Arrêt pour la fusion, puis la PR 44 remise à jour avec `main`.
+- D'ici une semaine, une seconde PR : Langfuse à la dernière version qui corrige `source-map-js` (4.53.0 ou suivante), nouvelles empreintes, faits de l'ADR 008 revérifiés, exception `deepmerge-ts` revue, exception `source-map-js` supprimée.
+- PR 44 : aucune exécution qui n'a pas fait tourner les scénarios n'est comptée.
+
+### Scan complet
+
+- `scripts/chaine.py images-de-test` : chaque image est tirée, inventoriée et scannée ; une faille non couverte ou un tirage impossible la refuse ; le bilan nomme toutes les images refusées (code 1).
+- Lancé sur le poste : 4 images, une seule refusée, Langfuse worker, pour `source-map-js` seulement ; ni l'image web (sortie autonome de Next.js, sans `source-map-js`), ni ClickHouse, ni Valkey.
+
+### Motif, établi dans le code de la 4.50.0 et l'inventaire de l'image
+
+- Inventaire du worker : `source-map-js` 1.2.1 sous `/app/worker/node_modules/.pnpm/`, avec `postcss`, `next`, `magicast` et `c12` (dépendances de production du worker, `pnpm deploy --prod`).
+- Fichier de verrouillage du tag `v4.50.0` : deux chemins, `worker` → `@langfuse/shared` → `next-auth` → `next` → `postcss` → `source-map-js`, et `magicast` (par `c12`, chargeur de configuration de Prisma) → `source-map-js`.
+- Sources du tag : ni `worker/` ni `packages/shared/` (hors tests) n'importent `source-map-js`, `postcss`, `magicast` ou `c12` ; `@langfuse/shared` n'utilise de `next-auth` que des fournisseurs d'identité. Le point d'entrée du worker ne fait que construire l'adresse de la base, puis lance `node worker/dist/index.js` : aucune carte de sources lue, d'où qu'elle vienne.
+- Exposition : image de test seulement ; dans le cluster, l'espace de Langfuse refuse tout par défaut et le worker n'accepte que les pods de son espace.
+- Exception ajoutée à `securite/exceptions-vulnerabilites-tests.yaml`, décidée le 06/10, expire le 05/11 ; rescan des inventaires du worker et du web avec elle : aucune faille critique ou haute corrigeable.
+
+### À signaler
+
+- Le message d'une exception expirée nomme toujours le fichier des exceptions du produit (`_exception_rule`, `scripts/chaine.py`), même pour celles des tests. Non corrigé ici (hors de la décision) ; à traiter si le propriétaire le souhaite.
+
+### Nombre de tests
+
+- La suite principale passe de 2 350 à 2 352 (scan complet, tirage impossible, exception de 30 jours) ; le total, de 2 528 à 2 530.
