@@ -5,6 +5,7 @@ test échoue si l'empreinte diverge entre docker-compose.yml et le workflow.
 """
 
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -95,6 +96,35 @@ def test_check_sh_executable_et_arrete_au_premier_echec():
     assert [line for line in text.splitlines() if line.startswith("uv sync")] == [
         "uv sync --locked --all-groups"
     ]
+
+
+def test_check_sh_finit_par_une_ligne_sans_ambiguite():
+    """Décision du 06/10 : deux pushes après un check.sh en échec, lu par le code de
+    sortie d'une autre commande (un « ; echo », un « | tail »). check.sh écrit lui-même
+    sa dernière ligne, quoi qu'il arrive, et garde son code de sortie ; on ne pousse
+    qu'après avoir lu cette ligne (CLAUDE.md)."""
+    failed = subprocess.run(
+        [str(SCRIPT), "--option-inconnue"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert failed.returncode == 2
+    assert failed.stdout.splitlines()[-1] == "check.sh : ÉCHEC, code 2"
+    # le succès : la même fonction de sortie, appelée avec 0, sans relancer la CI
+    text = SCRIPT.read_text(encoding="utf-8")
+    end = re.search(r"^fin\(\) \{\n.*?^\}\n", text, re.MULTILINE | re.DOTALL)
+    assert end is not None, "fonction fin() introuvable dans scripts/check.sh"
+    done = subprocess.run(
+        ["bash", "-c", 'NETTOYER=""\n' + end[0] + "fin 0"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert done.stdout.splitlines()[-1] == "check.sh : SUCCÈS"
+    assert "trap 'fin $?' EXIT" in text
 
 
 # --- image : même construction et mêmes vérifications en CI et en local --------------------
