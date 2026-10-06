@@ -3157,11 +3157,27 @@ Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d
 1. Le proxy, pod neuf, pas encore admis par les règles réseau du nœud de Traefik (devant Dex) : même mécanisme que la sonde de la PR 42, du côté du proxy.
 2. Le pod de l'interface pas encore admis à joindre le pod neuf du proxy.
 3. Une indisponibilité ponctuelle de Dex ou de Traefik.
+4. (06/10, tirée des deux premières chroniques) Un ancien pod du proxy, en arrêt, qui reçoit encore une nouvelle connexion du service : Smokescreen ferme son port dès l'ordre d'arrêt (sa sonde de disponibilité est refusée 1,1 s plus tard), son chart n'a pas d'attente avant l'arrêt (`preStop`), et la requête du scénario part environ 2 s après le dernier ordre d'arrêt, `helm --wait` rendant la main dès la fin du remplacement. Tant que kube-proxy n'a pas retiré l'ancien pod des règles du service, la connexion peut lui être envoyée, refusée sans trace dans les journaux du proxy : même `cause` que la piste 1 (`URLError/ConnectionRefusedError`).
 
 ### Instrumentation
 
 - **Journal d'accès** : `fournisseur_injoignable` porte une `cause`, l'erreur réseau par son type et au plus un code, jamais par son message (`oidc.cause_reseau` : `URLError/ConnectionRefusedError`, `URLError/OSError tunnel 502` pour un refus du proxy à l'ouverture du tunnel, `HTTPError 503`…), lue sous l'erreur de PyJWT 2.15.1, qui enchaîne l'erreur d'origine.
 - **Scénario** : chronique des pods de l'interface et du proxy (nœud, adresse, prêt, arrêt), de leurs événements, de la tranche d'adresses du service du proxy, des refus et des adresses entrant dans les ensembles de kube-router sur chaque nœud ; journaux du proxy de production et place des pods du proxy et de Traefik relevés avant sa remise en état. Écrite à chaque exécution dans l'artefact de la CI (`proxy-production.txt`), imprimée en cas d'échec ; l'artefact, qui porte désormais deux chroniques, devient `chroniques-du-cluster` (au lieu de `chronique-mise-a-jour`).
+
+### Deux exécutions instrumentées sans échec (06/10)
+
+- Le job `cluster` passe sur 843a21d, puis sur fb9fe3f (mise à jour avec `main`). Dans les deux chroniques, kube-router admet chaque pod neuf du proxy sur les trois nœuds environ 0,5 s après son démarrage, bien avant qu'il soit prêt ; les deux lectures de clés de l'application passent par les pods neufs et réussissent (`CONNECT dex.cdg.test:443`, 4 à 11 ms). Rien ne départage encore les pistes. La chronique de la mise à jour progressive, elle, ne perd aucune requête (2 059 et 2 062 réponses).
+
+### Décisions du propriétaire (06/10)
+
+- Ajouter le relevé du moment où kube-proxy retire l'ancien pod des règles du service, puis pousser ; le compteur reprend à trois relances restantes à partir de ce push.
+- Si aucune relance n'échoue, ne rien corriger d'office : présenter les deux corrections défendables par elles-mêmes, avec leur coût. D'une part, une attente avant l'arrêt (`preStop`) pour le proxy de sortie, comme celle de l'application, pour qu'il ne ferme pas son port tant que le service peut encore lui envoyer du trafic ; d'autre part, une reprise bornée de la lecture des clés de Dex, ou leur chargement avant que le pod se déclare prêt. L'échec reste explicite dans tous les cas.
+
+### Instrumentation complétée (06/10)
+
+- **Règles de kube-proxy** : à chaque relevé d'un nœud (deux par seconde), la chronique lit aussi la table `nat` (`iptables-save -t nat`) et note chaque destination du service suivi qui entre dans les règles de kube-proxy ou en sort, datée entre deux relevés, avec le pod qui la porte (`tests/chronique.py`, `destinations`). Vérifié dans le code installé, pas de mémoire : k3s 1.36.4 lance kube-proxy en mode `iptables` (`kubeProxyArgs`) ; Kubernetes 1.36.4 écrit une règle par destination dans la chaîne `KUBE-SVC` du service (`KUBE-SVL` en trafic local), commentée `espace/service:port -> adresse:port` (`writeServiceToEndpointRules`), avec les seules destinations prêtes (à défaut, celles en arrêt qui servent encore).
+- Un relevé sans l'un de ses séparateurs (`#nat`, `#ipset`) est noté « relevé illisible », jamais lu à moitié ni compté.
+- La chronique de la mise à jour progressive, qui suit le service de santé, en profite.
 
 ### Fait trouvé en passant : une fenêtre sans droits dans `setup-db`
 
@@ -3171,3 +3187,4 @@ Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d
 ### Nombre de tests
 
 - La suite principale passe de 2 348 à 2 360 (cause de l'injoignabilité, chronologie sans sonde) ; le total, après la fusion de la PR 43, de 2 526 à 2 538.
+- 06/10 : de 2 360 à 2 367 (règles de kube-proxy, relevé illisible) ; le total de 2 538 à 2 545.
