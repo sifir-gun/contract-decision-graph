@@ -4,12 +4,15 @@ seuls ne suffisent plus. Refus explicites (401, 503) tracés au journal des acc�
 reçoit ni jeton, ni e-mail, ni nom. Déconnexion : session d'oauth2-proxy effacée, puis
 session du fournisseur fermée quand il le permet et que le chart le demande."""
 
+import asyncio
 import html
 import json
 import logging
 import re
+import time
 from urllib.parse import parse_qs, quote, urlsplit
 
+import httpx
 import pytest
 from doubles import ANALYSTE, ISSUER, FakeVerifier
 from fastapi.testclient import TestClient
@@ -90,6 +93,51 @@ def test_fournisseur_injoignable_503_distinct_d_un_refus(caplog):
     assert event["evenement"] == "fournisseur_injoignable"
     # la cause, par son type (enquête du 05/10) ; jamais un message ni une adresse
     assert event["cause"] == "URLError/ConnectionRefusedError"
+
+
+class SlowVerifier(FakeVerifier):
+    """Lecture des clés lente : `verify` bloque son fil `delai` secondes, comme une
+    lecture réseau (délai de 5 s du vérificateur réel, `adapters/oidc.py`)."""
+
+    def __init__(self, delai: float):
+        super().__init__()
+        self.delai = delai
+
+    def verify(self, token: str):
+        time.sleep(self.delai)
+        return super().verify(token)
+
+
+def test_lecture_de_cles_lente_ne_bloque_pas_les_autres_requetes():
+    """Une lecture de clés lente ne retient que sa requête : une autre, sans jeton, est
+    refusée (401) sans l'attendre. Le serveur n'a qu'une boucle par pod : un appel
+    bloquant dans le middleware y arrêtait toutes les requêtes."""
+    app = create_app(
+        memory_service(),
+        authentication=Authentication(
+            verifier=SlowVerifier(1.0),
+            public_origin=PUBLIC,
+            client_id="cdg-interface",
+            roles={"analyste": ("cdg-analystes",), "relecteur": ("cdg-relecteurs",)},
+            provider_logout=False,
+        ),
+    )
+
+    async def scenario() -> tuple[int, int, float]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="https://127.0.0.1:8000"
+        ) as http:
+            start = time.monotonic()
+            slow = asyncio.create_task(http.get("/", headers=BEARER))
+            await asyncio.sleep(0.2)  # la lecture lente a commencé
+            refused = await http.get("/")
+            when = time.monotonic() - start
+            return (await slow).status_code, refused.status_code, when
+
+    slow, refused, when = asyncio.run(scenario())
+    assert (slow, refused) == (200, 401)
+    assert when < 0.6, f"refus rendu à {when:.2f} s : la boucle attendait la lecture"
 
 
 def test_jeton_valide_page_servie_avec_le_nom_affiche_et_la_deconnexion():

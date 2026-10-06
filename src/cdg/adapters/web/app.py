@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import DictLoader, Environment, StrictUndefined
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 
@@ -218,7 +219,7 @@ def create_app(
         name = security.host_name(request.headers.get("host", ""))
         length = request.headers.get("content-length", "")
         posted = request.method == "POST"
-        refused = None if authentication is None else authenticate(request)
+        refused = None if authentication is None else await authenticate(request)
         if refused is None and authentication is not None:
             refused = authorize(request)
         if hosts is not None and name not in hosts:
@@ -346,15 +347,19 @@ def create_app(
             return Actor(canal="locale", authentifie=False)
         return authorization.interface_actor(request.state.identity)
 
-    def authenticate(request: Request) -> Response | None:
-        """Jeton d'identité vérifié, ou la réponse de refus (401, 503), tracée."""
+    async def authenticate(request: Request) -> Response | None:
+        """Jeton d'identité vérifié, ou la réponse de refus (401, 503), tracée. Le
+        vérificateur peut lire les clés du fournisseur (jusqu'à 5 s) : appelé dans un
+        fil, jamais dans la boucle du serveur, la seule du pod (06/10)."""
         assert authentication is not None
         where = {"methode": request.method, "chemin": request.url.path}
         token = bearer(request.headers.get("authorization"))
         try:
             if token is None:
                 raise IdentityRejected("jeton_absent")
-            request.state.identity = authentication.verifier.verify(token)
+            request.state.identity = await run_in_threadpool(
+                authentication.verifier.verify, token
+            )
         except IdentityRejected as exc:
             acces.event("acces_refuse", motif=exc.reason, **where, statut=401)
             response = page(
