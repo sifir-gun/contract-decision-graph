@@ -3272,3 +3272,30 @@ Relance du job `cluster` de la PR 44 (06/10, 14:07) : échec avant la création 
 ### Nombre de tests
 
 - La suite principale passe de 2 350 à 2 352 (scan complet, tirage impossible, exception de 30 jours) ; le total, de 2 528 à 2 530.
+
+## 2026-10-06 · Jeton vérifié hors de la boucle du serveur (branche `jetons-hors-boucle`)
+
+Trouvé pendant l'enquête sur les clés de Dex injoignables (PR 44) : la vérification des jetons bloquait toutes les requêtes du pod pendant une lecture de clés lente.
+
+### Décisions du propriétaire (06/10)
+
+- Tâche à part, après la PR 44 : cause et correction présentées d'abord, avec un test qui montre le blocage avant la correction.
+- Correction retenue : `authenticate` asynchrone, seul l'appel au vérificateur dans un fil (`run_in_threadpool`), sans réserve de fils à part ; le test doit passer avec un refus vers 0,2 s, toute la suite de l'interface inchangée.
+
+### Cause
+
+- Le middleware `guard` (`adapters/web/app.py`), asynchrone, appelait `authenticate`, puis `verifier.verify`, dans la boucle du serveur ; uvicorn tourne en un seul processus, la boucle est la seule du pod. Pendant un `verify` qui lit le réseau, plus rien n'avançait : ni les autres requêtes, ni l'envoi des réponses prêtes, ni l'arrêt propre. Les sondes de santé, dans leur propre fil et leur propre boucle, n'étaient pas touchées.
+- Le vérificateur lit le réseau, jusqu'à 5 s par lecture (`TIMEOUT_SECONDS`) : à la première requête du processus (découverte, puis clés) ; toutes les 5 minutes, à l'expiration du cache des clés ; sur une clé inconnue, au plus une fois par 30 s ; et à chaque requête tant que le fournisseur est injoignable (PyJWT 2.15.1 n'écrit son cache qu'après un succès ; la découverte n'est mémorisée qu'une fois lue).
+
+### Test d'abord, puis correction
+
+- `test_lecture_de_cles_lente_ne_bloque_pas_les_autres_requetes` : une doublure du vérificateur dure 1 s ; une requête authentifiée part, puis, 0,2 s plus tard, une requête sans jeton, qui ne demande aucune lecture. Avant la correction : refusée à 1,02 s, après la vérification de l'autre.
+- Correction : `authenticate` asynchrone ; seul l'appel au vérificateur passe dans un fil (`run_in_threadpool`, Starlette 1.7.0 : les fils d'anyio, 40 au plus dans anyio 4.15.1, ceux des routes synchrones) ; refus 401 et 503, journal d'accès et cause inchangés. Après : refus à 0,20 s (trois mesures, de 0,203 à 0,206 s), la requête lente servie à 1,02 s.
+
+### Piste notée, non faite
+
+- Fournisseur injoignable : chaque requête retente une lecture, jusqu'à 5 s ; en panne longue, les fils pourraient se remplir. Parade possible : mémoriser l'échec quelques secondes et refuser aussitôt, en 503 explicite.
+
+### Nombre de tests
+
+- La suite principale passe de 2 380 à 2 381 ; le total, de 2 560 à 2 561.
