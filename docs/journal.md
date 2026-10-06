@@ -3182,9 +3182,32 @@ Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d
 ### Fait trouvé en passant : une fenêtre sans droits dans `setup-db`
 
 - Pendant la vérification locale de la PR 43, `tests/test_verify.py` a échoué une fois sur `permission denied for table checkpoints` (PostgreSQL local, 21:31:15), puis a passé seul. `setup_database` (`adapters/langgraph/checkpointer.py`) retire tous les droits d'`app_role` sur les tables du checkpointer, puis les rend, en deux commandes en autocommit : entre les deux, une autre session d'`app_role` est refusée. La fixture de session `pg` l'exécute au début de chaque session de tests : deux suites lancées en même temps sur la base locale se gênent.
-- La même fenêtre existe dans le cluster : `setup-db` est la tâche Helm `pre-upgrade`, lancée pendant que les anciens pods servent. Une analyse qui écrit son point de reprise à cet instant échouerait. À présenter au propriétaire avant toute correction (piste : retirer et rendre les droits dans une seule transaction).
+- La même fenêtre existe dans le cluster : `setup-db` est la tâche Helm `pre-upgrade`, lancée pendant que les anciens pods servent. Une analyse qui écrit son point de reprise à cet instant échouerait. Corrigé par la PR 45 : retrait et octroi dans une seule transaction (entrée du 06/10).
 
 ### Nombre de tests
 
 - La suite principale passe de 2 348 à 2 360 (cause de l'injoignabilité, chronologie sans sonde) ; le total, après la fusion de la PR 43, de 2 526 à 2 538.
-- 06/10 : de 2 360 à 2 367 (règles de kube-proxy, relevé illisible) ; le total de 2 538 à 2 545.
+- 06/10 : de 2 360 à 2 367 (règles de kube-proxy, relevé illisible) ; avec les 2 tests de la PR 45, fusionnée entre-temps, 2 369 dans la suite principale et 2 547 au total.
+
+## 2026-10-06 · `setup-db` en une transaction, et la dernière ligne de `check.sh` (branche `setup-db-transaction`)
+
+### Décisions du propriétaire (06/10)
+
+- La cause est établie (journal du 05/10, enquête sur les clés de Dex, « fait trouvé en passant ») : une PR à part, après la fusion de la PR 43. D'abord un test qui reproduit le refus pendant `setup-db` (une session `app_role` concurrente), puis la correction : retirer et rendre les droits dans une seule transaction.
+- Méthode : « c'est la deuxième fois que tu pousses après un `check.sh` en échec, en lisant le code de sortie d'une autre commande. Rends l'erreur impossible plutôt que de compter sur l'attention » : `check.sh` écrit lui-même sa dernière ligne sans ambiguïté et garde son code de sortie même derrière un tube ; règle dans CLAUDE.md : on ne pousse qu'après avoir lu cette ligne.
+
+### `setup-db`
+
+- **Test d'abord** (`test_setup_database_jamais_sans_droits_pour_une_session_d_app_role`) : juste après le retrait des droits, une session d'`app_role` concurrente lit `checkpoints`, lecture bornée à 5 secondes pour qu'une attente sur un verrou soit dite. Avant la correction : refusée, de façon déterministe.
+- **Correction** : retrait et octroi dans une seule transaction (`conn.transaction()`, psycopg 3.3.6) ; les autres sessions voient les anciens droits jusqu'à la validation, sans attendre (le test passe en moins d'une seconde).
+- **Portée** : la base locale, où deux suites de tests se croisaient, et le cluster, où `setup-db` est la tâche Helm `pre-upgrade`, lancée pendant que les anciens pods servent.
+
+### `check.sh`
+
+- Un piège de sortie écrit la dernière ligne, quoi qu'il arrive : « check.sh : SUCCÈS » ou « check.sh : ÉCHEC, code N » ; il reprend le nettoyage du dossier temporaire (un second piège aurait remplacé le premier). Le code de sortie reste celui de l'échec ; `set -euo pipefail` arrête le script sur un échec dans un tube.
+- Test : une option inconnue donne le code 2 et la ligne « check.sh : ÉCHEC, code 2 » ; la fonction de sortie, appelée avec 0, écrit « check.sh : SUCCÈS ».
+- CLAUDE.md : on ne pousse qu'après avoir lu cette ligne, jamais le code d'une commande qui englobe `check.sh` ; une seule suite de tests à la fois sur la base locale.
+
+### Nombre de tests
+
+- La suite principale passe de 2 348 à 2 350 ; le total, de 2 526 à 2 528.
