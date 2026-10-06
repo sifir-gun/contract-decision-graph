@@ -7,8 +7,11 @@ horodatés à l'horloge du runner (celle des nœuds k3d et de la sonde : même n
 - l'état des pods de l'espace (nœud, adresse, prêt, arrêt) et ses événements Kubernetes ;
 - la tranche d'adresses (EndpointSlice) du service visé par la sonde ;
 - sur chaque nœud, deux fois par seconde, les règles de refus (REJECT de kube-router et de
-  kube-proxy) dont le compteur augmente, et les adresses qui entrent dans les ensembles
-  d'adresses (ipset) de kube-router ou en sortent.
+  kube-proxy) dont le compteur augmente, les adresses qui entrent dans les ensembles
+  d'adresses (ipset) de kube-router ou en sortent, et les destinations du service suivi
+  dans les règles de kube-proxy (enquête du 06/10 : le proxy de sortie ferme son port
+  dès l'ordre d'arrêt ; un pod sorti de ces règles ne reçoit plus de nouvelle connexion
+  du service).
 
 kube-router (2.6.3-k3s1, celui de k3s 1.36.4) refuse par REJECT (ICMP « port
 injoignable » : « Connection refused » pour le client), dans une chaîne par pod renommée
@@ -112,19 +115,27 @@ print(json.dumps({{"admise": True, "ok": ok, "ko": ko, "debut": debut,
                   "echecs": echecs[:20], "instances": instances}}))
 """
 
-# relevé d'un nœud k3d : règles du filtre avec leurs compteurs, puis ensembles d'adresses
-# (outils de k3s, dans /bin/aux, sur le PATH de l'image)
-RELEVE = "iptables-save -c -t filter && echo '#ipset' && ipset save"
+# relevé d'un nœud k3d : règles du filtre avec leurs compteurs, règles de traduction
+# d'adresses (kube-proxy), puis ensembles d'adresses (outils de k3s, dans /bin/aux, sur
+# le PATH de l'image)
+RELEVE = (
+    "iptables-save -c -t filter && echo '#nat' && iptables-save -t nat"
+    " && echo '#ipset' && ipset save"
+)
 
 
 @dataclass(frozen=True)
 class Evenement:
     instant: float  # secondes depuis l'époque, horloge du runner
-    source: str  # pod, evenement, tranche, refus, ensemble
+    source: str  # pod, evenement, tranche, refus, ensemble, service
     objet: str  # pod, objet Kubernetes, tranche ou nœud concerné
     texte: str
     adresse: str | None = None  # adresse entrée dans un ensemble, ou sortie
     depuis: float | None = None  # relevé précédent : le fait date d'entre les deux
+
+
+class ReleveIllisible(Exception):
+    """Relevé d'un nœud sans l'un de ses séparateurs : jamais lu à moitié."""
 
 
 class FluxIllisible(Exception):
@@ -246,6 +257,44 @@ def membres(texte: str) -> set[tuple[str, str]]:
     }
 
 
+def decouper_releve(texte: str) -> tuple[str, str, str]:
+    """Règles du filtre, règles de traduction d'adresses et ensembles d'un relevé."""
+    rules, found, rest = texte.partition("\n#nat\n")
+    if not found:
+        raise ReleveIllisible("séparateur #nat absent")
+    nat, found, sets = rest.partition("\n#ipset\n")
+    if not found:
+        raise ReleveIllisible("séparateur #ipset absent")
+    return rules, nat, sets
+
+
+# kube-proxy 1.36.4 en mode iptables, celui de k3s 1.36.4 (`kubeProxyArgs`) : une règle
+# par destination du service dans sa chaîne KUBE-SVC (KUBE-SVL en trafic local),
+# commentée « espace/service:port -> adresse:port » (`writeServiceToEndpointRules`) ;
+# seules les destinations prêtes y figurent (à défaut, celles en arrêt qui servent encore)
+_DESTINATION = re.compile(r"^-A KUBE-SV[CL]-\S+ (.*)$")
+
+
+def destinations(texte: str, espace: str, service: str) -> set[tuple[str, str]]:
+    """(port du service, destination) des règles de kube-proxy pour `espace/service`,
+    lues dans `iptables-save -t nat`."""
+    name, found = f"{espace}/{service}", set()
+    for line in texte.splitlines():
+        rule = _DESTINATION.match(line)
+        comment = _COMMENTAIRE.search(rule[1]) if rule else None
+        if comment is None:
+            continue
+        port, arrow, target = (comment[1] or comment[2]).partition(" -> ")
+        if arrow and (port == name or port.startswith(name + ":")):
+            found.add((port, target))
+    return found
+
+
+def _adresse(destination: str) -> str:
+    """Adresse d'une destination « adresse:port » (IPv6 entre crochets)."""
+    return destination.rpartition(":")[0].strip("[]")
+
+
 def _heure(instant: float) -> str:
     return datetime.fromtimestamp(instant, UTC).strftime("%H:%M:%S.%f")[:-3]
 
@@ -287,6 +336,13 @@ def _lignes(
                 outside += int(event.texte.split()[0])
                 continue
             text = f"refus {event.objet} : {event.texte}"
+            if event.depuis is not None:
+                text += f", depuis {event.depuis - start:+.2f} s"
+        elif event.source == "service":
+            # toutes les destinations du service suivi, d'un pod connu ou non
+            text = f"service {event.objet} : {event.texte}"
+            if event.adresse in owners:
+                text += f" ({owners[event.adresse]})"
             if event.depuis is not None:
                 text += f", depuis {event.depuis - start:+.2f} s"
         elif event.source == "evenement":
@@ -616,7 +672,7 @@ class Chronique:
             self._add(Evenement(instant, "tranche", name, text))
 
     def _poll(self, node: str) -> None:
-        previous: tuple[float, dict, set] | None = None
+        previous: tuple[float, dict, set, set] | None = None
         while not self._stop.is_set():
             begun = time.time()
             try:
@@ -642,16 +698,26 @@ class Chronique:
                     f"{node} : {' '.join(first) or f'code {result.returncode}'}"
                 )
             else:
-                rules, _, sets = result.stdout.partition("\n#ipset\n")
-                counts, members = compteurs_de_refus(rules), membres(sets)
-                if previous is not None:
-                    self._compare(node, previous, instant, counts, members)
-                previous = (instant, counts, members)
-                self._releves[node] += 1
+                try:
+                    rules, nat, sets = decouper_releve(result.stdout)
+                except ReleveIllisible as exc:
+                    self._error(f"{node} : relevé illisible ({exc})")
+                else:
+                    current = (
+                        instant,
+                        compteurs_de_refus(rules),
+                        membres(sets),
+                        destinations(nat, self._espace, self._service),
+                    )
+                    if previous is not None:
+                        self._compare(node, previous, current)
+                    previous = current
+                    self._releves[node] += 1
             self._stop.wait(max(0.0, self._intervalle - (time.time() - begun)))
 
-    def _compare(self, node, previous, instant, counts, members) -> None:
-        since, old_counts, old_members = previous
+    def _compare(self, node, previous, current) -> None:
+        since, old_counts, old_members, old_targets = previous
+        instant, counts, members, targets = current
         for (chain, comment), added in nouveaux_refus(old_counts, counts):
             text = f"+{added} {chain} « {comment} »"
             self._add(Evenement(instant, "refus", node, text, None, since))
@@ -659,3 +725,13 @@ class Chronique:
             self._add(Evenement(instant, "ensemble", node, f"+ {name}", address, since))
         for name, address in sorted(old_members - members):
             self._add(Evenement(instant, "ensemble", node, f"- {name}", address, since))
+        for port, target in sorted(targets - old_targets):
+            text = f"+ {port} -> {target}"
+            self._add(
+                Evenement(instant, "service", node, text, _adresse(target), since)
+            )
+        for port, target in sorted(old_targets - targets):
+            text = f"- {port} -> {target}"
+            self._add(
+                Evenement(instant, "service", node, text, _adresse(target), since)
+            )
