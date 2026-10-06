@@ -3179,6 +3179,35 @@ Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d
 - Un relevé sans l'un de ses séparateurs (`#nat`, `#ipset`) est noté « relevé illisible », jamais lu à moitié ni compté.
 - La chronique de la mise à jour progressive, qui suit le service de santé, en profite.
 
+### Trois relances, scénarios compris, sans échec (06/10)
+
+- Après la PR 46 (scan des images de test débloqué ; une exécution qui n'a pas fait tourner les scénarios ne compte pas, décision du 06/10) : trois exécutions du job `cluster` sur 85498ef, toutes passées.
+- Mesures, par le relevé de kube-proxy : à l'ordre d'arrêt, Smokescreen écrit « quitting gracefully » et ferme son port (`runServer` au commit 6c44698, puis `http.Server.Shutdown`, qui ferme d'abord les ports d'écoute dans Go 1.26.8) ; kube-proxy retire l'ancien pod des règles du service sur les trois nœuds 0,14 à 1,47 s plus tard (six anciens pods), une synchronisation par seconde au plus (`MinSyncPeriod` de 1 s, Kubernetes 1.36.4, que k3s ne change pas). Les nouveaux pods entrent dans les règles 0,05 à 0,5 s après qu'ils sont prêts ; kube-router les admet environ 0,5 s après leur démarrage, bien avant.
+- Les lectures de clés du scénario partent 1,1 à 2,7 s après le dernier retrait, par les nouveaux pods, et réussissent. La chronique de la mise à jour progressive ne perd aucune requête (2 049, 2 057 et 2 064 réponses).
+- Pistes : 1 et 2 contredites par les mesures (pods neufs du proxy admis bien avant d'être prêts, et kube-proxy n'envoie de trafic qu'aux pods prêts) ; 4, mécanisme démontré, fenêtre mesurée ; 3, jamais observée, non exclue.
+
+### Correction retenue (décision du propriétaire, 06/10)
+
+- Présentées sans rien appliquer : A, une pause avant l'arrêt du proxy de sortie ; B, côté application, une reprise bornée de la lecture des clés (B1) ou leur chargement avant que le pod se déclare prêt (B2).
+- A retenue, dans cette PR : `preStop.sleep` de 10 s, la valeur de l'interface (une seule règle, et de la marge si les nœuds sont chargés) ; `terminationGracePeriodSeconds` à la pause plus 30 s ; tests du rendu ; preuve dans le scénario. B2 refusée : les déploiements dépendraient de Dex. B1 : non pour l'instant.
+- Tâche à part, après cette PR : la vérification des jetons s'exécute dans le middleware asynchrone et bloque toutes les requêtes du pod pendant une lecture de clés lente (jusqu'au délai de 5 s). Cause et correction (vérification hors de la boucle du serveur) à présenter d'abord, avec un test qui montre le blocage avant la correction.
+
+### Correction et preuve
+
+- Chart `cdg-proxy` : `pauseAvantArret: 10` (entier positif ou nul), `preStop.sleep`, `terminationGracePeriodSeconds` à la pause plus 30 s ; un test vérifie que la pause du proxy est celle de l'interface.
+- Scénario du proxy de production : à chacune des deux mises à jour (production, puis remise en état), chaque ancien pod doit avoir quitté les règles du service sur tous les nœuds avant que Smokescreen écrive « quitting gracefully » ; quatre pods, jamais une preuve vide. Le scénario attend l'arrêt des anciens pods de la remise en état (pause plus 30 s au plus) : une dizaine de secondes de plus.
+- Chronique : journaux des pods du proxy suivis en continu dès qu'ils sont prêts (`kubectl logs -f --timestamps`), lisibles après la disparition du pod ; preuve calculée par `retraits_avant_arret` à partir de relevés datés au plus tard : une preuve, pas une estimation.
+
+### Instrumentation retirée, gardée
+
+- Retirés : le relevé ponctuel des journaux du proxy avant sa remise en état, remplacé par le suivi continu ; la place des pods du proxy et de Traefik, qui servait aux pistes 1 et 2.
+- Gardés : le relevé des règles de kube-proxy et le suivi des journaux, qui portent la preuve ; la chronique du proxy, artefact de chaque exécution ; la cause dans le journal d'accès (`fournisseur_injoignable`), diagnostic du produit : c'est elle qui dira la cause d'un prochain 503.
+
+### Ce qui reste non prouvé
+
+- La cause exacte du 503 du 05/10 : le journal d'accès ne notait pas encore la cause, et aucune des trois relances n'a échoué. La fenêtre mesurée l'explique, sans le démontrer.
+- La piste 3, une indisponibilité ponctuelle de Dex ou de Traefik : jamais observée, non exclue ; un prochain 503 dira sa cause dans le journal d'accès.
+
 ### Fait trouvé en passant : une fenêtre sans droits dans `setup-db`
 
 - Pendant la vérification locale de la PR 43, `tests/test_verify.py` a échoué une fois sur `permission denied for table checkpoints` (PostgreSQL local, 21:31:15), puis a passé seul. `setup_database` (`adapters/langgraph/checkpointer.py`) retire tous les droits d'`app_role` sur les tables du checkpointer, puis les rend, en deux commandes en autocommit : entre les deux, une autre session d'`app_role` est refusée. La fixture de session `pg` l'exécute au début de chaque session de tests : deux suites lancées en même temps sur la base locale se gênent.
@@ -3188,6 +3217,7 @@ Seconde relance du job `cluster` de la PR 42 (05/10, 20:49:06) : `test_adresse_d
 
 - La suite principale passe de 2 348 à 2 360 (cause de l'injoignabilité, chronologie sans sonde) ; le total, après la fusion de la PR 43, de 2 526 à 2 538.
 - 06/10 : de 2 360 à 2 367 (règles de kube-proxy, relevé illisible) ; avec les 2 tests de la PR 45 et les 2 de la PR 46, fusionnées entre-temps, 2 371 dans la suite principale et 2 549 au total.
+- Correction du 06/10 : de 2 371 à 2 380 (pause avant l'arrêt, suivi des journaux, preuve) ; tests du rendu des charts, de 115 à 117 ; le total, de 2 549 à 2 560.
 
 ## 2026-10-06 · `setup-db` en une transaction, et la dernière ligne de `check.sh` (branche `setup-db-transaction`)
 
