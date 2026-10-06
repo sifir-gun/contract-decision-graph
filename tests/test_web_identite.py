@@ -86,7 +86,10 @@ def test_jeton_refuse_trace_sans_jeton_ni_identite(caplog, capsys):
 def test_fournisseur_injoignable_503_distinct_d_un_refus(caplog):
     response = authenticated(FakeVerifier(unavailable=True)).get("/", headers=BEARER)
     assert response.status_code == 503
-    assert events(caplog)[0]["evenement"] == "fournisseur_injoignable"
+    [event] = events(caplog)
+    assert event["evenement"] == "fournisseur_injoignable"
+    # la cause, par son type (enquête du 05/10) ; jamais un message ni une adresse
+    assert event["cause"] == "URLError/ConnectionRefusedError"
 
 
 def test_jeton_valide_page_servie_avec_le_nom_affiche_et_la_deconnexion():
@@ -297,7 +300,7 @@ def test_autre_schema_d_authentification_refuse(caplog):
 def test_deconnexion_fournisseur_injoignable_le_journal_le_dit(caplog):
     class Unreachable(FakeVerifier):
         def end_session_endpoint(self):
-            raise ProviderUnavailable("injoignable")
+            raise ProviderUnavailable("injoignable", cause="URLError/TimeoutError")
 
     response = logout(authenticated(Unreachable(), provider_logout=True))
     assert target(response) == "/oauth2/sign_out?rd=%2F"

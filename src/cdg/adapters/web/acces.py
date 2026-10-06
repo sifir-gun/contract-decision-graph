@@ -38,6 +38,8 @@ FIELDS = frozenset(
         "thread_id",
         "operateur",
         "commande",
+        # fournisseur injoignable : l'erreur réseau par son type (oidc.cause_reseau)
+        "cause",
     }
 )
 

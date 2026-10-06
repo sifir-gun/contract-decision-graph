@@ -383,13 +383,14 @@ jobs:
       - name: Scénarios (concurrence, arrêt, mise à jour, retour arrière, réseau, contrôle, traces, restauration)
         id: scenarios
         run: uv run --no-sync pytest -m cluster --cluster="$RUNNER_TEMP/cluster"
-      # chronique de la mise à jour progressive (tests/chronique.py, enquête du 05/10),
-      # écrite à chaque exécution des scénarios, réussie ou non ; imprimée en cas d'échec
-      - name: Chronique de la mise à jour, conservée
+      # chroniques des scénarios (tests/chronique.py, enquêtes du 05/10) : mise à jour
+      # progressive, proxy de production ; écrites à chaque exécution des scénarios,
+      # réussie ou non ; imprimées en cas d'échec
+      - name: Chroniques des scénarios, conservées
         if: ${{ !cancelled() && (steps.scenarios.outcome == 'success' || steps.scenarios.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: chronique-mise-a-jour
+          name: chroniques-du-cluster
           path: ${{ runner.temp }}/cluster/chroniques/
           if-no-files-found: error
           retention-days: 30

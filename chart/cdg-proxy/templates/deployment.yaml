@@ -29,6 +29,8 @@ spec:
         checksum/configuration: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       restartPolicy: Always
+      # pause avant l'arrêt + 30 s laissées aux tunnels ouverts (ADR 005, arrêt propre)
+      terminationGracePeriodSeconds: {{ add .Values.pauseAvantArret 30 }}
       serviceAccountName: {{ include "cdg-proxy.nomComplet" . }}
       automountServiceAccountToken: false
       enableServiceLinks: false
@@ -83,6 +85,12 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 2
+          lifecycle:
+            preStop:
+              # retiré des règles du service avant que Smokescreen ferme son port ; action
+              # native de Kubernetes, sans shell (image distroless)
+              sleep:
+                seconds: {{ .Values.pauseAvantArret }}
           resources:
             {{- toYaml .Values.ressources | nindent 12 }}
           securityContext:

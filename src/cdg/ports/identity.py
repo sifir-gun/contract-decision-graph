@@ -36,7 +36,13 @@ class IdentityRejected(Exception):
 
 
 class ProviderUnavailable(Exception):
-    """Fournisseur d'identité injoignable : le jeton n'est ni accepté ni refusé (503)."""
+    """Fournisseur d'identité injoignable : le jeton n'est ni accepté ni refusé (503).
+    `cause` : l'erreur réseau, par son type et au plus un code (HTTP, tunnel du proxy),
+    jamais par son message : elle va au journal des accès."""
+
+    def __init__(self, message: str, *, cause: str) -> None:
+        super().__init__(message)
+        self.cause = cause
 
 
 class IdentityVerifier(Protocol):

@@ -7,8 +7,14 @@ horodatés à l'horloge du runner (celle des nœuds k3d et de la sonde : même n
 - l'état des pods de l'espace (nœud, adresse, prêt, arrêt) et ses événements Kubernetes ;
 - la tranche d'adresses (EndpointSlice) du service visé par la sonde ;
 - sur chaque nœud, deux fois par seconde, les règles de refus (REJECT de kube-router et de
-  kube-proxy) dont le compteur augmente, et les adresses qui entrent dans les ensembles
-  d'adresses (ipset) de kube-router ou en sortent.
+  kube-proxy) dont le compteur augmente, les adresses qui entrent dans les ensembles
+  d'adresses (ipset) de kube-router ou en sortent, et les destinations du service suivi
+  dans les règles de kube-proxy (enquête du 06/10 : le proxy de sortie ferme son port
+  dès l'ordre d'arrêt ; un pod sorti de ces règles ne reçoit plus de nouvelle connexion
+  du service) ;
+- au besoin, les journaux des pods d'un composant, suivis dès qu'ils sont prêts : ils
+  restent lisibles après la disparition du pod (preuve du 06/10, qu'un ancien pod du proxy
+  quitte les règles du service sur tous les nœuds avant que Smokescreen s'arrête).
 
 kube-router (2.6.3-k3s1, celui de k3s 1.36.4) refuse par REJECT (ICMP « port
 injoignable » : « Connection refused » pour le client), dans une chaîne par pod renommée
@@ -112,19 +118,27 @@ print(json.dumps({{"admise": True, "ok": ok, "ko": ko, "debut": debut,
                   "echecs": echecs[:20], "instances": instances}}))
 """
 
-# relevé d'un nœud k3d : règles du filtre avec leurs compteurs, puis ensembles d'adresses
-# (outils de k3s, dans /bin/aux, sur le PATH de l'image)
-RELEVE = "iptables-save -c -t filter && echo '#ipset' && ipset save"
+# relevé d'un nœud k3d : règles du filtre avec leurs compteurs, règles de traduction
+# d'adresses (kube-proxy), puis ensembles d'adresses (outils de k3s, dans /bin/aux, sur
+# le PATH de l'image)
+RELEVE = (
+    "iptables-save -c -t filter && echo '#nat' && iptables-save -t nat"
+    " && echo '#ipset' && ipset save"
+)
 
 
 @dataclass(frozen=True)
 class Evenement:
     instant: float  # secondes depuis l'époque, horloge du runner
-    source: str  # pod, evenement, tranche, refus, ensemble
+    source: str  # pod, evenement, tranche, refus, ensemble, service
     objet: str  # pod, objet Kubernetes, tranche ou nœud concerné
     texte: str
     adresse: str | None = None  # adresse entrée dans un ensemble, ou sortie
     depuis: float | None = None  # relevé précédent : le fait date d'entre les deux
+
+
+class ReleveIllisible(Exception):
+    """Relevé d'un nœud sans l'un de ses séparateurs : jamais lu à moitié."""
 
 
 class FluxIllisible(Exception):
@@ -246,6 +260,119 @@ def membres(texte: str) -> set[tuple[str, str]]:
     }
 
 
+def decouper_releve(texte: str) -> tuple[str, str, str]:
+    """Règles du filtre, règles de traduction d'adresses et ensembles d'un relevé."""
+    rules, found, rest = texte.partition("\n#nat\n")
+    if not found:
+        raise ReleveIllisible("séparateur #nat absent")
+    nat, found, sets = rest.partition("\n#ipset\n")
+    if not found:
+        raise ReleveIllisible("séparateur #ipset absent")
+    return rules, nat, sets
+
+
+# kube-proxy 1.36.4 en mode iptables, celui de k3s 1.36.4 (`kubeProxyArgs`) : une règle
+# par destination du service dans sa chaîne KUBE-SVC (KUBE-SVL en trafic local),
+# commentée « espace/service:port -> adresse:port » (`writeServiceToEndpointRules`) ;
+# seules les destinations prêtes y figurent (à défaut, celles en arrêt qui servent encore)
+_DESTINATION = re.compile(r"^-A KUBE-SV[CL]-\S+ (.*)$")
+
+
+def destinations(texte: str, espace: str, service: str) -> set[tuple[str, str]]:
+    """(port du service, destination) des règles de kube-proxy pour `espace/service`,
+    lues dans `iptables-save -t nat`."""
+    name, found = f"{espace}/{service}", set()
+    for line in texte.splitlines():
+        rule = _DESTINATION.match(line)
+        comment = _COMMENTAIRE.search(rule[1]) if rule else None
+        if comment is None:
+            continue
+        port, arrow, target = (comment[1] or comment[2]).partition(" -> ")
+        if arrow and (port == name or port.startswith(name + ":")):
+            found.add((port, target))
+    return found
+
+
+def _adresse(destination: str) -> str:
+    """Adresse d'une destination « adresse:port » (IPv6 entre crochets)."""
+    return destination.rpartition(":")[0].strip("[]")
+
+
+def instant_journal(ligne: str) -> tuple[float, str] | None:
+    """Instant et texte d'une ligne de `kubectl logs --timestamps` (RFC 3339, en UTC) ;
+    None pour une ligne sans horodatage."""
+    stamp, _, text = ligne.partition(" ")
+    try:
+        return datetime.fromisoformat(stamp).timestamp(), text
+    except ValueError:
+        return None
+
+
+def retraits_avant_arret(
+    evenements: list[Evenement],
+    pods: dict[str, dict],
+    journaux: dict[str, list[str]],
+    noeuds: list[str],
+    composant: str,
+    motif: str,
+    debut: float,
+) -> list[tuple[bool, str]]:
+    """Pour chaque pod du composant dont l'arrêt a été demandé : à l'instant où son
+    journal dit `motif` (le port fermé), la dernière règle relevée pour son adresse est un
+    retrait, sur chaque nœud ; un relevé daté au plus tard, donc une preuve, pas une
+    estimation. Un pod sans adresse, ou dont le journal ne dit jamais `motif`, échoue."""
+    stopped = sorted(
+        {
+            e.objet
+            for e in evenements
+            if e.source == "pod"
+            and e.texte == "arrêt demandé"
+            and (pods.get(e.objet) or {}).get("composant") == composant
+        }
+    )
+    results = []
+    for name in stopped:
+        address = pods[name].get("ip")
+        if not address:
+            results.append((False, f"{name} : adresse inconnue"))
+            continue
+        who = f"{name} {address}"
+        ends = [
+            found[0]
+            for found in map(instant_journal, journaux.get(name, []))
+            if found is not None and motif in found[1]
+        ]
+        if not ends:
+            results.append((False, f"{who} : arrêt jamais vu dans ses journaux"))
+            continue
+        end = min(ends)
+        late, removed = [], []
+        for node in noeuds:
+            seen = sorted(
+                (e.instant, e.texte[0])
+                for e in evenements
+                if e.source == "service"
+                and e.objet == node
+                and e.adresse == address
+                and e.instant < end
+            )
+            if not seen or seen[-1][1] != "-":
+                late.append(node)
+            else:
+                removed.append(seen[-1][0])
+        stop = f"{end - debut:+.2f} s"
+        if late:
+            text = f"encore dans les règles du service de {', '.join(late)} à l'arrêt"
+            results.append((False, f"{who} : {text} ({stop})"))
+        else:
+            last = f"{max(removed) - debut:+.2f} s"
+            text = f"retiré des règles du service sur {len(removed)} nœuds"
+            results.append(
+                (True, f"{who} : {text} au plus tard à {last} ; arrêt à {stop}")
+            )
+    return results
+
+
 def _heure(instant: float) -> str:
     return datetime.fromtimestamp(instant, UTC).strftime("%H:%M:%S.%f")[:-3]
 
@@ -264,6 +391,82 @@ def _echec(failure: dict) -> str:
     return text
 
 
+def _lignes(
+    evenements: list[Evenement], owners: dict[str, str], start: float
+) -> tuple[list[tuple[float, str]], int]:
+    """Lignes datées de la chronique, et le nombre de refus hors de l'espace cdg.
+    Ensembles d'adresses : seulement les adresses de `owners` ; refus : en entier dans
+    l'espace cdg, comptés ailleurs."""
+    rows: list[tuple[float, str]] = []
+    outside = 0
+    for event in evenements:
+        if event.source == "ensemble":
+            if event.adresse not in owners:
+                continue
+            text = (
+                f"ensemble {event.objet} : {event.texte} {event.adresse} "
+                f"({owners[event.adresse]})"
+            )
+            if event.depuis is not None:
+                text += f", depuis {event.depuis - start:+.2f} s"
+        elif event.source == "refus":
+            if not _CDG.search(event.texte):
+                outside += int(event.texte.split()[0])
+                continue
+            text = f"refus {event.objet} : {event.texte}"
+            if event.depuis is not None:
+                text += f", depuis {event.depuis - start:+.2f} s"
+        elif event.source == "service":
+            # toutes les destinations du service suivi, d'un pod connu ou non
+            text = f"service {event.objet} : {event.texte}"
+            if event.adresse in owners:
+                text += f" ({owners[event.adresse]})"
+            if event.depuis is not None:
+                text += f", depuis {event.depuis - start:+.2f} s"
+        elif event.source == "evenement":
+            text = f"événement {event.objet} : {event.texte}"
+        else:
+            text = f"{event.source} {event.objet} : {event.texte}"
+        rows.append((event.instant, text))
+    return rows, outside
+
+
+def _proprietaires(
+    pods: dict[str, dict], composants: tuple[str, ...]
+) -> dict[str, str]:
+    return {
+        p["ip"]: name
+        for name, p in pods.items()
+        if p.get("ip") and p.get("composant") in composants
+    }
+
+
+def chronologie(
+    evenements: list[Evenement],
+    pods: dict[str, dict],
+    debut: float,
+    composants: tuple[str, ...],
+    erreurs: list[str],
+    titre: str,
+) -> list[str]:
+    """Chronique d'un scénario sans sonde (enquête du 05/10 sur les clés de Dex
+    injoignables) : datée en UTC et relativement à `debut` ; ensembles d'adresses
+    limités aux pods des `composants`."""
+    rows, outside = _lignes(evenements, _proprietaires(pods, composants), debut)
+    lines = [
+        f"=== chronique : {titre}, début {_heure(debut)} UTC ===",
+        f"refus hors de l'espace cdg : {outside}",
+    ]
+    if erreurs:
+        lines.append("relevés incomplets : " + " ; ".join(erreurs))
+    lines.append("--- chronique")
+    lines.extend(
+        f"{_heure(instant)} ({instant - debut:+.2f} s) {text}"
+        for instant, text in sorted(rows)
+    )
+    return lines
+
+
 def rapport(
     evenements: list[Evenement],
     pods: dict[str, dict],
@@ -279,41 +482,18 @@ def rapport(
     def when(instant: float) -> str:
         return f"{_heure(instant)} ({instant - start:+.2f} s)"
 
-    owners = {
-        p["ip"]: name
-        for name, p in pods.items()
-        if p.get("ip") and p.get("composant") in ("web", "test")
-    }
+    owners = _proprietaires(pods, ("web", "test"))
     # l'adresse que la sonde donne d'elle-même, à défaut de celle de son pod
     probe_ip = (pods.get(nom_sonde) or {}).get("ip") or sonde.get("adresse")
     if probe_ip:
         owners[probe_ip] = nom_sonde
-    rows: list[tuple[float, str]] = [(start, "sonde : début, phase d'admission")]
-    outside, admitted = 0, []
-    for event in evenements:
-        if event.source == "ensemble":
-            if event.adresse not in owners:
-                continue
-            text = (
-                f"ensemble {event.objet} : {event.texte} {event.adresse} "
-                f"({owners[event.adresse]})"
-            )
-            if event.depuis is not None:
-                text += f", depuis {event.depuis - start:+.2f} s"
-            if event.adresse == probe_ip and event.texte.startswith("+"):
-                admitted.append(event)
-        elif event.source == "refus":
-            if not _CDG.search(event.texte):
-                outside += int(event.texte.split()[0])
-                continue
-            text = f"refus {event.objet} : {event.texte}"
-            if event.depuis is not None:
-                text += f", depuis {event.depuis - start:+.2f} s"
-        elif event.source == "evenement":
-            text = f"événement {event.objet} : {event.texte}"
-        else:
-            text = f"{event.source} {event.objet} : {event.texte}"
-        rows.append((event.instant, text))
+    rows, outside = _lignes(evenements, owners, start)
+    rows.append((start, "sonde : début, phase d'admission"))
+    admitted = [
+        e
+        for e in evenements
+        if e.source == "ensemble" and e.adresse == probe_ip and e.texte.startswith("+")
+    ]
     for failure in sonde.get("echecs", []):
         rows.append((failure["t"], f"ÉCHEC n°{failure['n']} : {_echec(failure)}"))
     for name, (first, last, _) in sonde.get("instances", {}).items():
@@ -392,10 +572,13 @@ class Chronique:
         *,
         docker: list[str] | None = None,
         intervalle: float = 0.5,
+        journaux: tuple[str, ...] = (),
     ):
         self._kubectl, self._espace, self._service = kubectl, espace, service
         self._docker = docker if docker is not None else ["docker"]
         self._intervalle = intervalle
+        self._journaux = journaux  # composants dont les journaux sont suivis
+        self.journaux: dict[str, list[str]] = {}  # lignes horodatées, par pod
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._threads: list[threading.Thread] = []
@@ -455,7 +638,9 @@ class Chronique:
 
     def __exit__(self, *exc: object) -> None:
         self._stop.set()
-        for process in self._watches:
+        with self._lock:
+            processes = list(self._watches)
+        for process in processes:
             process.terminate()
         for thread in self._threads:
             thread.join(15)
@@ -465,6 +650,10 @@ class Chronique:
         for what, count in self._recus.items():
             if count == 0:
                 self._error(f"suivi des {what} : aucun objet reçu")
+
+    @property
+    def noeuds(self) -> list[str]:
+        return list(self._releves)
 
     def lacunes(self) -> list[str]:
         """Ce qui rend la chronique inutilisable : un nœud jamais relevé, un suivi
@@ -489,6 +678,26 @@ class Chronique:
         lines = self.rapport(sonde, nom_sonde)
         chemin.parent.mkdir(parents=True, exist_ok=True)
         chemin.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return lines
+
+    def ecrire_chronologie(
+        self,
+        chemin: Path,
+        debut: float,
+        composants: tuple[str, ...],
+        titre: str,
+        annexe: str = "",
+    ) -> list[str]:
+        """Chronique d'un scénario sans sonde, écrite dans `chemin` (artefact de la CI)
+        avec son annexe (journaux relevés par le scénario), et rendue."""
+        with self._lock:
+            events = list(self.evenements)
+        lines = chronologie(events, self.pods, debut, composants, self.erreurs, titre)
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        text = "\n".join(lines) + "\n"
+        if annexe:
+            text += "--- annexe\n" + annexe.rstrip("\n") + "\n"
+        chemin.write_text(text, encoding="utf-8")
         return lines
 
     def _start(self, target, *args) -> None:
@@ -529,6 +738,36 @@ class Chronique:
             self._add(Evenement(instant, "pod", name, change))
         with self._lock:
             self.pods[name] = state
+            # journaux suivis dès que le pod est prêt : son conteneur tourne
+            follow = (
+                state["composant"] in self._journaux
+                and state["pret"]
+                and name not in self.journaux
+                and not self._stop.is_set()
+            )
+            if follow:
+                self.journaux[name] = []
+        if follow:
+            self._start(self._logs, name)
+
+    def _logs(self, name: str) -> None:
+        process = subprocess.Popen(
+            self._kubectl
+            + ["logs", "-f", "--timestamps", "--all-containers", "-n", self._espace]
+            + [name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        with self._lock:
+            self._watches.append(process)
+        assert process.stdout is not None and process.stderr is not None
+        for line in process.stdout:
+            with self._lock:
+                self.journaux[name].append(line.rstrip("\n"))
+        if process.wait() != 0 and not self._stop.is_set():
+            detail = process.stderr.read().strip().splitlines()[:1]
+            self._error(f"journaux de {name} : {' '.join(detail) or '?'}")
 
     def _k8s_event(self, event: dict, instant: float) -> None:
         obj = event["object"]
@@ -550,7 +789,7 @@ class Chronique:
             self._add(Evenement(instant, "tranche", name, text))
 
     def _poll(self, node: str) -> None:
-        previous: tuple[float, dict, set] | None = None
+        previous: tuple[float, dict, set, set] | None = None
         while not self._stop.is_set():
             begun = time.time()
             try:
@@ -576,16 +815,26 @@ class Chronique:
                     f"{node} : {' '.join(first) or f'code {result.returncode}'}"
                 )
             else:
-                rules, _, sets = result.stdout.partition("\n#ipset\n")
-                counts, members = compteurs_de_refus(rules), membres(sets)
-                if previous is not None:
-                    self._compare(node, previous, instant, counts, members)
-                previous = (instant, counts, members)
-                self._releves[node] += 1
+                try:
+                    rules, nat, sets = decouper_releve(result.stdout)
+                except ReleveIllisible as exc:
+                    self._error(f"{node} : relevé illisible ({exc})")
+                else:
+                    current = (
+                        instant,
+                        compteurs_de_refus(rules),
+                        membres(sets),
+                        destinations(nat, self._espace, self._service),
+                    )
+                    if previous is not None:
+                        self._compare(node, previous, current)
+                    previous = current
+                    self._releves[node] += 1
             self._stop.wait(max(0.0, self._intervalle - (time.time() - begun)))
 
-    def _compare(self, node, previous, instant, counts, members) -> None:
-        since, old_counts, old_members = previous
+    def _compare(self, node, previous, current) -> None:
+        since, old_counts, old_members, old_targets = previous
+        instant, counts, members, targets = current
         for (chain, comment), added in nouveaux_refus(old_counts, counts):
             text = f"+{added} {chain} « {comment} »"
             self._add(Evenement(instant, "refus", node, text, None, since))
@@ -593,3 +842,13 @@ class Chronique:
             self._add(Evenement(instant, "ensemble", node, f"+ {name}", address, since))
         for name, address in sorted(old_members - members):
             self._add(Evenement(instant, "ensemble", node, f"- {name}", address, since))
+        for port, target in sorted(targets - old_targets):
+            text = f"+ {port} -> {target}"
+            self._add(
+                Evenement(instant, "service", node, text, _adresse(target), since)
+            )
+        for port, target in sorted(old_targets - targets):
+            text = f"- {port} -> {target}"
+            self._add(
+                Evenement(instant, "service", node, text, _adresse(target), since)
+            )

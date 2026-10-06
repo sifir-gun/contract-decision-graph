@@ -370,8 +370,8 @@ def create_app(
                 'Bearer realm="contract-decision-graph"'
             )
             return response
-        except ProviderUnavailable:
-            acces.event("fournisseur_injoignable", **where, statut=503)
+        except ProviderUnavailable as exc:
+            acces.event("fournisseur_injoignable", **where, cause=exc.cause, statut=503)
             response = page(
                 request,
                 "erreur.html",
