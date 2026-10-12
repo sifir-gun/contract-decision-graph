@@ -103,8 +103,8 @@ def test_licences_des_modules_du_binaire_reconstituees_sans_trou():
 
 
 UV_BASE = (
-    "ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:"
-    "c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197"
+    "ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:"
+    "71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980"
 )
 STATIC_BASE = (
     "gcr.io/distroless/static-debian13:nonroot@sha256:"

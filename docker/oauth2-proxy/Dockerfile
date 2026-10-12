@@ -14,12 +14,12 @@
 #     docker/oauth2-proxy
 ARG TARGETARCH
 
-FROM ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197 AS archive-amd64
+FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS archive-amd64
 ADD --checksum=sha256:4fbe902189aab713d9c0519b90a645032d4636ecb523dc36f5cc312d8ebef1e2 https://github.com/oauth2-proxy/oauth2-proxy/releases/download/v7.15.4/oauth2-proxy-v7.15.4.linux-amd64.tar.gz /archive.tar.gz
 ADD --checksum=sha256:d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b https://go.dev/dl/go1.26.8.linux-amd64.tar.gz /go.tar.gz
 ENV BINAIRE_SHA256=d2cc1a814d189ad3c5d3ac712dcfbea43176afacae814c8f64e8dded885f5c41
 
-FROM ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197 AS archive-arm64
+FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS archive-arm64
 ADD --checksum=sha256:b3fb0b61aecfb4b776dccb6daff406676ed0ead74245dc6e4bdf71f993eb1710 https://github.com/oauth2-proxy/oauth2-proxy/releases/download/v7.15.4/oauth2-proxy-v7.15.4.linux-arm64.tar.gz /archive.tar.gz
 ADD --checksum=sha256:211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0 https://go.dev/dl/go1.26.8.linux-arm64.tar.gz /go.tar.gz
 ENV BINAIRE_SHA256=dd70759fdd210ea10e16d44a8072356f74789da2d58fd1a7f3b9bb08922b9c40

@@ -11,10 +11,10 @@
 #     docker/proxy-sortie
 ARG TARGETARCH
 
-FROM ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197 AS go-amd64
+FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-amd64
 ADD --checksum=sha256:d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b https://go.dev/dl/go1.26.8.linux-amd64.tar.gz /go.tar.gz
 
-FROM ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197 AS go-arm64
+FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-arm64
 ADD --checksum=sha256:211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0 https://go.dev/dl/go1.26.8.linux-arm64.tar.gz /go.tar.gz
 
 FROM go-${TARGETARCH} AS construction

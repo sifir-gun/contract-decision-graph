@@ -24,8 +24,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 LICENCES = ROOT / "licences"
 PROVENANCE = LICENCES / "PROVENANCE.md"
-# contenu de python/licenses/ dans les archives complètes de la publication 20260924
-# (identique en x86_64 et en aarch64, relevé le 28/09/2026)
+# contenu de python/licenses/ dans les archives complètes des publications 20260924
+# (relevé le 28/09/2026) et 20261003 (CPython 3.12.15, relevé le 12/10/2026) : identique
+# en x86_64 et en aarch64, et d'une publication à l'autre
 PYTHON_LICENCES = {
     f"LICENSE.{name}.txt"
     for name in (
@@ -153,7 +154,7 @@ for info in sorted(site.glob("*.dist-info")):
 status = pathlib.Path("/var/lib/dpkg/status.d")
 debs = sorted({p.name.split(".")[0] for p in status.iterdir()})
 no_copyright = [d for d in debs if not pathlib.Path(f"/usr/share/doc/{d}/copyright").is_file()]
-# cpython-3.12-… est un lien vers cpython-3.12.14-… (uv) : chemins résolus
+# cpython-3.12-… est un lien vers cpython-3.12.15-… (uv) : chemins résolus
 pbs = pathlib.Path("/app/licences/python-build-standalone")
 cpython = {p.resolve() for p in pathlib.Path("/python").glob("cpython-*/lib/python3.12/LICENSE.txt")}
 print(json.dumps({
