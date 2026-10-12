@@ -219,7 +219,7 @@ jobs:
         # exceptions justifiées, datées et expirantes : securite/exceptions-vulnerabilites.yaml
         run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine"
       - name: Image et inventaire, pour le cluster de test et la publication
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-${{ matrix.arch }}
           path: |
@@ -243,7 +243,7 @@ jobs:
       - name: Proxy de sortie, scan (Grype)
         run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-proxy"
       - name: Proxy de sortie, image et inventaire, pour le cluster et la publication
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: proxy-${{ matrix.arch }}
           path: |
@@ -267,7 +267,7 @@ jobs:
       - name: oauth2-proxy, scan (Grype)
         run: uv run --no-sync python scripts/chaine.py scan --dossier "$RUNNER_TEMP/chaine-oauth2-proxy"
       - name: oauth2-proxy, image et inventaire, pour le cluster et la publication
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: oauth2-proxy-${{ matrix.arch }}
           path: |
@@ -388,7 +388,7 @@ jobs:
       # réussie ou non ; imprimées en cas d'échec
       - name: Chroniques des scénarios, conservées
         if: ${{ !cancelled() && (steps.scenarios.outcome == 'success' || steps.scenarios.outcome == 'failure') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: chroniques-du-cluster
           path: ${{ runner.temp }}/cluster/chroniques/
