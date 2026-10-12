@@ -3299,3 +3299,26 @@ Trouvé pendant l'enquête sur les clés de Dex injoignables (PR 44) : la vérif
 ### Nombre de tests
 
 - La suite principale passe de 2 380 à 2 381 ; le total, de 2 560 à 2 561.
+
+## 2026-10-12 · uv 0.12.24 et CPython 3.12.15 (branche `uv-0-12-24`)
+
+Le scan hebdomadaire de `main` (lundi 12/10, job `image`, amd64 et arm64) échoue sur l'image de l'application : CPython 3.12.14, CVE-2026-19445 (critique : un client TLS peut faire planter un serveur, ou lui faire appeler un pointeur libéré) et CVE-2026-19553 (haute : `ssl.SSLContext.wrap_bio()` acceptait un `server_hostname` vide), module `ssl`, publiées le 30/09, corrigées en 3.12.15. Toute PR échoue au job `image`, et son job `cluster` ne tourne pas ; constaté au `check.sh` d'avant le push de Langfuse 4.53.0, qui n'a donc pas été poussée.
+
+### Décision du propriétaire (12/10)
+
+- Une PR à part, avant Langfuse : uv 0.12.24 et CPython 3.12.15, plutôt qu'une exception (l'application ne sert pas de TLS elle-même, mais la seconde faille touche les clients) ; uv mis à jour sur le poste par le propriétaire (`~/.pyenv/versions/3.11.7/bin/python -m pip install "uv==0.12.24"`).
+
+### Vérifications
+
+- uv 0.12.19 ne connaît pas la 3.12.15 (sa liste s'arrête à la 3.12.14) ; la première version qui la propose est la 0.12.22 (manifeste des téléchargements). Retenue : 0.12.24 (08/10), la dernière de la branche 0.12, sans la version mineure 0.13.0 (09/10).
+- Notes de version 0.12.20 à 0.12.24 : rien de bloquant ; CPython de python-build-standalone avec OpenSSL 3.5.9 (0.12.21), CPython 3.12.15 (0.12.22), empreintes fournies vérifiées même sans exigence d'empreinte (0.12.24). `uv.lock` reste valide sans réécriture (`uv lock --check`).
+- Python : uv 0.12.24 installe la publication `20261003` de python-build-standalone ; archives complètes x86_64 et aarch64 vérifiées par le `SHA256SUMS` de la publication ; les 19 textes de licence (`python/licenses/`) identiques à ceux du dépôt ; `licences/PROVENANCE.md` mis à jour.
+- CVE-2026-82049 (`tarfile`, exception de CPython 3.12.14 jusqu'au 28/10) : le correctif (python/cpython#157454, fusionné le 30/09 dans la branche 3.12) est un ancêtre du tag v3.12.15 ; exception retirée.
+
+### Changements
+
+- `Dockerfile` (CPython 3.12.15, image de uv 0.12.24 par empreinte), `docker/proxy-sortie/Dockerfile` et `docker/oauth2-proxy/Dockerfile` (image de uv 0.12.24) ; `ci.yml` (sept jobs) et `modele.yml` (deux) ; tests ; CLAUDE.md, spec, ADR 005.
+
+### Suite
+
+- Langfuse 4.53.0 (branche `langfuse-4-53`, prête depuis le 07/10) : remise à jour avec `main` après cette PR, puis poussée.
