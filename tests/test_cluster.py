@@ -710,7 +710,7 @@ IDENTITY_EGRESS = (
 
 
 # Smokescreen (commit 6c44698, `runServer`) écrit ce message à l'ordre d'arrêt, puis ferme
-# son port (http.Server.Shutdown, Go 1.26.8)
+# son port (http.Server.Shutdown, Go 1.26.8, puis 1.26.9)
 PROXY = "proxy-de-sortie"
 ARRET_DU_PROXY = "quitting gracefully"
 
