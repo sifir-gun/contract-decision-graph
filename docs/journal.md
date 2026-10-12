@@ -3300,7 +3300,7 @@ Trouvé pendant l'enquête sur les clés de Dex injoignables (PR 44) : la vérif
 
 - La suite principale passe de 2 380 à 2 381 ; le total, de 2 560 à 2 561.
 
-## 2026-10-12 · uv 0.12.24 et CPython 3.12.15 (branche `uv-0-12-24`)
+## 2026-10-12 · uv 0.12.24, CPython 3.12.15, et les images Go en Go 1.26.9 (branche `uv-0-12-24`)
 
 Le scan hebdomadaire de `main` (lundi 12/10, job `image`, amd64 et arm64) échoue sur l'image de l'application : CPython 3.12.14, CVE-2026-19445 (critique : un client TLS peut faire planter un serveur, ou lui faire appeler un pointeur libéré) et CVE-2026-19553 (haute : `ssl.SSLContext.wrap_bio()` acceptait un `server_hostname` vide), module `ssl`, publiées le 30/09, corrigées en 3.12.15. Toute PR échoue au job `image`, et son job `cluster` ne tourne pas ; constaté au `check.sh` d'avant le push de Langfuse 4.53.0, qui n'a donc pas été poussée.
 
@@ -3319,6 +3319,20 @@ Le scan hebdomadaire de `main` (lundi 12/10, job `image`, amd64 et arm64) échou
 
 - `Dockerfile` (CPython 3.12.15, image de uv 0.12.24 par empreinte), `docker/proxy-sortie/Dockerfile` et `docker/oauth2-proxy/Dockerfile` (image de uv 0.12.24) ; `ci.yml` (sept jobs) et `modele.yml` (deux) ; tests ; CLAUDE.md, spec, ADR 005.
 
+### Images Go : failles de `net/http` du 08/10
+
+- Le `check.sh` de cette branche échoue ensuite sur l'image du proxy de sortie, puis sur celle d'oauth2-proxy (scan lancé à part) : failles de `net/http` et de `golang.org/x/net` publiées le 08/10 (GO-2026-6603, 6604, 6605, 6607 à 6613, 6617 ; corrigées par Go 1.26.9 et x/net 0.60.0). Elles étaient cachées sur `main` : l'échec du scan de l'image de l'application arrêtait le job avant.
+- **govulncheck v1.1.4, en mode binaire** : fonctions vulnérables liées aux deux binaires, dont la lecture des en-têtes de chaque requête (`net/textproto.Reader.ReadMIMEHeader`) et le traitement de CONNECT ; aucune exception défendable. Erreur de ma part, corrigée devant le propriétaire : sur le binaire de Smokescreen en Go 1.26.8, j'avais dit les fonctions de x/net absentes, en lisant le résumé (qui comptait ces failles avec la bibliothèque standard) au lieu du détail (« Found in: golang.org/x/net@v0.59.0 ») ; recompilé en Go 1.26.9, govulncheck les a dites atteintes, et l'exception prévue n'a pas été écrite.
+- **Décisions du propriétaire (12/10)** : Smokescreen en Go 1.26.9 et x/net 0.60.0 ; oauth2-proxy compilé depuis les sources de l'étiquette v7.15.5, avec Go 1.26.9 et x/net 0.60.0 ; garde-fous dans la construction (commit vérifié, modules vérifiés par `sum.golang.org`, suite de tests du projet bloquante, govulncheck sans faille atteignable) ; amendement daté de l'ADR 005, avec les conditions de retour (dossier `vendor` de Smokescreen dès qu'un de ses commits passe à x/net 0.60.0 ou plus ; binaire publié d'oauth2-proxy, option B, dès qu'une version officielle est compilée avec Go 1.26.9 ou plus) ; détail de govulncheck lu faille par faille ; une seule PR, un commit par image.
+- **Smokescreen** : construction validée d'abord à part, puis dans l'image : seule la ligne de x/net change dans `go.mod`, `go mod verify` passe, la suite de tests passe (33 s), govulncheck ne trouve aucune faille (20 modules et la bibliothèque standard de Go 1.26.9), le scan non plus.
+- **oauth2-proxy** : commit extrait `bea3f04b…`, celui de l'étiquette annotée v7.15.5 ; x/net seul changé dans `go.mod` ; 29 paquets de tests passés (environ 3 min 15 s par architecture) ; binaire « v7.15.5 (built with go1.26.9) » ; govulncheck sans faille atteinte, ni au niveau des fonctions ni des paquets (59 modules), une seule au niveau des modules, sans correctif et hors du binaire (GO-2026-5932, `golang.org/x/crypto/openpgp`) ; scan sans faille ; les quatre exceptions de gRPC v1.83.0 et x/crypto v0.55.0 retirées. Options du chart inchangées de la v7.15.4 à la v7.15.5 (seuls changements : une option Bitbucket, et l'adresse du client lue dans les en-têtes seulement derrière un mandataire de confiance, absente de notre format de journal).
+- **Python et OpenSSL** : CPython 3.12.15 (publication 20261003) charge OpenSSL 3.5.9, vérifié dans l'image ; noté au commentaire des exceptions `libssl3t64`, dont les motifs restent ceux du 01/10.
+
 ### Suite
 
+- **Empreintes des charts** : après la fusion, le job `publication` publie les nouvelles images ; le chart désigne encore les index publiés précédents (application ; oauth2-proxy v7.15.4) : PR à part pour y mettre les nouvelles empreintes, une fois la publication vérifiée.
 - Langfuse 4.53.0 (branche `langfuse-4-53`, prête depuis le 07/10) : remise à jour avec `main` après cette PR, puis poussée.
+
+### Nombre de tests
+
+- La suite principale passe de 2 381 à 2 385 (Smokescreen : commit vérifié, x/net, tests et govulncheck dans la construction ; oauth2-proxy : Go, sources de l'étiquette, x/net, tests et govulncheck, licence, à la place de l'archive et du binaire publiés) ; le total, de 2 561 à 2 565.
