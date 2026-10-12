@@ -40,7 +40,7 @@ de la même configuration : input.max_chars × 4 octets + 64 Kio de formulaire. 
 {{- add (mul (int $config.input.max_chars) 4) 65536 -}}
 {{- end -}}
 
-{{- /* Arguments d'oauth2-proxy v7.15.4 (options vérifiées dans son code) : seul chemin
+{{- /* Arguments d'oauth2-proxy v7.15.5 (options vérifiées dans son code ; celles-ci, inchangées depuis la v7.15.4) : seul chemin
 vers l'interface ; jeton d'identité transmis, en-têtes d'identité du client retirés ;
 journal de connexion réduit au sub (revendication d'e-mail remplacée par sub, ni message,
 ni adresse du client) ; ni e-mail demandé au fournisseur. */}}

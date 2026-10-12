@@ -337,18 +337,9 @@ def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
     rules = {rule["vulnerability"]: rule for rule in config["ignore"]}
     # CPython 3.12.15 (12/10) corrige CVE-2026-82049 (tarfile) : plus d'exception
     assert not any(rule["package"]["name"] == "python" for rule in config["ignore"])
-    # oauth2-proxy v7.15.4 (PR D1) : binaire publié, dépendances figées ; failles jugées
-    # hors d'atteinte (aucun serveur gRPC, pas de SSH ; govulncheck)
-    grpc = {"name": "google.golang.org/grpc", "type": "go-module", "version": "v1.83.0"}
-    crypto = {"name": "golang.org/x/crypto", "type": "go-module", "version": "v0.55.0"}
-    for name, package in (
-        ("GHSA-2v4p-qf9q-27wj", grpc),
-        ("GHSA-vp52-pcj8-j9qc", grpc),
-        ("GO-2026-6354", crypto),
-        ("GO-2026-6355", crypto),
-    ):
-        assert rules[name]["package"] == package
-        assert "govulncheck" in rules[name]["reason"]
+    # oauth2-proxy v7.15.5 compilé par nous (amendement du 12/10 à l'ADR 005) : gRPC 1.84.0
+    # et x/crypto 0.57.0, plus d'exception pour ses modules
+    assert not any(rule["package"]["type"] == "go-module" for rule in config["ignore"])
     # distroless cc-debian13 (01/10/2026) : libssl3t64 de l'image de base, présente mais
     # chargée par aucun processus (DT_NEEDED, /proc/<pid>/maps), correctif pas encore
     # republié par distroless
@@ -361,7 +352,7 @@ def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
     ):
         assert rules[name]["package"] == libssl
         assert "DT_NEEDED" in rules[name]["reason"] and "maps" in rules[name]["reason"]
-    assert len(rules) == 8
+    assert len(rules) == 4
 
 
 def exceptions(tmp_path, **changes) -> Path:
