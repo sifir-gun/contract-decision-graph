@@ -3331,8 +3331,16 @@ Le scan hebdomadaire de `main` (lundi 12/10, job `image`, amd64 et arm64) échou
 ### Suite
 
 - **Empreintes des charts** : après la fusion, le job `publication` publie les nouvelles images ; le chart désigne encore les index publiés précédents (application ; oauth2-proxy v7.15.4) : PR à part pour y mettre les nouvelles empreintes, une fois la publication vérifiée.
-- Langfuse 4.53.0 (branche `langfuse-4-53`, prête depuis le 07/10) : remise à jour avec `main` après cette PR, puis poussée.
+- Langfuse : traitée dans cette PR (ci-dessous), en 4.58.0 ; la branche `langfuse-4-53` n'a plus d'objet.
 
 ### Nombre de tests
 
 - La suite principale passe de 2 381 à 2 385 (Smokescreen : commit vérifié, x/net, tests et govulncheck dans la construction ; oauth2-proxy : Go, sources de l'étiquette, x/net, tests et govulncheck, licence, à la place de l'archive et du binaire publiés) ; le total, de 2 561 à 2 565.
+
+### Images de test : Langfuse 4.58.0 et Valkey (13/10)
+
+- Le job `cluster` de cette PR échoue au scan des images de test, avant le cluster : avis parus depuis le 07/10 dans Langfuse 4.50.0 (`sharp` 0.35.4, `@modelcontextprotocol/sdk` 1.29.0, outil de migration en Go 1.26.8, `zlib` 1.3.2-r0) et dans Valkey (`zlib`). Blocage croisé : seule, une PR Langfuse aurait échoué au job `image`. Décision du propriétaire : compléter cette PR.
+- Langfuse 4.53.0 ne réglait rien (`sharp` et le SDK MCP inchangés) ; la 4.57.0 réglait tout, mais portait `pcre2` 10.40-6.el9 (trois failles hautes, base UBI) ; retenue : 4.58.0 (13/10), où `pcre2` est corrigé, à Dockerfile identique. Vérifications et scan : ADR 008. Le propriétaire a demandé d'aller au bout sans multiplier les allers-retours.
+- Valkey 8.1.10-alpine, non republiée : exception de 30 jours pour CVE-2026-85091 (`zlib`), `valkey-server` ne liant pas `zlib`.
+- Le message d'une exception expirée, corrigé sur la branche `langfuse-4-53` le 07/10, est repris ici.
+- Nombre de tests : la suite principale passe de 2 385 à 2 387 (message de l'exception expirée, sur deux fichiers ; le test de l'exception `source-map-js` remplacé par celui de `zlib`) ; le total, de 2 565 à 2 567.
