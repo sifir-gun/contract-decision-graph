@@ -1,7 +1,8 @@
 """Chart du proxy de sortie (ADR 005, PR C3) : Smokescreen, seule sortie vers Internet.
 
-Sans helm : sa liste d'accès par défaut ne laisse passer que l'API de Mistral. Avec helm
-(marqueur `chart`) : pods restreints, image par empreinte obligatoire, configuration DNS
+Sans helm : sa liste d'accès par défaut ne laisse passer que l'API de Mistral, son image
+par défaut est l'index publié. Avec helm (marqueur `chart`) : pods restreints, image par
+empreinte, jamais par étiquette, configuration DNS
 recommandée (`ndots: "2"`, le proxy résout api.mistral.ai), liste d'accès et plages
 refusées, règles réseau (entrée : les seuls pods de l'application ; sortie : le DNS et le
 port 443 hors des adresses privées), disponibilité et relance sur changement, pause avant
@@ -14,11 +15,14 @@ from pathlib import Path
 
 import pytest
 import yaml
-from test_chart import IGNORE, UniqueKeys, named, of_kind
+from test_chart import IGNORE, UniqueKeys, chart_script, named, of_kind
 
 ROOT = Path(__file__).resolve().parents[1]
 CHART = ROOT / "chart" / "cdg-proxy"
-DIGEST = "sha256:" + "1" * 64  # empreinte d'exemple : l'image se désigne par empreinte
+# index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; Smokescreen compilé avec
+# Go 1.26.9 et x/net 0.60.0), signature cosign et provenance vérifiées le 13/10/2026
+# (docs/exploitation.md, « Image publiée »)
+PROXY_INDEX = "sha256:c1c2edbc14dbb83f923ebb2b0b94a3aed016199d84b01889b5ea5228a49db14c"
 PRIVATE = [
     "10.0.0.0/8",
     "172.16.0.0/12",
@@ -35,8 +39,7 @@ def values() -> dict:
 
 def render(*options: str) -> list[dict]:
     result = subprocess.run(
-        ["helm", "template", "cdg-proxy", str(CHART), "--namespace", "cdg"]
-        + ["--set", f"image.digest={DIGEST}", *options],
+        ["helm", "template", "cdg-proxy", str(CHART), "--namespace", "cdg", *options],
         capture_output=True,
         text=True,
         check=False,
@@ -63,19 +66,28 @@ def test_seule_l_api_de_mistral_par_defaut():
     assert values()["plagesAutorisees"] == []  # aucune adresse privée joignable
 
 
-def test_empreinte_de_l_image_obligatoire_sans_valeur_par_defaut():
-    """Publiée après la fusion (job publication) : l'empreinte se renseigne à
-    l'installation ; sans elle, le schéma refuse."""
-    assert values()["image"]["digest"] == ""
+def test_image_par_defaut_l_index_publie():
+    """Installation sans option d'image : l'index publié et vérifié."""
+    assert values()["image"]["digest"] == PROXY_INDEX
+    for options in chart_script().PROXY_VARIANTS.values():
+        assert not any("image.digest" in word for word in options)
 
 
 # --- avec helm -------------------------------------------------------------------------------
 
 
 @pytest.mark.chart
-def test_sans_empreinte_installation_refusee():
+@pytest.mark.parametrize("digest", ["latest", "v1", ""])
+def test_image_jamais_par_etiquette_ni_sans_empreinte(digest):
     result = subprocess.run(
-        ["helm", "template", "cdg-proxy", str(CHART)],
+        [
+            "helm",
+            "template",
+            "cdg-proxy",
+            str(CHART),
+            "--set",
+            f"image.digest={digest}",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -103,7 +115,7 @@ def test_pods_restreints_image_par_empreinte(rendu):
     assert security["allowPrivilegeEscalation"] is False
     assert security["capabilities"] == {"drop": ["ALL"]}
     assert container["image"] == (
-        f"ghcr.io/sifir-gun/contract-decision-graph/proxy-sortie@{DIGEST}"
+        f"ghcr.io/sifir-gun/contract-decision-graph/proxy-sortie@{PROXY_INDEX}"
     )
     assert container["resources"]["limits"] and container["resources"]["requests"]
 

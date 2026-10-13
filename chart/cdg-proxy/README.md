@@ -7,16 +7,16 @@ Proxy de sortie de contract-decision-graph, selon l'ADR 005 : Smokescreen, const
 À installer sous le nom `cdg-proxy`, dans l'espace de noms de l'application, avant elle : le service s'appelle alors `cdg-proxy`, l'adresse que l'application attend par défaut (`proxy.url`).
 
 ```bash
-helm upgrade --install cdg-proxy chart/cdg-proxy --namespace cdg --set image.digest=sha256:…
+helm upgrade --install cdg-proxy chart/cdg-proxy --namespace cdg
 ```
 
-L'empreinte de l'image est obligatoire : celle de l'index publié par la CI (résumé du job `publication`, image `ghcr.io/sifir-gun/contract-decision-graph/proxy-sortie`). Sans elle, l'installation est refusée.
+L'image par défaut est l'index publié par la CI à la fusion de la PR #53 (image `ghcr.io/sifir-gun/contract-decision-graph/proxy-sortie`), signature et provenance vérifiées ; une autre se désigne par l'empreinte de son index (résumé du job `publication`), jamais par une étiquette.
 
 ## Valeurs principales
 
 | Valeur | Défaut | Rôle |
 | --- | --- | --- |
-| `image.digest` | aucune | Empreinte de l'index amd64/arm64 du proxy ; obligatoire. |
+| `image.digest` | index publié | Empreinte de l'index amd64/arm64 du proxy, jamais une étiquette. |
 | `domainesAutorises` | `api.mistral.ai` | Seuls domaines joignables (Smokescreen, « enforce »). |
 | `plagesAutorisees` | vide | Adresses privées admises ; profil de test seulement (serveur factice). |
 | `clients` | pods web de l'application | Seuls pods admis en entrée. |
