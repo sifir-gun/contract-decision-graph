@@ -2,29 +2,58 @@
 # même chaîne que l'image de l'application. Entrées figées et vérifiées :
 # - l'image de construction de l'application (uv, Debian trixie), déjà vérifiée par
 #   scripts/chaine.py ; seules ses commandes de base (tar, cp, find) servent ici ;
-# - Go, archive officielle, vérifiée par son empreinte (https://go.dev/dl/?mode=json) ;
-# - Smokescreen, source figée par son commit : master du 28/09/2026, qui contient les
-#   correctifs de sécurité publiés après la v0.1.0 (ADR 005 : surveillance, étiquette
-#   officielle dès la prochaine version) ; dépendances du dossier vendor, sans téléchargement ;
+# - Go 1.26.9, archive officielle, vérifiée par son empreinte (https://go.dev/dl/?mode=json) :
+#   failles de net/http du 08/10/2026 corrigées dans la bibliothèque standard liée ;
+# - Smokescreen, source figée par son commit, vérifié à l'extraction : master du 28/09/2026,
+#   qui contient les correctifs de sécurité publiés après la v0.1.0 (ADR 005 : surveillance,
+#   étiquette officielle dès la prochaine version) ; dépendances du dossier vendor ;
+# - écart du 12/10/2026 (amendement de l'ADR 005) : golang.org/x/net passé de v0.59.0 à
+#   v0.60.0 (failles HTTP/2 du 08/10, atteintes d'après govulncheck), par le proxy des
+#   modules et vérifié par sum.golang.org, puis dossier vendor régénéré ; retour au vendor du
+#   commit dès qu'un commit de Smokescreen passe à x/net 0.60.0 ou plus ;
+# - suite de tests de Smokescreen, puis govulncheck v1.1.4 sur le binaire : tout échec, ou
+#   toute faille atteignable, arrête la construction ;
 # - l'image d'exécution distroless static, signée (scripts/chaine.py).
 #   docker build --file docker/proxy-sortie/Dockerfile --tag cdg-proxy:verification \
 #     docker/proxy-sortie
 ARG TARGETARCH
 
-FROM ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197 AS go-amd64
-ADD --checksum=sha256:d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b https://go.dev/dl/go1.26.8.linux-amd64.tar.gz /go.tar.gz
+FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-amd64
+ADD --checksum=sha256:42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d https://go.dev/dl/go1.26.9.linux-amd64.tar.gz /go.tar.gz
 
-FROM ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197 AS go-arm64
-ADD --checksum=sha256:211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0 https://go.dev/dl/go1.26.8.linux-arm64.tar.gz /go.tar.gz
+FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-arm64
+ADD --checksum=sha256:4a97373d49fcacdcf3694fea368a500b00ee3e963974f3e7514132717632f052 https://go.dev/dl/go1.26.9.linux-arm64.tar.gz /go.tar.gz
 
 FROM go-${TARGETARCH} AS construction
-ADD --keep-git-dir=false https://github.com/stripe/smokescreen.git#6c44698887826662733b47bbdc461aabcbb365ee /src
+# autorités de confiance pour le proxy et la base de sommes des modules de Go : celles de
+# l'image d'exécution, figée et signée, l'image de construction n'en ayant pas
+COPY --from=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ADD --keep-git-dir=true https://github.com/stripe/smokescreen.git#6c44698887826662733b47bbdc461aabcbb365ee /src
 WORKDIR /src
-# binaire statique ; GOPROXY=off et -mod=vendor : aucune dépendance téléchargée ;
 # GOTOOLCHAIN=local : le Go vérifié ci-dessus, jamais un autre
-RUN tar -C /usr/local -xzf /go.tar.gz \
- && CGO_ENABLED=0 GOFLAGS=-buildvcs=false GOPROXY=off GOTOOLCHAIN=local \
-    /usr/local/go/bin/go build -mod=vendor -trimpath -ldflags="-s -w" -o /smokescreen .
+ENV PATH=/usr/local/go/bin:$PATH GOPATH=/go GOTOOLCHAIN=local
+# le commit extrait est bien celui qui est figé, puis l'historique disparaît
+RUN test "$(cat .git/HEAD)" = "6c44698887826662733b47bbdc461aabcbb365ee" \
+ && rm -rf .git \
+ && tar -C /usr/local -xzf /go.tar.gz
+# x/net v0.60.0 (amendement du 12/10 à l'ADR 005) : téléchargé par le proxy des modules et
+# vérifié par sum.golang.org, puis le dossier vendor régénéré et vérifié
+RUN GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+    go get golang.org/x/net@v0.60.0 \
+ && GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org go mod vendor \
+ && go mod verify \
+ && test "$(go list -m -f '{{.Version}}' golang.org/x/net)" = "v0.60.0"
+# suite de tests de Smokescreen, sur le dossier vendor, sans téléchargement : un échec
+# arrête la construction
+RUN CGO_ENABLED=0 GOFLAGS=-buildvcs=false GOPROXY=off go test -mod=vendor ./...
+# binaire statique ; GOPROXY=off et -mod=vendor : aucune dépendance téléchargée
+RUN CGO_ENABLED=0 GOFLAGS=-buildvcs=false GOPROXY=off \
+    go build -mod=vendor -trimpath -ldflags="-s -w" -o /smokescreen .
+# govulncheck v1.1.4 (vérifié par sum.golang.org) sur le binaire : une faille atteignable
+# arrête la construction (code 3) ; le détail reste dans le journal de construction
+RUN GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+    go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 \
+ && /go/bin/govulncheck -mode=binary -show verbose /smokescreen
 # licences : Smokescreen, Go (bibliothèque standard liée au binaire), chaque dépendance
 RUN mkdir -p /licences/smokescreen /licences/go /licences/vendor \
  && cp /src/LICENSE.txt /licences/smokescreen/ \

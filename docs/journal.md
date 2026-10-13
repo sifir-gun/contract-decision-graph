@@ -3299,3 +3299,48 @@ Trouvé pendant l'enquête sur les clés de Dex injoignables (PR 44) : la vérif
 ### Nombre de tests
 
 - La suite principale passe de 2 380 à 2 381 ; le total, de 2 560 à 2 561.
+
+## 2026-10-12 · uv 0.12.24, CPython 3.12.15, et les images Go en Go 1.26.9 (branche `uv-0-12-24`)
+
+Le scan hebdomadaire de `main` (lundi 12/10, job `image`, amd64 et arm64) échoue sur l'image de l'application : CPython 3.12.14, CVE-2026-19445 (critique : un client TLS peut faire planter un serveur, ou lui faire appeler un pointeur libéré) et CVE-2026-19553 (haute : `ssl.SSLContext.wrap_bio()` acceptait un `server_hostname` vide), module `ssl`, publiées le 30/09, corrigées en 3.12.15. Toute PR échoue au job `image`, et son job `cluster` ne tourne pas ; constaté au `check.sh` d'avant le push de Langfuse 4.53.0, qui n'a donc pas été poussée.
+
+### Décision du propriétaire (12/10)
+
+- Une PR à part, avant Langfuse : uv 0.12.24 et CPython 3.12.15, plutôt qu'une exception (l'application ne sert pas de TLS elle-même, mais la seconde faille touche les clients) ; uv mis à jour sur le poste par le propriétaire (`~/.pyenv/versions/3.11.7/bin/python -m pip install "uv==0.12.24"`).
+
+### Vérifications
+
+- uv 0.12.19 ne connaît pas la 3.12.15 (sa liste s'arrête à la 3.12.14) ; la première version qui la propose est la 0.12.22 (manifeste des téléchargements). Retenue : 0.12.24 (08/10), la dernière de la branche 0.12, sans la version mineure 0.13.0 (09/10).
+- Notes de version 0.12.20 à 0.12.24 : rien de bloquant ; CPython de python-build-standalone avec OpenSSL 3.5.9 (0.12.21), CPython 3.12.15 (0.12.22), empreintes fournies vérifiées même sans exigence d'empreinte (0.12.24). `uv.lock` reste valide sans réécriture (`uv lock --check`).
+- Python : uv 0.12.24 installe la publication `20261003` de python-build-standalone ; archives complètes x86_64 et aarch64 vérifiées par le `SHA256SUMS` de la publication ; les 19 textes de licence (`python/licenses/`) identiques à ceux du dépôt ; `licences/PROVENANCE.md` mis à jour.
+- CVE-2026-82049 (`tarfile`, exception de CPython 3.12.14 jusqu'au 28/10) : le correctif (python/cpython#157454, fusionné le 30/09 dans la branche 3.12) est un ancêtre du tag v3.12.15 ; exception retirée.
+
+### Changements
+
+- `Dockerfile` (CPython 3.12.15, image de uv 0.12.24 par empreinte), `docker/proxy-sortie/Dockerfile` et `docker/oauth2-proxy/Dockerfile` (image de uv 0.12.24) ; `ci.yml` (sept jobs) et `modele.yml` (deux) ; tests ; CLAUDE.md, spec, ADR 005.
+
+### Images Go : failles de `net/http` du 08/10
+
+- Le `check.sh` de cette branche échoue ensuite sur l'image du proxy de sortie, puis sur celle d'oauth2-proxy (scan lancé à part) : failles de `net/http` et de `golang.org/x/net` publiées le 08/10 (GO-2026-6603, 6604, 6605, 6607 à 6613, 6617 ; corrigées par Go 1.26.9 et x/net 0.60.0). Elles étaient cachées sur `main` : l'échec du scan de l'image de l'application arrêtait le job avant.
+- **govulncheck v1.1.4, en mode binaire** : fonctions vulnérables liées aux deux binaires, dont la lecture des en-têtes de chaque requête (`net/textproto.Reader.ReadMIMEHeader`) et le traitement de CONNECT ; aucune exception défendable. Erreur de ma part, corrigée devant le propriétaire : sur le binaire de Smokescreen en Go 1.26.8, j'avais dit les fonctions de x/net absentes, en lisant le résumé (qui comptait ces failles avec la bibliothèque standard) au lieu du détail (« Found in: golang.org/x/net@v0.59.0 ») ; recompilé en Go 1.26.9, govulncheck les a dites atteintes, et l'exception prévue n'a pas été écrite.
+- **Décisions du propriétaire (12/10)** : Smokescreen en Go 1.26.9 et x/net 0.60.0 ; oauth2-proxy compilé depuis les sources de l'étiquette v7.15.5, avec Go 1.26.9 et x/net 0.60.0 ; garde-fous dans la construction (commit vérifié, modules vérifiés par `sum.golang.org`, suite de tests du projet bloquante, govulncheck sans faille atteignable) ; amendement daté de l'ADR 005, avec les conditions de retour (dossier `vendor` de Smokescreen dès qu'un de ses commits passe à x/net 0.60.0 ou plus ; binaire publié d'oauth2-proxy, option B, dès qu'une version officielle est compilée avec Go 1.26.9 ou plus) ; détail de govulncheck lu faille par faille ; une seule PR, un commit par image.
+- **Smokescreen** : construction validée d'abord à part, puis dans l'image : seule la ligne de x/net change dans `go.mod`, `go mod verify` passe, la suite de tests passe (33 s), govulncheck ne trouve aucune faille (20 modules et la bibliothèque standard de Go 1.26.9), le scan non plus.
+- **oauth2-proxy** : commit extrait `bea3f04b…`, celui de l'étiquette annotée v7.15.5 ; x/net seul changé dans `go.mod` ; 29 paquets de tests passés (environ 3 min 15 s par architecture) ; binaire « v7.15.5 (built with go1.26.9) » ; govulncheck sans faille atteinte, ni au niveau des fonctions ni des paquets (59 modules), une seule au niveau des modules, sans correctif et hors du binaire (GO-2026-5932, `golang.org/x/crypto/openpgp`) ; scan sans faille ; les quatre exceptions de gRPC v1.83.0 et x/crypto v0.55.0 retirées. Options du chart inchangées de la v7.15.4 à la v7.15.5 (seuls changements : une option Bitbucket, et l'adresse du client lue dans les en-têtes seulement derrière un mandataire de confiance, absente de notre format de journal).
+- **Python et OpenSSL** : CPython 3.12.15 (publication 20261003) charge OpenSSL 3.5.9, vérifié dans l'image ; noté au commentaire des exceptions `libssl3t64`, dont les motifs restent ceux du 01/10.
+
+### Suite
+
+- **Empreintes des charts** : après la fusion, le job `publication` publie les nouvelles images ; le chart désigne encore les index publiés précédents (application ; oauth2-proxy v7.15.4) : PR à part pour y mettre les nouvelles empreintes, une fois la publication vérifiée.
+- Langfuse : traitée dans cette PR (ci-dessous), en 4.58.0 ; la branche `langfuse-4-53` n'a plus d'objet.
+
+### Nombre de tests
+
+- La suite principale passe de 2 381 à 2 385 (Smokescreen : commit vérifié, x/net, tests et govulncheck dans la construction ; oauth2-proxy : Go, sources de l'étiquette, x/net, tests et govulncheck, licence, à la place de l'archive et du binaire publiés) ; le total, de 2 561 à 2 565.
+
+### Images de test : Langfuse 4.58.0 et Valkey (13/10)
+
+- Le job `cluster` de cette PR échoue au scan des images de test, avant le cluster : avis parus depuis le 07/10 dans Langfuse 4.50.0 (`sharp` 0.35.4, `@modelcontextprotocol/sdk` 1.29.0, outil de migration en Go 1.26.8, `zlib` 1.3.2-r0) et dans Valkey (`zlib`). Blocage croisé : seule, une PR Langfuse aurait échoué au job `image`. Décision du propriétaire : compléter cette PR.
+- Langfuse 4.53.0 ne réglait rien (`sharp` et le SDK MCP inchangés) ; la 4.57.0 réglait tout, mais portait `pcre2` 10.40-6.el9 (trois failles hautes, base UBI) ; retenue : 4.58.0 (13/10), où `pcre2` est corrigé, à Dockerfile identique. Vérifications et scan : ADR 008. Le propriétaire a demandé d'aller au bout sans multiplier les allers-retours.
+- Valkey 8.1.10-alpine, non republiée : exception de 30 jours pour CVE-2026-85091 (`zlib`), `valkey-server` ne liant pas `zlib`.
+- Le message d'une exception expirée, corrigé sur la branche `langfuse-4-53` le 07/10, est repris ici.
+- Nombre de tests : la suite principale passe de 2 385 à 2 387 (message de l'exception expirée, sur deux fichiers ; le test de l'exception `source-map-js` remplacé par celui de `zlib`) ; le total, de 2 565 à 2 567.

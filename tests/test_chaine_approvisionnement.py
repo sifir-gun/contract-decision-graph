@@ -102,7 +102,7 @@ def test_chaque_base_du_dockerfile_a_sa_verification():
     module = chaine()
     bases = module.bases(ROOT / "Dockerfile")
     assert [b.split("@")[0] for b in bases] == [
-        "ghcr.io/astral-sh/uv:0.12.19-trixie-slim",
+        "ghcr.io/astral-sh/uv:0.12.24-trixie-slim",
         "gcr.io/distroless/cc-debian13:nonroot",
     ]
     distroless = module.command(bases[1])
@@ -130,7 +130,7 @@ def test_une_etape_du_meme_dockerfile_n_est_pas_une_base(tmp_path):
     """`FROM etape` reprend une étape précédente, y compris choisie par une variable
     (`go-${TARGETARCH}`) : seules les images sont des bases, chacune une fois."""
     dockerfile = tmp_path / "Dockerfile"
-    uv = "ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:" + "a" * 64
+    uv = "ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:" + "a" * 64
     static = "gcr.io/distroless/static-debian13:nonroot@sha256:" + "b" * 64
     dockerfile.write_text(
         "ARG TARGETARCH\n"
@@ -175,7 +175,7 @@ def test_verification_echouee_arrete_avec_la_base_en_cause(tmp_path, capsys):
 
 
 DISTROLESS = "gcr.io/distroless/cc-debian13:nonroot@sha256:" + "a" * 64
-UV = "ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:" + "b" * 64
+UV = "ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:" + "b" * 64
 # messages d'échec des outils de vérification : un problème d'environnement, reconnu, ne
 # dit rien de la signature ; toute autre cause est une signature invalide
 UNVERIFIABLE = {
@@ -335,21 +335,11 @@ def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
     module.scan(tmp_path, EXCEPTIONS, today=TODAY, run=ok)
     config = yaml.safe_load((tmp_path / "grype.yaml").read_text(encoding="utf-8"))
     rules = {rule["vulnerability"]: rule for rule in config["ignore"]}
-    rule = rules["CVE-2026-82049"]
-    assert rule["package"] == {"name": "python", "type": "binary", "version": "3.12.14"}
-    assert "157454" in rule["reason"]  # report sur 3.12 non fusionné
-    # oauth2-proxy v7.15.4 (PR D1) : binaire publié, dépendances figées ; failles jugées
-    # hors d'atteinte (aucun serveur gRPC, pas de SSH ; govulncheck)
-    grpc = {"name": "google.golang.org/grpc", "type": "go-module", "version": "v1.83.0"}
-    crypto = {"name": "golang.org/x/crypto", "type": "go-module", "version": "v0.55.0"}
-    for name, package in (
-        ("GHSA-2v4p-qf9q-27wj", grpc),
-        ("GHSA-vp52-pcj8-j9qc", grpc),
-        ("GO-2026-6354", crypto),
-        ("GO-2026-6355", crypto),
-    ):
-        assert rules[name]["package"] == package
-        assert "govulncheck" in rules[name]["reason"]
+    # CPython 3.12.15 (12/10) corrige CVE-2026-82049 (tarfile) : plus d'exception
+    assert not any(rule["package"]["name"] == "python" for rule in config["ignore"])
+    # oauth2-proxy v7.15.5 compilé par nous (amendement du 12/10 à l'ADR 005) : gRPC 1.84.0
+    # et x/crypto 0.57.0, plus d'exception pour ses modules
+    assert not any(rule["package"]["type"] == "go-module" for rule in config["ignore"])
     # distroless cc-debian13 (01/10/2026) : libssl3t64 de l'image de base, présente mais
     # chargée par aucun processus (DT_NEEDED, /proc/<pid>/maps), correctif pas encore
     # republié par distroless
@@ -362,7 +352,7 @@ def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
     ):
         assert rules[name]["package"] == libssl
         assert "DT_NEEDED" in rules[name]["reason"] and "maps" in rules[name]["reason"]
-    assert len(rules) == 9
+    assert len(rules) == 4
 
 
 def exceptions(tmp_path, **changes) -> Path:
@@ -391,6 +381,17 @@ def test_exception_expiree_ou_incomplete_refusee(tmp_path, changes, message):
     module = chaine()
     with pytest.raises(ValueError, match=message):
         module.scan(tmp_path, exceptions(tmp_path, **changes), today=TODAY, run=ok)
+
+
+@pytest.mark.parametrize(
+    "name", ["exceptions-vulnerabilites.yaml", "exceptions-vulnerabilites-tests.yaml"]
+)
+def test_exception_expiree_nomme_le_fichier_ou_la_revoir(name):
+    """Le message nomme le fichier de l'exception expirée : il nommait toujours celui
+    du produit, même pour une exception des images de test (signalé le 06/10)."""
+    module = chaine()
+    with pytest.raises(ValueError, match=re.escape(f"(securite/{name})")):
+        module.grype_config(ROOT / "securite" / name, date(2030, 1, 1))
 
 
 def test_inventaire_et_scan_apres_la_construction_en_ci_et_en_local():

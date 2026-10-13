@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19" # celle du poste de développement ; uv.lock vérifié avec elle
+          version: "0.12.24" # celle du poste de développement ; uv.lock vérifié avec elle
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances de développement, strictement depuis uv.lock
@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19"
+          version: "0.12.24"
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock (mypy lit les types des bibliothèques)
@@ -66,7 +66,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19"
+          version: "0.12.24"
           python-version: "3.12"
           enable-cache: true
       - name: pip-audit, strictement depuis uv.lock (groupe audit)
@@ -126,7 +126,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19"
+          version: "0.12.24"
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock
@@ -155,7 +155,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19"
+          version: "0.12.24"
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock (pytest pour les tests du rendu)
@@ -195,7 +195,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19"
+          version: "0.12.24"
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock (pytest et httpx pour les vérifications)
@@ -293,7 +293,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.19"
+          version: "0.12.24"
           python-version: "3.12"
           enable-cache: true
       - name: Dépendances, strictement depuis uv.lock (pytest et httpx pour les scénarios)

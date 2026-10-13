@@ -281,7 +281,7 @@ def test_meme_construction_de_l_application_qu_en_ci():
         for s in workflow()["jobs"]["verification"]["steps"]
         if s.get("uses", "").startswith("astral-sh/setup-uv@")
     }
-    assert uv == {"0.12.19"}
+    assert uv == {"0.12.24"}
 
 
 # --- l'image construite (--modele ÉTIQUETTE, --image ÉTIQUETTE) ----------------------------

@@ -2,7 +2,9 @@
 chaîne que l'image de l'application.
 
 - Sans image : bases vérifiables (scripts/chaine.py), archive officielle de Go vérifiée par
-  son empreinte pour chaque architecture, source figée par son commit, construction
+  son empreinte pour chaque architecture, source figée par son commit et commit vérifié,
+  x/net 0.60.0 vérifié par la base de sommes de Go (amendement du 12/10 à l'ADR 005), suite
+  de tests de Smokescreen et govulncheck bloquants pendant la construction, construction
   reproductible, licences embarquées.
 - Sur l'image construite (marqueur `proxy`, `--proxy ÉTIQUETTE`, avec `--image` pour le
   client et le serveur de test, qui ont Python) : non root, sans shell, licences présentes ;
@@ -26,10 +28,11 @@ PROXY = ROOT / "docker" / "proxy-sortie"
 # commit de master du 28/09/2026 : les correctifs de sécurité publiés après la v0.1.0
 # (#326 adresses NAT64 locales, #328 connexions vers soi, #329 validation des CRL)
 SMOKESCREEN_COMMIT = "6c44698887826662733b47bbdc461aabcbb365ee"
-GO = "1.26.8"  # go.mod de Smokescreen : go 1.26.0
-GO_SHA256 = {  # https://go.dev/dl/?mode=json, relevé le 28/09/2026
-    "amd64": "d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b",
-    "arm64": "211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0",
+# go.mod de Smokescreen : go 1.26.0 ; 1.26.9 (12/10/2026) : failles de net/http du 08/10
+GO = "1.26.9"
+GO_SHA256 = {  # https://go.dev/dl/?mode=json, relevé le 12/10/2026
+    "amd64": "42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d",
+    "arm64": "4a97373d49fcacdcf3694fea368a500b00ee3e963974f3e7514132717632f052",
 }
 NONROOT = "65532:65532"
 
@@ -78,9 +81,47 @@ def test_go_officiel_verifie_par_son_empreinte_pour_chaque_architecture():
         assert f"ADD --checksum=sha256:{digest} {url} /go.tar.gz" in adds, arch
 
 
-def test_source_de_smokescreen_figee_par_son_commit():
+def test_source_de_smokescreen_figee_par_son_commit_verifie():
     source = f"https://github.com/stripe/smokescreen.git#{SMOKESCREEN_COMMIT}"
-    assert f"ADD --keep-git-dir=false {source} /src" in instructions()
+    lines = instructions()
+    assert f"ADD --keep-git-dir=true {source} /src" in lines
+    # le commit extrait est celui qu'on attend, puis l'historique disparaît
+    [check] = [i for i in lines if ".git/HEAD" in i]
+    assert f'test "$(cat .git/HEAD)" = "{SMOKESCREEN_COMMIT}"' in check
+    assert "rm -rf .git" in check
+
+
+def test_x_net_0_60_0_verifie_par_la_base_de_sommes_de_go():
+    """Amendement du 12/10 à l'ADR 005 : golang.org/x/net v0.59.0 du commit figé porte les
+    failles HTTP/2 du 08/10 (GO-2026-6603, 6610, 6611, 6612, 6617), atteintes d'après
+    govulncheck ; passé à v0.60.0 par le proxy des modules, vérifié par sum.golang.org,
+    dossier vendor régénéré. Retour au vendor du commit dès qu'un commit de Smokescreen
+    passe à x/net 0.60.0 ou plus."""
+    [update] = [i for i in instructions() if "go get" in i]
+    for part in (
+        "GOPROXY=https://proxy.golang.org",
+        "GOSUMDB=sum.golang.org",
+        "go get golang.org/x/net@v0.60.0",
+        "go mod vendor",
+        "go mod verify",
+        "go list -m -f '{{.Version}}' golang.org/x/net",
+        '= "v0.60.0"',
+    ):
+        assert part in update, part
+    assert "GONOSUMDB" not in update and "GOFLAGS=-insecure" not in update
+
+
+def test_suite_de_tests_et_govulncheck_bloquants_pendant_la_construction():
+    lines = instructions()
+    [tests] = [i for i in lines if "go test" in i]
+    assert "go test -mod=vendor ./..." in tests and "GOPROXY=off" in tests
+    [check] = [i for i in lines if "govulncheck -mode=binary" in i]
+    assert "go install golang.org/x/vuln/cmd/govulncheck@v1.1.4" in check
+    assert "GOSUMDB=sum.golang.org" in check
+    assert "govulncheck -mode=binary -show verbose /smokescreen" in check
+    [build] = [i for i in lines if "go build" in i]
+    # tests avant le binaire, govulncheck sur le binaire construit
+    assert lines.index(tests) < lines.index(build) < lines.index(check)
 
 
 def test_construction_statique_reproductible_sans_telechargement():

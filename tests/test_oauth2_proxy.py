@@ -1,13 +1,16 @@
-"""Image d'oauth2-proxy (PR D1, ADR 005, option B) : construite par notre chaîne à partir
-du binaire publié dans la release GitHub v7.15.4, jamais depuis l'image officielle, dont
-les binaires ne correspondent pas aux empreintes publiées (relevé du 30/09/2026).
+"""Image d'oauth2-proxy (PR D1, ADR 005) : jusqu'au 12/10/2026, le binaire publié dans la
+release GitHub v7.15.4 (option B). Amendement du 12/10 à l'ADR 005 : aucune version publiée
+n'est compilée avec Go 1.26.9 (failles de net/http du 08/10) ; compilée par notre chaîne
+depuis les sources de l'étiquette v7.15.5, avec Go 1.26.9 et golang.org/x/net 0.60.0,
+jusqu'à ce qu'une version officielle soit compilée avec Go 1.26.9 ou plus.
 
-- Sans image : archive de la release vérifiée par son empreinte, binaire extrait comparé à
-  l'empreinte publiée pour chaque architecture, licence d'oauth2-proxy figée, licences des
+- Sans image : Go officiel vérifié par son empreinte, commit de l'étiquette vérifié, x/net
+  vérifié par la base de sommes de Go, suite de tests d'oauth2-proxy et govulncheck
+  bloquants, binaire statique à la version de l'étiquette, licence figée, licences des
   modules Go du binaire reconstituées, bases vérifiables, contexte vide.
 - Sur l'image construite (marqueur `oauth2proxy`, `--oauth2-proxy ÉTIQUETTE`) : non root,
-  sans shell, version attendue, binaire identique à l'empreinte publiée, licences de chaque
-  module embarqué.
+  sans shell, version attendue et Go 1.26.9, x/net 0.60.0 lié, licences de chaque module
+  embarqué.
 """
 
 import hashlib
@@ -22,18 +25,18 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FOLDER = ROOT / "docker" / "oauth2-proxy"
-VERSION = "v7.15.4"
-RELEASE = f"https://github.com/oauth2-proxy/oauth2-proxy/releases/download/{VERSION}"
-# fichiers *.tar.gz-sha256sum.txt et *-sha256sum.txt de la release, relevés le 30/09/2026
-ARCHIVE_SHA256 = {
-    "amd64": "4fbe902189aab713d9c0519b90a645032d4636ecb523dc36f5cc312d8ebef1e2",
-    "arm64": "b3fb0b61aecfb4b776dccb6daff406676ed0ead74245dc6e4bdf71f993eb1710",
+VERSION = "v7.15.5"
+SOURCE = f"https://github.com/oauth2-proxy/oauth2-proxy.git#{VERSION}"
+# commit de l'étiquette annotée v7.15.5 (objet 6e4bd00e…), relevé le 12/10/2026
+TAG_COMMIT = "bea3f04bf87b93f5354f392fe2216a88e6031350"
+GO = "1.26.9"
+GO_SHA256 = {  # https://go.dev/dl/?mode=json, relevé le 12/10/2026
+    "amd64": "42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d",
+    "arm64": "4a97373d49fcacdcf3694fea368a500b00ee3e963974f3e7514132717632f052",
 }
-BINARY_SHA256 = {
-    "amd64": "d2cc1a814d189ad3c5d3ac712dcfbea43176afacae814c8f64e8dded885f5c41",
-    "arm64": "dd70759fdd210ea10e16d44a8072356f74789da2d58fd1a7f3b9bb08922b9c40",
-}
-TAG_COMMIT = "81ff034fe2ff3246e670c694b02e3267d1ae46bc"  # étiquette v7.15.4
+# version gravée dans le binaire, comme dist.sh de la release
+LDFLAG_VERSION = "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/version.VERSION"
+# LICENSE identique aux étiquettes v7.15.4 et v7.15.5
 LICENSE_SHA256 = "89807acf2309bd285f033404ee78581602f3cd9b819a16ac2f0e5f60ff4a473e"
 NONROOT = "65532:65532"
 WAIT = 300
@@ -65,30 +68,66 @@ def chaine():
 # --- sans image ------------------------------------------------------------------------------
 
 
-def test_archive_de_la_release_verifiee_par_son_empreinte():
-    for arch, digest in ARCHIVE_SHA256.items():
-        url = f"{RELEASE}/oauth2-proxy-{VERSION}.linux-{arch}.tar.gz"
-        assert f"ADD --checksum=sha256:{digest} {url} /archive.tar.gz" in instructions()
+def test_go_officiel_verifie_par_son_empreinte_pour_chaque_architecture():
+    adds = [i for i in instructions() if i.startswith("ADD --checksum=sha256:")]
+    for arch, digest in GO_SHA256.items():
+        url = f"https://go.dev/dl/go{GO}.linux-{arch}.tar.gz"
+        assert f"ADD --checksum=sha256:{digest} {url} /go.tar.gz" in adds, arch
 
 
-def test_binaire_compare_a_l_empreinte_publiee_pour_chaque_architecture():
-    """Échec de la construction si le binaire de l'archive n'est pas celui dont la
-    release publie l'empreinte."""
-    text = " ".join(instructions())
-    for arch, digest in BINARY_SHA256.items():
-        assert f"ENV BINAIRE_SHA256={digest}" in text, arch
-    assert "sha256sum --check --strict" in text
+def test_sources_de_l_etiquette_publiee_commit_verifie():
+    """Le commit compilé est celui de l'étiquette v7.15.5 publiée : l'étiquette déplacée,
+    la construction échoue."""
+    lines = instructions()
+    assert f"ADD --keep-git-dir=true {SOURCE} /src" in lines
+    [check] = [i for i in lines if ".git/HEAD" in i]
+    assert f'test "$(cat .git/HEAD)" = "{TAG_COMMIT}"' in check
+    assert "rm -rf .git" in check
 
 
-def test_licence_d_oauth2_proxy_figee_au_commit_de_l_etiquette():
-    url = (
-        f"https://raw.githubusercontent.com/oauth2-proxy/oauth2-proxy/{TAG_COMMIT}"
-        "/LICENSE"
-    )
-    assert (
-        f"ADD --checksum=sha256:{LICENSE_SHA256} {url} /licences/oauth2-proxy/LICENSE"
-        in (instructions())
-    )
+def test_x_net_0_60_0_verifie_par_la_base_de_sommes_de_go():
+    [update] = [i for i in instructions() if "go get" in i]
+    for part in (
+        "GOPROXY=https://proxy.golang.org",
+        "GOSUMDB=sum.golang.org",
+        "go get golang.org/x/net@v0.60.0",
+        "go mod download",
+        "go mod verify",
+        "go list -m -f '{{.Version}}' golang.org/x/net",
+        '= "v0.60.0"',
+    ):
+        assert part in update, part
+    assert "GONOSUMDB" not in update and "GOFLAGS=-insecure" not in update
+
+
+def test_suite_de_tests_et_govulncheck_bloquants_pendant_la_construction():
+    """Suite de tests d'oauth2-proxy (sans -race, qui exige cgo), sans téléchargement ;
+    govulncheck sur le binaire construit : une faille atteignable arrête la
+    construction."""
+    lines = instructions()
+    [tests] = [i for i in lines if "go test" in i]
+    assert "go test ./..." in tests and "GOPROXY=off" in tests
+    [build] = [i for i in lines if "go build" in i]
+    for part in (
+        "CGO_ENABLED=0",
+        "GOPROXY=off",
+        "-trimpath",
+        f'-ldflags="-X {LDFLAG_VERSION}={VERSION}"',
+        "-o /oauth2-proxy",
+    ):
+        assert part in build, part
+    [check] = [i for i in lines if "govulncheck -mode=binary" in i]
+    assert "go install golang.org/x/vuln/cmd/govulncheck@v1.1.4" in check
+    assert "GOSUMDB=sum.golang.org" in check
+    assert "govulncheck -mode=binary -show verbose /oauth2-proxy" in check
+    assert lines.index(tests) < lines.index(build) < lines.index(check)
+
+
+def test_licence_d_oauth2_proxy_figee():
+    [licence] = [i for i in instructions() if "/licences/oauth2-proxy" in i]
+    assert "cp /src/LICENSE /licences/oauth2-proxy/LICENSE" in licence
+    assert f"{LICENSE_SHA256}  /licences/oauth2-proxy/LICENSE" in licence
+    assert "sha256sum --check --strict" in licence
 
 
 def test_licences_des_modules_du_binaire_reconstituees_sans_trou():
@@ -103,8 +142,8 @@ def test_licences_des_modules_du_binaire_reconstituees_sans_trou():
 
 
 UV_BASE = (
-    "ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:"
-    "c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197"
+    "ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:"
+    "71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980"
 )
 STATIC_BASE = (
     "gcr.io/distroless/static-debian13:nonroot@sha256:"
@@ -176,18 +215,18 @@ def test_image_non_root_sans_shell(image):
 
 
 @pytest.mark.oauth2proxy
-def test_version_attendue(image):
+def test_version_attendue_compilee_avec_go_1_26_9(image):
     ran = docker("run", "--rm", "--read-only", image, "--version")
     assert ran.returncode == 0, ran.stderr
-    assert VERSION in ran.stdout + ran.stderr
+    assert f"oauth2-proxy {VERSION} (built with go{GO})" in ran.stdout + ran.stderr
 
 
 @pytest.mark.oauth2proxy
-def test_binaire_identique_a_l_empreinte_publiee(image):
-    [config] = json.loads(docker("image", "inspect", image).stdout)
-    arch = config["Architecture"]
-    binary = files(image)["/oauth2-proxy"]  # chemin de l'ENTRYPOINT
-    assert hashlib.sha256(binary).hexdigest() == BINARY_SHA256[arch]
+def test_x_net_0_60_0_lie_au_binaire(image):
+    """Modules du binaire (go version -m), relevés pour les licences : x/net 0.60.0."""
+    modules = files(image)["/licences/modules.txt"].decode().split()
+    assert "golang.org/x/net@v0.60.0" in modules
+    assert not [m for m in modules if m.startswith("golang.org/x/net@v0.5")]
 
 
 @pytest.mark.oauth2proxy

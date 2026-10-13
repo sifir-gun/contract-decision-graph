@@ -1,6 +1,6 @@
 # Image de l'application (ADR 005, « Image ») : deux étapes.
 #
-# 1. Construction : uv 0.12.19 (celui de la CI), Python géré par uv (python-build-standalone,
+# 1. Construction : uv 0.12.24 (celui de la CI), Python géré par uv (python-build-standalone,
 #    empreinte SHA-256 vérifiée par uv), dépendances de uv.lock seules, sans le groupe dev,
 #    sans rien construire depuis des sources.
 # 2. Exécution : distroless cc (glibc, libstdc++, certificats), sans shell ni gestionnaire
@@ -13,9 +13,9 @@
 #   docker build --build-arg CDG_COMMIT="$(uv run --no-sync python scripts/chaine.py revision)" --tag cdg:verification .
 #   uv run pytest -m image --image cdg:verification
 
-ARG PYTHON_VERSION=3.12.14
+ARG PYTHON_VERSION=3.12.15
 
-FROM ghcr.io/astral-sh/uv:0.12.19-trixie-slim@sha256:c40e42de0e1516439b5139d7a214657dbffbbd3d2366661347efae7b8337c197 AS construction
+FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS construction
 ARG PYTHON_VERSION
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
