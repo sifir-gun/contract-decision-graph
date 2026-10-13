@@ -155,9 +155,10 @@ authentification:
     revalidation: 5m  # cookie-refresh : un compte retiré perd l'accès dans ce délai
   image:
     repository: ghcr.io/sifir-gun/contract-decision-graph/oauth2-proxy
-    # index publié par la CI à la fusion de la D1 (sha-e338f31 ; oauth2-proxy v7.15.4,
-    # binaire vérifié) ; signature cosign et provenance vérifiées le 30/09/2026
-    digest: sha256:1ea518c8f7b97699d64fec957921ae83de5bc1f75008c8b9bf66ebee8db87795
+    # index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; oauth2-proxy v7.15.5,
+    # compilé avec Go 1.26.9, amendement du 12/10 à l'ADR 005) ; signature cosign et
+    # provenance vérifiées le 13/10/2026
+    digest: sha256:63370d5ff5944f657e99783644429419c35f7ab0535caf61c8c1e67361a4ebe1
     pullPolicy: IfNotPresent
   port: 4180
   ressources:
