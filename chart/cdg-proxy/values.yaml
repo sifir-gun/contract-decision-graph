@@ -2,11 +2,13 @@
 # inconnue ou mal formée fait échouer l'installation.
 
 # Image du proxy : l'empreinte de l'index amd64/arm64 publié par la CI (résumé du job
-# publication), jamais une étiquette. Obligatoire, sans valeur par défaut tant que la
-# première publication n'a pas eu lieu : sans elle, l'installation est refusée.
+# publication), jamais une étiquette.
 image:
   repository: ghcr.io/sifir-gun/contract-decision-graph/proxy-sortie
-  digest: ""
+  # index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; Smokescreen compilé
+  # avec Go 1.26.9 et x/net 0.60.0, amendement du 12/10 à l'ADR 005) ; signature cosign
+  # et provenance vérifiées le 13/10/2026
+  digest: sha256:c1c2edbc14dbb83f923ebb2b0b94a3aed016199d84b01889b5ea5228a49db14c
   pullPolicy: IfNotPresent
 
 replicas: 2

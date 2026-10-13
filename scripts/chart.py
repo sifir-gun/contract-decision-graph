@@ -74,14 +74,10 @@ VARIANTS: dict[str, list[str]] = {
         ),
     ],
 }
-# proxy de sortie (PR C3) : l'empreinte de l'image n'a pas de valeur par défaut avant la
-# première publication ; une empreinte d'exemple pour le rendu, qui ne tire rien
-EXAMPLE_DIGEST = "sha256:" + "1" * 64
+# proxy de sortie (PR C3) : l'image par défaut est l'index publié
 PROXY_VARIANTS: dict[str, list[str]] = {
-    "production": ["--set", f"image.digest={EXAMPLE_DIGEST}"],
+    "production": [],
     "test": [
-        "--set",
-        f"image.digest={EXAMPLE_DIGEST}",
         "--set",
         "plagesAutorisees[0]=10.43.0.0/16",
         "--set",

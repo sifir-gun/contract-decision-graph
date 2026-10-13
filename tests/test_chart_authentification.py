@@ -90,10 +90,11 @@ def test_authentification_exige_ses_valeurs(missing):
     assert missing.split(".")[-1] in refused(*kept)
 
 
-# index publié par la CI à la fusion de la D1 (sha-e338f31), signature cosign et
-# provenance vérifiées le 30/09/2026 (docs/exploitation.md, « Image publiée »)
+# index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; oauth2-proxy v7.15.5,
+# compilé avec Go 1.26.9), signature cosign et provenance vérifiées le 13/10/2026
+# (docs/exploitation.md, « Image publiée »)
 OAUTH2_PROXY_INDEX = (
-    "sha256:1ea518c8f7b97699d64fec957921ae83de5bc1f75008c8b9bf66ebee8db87795"
+    "sha256:63370d5ff5944f657e99783644429419c35f7ab0535caf61c8c1e67361a4ebe1"
 )
 
 
@@ -108,7 +109,7 @@ def test_image_d_oauth2_proxy_par_defaut_l_index_publie():
 
 def test_image_d_oauth2_proxy_jamais_par_etiquette():
     auth = chart_script().AUTH
-    message = refused(*auth, "--set", "authentification.image.digest=v7.15.4")
+    message = refused(*auth, "--set", "authentification.image.digest=v7.15.5")
     assert "digest" in message
 
 
