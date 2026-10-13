@@ -12,11 +12,12 @@ exceptions:
     paquet: {nom: deepmerge-ts, type: npm, version: 7.1.5}
     motif: >-
       CVE-2026-40345, épuisement de pile en fusionnant des graphes d'objets récursifs
-      (déni de service), corrigé en 8.0.0. Dans Langfuse web et worker 4.50.0, que le projet
-      ne construit pas ; images de test seulement, joignables depuis l'application seule
-      (cluster) ou le poste (127.0.0.1), et du JSON ne peut pas exprimer de cycle. À revoir
-      à la version suivante de Langfuse.
-    decidee: 2026-10-04
+      (déni de service), corrigé en 8.0.0. Dans Langfuse web et worker 4.58.0 (revue du
+      13/10 : la 7.1.5 y reste, à côté de la 8.0.2, tirée par @prisma/config 6.19.3, le
+      chargeur de configuration de Prisma), que le projet ne construit pas ; images de test
+      seulement, joignables depuis l'application seule (cluster) ou le poste (127.0.0.1), et
+      du JSON ne peut pas exprimer de cycle. À revoir à la version suivante de Langfuse.
+    decidee: 2026-10-13
     expire: 2026-12-31
   - vulnerabilite: CVE-2026-5450
     paquet: {nom: libc6, type: deb, version: 2.41-12+deb13u3}
@@ -37,18 +38,15 @@ exceptions:
       à la prochaine publication de l'image.
     decidee: 2026-10-04
     expire: 2026-12-31
-  - vulnerabilite: GHSA-68fv-2mgg-jv7q
-    paquet: {nom: source-map-js, type: npm, version: 1.2.1}
+  - vulnerabilite: CVE-2026-85091
+    paquet: {nom: zlib, type: apk, version: 1.3.2-r0}
     motif: >-
-      CVE-2026-93749, blocage de la boucle d'événements par un décalage de ligne démesuré
-      dans une carte de sources indexée (déni de service), corrigé en 1.2.2. Seulement dans
-      Langfuse worker 4.50.0 (scan complet du 06/10 : ni l'image web, ni ClickHouse, ni
-      Valkey), que le projet ne construit pas : dépendance transitive de next (par
-      next-auth, dans @langfuse/shared) et de magicast (par c12). Ni le code du worker ni
-      @langfuse/shared ne l'importent, ni postcss, magicast ou c12 ; le worker ne lance que
-      node worker/dist/index.js : aucune carte de sources lue, d'où qu'elle vienne. Image
-      de test seulement ; dans le cluster, le worker n'accepte que les pods de son espace.
-      Sortie : la mise à jour de Langfuse (4.53.0 ou suivante, qui embarque 1.2.2), d'ici
-      le 13/10 ; 30 jours au plus (décision du 06/10).
-    decidee: 2026-10-06
-    expire: 2026-11-05
+      zlib 1.3.1.2 à 1.3.2 : débordement de tas dans gz_vacate() lors d'écritures gzwrite()
+      non bloquantes, atteint par gzprintf() ou gzvprintf() après un blocage d'écriture ;
+      corrigé en 1.3.2-r1. Dans Valkey 8.1.10-alpine, non republiée au 13/10 (pas de
+      8.1.11), que le projet ne construit pas : valkey-server ne lie pas zlib (ldd : libssl,
+      libcrypto, musl), seul libapk, le gestionnaire de paquets, en dépend. Image de test
+      seulement, sans sortie ni entrée hors de Langfuse. Sortie : la prochaine publication
+      de l'image de Valkey ; 30 jours au plus (décision du 13/10).
+    decidee: 2026-10-13
+    expire: 2026-11-12
