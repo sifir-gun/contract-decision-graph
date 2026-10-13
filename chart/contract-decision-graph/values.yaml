@@ -10,7 +10,9 @@ mode: reel
 # run de publication), jamais une étiquette.
 image:
   repository: ghcr.io/sifir-gun/contract-decision-graph
-  digest: sha256:0727136980b36b63f0e86e2e5a3a5a6b1178bf535b96fd5796966e2021fd716d
+  # index publié par la CI à la fusion de la PR #53 (sha-7a24bfb) ; signature cosign et
+  # provenance vérifiées le 13/10/2026
+  digest: sha256:54510fb02304ab276d65dd018e86cf44cf2fa862caccfbdfbaa628936d3a03ab
   pullPolicy: IfNotPresent
 
 # Poids du modèle d'embedding : image dédiée, montée en lecture seule (mode réel).

@@ -303,6 +303,18 @@ def test_images_par_empreinte_jamais_par_etiquette(reel):
                 assert DIGEST.fullmatch(volume["image"]["reference"]), name
 
 
+# index publié par la CI à la fusion de la PR #53 (sha-7a24bfb), signature cosign et
+# provenance vérifiées le 13/10/2026 (docs/exploitation.md, « Image publiée »)
+APP_INDEX = "sha256:54510fb02304ab276d65dd018e86cf44cf2fa862caccfbdfbaa628936d3a03ab"
+
+
+def test_image_de_l_application_par_defaut_l_index_publie():
+    """Installation sans option d'image : l'index publié et vérifié."""
+    image = chart_values("contract-decision-graph")["image"]
+    assert image["repository"] == "ghcr.io/sifir-gun/contract-decision-graph"
+    assert image["digest"] == APP_INDEX
+
+
 @pytest.mark.chart
 @pytest.mark.chart
 @pytest.mark.parametrize("variant", ["reel", "demo", "copie"])
