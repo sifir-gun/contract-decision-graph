@@ -3344,3 +3344,25 @@ Le scan hebdomadaire de `main` (lundi 12/10, job `image`, amd64 et arm64) échou
 - Valkey 8.1.10-alpine, non republiée : exception de 30 jours pour CVE-2026-85091 (`zlib`), `valkey-server` ne liant pas `zlib`.
 - Le message d'une exception expirée, corrigé sur la branche `langfuse-4-53` le 07/10, est repris ici.
 - Nombre de tests : la suite principale passe de 2 385 à 2 387 (message de l'exception expirée, sur deux fichiers ; le test de l'exception `source-map-js` remplacé par celui de `zlib`) ; le total, de 2 565 à 2 567.
+
+## 2026-10-13 · Empreintes des charts : les index publiés à la fusion de la #53 (branche `empreintes-chart`)
+
+La PR #53 fusionnée, la CI de `main` passe en entier (cluster compris : première exécution réelle d'oauth2-proxy compilé, de Smokescreen en Go 1.26.9 et de Langfuse 4.58.0 dans le cluster) et publie les trois images (`sha-7a24bfb`).
+
+### Vérifications, sur chaque index
+
+- Empreintes du résumé de la publication relues dans le registre (`docker buildx imagetools inspect` : l'index et ses deux architectures).
+- Signature : `cosign verify` (image figée de `scripts/chaine.py`, cosign v3.1.3), identité du workflow `ci.yml` sur `main`, émetteur GitHub Actions.
+- Provenance : `gh attestation verify` (sortie JSON lue) : SLSA v1, sujet l'index, `main` au commit `7a24bfb`.
+- Contenu : « oauth2-proxy v7.15.5 (built with go1.26.9) » ; `CDG_COMMIT=7a24bfb…` dans l'image de l'application.
+
+### Changements
+
+- **Application** : l'empreinte par défaut datait du chart initial (PR C2) ; une installation sans option tirait une image antérieure à l'authentification, aux traces et aux correctifs de la #53. Passée à l'index publié ; test qui la fige.
+- **oauth2-proxy** : l'index de la v7.15.4 (`sha-e338f31`, 14 failles atteintes d'après govulncheck) remplacé par celui de la v7.15.5 compilée.
+- **Proxy de sortie** : l'empreinte restait vide « tant que la première publication n'a pas eu lieu », alors que la CI publie le proxy à chaque fusion ; l'index publié par défaut, comme pour oauth2-proxy le 30/09. L'installation n'exige plus d'option d'image ; étiquette et empreinte vide refusées par le schéma. Le job `cluster` passe toujours l'empreinte des images qu'il vient de construire.
+- README : la phrase sur la construction d'oauth2-proxy, restée à l'option B dans la #53, corrigée.
+
+### Nombre de tests
+
+- La suite principale passe de 2 387 à 2 388 (index par défaut de l'application) ; les charts, de 117 à 119 (refus d'une étiquette, ou d'une empreinte vide, pour le proxy, à la place du refus sans empreinte) ; le total, de 2 567 à 2 570.
