@@ -194,8 +194,8 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         ),
     )
     def analyser_contrat(
-        contrat_du_jeu: Annotated[  # type: ignore[valid-type]
-            DemoContract | None,
+        contrat_du_jeu: Annotated[
+            DemoContract | None,  # type: ignore[valid-type]
             Field(description="identifiant d'un contrat du jeu de démonstration"),
         ] = None,
         texte: Annotated[
