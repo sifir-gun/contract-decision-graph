@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from cdg.adapters.web import NO_TELEMETRY
+
 log = logging.getLogger(__name__)
 METHODS = ["GET", "HEAD"]
 HEADERS = {"cache-control": "no-store"}
@@ -47,7 +49,9 @@ def _passes(name: str, check: Callable[[], bool]) -> bool:
 
 
 def create_health_app(checks: Checks, *, instance: str) -> FastAPI:
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        docs_url=None, redoc_url=None, openapi_url=None, telemetry=NO_TELEMETRY
+    )
 
     def answer(status: str, reasons: list[str]) -> JSONResponse:
         if reasons:

@@ -39,7 +39,8 @@ SECRETS = (
 # langchain-core ; *_TRACING_V2 l'emporte sur *_TRACING, et LANGCHAIN_TRACING_V2=true sur
 # le LANGSMITH_TRACING=false de l'image), son mode OpenTelemetry, et la télémétrie du SDK
 # Mistral, qui tracerait prompts et réponses (global : vers le traceur global ; dedicated :
-# vers api.mistral.ai)
+# vers api.mistral.ai), et l'export que FastAPI (depuis 0.142) installerait lui-même vers
+# OTEL_EXPORTER_OTLP_ENDPOINT, journaux d'erreurs compris (messages et piles)
 TRACING_VARS = (
     "LANGSMITH_TRACING_V2",
     "LANGCHAIN_TRACING_V2",
@@ -49,6 +50,7 @@ TRACING_VARS = (
     "LANGSMITH_OTEL_ENABLED",
     "LANGSMITH_OTEL_ONLY",
     "MISTRAL_SDK_TELEMETRY",
+    "FASTAPI_OTEL_AUTO_CONFIGURE",
 )
 
 
