@@ -36,7 +36,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 
-from cdg.adapters.web import acces, presentation, security
+from cdg.adapters.web import NO_TELEMETRY, acces, presentation, security
 from cdg.application import demo_set, saisie
 from cdg.application.saisie import InputError  # formulaire refusé : 400, message
 from cdg.application.service import ContractService, FourEyesRefused
@@ -148,7 +148,9 @@ def create_app(
         contract_path=presentation.contract_path,
     )
     templates = Jinja2Templates(env=env)
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        docs_url=None, redoc_url=None, openapi_url=None, telemetry=NO_TELEMETRY
+    )
     app.mount("/static", StaticFiles(directory=WEB_ROOT / "static"), name="static")
 
     @app.api_route("/favicon.ico", methods=PAGE_METHODS)

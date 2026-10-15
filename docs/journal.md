@@ -3366,3 +3366,29 @@ La PR #53 fusionnée, la CI de `main` passe en entier (cluster compris : premiè
 ### Nombre de tests
 
 - La suite principale passe de 2 387 à 2 388 (index par défaut de l'application) ; les charts, de 117 à 119 (refus d'une étiquette, ou d'une empreinte vide, pour le proxy, à la place du refus sans empreinte) ; le total, de 2 567 à 2 570.
+
+## 2026-10-14 · fastapi 0.143.0 : sa télémétrie coupée, son export automatique refusé (PR #49, Dependabot)
+
+Les PR de Dependabot en attente, remises sur `main` (rebase par GitHub) et leurs notes de version lues : seule fastapi touche à une règle du projet.
+
+### Ce que fait fastapi depuis la 0.142 (code installé de la 0.143.0)
+
+- Il trace chaque requête (et la résolution des dépendances, l'appel de la route, la sérialisation), la mesure, et journalise les échecs de validation et les exceptions, messages et piles compris, vers les fournisseurs globaux d'OpenTelemetry, relus à chaque requête. Le projet n'en installe jamais (ADR 008) : rien n'était émis.
+- Sous `FASTAPI_OTEL_AUTO_CONFIGURE=true` (0.143.0 : désormais à demander ; 0.142 : par défaut), il installe lui-même des fournisseurs globaux et exporte vers `OTEL_EXPORTER_OTLP_ENDPOINT` : hors de la liste blanche des attributs et du contrôle de la destination, le cas de LangSmith.
+- Il dépend de l'API d'OpenTelemetry depuis la 0.143.0, déjà dans le verrou : aucun paquet ajouté.
+
+### Décision du propriétaire (14/10) et changements
+
+- La variable rejoint les traçages par un tiers refusés au démarrage (`settings.TRACING_VARS`), nommée, jamais sa valeur.
+- Seconde défense, aucune n'étant retirée parce qu'une autre semble suffire : chaque application FastAPI du projet (interface, sondes de santé) est créée télémétrie coupée (`NO_TELEMETRY`, `adapters/web/`), réglage explicite qui l'emporte sur la variable.
+- Tests (`tests/test_tracage_tiers.py`), chacun contre un témoin, une application FastAPI sans réglage : sous des fournisseurs globaux simulés, rien de tracé, mesuré ni journalisé (avant la correction : 9 spans et 2 mesures) ; sous la variable, aucun fournisseur installé. Erreur du test, corrigée avant le commit : `opentelemetry._logs` réexporte `get_logger_provider`, mais `get_logger` appelle celle de son module interne ; le témoin ne voyait aucun journal.
+- ADR 008, exploitation et CLAUDE.md à jour.
+
+### Les autres PR de Dependabot
+
+- mypy 2.4.0 (#40) : son nouvel analyseur, celui par défaut, rattache l'erreur voulue du type `Literal` construit à l'exécution (serveur MCP) à la ligne du type ; le commentaire d'exception y passe (vérifié : ligne 197 en 2.3.1, 198 en 2.4.0, aucune erreur avec `--no-native-parser`).
+- anthropic 1.12.1, python-dotenv 1.2.4, ruff 0.16.10, distroless, actions d'artefacts et setup-uv : notes de version sans effet sur le projet.
+
+### Nombre de tests
+
+- La suite principale passe de 2 388 à 2 391 (variable refusée, deux tests de la télémétrie de FastAPI) ; le total, de 2 570 à 2 573.
