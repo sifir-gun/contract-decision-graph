@@ -8,7 +8,9 @@ Règles de nettoyage explicites, testées sur les fichiers réels :
    des métadonnées (début, fin de validité, texte modificateur), pas du contenu indexé ;
 2. lignes d'interface en fin de fichier (« Voir les versions »…) : supprimées ;
 3. notes « Conformément à … » : sorties du texte, conservées en métadonnée `note` ;
-4. la fin de validité est stockée ; `expired` dit si une version a expiré à une date.
+4. début et fin de validité sont stockés ; `expired` dit si une version a expiré à une
+   date, `in_force` si elle y est en vigueur, et `drop_superseded` écarte les versions
+   supplantées : la date d'analyse choisit la version (docs/spec-versions-corpus.md).
 
 Rattachement déclaré (J4) : chaque article du manifeste et chaque fiche déclarent les types
 de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (`by_domain`).
@@ -16,10 +18,10 @@ de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (
 
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, model_validator
 
@@ -69,6 +71,37 @@ def french_date(text: str) -> date:
 def expired(valid_until: date | None, on: date) -> bool:
     """Version expirée à la date `on` : sa fin de validité est atteinte."""
     return valid_until is not None and on >= valid_until
+
+
+def in_force(valid_from: date | None, valid_until: date | None, on: date) -> bool:
+    """Version en vigueur à la date `on` : commencée (aucun début, ou début atteint) et
+    non expirée."""
+    return (valid_from is None or valid_from <= on) and not expired(valid_until, on)
+
+
+class Versioned(Protocol):
+    """Extrait ou ligne d'une version d'une référence du corpus."""
+
+    @property
+    def reference(self) -> str: ...
+
+    @property
+    def valid_from(self) -> date | None: ...
+
+    @property
+    def valid_until(self) -> date | None: ...
+
+
+def drop_superseded[T: Versioned](items: Sequence[T], on: date) -> list[T]:
+    """Écarte les versions supplantées à la date `on` : pour une référence qui a au moins
+    une version en vigueur, ses autres versions. Une référence sans version en vigueur
+    garde toutes les siennes, que le CRAG signale. Ordre conservé."""
+    current = {i.reference for i in items if in_force(i.valid_from, i.valid_until, on)}
+    return [
+        i
+        for i in items
+        if i.reference not in current or in_force(i.valid_from, i.valid_until, on)
+    ]
 
 
 def expiring(
