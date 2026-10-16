@@ -45,7 +45,7 @@ class ExtractionOutput(BaseModel):
     clauses: list[ExtractedClause]
 
 
-# schéma de sortie et prompt système de chaque profil (ADR 009) : le profil `fournisseur`
+# schéma de sortie et prompt système de chaque profil (ADR 010) : le profil `fournisseur`
 # garde `ExtractionOutput` (son nom est celui que le faux Mistral reconnaît) et son prompt
 SCHEMAS: Mapping[Profile, type[BaseModel]] = {"fournisseur": ExtractionOutput}
 PROMPT_FILES: Mapping[Profile, str] = {"fournisseur": "extraction_system.md"}

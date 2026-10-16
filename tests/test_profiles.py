@@ -2,7 +2,7 @@
 
 Le profil `fournisseur` reprend à l'identique les constantes qui étaient globales
 (`models.REQUIRED_KINDS`, `DOMAIN_KINDS`, `KIND_CATEGORIES`, `verification.VALUE_UNITS`) :
-ces tests figent l'existant (ADR 009).
+ces tests figent l'existant (ADR 010).
 """
 
 import ast

@@ -3392,3 +3392,52 @@ Les PR de Dependabot en attente, remises sur `main` (rebase par GitHub) et leurs
 ### Nombre de tests
 
 - La suite principale passe de 2 388 à 2 391 (variable refusée, deux tests de la télémétrie de FastAPI) ; le total, de 2 570 à 2 573.
+
+## 2026-10-16 · Profils de contrat, PR 1 : le profil explicite (branche `profils-sous-traitance`)
+
+Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmètre figé depuis la v1.1 pour ce seul chantier : servir un cabinet d'assistance à maîtrise d'ouvrage, avec un second genre de contrat, la sous-traitance. Spec : [spec-profils-sous-traitance.md](spec-profils-sous-traitance.md) ; décision : [ADR 010](adr-010-profils-de-contrat.md). Quatre PR. Celle-ci rend le profil explicite et ne change aucun comportement : le seul profil est `fournisseur`, qui reprend à l'identique les constantes, les règles, les tables du CRAG, les prompts et le schéma d'extraction.
+
+### Décisions du plan
+
+- **Noms.** `profile` dans le code et l'état (`ContractState["profile"]`, paramètres Python) ; `profil` aux portes et dans les sorties : `--profil` (comme `--operateur`), champ de formulaire, argument MCP, clé des lignes et des dossiers rendus par le service.
+- **État sans profil.** Une seule fonction lit le profil d'un état, `profiles.of_state` : absent, il vaut `fournisseur` (`LEGACY_PROFILE`), seul profil possible avant la PR ; présent et inconnu, `ValueError`. Tous les nœuds, le scellement et la relance y passent. `run_contract` pose toujours le profil, de sorte que la lecture « ancienne » ne sert qu'aux états d'avant la PR.
+- **`attendus.yaml`** reçoit un champ `profile` obligatoire dès la PR 1 (les treize contrats : `fournisseur`), et non en PR 3 : l'extraction simulée doit vérifier le profil que lui passe le port. Écart de calendrier avec la spec, sans effet sur le comportement.
+- **Prompt d'explication inchangé.** Il n'en existe qu'un et le port `Explainer` ne change pas ; le prompt d'explication par profil arrive en PR 2, avec le second prompt.
+- **Étape intermédiaire.** Entre la tâche 2 et les tâches 3 et 4, `evaluation.demo_queries` et `audit._rejustified` lisaient `RULES["fournisseur"]` ; elles dépendent du profil depuis. Chaque tâche est restée verte.
+- **Cluster.** `tests/test_cluster.py` est adapté (champ `profil` du formulaire, version 3), mais pas lancé en local (`check.sh --sans-cluster` : le profil local monte à 7 Go sur les 8 de la VM Docker) : le job `cluster` de la CI le vérifie.
+- **Documents historiques.** Les ADR 005 et 007 décrivent le format v2 à leur date : ils ne changent pas (l'ADR 007 gagne un amendement, ci-dessous). CLAUDE.md, README, exploitation, spec et ADR 010 sont à jour.
+
+### Décisions prises en route
+
+- **ADR 010, et non 009.** La branche de la mise à jour de L441-10 crée `docs/adr-009-versions-du-corpus.md` et fusionnera avant celle-ci : l'ADR des profils est renuméroté, avec tous ses renvois (spec, `attendus.yaml`, docstrings).
+- **L'analyste lit `profiles.of_state(inp)`**, pas `inp["profile"]` : un `Send` en attente dans un checkpoint d'avant la PR n'a pas de clé `profile`, et `inp["profile"]` lèverait `KeyError` à la reprise. Le test de l'analyse interrompue échoue si l'on revient à `inp["profile"]` (vérifié par mutation).
+- **Le profil de l'outil MCP passe par `saisie.profile`**, en plus du `Literal` du schéma : la spec veut une saisie commune à l'interface et au serveur MCP. Absent, vide, d'une autre casse ou inconnu, il est refusé aux trois portes (par argparse pour la CLI) ; le message de `saisie.profile` cite les profils admis et ne reprend jamais la valeur reçue.
+- **Lignes provisoires** entre les tâches, pour que chacune reste verte : `mesure-recherche`, l'interface et l'outil MCP passaient `fournisseur` en dur jusqu'aux tâches 5 et 6, qui les ont remplacées.
+- **Amendement de l'ADR 007** (« Erreurs »), à la suite de la relecture de la tâche 6.
+
+### Ce qui change
+
+- **Domaine** : `domain/profiles.py` (types de clauses, partition entre les quatre domaines, unités des valeurs, catégories admises ; n'importe que `domain/models.py`) remplace `REQUIRED_KINDS`, `DOMAIN_KINDS`, `KIND_CATEGORIES`, `CATEGORY_KINDS` et `VALUE_UNITS`. Registre de règles `RULES[profil][domaine]`.
+- **Application** : le profil est dans l'état, avant tout nœud, et dans l'entrée des analystes. Les ports `Extractor` et `Crag` le prennent en paramètre ; tables du CRAG, schéma de sortie et fichier de prompt de l'extraction, jeu d'évaluation de la recherche : un par profil. `ContractService.analyse` l'exige, sans valeur par défaut ; `relaunch` repart sous celui du contrat d'origine.
+- **Journal v3** : `DecisionRecord.profile`, obligatoire, dans `decision_hash`. Les modèles v2 sont copiés, figés, sous `DecisionRecordV2` et `AuditRecordV2`. v1 et v2 sont relus et rejoués comme `fournisseur` (`record_profile`) ; `verify` exige l'archive de configuration d'un v3 comme d'un v2.
+- **Portes** : `run --profil` et `mesure-recherche --profil` obligatoires (refus d'argparse, code 2, qui nomme les profils admis) ; champ `profil` du formulaire (liste sans présélection, 400 s'il manque), colonne et en-tête du dossier ; argument `profil` énuméré de `analyser_contrat`. `tests/test_parite.py` vérifie le même profil et le même refus aux trois portes.
+- **Traces** : attribut `cdg.profil` de l'opération d'analyse et de relance, dans la liste blanche.
+- **Documentation et scripts** : README, exploitation, CLAUDE.md, `scripts/demo_terminal.sh`, ADR 007 (amendement) et ADR 010 (accepté).
+
+### Faits et pièges
+
+- **Une erreur du SDK MCP reprenait le texte du contrat** (relecture de la tâche 6). Un appel d'`analyser_contrat` sans l'argument obligatoire `profil` recevait l'erreur de validation du SDK, qui répète le début et la fin des arguments reçus : texte du contrat et noms des parties compris. Le middleware qui refuse déjà un argument inconnu refuse aussi un argument obligatoire manquant, avant la validation, avec un message qui le nomme et ne reprend aucune valeur. Reste, comme avant (ADR 007) : un argument du mauvais type, dont le SDK répète sa propre valeur tronquée.
+- **Invariants, vérifiés sur toute la branche** : `data/evaluation/recherche.yaml`, `config/decision.yaml`, `pyproject.toml` et `uv.lock` sans diff ; `DecisionConfig` ne gagne aucun champ, donc l'empreinte de configuration ne change pas ; aucune dépendance ajoutée.
+- **Vrai journal du poste** : `pytest -m journal_reel --journal-reel` relit ses cinq enregistrements, tous v1, à l'identique. Il ne contient aucun v2 : la forme figée du v2 est prouvée par des aides de test, pas par un enregistrement réel.
+- **Base partagée** : la base locale porte la migration 009 de la branche de L441-10 (clé d'unicité des extraits par version). Les tests `pg` d'ingestion et de recherche (27 erreurs, 2 échecs) y échouent, sur le poste seulement : une base neuve, celle de la CI, ne l'a pas. Ils se lèveront quand cette branche intégrera `main`, après la fusion de L441-10.
+- **Test préexistant, hors périmètre** : `tests/test_cli_traces.py::test_destination_sans_cle_refusee` échoue dès que le `.env` du poste porte les clés `LANGFUSE_*`, sur `main` aussi. Défaut d'isolation du test, à corriger à part (CLAUDE.md : on corrige le test, on ne l'exclut pas).
+- **L'enregistrement du terminal du README** (`docs/images/demo-terminal.gif`) n'est pas refait dans cette PR (analyse payante, scellée dans le vrai journal) : il date d'avant `--profil`, alors que le script est à jour.
+
+### Nombre de tests
+
+- La suite principale passe de 2 391 à 2 542 ; le total, de 2 573 à 2 724 (les charts, 119, l'image, 20, le proxy, 4, oauth2-proxy, 4, le cluster, 30 scénarios, et l'image du modèle, 5, ne changent pas).
+
+### Suite
+
+- **PR 2** : `sous_traitance` ajouté à `Profile`, avec ses types, ses règles, sa section de configuration, ses prompts (extraction et explication), ses tables du CRAG et son corpus (spec, « Découpage »).
+- **Notés pour la PR 2** : `models.category_required` garde `delai_paiement` en dur (seul `category_kinds` est paramétré) ; avec un seul profil, les tests de passage du profil (`run`, `mesure-recherche`, `relaunch`) ne distinguent pas une valeur écrite en dur : à renforcer avec le second profil ; `web --demo` demande un profil alors que chaque contrat du jeu déclare le sien ; la trace d'une revue, d'une expiration ou d'une reprise ne porte pas le profil.

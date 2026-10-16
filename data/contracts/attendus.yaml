@@ -7,7 +7,7 @@
 # réel et le coût par contrat relèvent du J5.
 #
 # Chaque règle du projet se déclenche dans au moins un contrat (test_demo.py).
-# Chaque contrat déclare son profil (`profile`, obligatoire, sans valeur par défaut : ADR 009).
+# Chaque contrat déclare son profil (`profile`, obligatoire, sans valeur par défaut : ADR 010).
 
 analysis_date: 2026-09-25
 

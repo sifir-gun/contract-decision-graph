@@ -15,7 +15,7 @@ chaîne et insère ; l'horodatage vient de l'appelant.
   maillon part de `GENESIS`.
 - `replay` : recalcule règles, justification et décision à partir de l'enregistrement
   scellé et des références figées, sans LLM ni CRAG, sous le profil de l'enregistrement.
-- Formats : v3 (profils, ADR 009) scelle le profil de contrat dans la partie décision,
+- Formats : v3 (profils, ADR 010) scelle le profil de contrat dans la partie décision,
   donc dans `decision_hash` ; v2 (PR D2) porte sa version, l'acteur de l'analyse et celui
   de la décision humaine (jamais de nom ni d'e-mail), la version du code de l'analyse et
   celle du scellement (hors de `decision_hash`, chaînées), que le v3 garde ; v1, sans
@@ -251,7 +251,7 @@ class DecisionRecordV2(_DecisionPart):
 
 
 class DecisionRecord(_DecisionPart):
-    """Format v3 (profils, ADR 009) : l'acteur de la décision humaine et le profil du
+    """Format v3 (profils, ADR 010) : l'acteur de la décision humaine et le profil du
     contrat, obligatoire, sans valeur par défaut."""
 
     human: HumanReview | None
@@ -305,7 +305,7 @@ class AuditRecordV2(_RecordPart):
 
 
 class AuditRecord(_RecordPart):
-    """Format v3 (profils, ADR 009) : le v2, avec le profil du contrat dans la partie
+    """Format v3 (profils, ADR 010) : le v2, avec le profil du contrat dans la partie
     décision."""
 
     version: Literal[3] = 3

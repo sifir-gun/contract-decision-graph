@@ -1,4 +1,4 @@
-"""Journal d'audit v3 (profils de contrat, ADR 009).
+"""Journal d'audit v3 (profils de contrat, ADR 010).
 
 - Le profil de contrat entre dans la partie décision de l'enregistrement, donc dans
   decision_hash : une même décision sous deux profils n'a pas la même empreinte.

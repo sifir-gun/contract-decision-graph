@@ -1,4 +1,4 @@
-"""Profils de contrat : ce que le code sait d'un genre de contrat (ADR 009).
+"""Profils de contrat : ce que le code sait d'un genre de contrat (ADR 010).
 
 Un profil nomme un genre de contrat analysable. Il porte les constantes du domaine qui
 dépendent du genre : ses types de clauses, leur partition entre les quatre domaines, l'unité

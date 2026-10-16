@@ -12,7 +12,7 @@ les résultats.
   catégorie, jamais de sa citation : aucun texte du contrat n'atteint le CRAG. Le domaine y
   est nommé par ce qu'il couvre (`DOMAIN_LABELS`), comme dans les messages du juge et de la
   réécriture. Les libellés, les sujets des clauses et les libellés des catégories sont
-  une table par profil (ADR 009) : un type commun à deux profils n'a pas le même sujet.
+  une table par profil (ADR 010) : un type commun à deux profils n'a pas le même sujet.
 - generate n'appelle aucun LLM : il rassemble les références retenues pour la clause.
   Une référence dont la version a expiré à la date d'analyse est signalée et jamais
   retenue.

@@ -1,6 +1,6 @@
-# ADR-009 : profils de contrat
+# ADR-010 : profils de contrat
 
-- **Statut** : proposé, le 16/10/2026 (branche `profils-sous-traitance`, conception validée section par section par le propriétaire) ; accepté à la fusion de la PR 1 du chantier.
+- **Statut** : accepté, PR 1 du chantier (branche `profils-sous-traitance`) ; proposé le 16/10/2026, conception validée section par section par le propriétaire.
 - **Portée** : la liste des types de clauses, leur partition entre les domaines, les règles, les réglages et le prompt d'extraction, aujourd'hui uniques ; le choix d'un profil à chaque analyse, son scellement et son rejeu. Spec : [`spec-profils-sous-traitance.md`](spec-profils-sous-traitance.md).
 
 ## Contexte

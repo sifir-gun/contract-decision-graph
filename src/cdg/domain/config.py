@@ -71,7 +71,7 @@ class Extraction(_Strict):
 
     @model_validator(mode="after")
     def _un_jeu_de_termes_par_type(self) -> "Extraction":
-        # ces sections sont celles du profil fournisseur, le seul profil (ADR 009)
+        # ces sections sont celles du profil fournisseur, le seul profil (ADR 010)
         profile_kinds = set(profiles.spec("fournisseur").kinds)
         kinds = set(self.absence_terms)
         if kinds != profile_kinds:

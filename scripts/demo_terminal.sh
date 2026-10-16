@@ -29,7 +29,8 @@ clear
 show "sed -n '/Article 5/,/Article 8/p' $CONTRACT"
 TIMEFORMAT=$'\033[2m(durée réelle : %1R s)\033[0m'
 show "time uv run python -m cdg.cli run $CONTRACT$ID_OPTION --operateur demo-terminal \\
-    --party 'Lambda Conseil Synthétique' --party 'Mu Énergie Synthétique' \\
+    --profil fournisseur --party 'Lambda Conseil Synthétique' \\
+    --party 'Mu Énergie Synthétique' \\
     | jq -f scripts/demo_terminal.jq"
 show "uv run python -m cdg.cli verify"
 sleep 1

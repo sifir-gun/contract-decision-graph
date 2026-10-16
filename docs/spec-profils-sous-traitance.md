@@ -1,6 +1,6 @@
 # Spec · Profils de contrat, profil sous-traitance
 
-Version du 16 octobre 2026, révisée le même jour après une relecture indépendante (ordre des PR, schéma d'extraction et tables du CRAG par profil, vrai contrat écarté de la démonstration). Conçue en séance de brainstorming avec le propriétaire, section par section, chaque section validée. Source de vérité pour ce chantier ; `docs/spec-phase1.md` le reste pour tout ce que ce document ne modifie pas. Décision d'architecture : [ADR 009](adr-009-profils-de-contrat.md).
+Version du 16 octobre 2026, révisée le même jour après une relecture indépendante (ordre des PR, schéma d'extraction et tables du CRAG par profil, vrai contrat écarté de la démonstration). Conçue en séance de brainstorming avec le propriétaire, section par section, chaque section validée. Source de vérité pour ce chantier ; `docs/spec-phase1.md` le reste pour tout ce que ce document ne modifie pas. Décision d'architecture : [ADR 010](adr-010-profils-de-contrat.md).
 
 ## Objectif et périmètre
 
@@ -30,7 +30,7 @@ Ce que le chantier doit livrer, et rien de plus :
 - Les normes payantes et les textes non libres : ni EN 45545-2 (CEN, vendue par les organismes de normalisation), ni les textes de l'Organisation maritime internationale n'entrent dans le corpus.
 - Un modèle LLM local, un hébergement, une installation chez le cabinet ; une nouvelle animation du terminal (`scripts/demo_terminal.sh`).
 - Des poids, des seuils de décision ou une politique d'arbitrage propres à chaque profil : communs aux deux profils au départ.
-- Une empreinte de configuration par profil : l'empreinte couvre tout le fichier, comme aujourd'hui (conséquence acceptée, ADR 009).
+- Une empreinte de configuration par profil : l'empreinte couvre tout le fichier, comme aujourd'hui (conséquence acceptée, ADR 010).
 
 ## Le profil
 
@@ -204,7 +204,7 @@ Chacun est une vérification observable, à la fin du chantier ; la PR où il de
 
 Une branche par PR, chacune verte avec `check.sh` avant d'être poussée par le propriétaire. Prérequis à part : la mise à jour de L441-10 (voir « Corpus »).
 
-1. **Profil explicite.** `domain/profiles.py` avec le seul profil `fournisseur` ; constantes, règles, tables du CRAG, prompts et schéma d'extraction déplacés sans changement de comportement ; `--profil` obligatoire aux trois portes et à `mesure-recherche` ; signatures des ports et de `AnalystInput` ; état, format v3 du journal, rejeu, traces ; scripts, scénarios du cluster et documentation passés à `--profil fournisseur` ; ADR 009 accepté ; CLAUDE.md mis à jour (format v3, profils). Après la PR 1 : `--profil sous_traitance` est refusé comme profil inconnu.
+1. **Profil explicite.** `domain/profiles.py` avec le seul profil `fournisseur` ; constantes, règles, tables du CRAG, prompts et schéma d'extraction déplacés sans changement de comportement ; `--profil` obligatoire aux trois portes et à `mesure-recherche` ; signatures des ports et de `AnalystInput` ; état, format v3 du journal, rejeu, traces ; scripts, scénarios du cluster et documentation passés à `--profil fournisseur` ; ADR 010 accepté ; CLAUDE.md mis à jour (format v3, profils). Après la PR 1 : `--profil sous_traitance` est refusé comme profil inconnu.
 2. **Profil sous-traitance et son corpus.** Dans la même PR, car les tests du corpus exigent au moins un article et une fiche pour chaque type de clause (`tests/test_corpus.py`), et les fiches décrivent des règles qui doivent exister. Code : `sous_traitance` ajouté à `Profile` ; ses types, sa partition, ses unités et catégories ; ses règles ; sa section de configuration ; ses prompts d'extraction et d'explication ; ses tables du CRAG ; son schéma d'extraction ; ses termes d'absence et de catégorie ; extension de la vérification des montants en euros. Corpus : licences relues ; textes copiés à la main dans `raw/` ; manifeste et format des citations étendus ; `SOURCES.md` ; quatre fiches ; rattachements élargis ; `ingest` à relancer. Après la PR 2 : une analyse sous ce profil fonctionne de bout en bout en mode réel, sans contrat du jeu pour la démontrer.
 3. **Jeu et démonstration.** Sept contrats et leurs attendus ; mode démonstration ; jeu d'évaluation de la recherche du profil et filtre par profil de `demo_queries`.
 4. **Série réelle.** Filtre par profil de `tests/test_llm_jeu.py` ; série lancée par le propriétaire ; résultats et coût consignés au journal.
@@ -217,7 +217,7 @@ Une branche par PR, chacune verte avec `check.sh` avant d'être poussée par le 
 
 ## Écarts avec l'existant
 
-Validés par le propriétaire pendant la conception, consignés dans l'ADR 009 :
+Validés par le propriétaire pendant la conception, consignés dans l'ADR 010 :
 
 - **Cible élargie.** `spec-phase1.md` vise les directions achats et juridiques de PME et d'ETI ; s'y ajoute le donneur d'ordre d'un contrat de sous-traitance.
 - **Schéma d'état.** Nouvelle clé `profile` ; `REQUIRED_KINDS`, `DOMAIN_KINDS`, `VALUE_UNITS`, `DOMAIN_LABELS`, `_SUBJECTS`, `_CATEGORY_LABELS` et le schéma d'extraction deviennent des attributs du profil ; les ports `Extractor` et `Crag` et `AnalystInput` portent le profil.
