@@ -13,7 +13,8 @@ les résultats.
   est nommé par ce qu'il couvre (`DOMAIN_LABELS`), comme dans les messages du juge et de la
   réécriture.
 - generate n'appelle aucun LLM : il rassemble les références retenues pour la clause.
-  Une référence dont la version a expiré à la date d'analyse est signalée et jamais
+  La date d'analyse choisit la version (docs/spec-versions-corpus.md) : une référence
+  sans version en vigueur, expirée ou pas encore en vigueur, est signalée et jamais
   retenue.
 - Le CRAG ne décide pas du statut du domaine : `domain/justification.py` le déduit des
   constats des règles et des références retenues pour chaque clause.
@@ -27,7 +28,7 @@ from typing import Annotated, Any, Literal, TypedDict
 from pydantic import BaseModel, StringConstraints
 
 from cdg.application.deps import RetrievalResult
-from cdg.domain.corpus import expired
+from cdg.domain.corpus import drop_superseded, expired, in_force
 from cdg.domain.models import (
     CLAUSE_CATEGORIES,
     DOMAIN_KINDS,
@@ -244,36 +245,47 @@ def rewrite(state: CragState, llm: LLMProvider) -> dict[str, Any]:
 
 
 def generate(state: CragState) -> dict[str, Any]:
-    """Références retenues pour la clause, sans LLM ; les versions expirées sont signalées,
-    jamais retenues."""
-    on, relevant, kind = (
-        state["analysis_date"],
-        state.get("relevant", []),
-        state["clause"].kind,
-    )
-    valid = [p for p in relevant if not expired(p.valid_until, on)]
-    retained = list(dict.fromkeys(p.reference for p in valid))
-    old: dict[str, date] = {}
-    for p in relevant:
-        # sans fin : jamais expiré
-        if p.valid_until is not None and expired(p.valid_until, on):
-            old.setdefault(p.reference, p.valid_until)
-    findings = [
-        f"référence expirée à la date d'analyse ({on.isoformat()}) : {reference}, "
-        f"version en vigueur jusqu'au {until.isoformat()}, non retenue ({kind})"
-        for reference, until in old.items()
-    ]
-    if old and not valid:
+    """Références retenues pour la clause, sans LLM. La date d'analyse choisit la version :
+    les versions supplantées sont écartées (`drop_superseded`) ; une référence sans
+    version en vigueur est signalée, expirée (fin de sa dernière version) ou pas encore
+    en vigueur (début de sa première), jamais retenue."""
+    on, kind = state["analysis_date"], state["clause"].kind
+    relevant = drop_superseded(state.get("relevant", []), on)
+    versions: dict[str, list[Passage]] = {}
+    for p in relevant:  # ordre de première apparition de chaque référence
+        versions.setdefault(p.reference, []).append(p)
+    retained, old, findings = [], [], []
+    for reference, found in versions.items():
+        if any(in_force(p.valid_from, p.valid_until, on) for p in found):
+            retained.append(reference)
+        elif all(expired(p.valid_until, on) for p in found):
+            until = max(p.valid_until for p in found if p.valid_until is not None)
+            old.append(reference)
+            findings.append(
+                f"référence expirée à la date d'analyse ({on.isoformat()}) : {reference}, "
+                f"version en vigueur jusqu'au {until.isoformat()}, non retenue ({kind})"
+            )
+        else:  # versions enchaînées sans trou : toutes à venir
+            start = min(p.valid_from for p in found if p.valid_from is not None)
+            findings.append(
+                f"référence pas encore en vigueur à la date d'analyse ({on.isoformat()}) "
+                f": {reference}, version en vigueur à partir du {start.isoformat()}, non "
+                f"retenue ({kind})"
+            )
+    if versions and not retained:
         findings.append(
             f"références pertinentes toutes expirées pour la clause {kind} : elles ne "
             "peuvent pas justifier seules le verdict"
+            if len(old) == len(versions)
+            else f"références pertinentes toutes hors de leur période de vigueur pour la "
+            f"clause {kind} : elles ne peuvent pas justifier seules le verdict"
         )
     trace = ClauseRetrieval(
         kind=kind,
         queries=state["queries"],
         passes=state["attempts"],
         retained=retained,
-        expired=list(old),
+        expired=old,
     )
     return {
         "result": ClauseResult(trace=trace, findings=findings, usage=state["usage"])

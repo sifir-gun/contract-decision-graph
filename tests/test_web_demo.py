@@ -10,6 +10,7 @@ from datetime import date
 
 import demo_set as expected_set
 import pytest
+from corpus_de_test import SECOND_FILE, T1, edit_manifest, raw
 from web_helpers import client, csrf
 
 from cdg import cli
@@ -180,14 +181,16 @@ def test_references_par_rattachement_declare():
     assert result.usage == []  # ni recherche vectorielle ni juge LLM
 
 
-def test_reference_expiree_signalee_jamais_retenue():
+def test_reference_expiree_signalee_jamais_retenue(corpus_synthetique):
+    # corpus synthétique réduit à sa première version, expirée le 01/01/2027
+    raw(corpus_synthetique, SECOND_FILE).unlink()
+    edit_manifest(corpus_synthetique, lambda s: s.pop("later_versions"))
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
     result = crag("financier", [clause], date(2027, 3, 1))
     [trace] = result.trace.clauses
-    assert "C. com., art. L441-10" in trace.expired
-    assert "C. com., art. L441-10" not in trace.retained
-    assert any("expirée" in f for f in result.trace.findings)
+    assert T1 in trace.expired and T1 not in trace.retained
+    assert any("expirée" in f and T1 in f for f in result.trace.findings)
 
 
 def test_commande_web_demo(monkeypatch, capsys):
@@ -214,3 +217,19 @@ def test_date_d_analyse_par_defaut_celle_des_attendus(demo):
     status = service.dossier("demo-01-go-maintenance")["status"]
     assert status["analysis_date"] == expected_on == date(2026, 9, 25)
     assert "25 septembre 2026" in web.get("/analyse").text
+
+
+def test_demo_version_a_venir_signalee(corpus_synthetique):
+    """Démonstration : la date d'analyse choisit la version ; avant la première, la
+    référence est signalée « pas encore en vigueur » et jamais retenue."""
+    crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
+    clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
+    [trace] = crag("financier", [clause], date(2026, 12, 31)).trace.clauses
+    assert T1 in trace.retained
+    result = crag("financier", [clause], date(2019, 1, 1))
+    [trace] = result.trace.clauses
+    assert T1 not in trace.retained and T1 not in trace.expired
+    assert any(
+        f.startswith("référence pas encore en vigueur") and T1 in f
+        for f in result.trace.findings
+    )

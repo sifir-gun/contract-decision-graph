@@ -3,7 +3,7 @@
 Pour chaque clause qui porte un constat, les extraits du corpus dont la source déclare ce
 type de clause (manifeste, en-tête des fiches) sont tenus pour pertinents ; l'étape
 `generate` du CRAG, la vraie, en tire les références retenues à la date d'analyse et
-signale les versions expirées. Là où le juge du CRAG trie les extraits trouvés, la
+signale les versions expirées ou pas encore en vigueur. Là où le juge du CRAG trie les extraits trouvés, la
 démonstration retient toutes les sources déclarées : ses références sont plus nombreuses.
 """
 
@@ -26,6 +26,7 @@ class DeclaredCrag:
                 reference=meta["reference"],
                 text=meta["text"],
                 distance=0.0,
+                valid_from=meta.get("valid_from"),
                 valid_until=meta["valid_until"],
                 note=meta.get("note"),
                 kinds=kinds,
