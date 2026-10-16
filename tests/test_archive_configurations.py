@@ -150,7 +150,9 @@ def test_configuration_de_l_analyse_incoherente_avec_son_empreinte_refusee():
 
 def test_contrat_scelle_sa_configuration_archivee():
     service = memory_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     [entry] = service.audit_store().entries()
     archived = service.audit_store().configurations()
     assert entry.config_hash in archived
@@ -374,7 +376,9 @@ def test_image_non_scellee_seul_le_commit_compte():
 
 def pending_service(code=CODE):
     service = memory_service(code_version=code)
-    service.analyse(CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     return service
 
 

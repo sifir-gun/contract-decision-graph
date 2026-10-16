@@ -62,6 +62,7 @@ class Run:
             config=CONFIG,
             actor=ACTEUR_ANALYSTE,
             code=CODE,
+            profile="fournisseur",
         )
 
     def resume(self, human):

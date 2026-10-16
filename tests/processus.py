@@ -58,7 +58,12 @@ def analyse(conninfo, journal, thread_id, text, started, release, results) -> No
     try:
         extractor = GatedExtractor(started, release)
         status = engine(conninfo, journal, extractor).run(
-            thread_id, text, (), date(2026, 9, 25), ACTEUR_ANALYSTE
+            thread_id,
+            text,
+            (),
+            date(2026, 9, 25),
+            ACTEUR_ANALYSTE,
+            profile="fournisseur",
         )
         results.put(("ok", status["statut"]))
     except Exception as exc:  # noqa: BLE001 : rendue au test par la file

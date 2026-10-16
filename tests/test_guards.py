@@ -268,6 +268,7 @@ def test_statut_expose_les_echecs():
         config=FAST,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     assert status["statut"] == "suspendu"
     assert status["failures"] == [

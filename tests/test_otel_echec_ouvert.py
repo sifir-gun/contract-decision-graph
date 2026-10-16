@@ -56,7 +56,9 @@ def analysed(telemetry):
     contract_id = "c-echec"
     svc, _ = service(telemetry)
     start = time.monotonic()
-    svc.analyse(CONTRACT_TEXT, contract_id=contract_id, actor=ANALYSTE)
+    svc.analyse(
+        CONTRACT_TEXT, contract_id=contract_id, actor=ANALYSTE, profile="fournisseur"
+    )
     elapsed = time.monotonic() - start
     dossier = svc.dossier(contract_id)
     return {key: dossier[key] for key in ("status", "etat", "verdicts")}, elapsed

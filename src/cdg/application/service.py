@@ -38,11 +38,12 @@ from pydantic import ValidationError
 
 from cdg.application import ingestion
 from cdg.application.observation import NoTelemetry
-from cdg.domain import audit, authorization, policy
+from cdg.domain import audit, authorization, policy, profiles
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.identifiers import check_contract_id
 from cdg.domain.models import Clause, Usage
+from cdg.domain.profiles import Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.engine import ContractEngine, ThreadError
@@ -146,12 +147,17 @@ class ContractService:
         *,
         contract_id: str,
         actor: Actor,
+        profile: Profile,
         parties: Sequence[str] = (),
         analysis_date: date | None = None,
     ) -> dict[str, Any]:
+        """Analyse un contrat sous le profil donné : obligatoire, jamais déduit ; scellé
+        avec la décision."""
         check_contract_id(
             contract_id
         )  # à la création seulement : l'existant reste lisible
+        # un profil inconnu est refusé avant la trace, le verrou et le moteur
+        profiles.parse(profile)
         on = analysis_date if analysis_date is not None else self.today()
         with (
             self.telemetry.operation(
@@ -159,7 +165,7 @@ class ContractService:
             ) as finish,
             self._writes,
         ):
-            status = self.engine.run(contract_id, raw_text, parties, on, actor)
+            status = self.engine.run(contract_id, raw_text, parties, on, actor, profile)
             finish(status)
             return status
 
@@ -202,6 +208,7 @@ class ContractService:
             row = {
                 "thread_id": status["thread_id"],
                 "etat": state_label(status),
+                "profil": status["profil"],
                 "analysis_date": status["analysis_date"],
                 "proposed_decision": status["proposed_decision"],
                 "final_decision": status["final_decision"],
@@ -257,8 +264,9 @@ class ContractService:
         """Relance, sous la configuration actuelle, l'analyse d'un contrat escaladé pour
         changement de configuration et encore en attente : un nouveau contrat (un thread
         par contrat ; par défaut `<id>-relance`), sur le texte masqué conservé (l'original
-        ne l'est jamais), à la même date d'analyse. Le contrat escaladé reste en attente,
-        jusqu'à sa décision ou son expiration."""
+        ne l'est jamais), à la même date d'analyse et sous le profil du contrat d'origine
+        (`fournisseur` pour un état d'avant les profils, scellé alors explicitement). Le
+        contrat escaladé reste en attente, jusqu'à sa décision ou son expiration."""
         status = self.engine.status(thread_id)
         if not status.get("configuration_changee"):
             raise ThreadError(
@@ -272,6 +280,8 @@ class ContractService:
         target = contract_id if contract_id is not None else f"{thread_id}-relance"
         check_contract_id(target)
         values = self.engine.values(thread_id)
+        # profil d'origine ; inconnu, la relance est refusée avant toute trace
+        profile = profiles.of_state(values)
         with (
             self.telemetry.operation(
                 "relance", contract_id=target, actor=actor
@@ -284,6 +294,7 @@ class ContractService:
                 (),
                 values["analysis_date"],
                 actor,
+                profile,
                 relaunch_of=thread_id,
             )
             finish(status)

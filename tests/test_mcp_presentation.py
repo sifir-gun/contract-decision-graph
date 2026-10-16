@@ -41,7 +41,11 @@ def piege(service):
     _, contracts = demo_set.load()
     chosen = contracts[PIEGE]
     service.analyse(
-        chosen.text(), contract_id="piege", actor=MCP, parties=list(chosen.parties)
+        chosen.text(),
+        contract_id="piege",
+        actor=MCP,
+        parties=list(chosen.parties),
+        profile="fournisseur",
     )
     return service.dossier("piege")
 
@@ -57,6 +61,7 @@ def tranche(service):
         contract_id="piege-tranche",
         actor=MCP,
         parties=list(chosen.parties),
+        profile="fournisseur",
     )
     service.decide(
         "piege-tranche",
@@ -154,7 +159,11 @@ def test_masquage_compte_seulement(service):
     _, contracts = demo_set.load()
     chosen = contracts["demo-01-go-maintenance"]
     status = service.analyse(
-        chosen.text(), contract_id="masque", actor=MCP, parties=list(chosen.parties)
+        chosen.text(),
+        contract_id="masque",
+        actor=MCP,
+        parties=list(chosen.parties),
+        profile="fournisseur",
     )
     fiche = presentation.summary(status)
     assert fiche.masquage == status["masquage"] and fiche.masquage["PARTIE"] > 0

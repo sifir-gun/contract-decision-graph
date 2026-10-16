@@ -41,6 +41,7 @@ KILLED_RUN = textwrap.dedent("""
             config=load_config(),
             actor=ACTEUR_ANALYSTE,
             code=CODE,
+            profile="fournisseur",
         )
         print(json.dumps(status["statut"]), flush=True)
         os.kill(os.getpid(), signal.SIGKILL)

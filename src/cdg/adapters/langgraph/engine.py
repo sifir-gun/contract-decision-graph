@@ -33,6 +33,7 @@ from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application.deps import Deps
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
+from cdg.domain.profiles import Profile
 from cdg.ports.engine import ThreadError
 from cdg.ports.locks import ContractLocks
 from cdg.ports.resumes import ResumeCounter
@@ -145,6 +146,7 @@ class LangGraphEngine:
         parties: Sequence[str],
         analysis_date: date,
         actor: Actor,
+        profile: Profile,
         relaunch_of: str | None = None,
     ) -> dict[str, Any]:
         deps = self._deps.run()  # le fournisseur d'abord : clé absente, rien d'ouvert
@@ -160,6 +162,7 @@ class LangGraphEngine:
                 config=self._config,
                 actor=actor,
                 code=deps.code_version,
+                profile=profile,
                 relaunch_of=relaunch_of,
             )
 

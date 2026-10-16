@@ -241,6 +241,7 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
                     entry.text,
                     contract_id=contract_id,
                     actor=actor,
+                    profile="fournisseur",  # provisoire : choix du profil en tâche 6
                     parties=entry.parties,
                     analysis_date=on,
                 )

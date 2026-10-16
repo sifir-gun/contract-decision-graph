@@ -370,14 +370,29 @@ def test_run_verifie_puis_mesure():
 @pytest.mark.parametrize("value", ["0", "-1", "a", "4,,8", ""])
 def test_mesure_rangs_invalides_refuses(value, capsys):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["mesure-recherche", "--k", value])
+        cli.main(["mesure-recherche", "--profil", "fournisseur", "--k", value])
     assert exc.value.code == 2
 
 
-def test_commande_mesure_recherche_mesure_provisoirement_le_profil_fournisseur(
+def test_mesure_recherche_sans_profil_refusee(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["mesure-recherche", "--k", "4"])
+    assert exc.value.code == 2
+    assert "--profil" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("profil", ["sous_traitance", "", "Fournisseur"])
+def test_mesure_recherche_profil_inconnu_refuse(capsys, profil):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["mesure-recherche", "--profil", profil])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--profil" in err and "fournisseur" in err  # le profil admis est cité
+
+
+def test_commande_mesure_recherche_mesure_le_profil_demande(
     capsys, monkeypatch, tmp_path
 ):
-    """Provisoire : `--profil` arrive avec la tâche 5 ; d'ici là, le seul profil."""
     seen = {}
     monkeypatch.setenv("EMBEDDING_CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(
@@ -395,7 +410,9 @@ def test_commande_mesure_recherche_mesure_provisoirement_le_profil_fournisseur(
         return {"requetes": 0}
 
     monkeypatch.setattr(cli.evaluation, "run", run)
-    code, out = run_cli(capsys, "mesure-recherche", "--k", "4")
+    code, out = run_cli(
+        capsys, "mesure-recherche", "--profil", "fournisseur", "--k", "4"
+    )
     assert code == 0 and out["mesure_recherche"] == "ok"
     assert seen == {"retriever": "retriever", "kwargs": {"profile": "fournisseur"}}
 
@@ -418,7 +435,9 @@ def test_commande_mesure_recherche_sur_le_corpus_indexe(
         embedder.model,
     )
     try:
-        code, out = run_cli(capsys, "mesure-recherche", "--k", "60,1,4,4")
+        code, out = run_cli(
+            capsys, "mesure-recherche", "--profil", "fournisseur", "--k", "60,1,4,4"
+        )
         assert code == 0 and out["mesure_recherche"] == "ok"
         assert out["modele"] == "hash-test" and out["k"] == [1, 4, 60]
         assert out["recherche"] == CONFIG.crag.search.model_dump()
@@ -447,6 +466,6 @@ def test_commande_mesure_recherche_corpus_absent_erreur_explicite(
     monkeypatch.setattr(
         cli.fastembed, "FastembedEmbedder", lambda config, cache_dir, **kw: Absent()
     )
-    code, err = run_cli(capsys, "mesure-recherche")
+    code, err = run_cli(capsys, "mesure-recherche", "--profil", "fournisseur")
     assert code == 1 and err["erreur"] == "IndexMismatch"
     assert "relancer ingest" in err["detail"]

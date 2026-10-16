@@ -80,7 +80,14 @@ def cli_calls(tmp_path, monkeypatch, capsys) -> dict[str, set[str]]:
     pending = tmp_path / "c-attente.txt"
     pending.write_text(PENDING_TEXT, encoding="utf-8")
     commands = {
-        "run": ["run", str(pending), "--operateur", "lot-parite"],
+        "run": [
+            "run",
+            "--profil",
+            "fournisseur",
+            str(pending),
+            "--operateur",
+            "lot-parite",
+        ],
         "show": ["show", "c-attente"],
         "history": ["history", "c-attente"],
         "list": ["list"],

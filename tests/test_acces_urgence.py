@@ -35,7 +35,12 @@ def run_cli(capsys, *argv) -> tuple[int, dict]:
 def pending(monkeypatch):
     """Contrat analysé dans l'interface authentifiée, en attente de revue."""
     service = memory_service()
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     monkeypatch.setattr(cli, "build_service", lambda config: service)
     return service
 

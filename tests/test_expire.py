@@ -37,6 +37,7 @@ def suspend(graph, thread_id: str) -> datetime:
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     assert status["statut"] == "suspendu"
     return datetime.fromisoformat(
@@ -110,6 +111,7 @@ def test_thread_termine_jamais_repris(pg, thread_id):
                 config=CONFIG,
                 actor=ACTEUR_ANALYSTE,
                 code=CODE,
+                profile="fournisseur",
             )["statut"]
             == "termine"
         )

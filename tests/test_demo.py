@@ -170,6 +170,7 @@ def run(contract, store):
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     if contract.human:
         # suspendu : rien de scellé pour ce contrat (le journal peut être partagé)

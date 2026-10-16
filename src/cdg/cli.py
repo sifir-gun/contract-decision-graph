@@ -61,6 +61,7 @@ from cdg.domain import audit, authorization, expiry
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, load_config
 from cdg.domain.models import Decision
+from cdg.domain.profiles import PROFILES
 from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
@@ -321,8 +322,7 @@ def _mesure_recherche(args: argparse.Namespace) -> dict:
         batch_size=EMBEDDER_THREADS["batch_size"],
     )
     retriever = rag_store.PgvectorRetriever(app_pool(), embedder, config.crag.search)
-    # provisoire : --profil en tâche 5
-    report = evaluation.run(config, retriever, retriever, args.k, profile="fournisseur")
+    report = evaluation.run(config, retriever, retriever, args.k, profile=args.profil)
     return {"mesure_recherche": "ok", "modele": embedder.model, **report}
 
 
@@ -493,6 +493,7 @@ def _run(args: argparse.Namespace) -> dict:
         raw_text,
         contract_id=args.contract_id or contract.stem,
         actor=actor,
+        profile=args.profil,
         parties=args.party,
         analysis_date=args.analysis_date,
     )
@@ -1039,6 +1040,7 @@ def build_parser() -> argparse.ArgumentParser:
         "identifiants administrateur ; rejouable, supprime les extraits disparus",
     ).set_defaults(handler=_ingest)
 
+    profile_names = ", ".join(PROFILES)
     mesure = sub.add_parser(
         "mesure-recherche",
         help="mesure la recherche seule, sans LLM : rappel et précision au rang k des "
@@ -1052,6 +1054,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="rangs mesurés, séparés par des virgules (défaut : "
         + ",".join(map(str, evaluation.DEFAULT_KS))
         + ")",
+    )
+    mesure.add_argument(
+        "--profil",
+        required=True,
+        choices=PROFILES,
+        help="profil mesuré, obligatoire : jeu d'évaluation et clauses de ce profil "
+        f"({profile_names})",
     )
     mesure.set_defaults(handler=_mesure_recherche)
 
@@ -1089,6 +1098,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=date.fromisoformat,
         help="date à laquelle les versions des textes sont jugées, AAAA-MM-JJ "
         "(défaut : aujourd'hui, heure de Paris)",
+    )
+    run.add_argument(
+        "--profil",
+        required=True,
+        choices=PROFILES,
+        help="profil du contrat, obligatoire et jamais déduit : le genre de contrat "
+        "analysé, qui fixe ses clauses et ses règles, scellé avec la décision "
+        f"({profile_names})",
     )
     run.add_argument("--operateur", required=True, help=OPERATOR_HELP)
     run.set_defaults(handler=_run)

@@ -76,7 +76,7 @@ def test_trace_d_une_analyse(otel):
     # juridique 0,5 : un constat, GO direct ; expliqué par le LLM (sans constat, rien à
     # expliquer : le gabarit, sans appel)
     svc, _ = service(telemetry, found=clauses(responsabilite_fournisseur=50))
-    svc.analyse(CONTRACT_TEXT, contract_id="c-1", actor=ANALYSTE)
+    svc.analyse(CONTRACT_TEXT, contract_id="c-1", actor=ANALYSTE, profile="fournisseur")
     [spans] = traces(exporter).values()
     root = root_of(spans)
     assert root.name == "cdg.analyse"
@@ -109,9 +109,13 @@ def test_trace_d_une_analyse(otel):
 def test_revue_et_expiration_ont_leur_trace_de_meme_session(otel):
     telemetry, exporter, _ = otel
     svc, _ = service(telemetry)
-    svc.analyse(PENDING_TEXT, contract_id="c-attente", actor=ANALYSTE)
+    svc.analyse(
+        PENDING_TEXT, contract_id="c-attente", actor=ANALYSTE, profile="fournisseur"
+    )
     svc.decide("c-attente", answer(CLI))
-    svc.analyse(PENDING_TEXT, contract_id="c-expire", actor=ANALYSTE)
+    svc.analyse(
+        PENDING_TEXT, contract_id="c-expire", actor=ANALYSTE, profile="fournisseur"
+    )
     svc.expire(timedelta(0), CLI)
     roots = [root_of(spans) for spans in traces(exporter).values()]
     seen = [(r.name, r.attributes.get("langfuse.session.id")) for r in roots]
@@ -146,7 +150,9 @@ def test_acteur_de_la_revue_sur_sa_trace():
         relecteur = Actor(
             canal="interface", authentifie=True, iss=iss, sub="sub-relecteur"
         )
-        svc.analyse(PENDING_TEXT, contract_id="c-attente", actor=analyste)
+        svc.analyse(
+            PENDING_TEXT, contract_id="c-attente", actor=analyste, profile="fournisseur"
+        )
         svc.decide("c-attente", answer(relecteur))
         [revue] = [s for s in exporter.get_finished_spans() if s.name == "cdg.revue"]
         assert revue.attributes["cdg.canal"] == "interface"
@@ -157,7 +163,7 @@ def test_acteur_de_la_revue_sur_sa_trace():
 def test_analystes_en_parallele_dans_la_meme_trace(otel):
     telemetry, exporter, _ = otel
     svc, _ = service(telemetry)
-    svc.analyse(CONTRACT_TEXT, contract_id="c-1", actor=ANALYSTE)
+    svc.analyse(CONTRACT_TEXT, contract_id="c-1", actor=ANALYSTE, profile="fournisseur")
     [spans] = traces(exporter).values()
     root = root_of(spans)
     analysts = [s for s in spans if s.name == "analyst"]
@@ -185,7 +191,12 @@ def interrupted(telemetry, ids):
     ] * len(ids)
     for contract_id in ids:
         with pytest.raises(KeyboardInterrupt):
-            svc.analyse(CONTRACT_TEXT, contract_id=contract_id, actor=ANALYSTE)
+            svc.analyse(
+                CONTRACT_TEXT,
+                contract_id=contract_id,
+                actor=ANALYSTE,
+                profile="fournisseur",
+            )
     return svc
 
 
@@ -220,7 +231,9 @@ def test_rien_a_reprendre_aucune_trace(otel):
 def test_interruption_de_la_revue_n_est_pas_un_echec(otel):
     telemetry, exporter, _ = otel
     svc, _ = service(telemetry)
-    svc.analyse(PENDING_TEXT, contract_id="c-attente", actor=ANALYSTE)
+    svc.analyse(
+        PENDING_TEXT, contract_id="c-attente", actor=ANALYSTE, profile="fournisseur"
+    )
     [review] = [s for s in exporter.get_finished_spans() if s.name == "human_review"]
     assert "error.type" not in review.attributes
 
@@ -271,7 +284,9 @@ def test_revue_d_un_identifiant_hostile_session_refusee(otel):
 def test_revue_refusee_type_seulement(otel):
     telemetry, exporter, _ = otel
     svc, _ = service(telemetry)
-    svc.analyse(PENDING_TEXT, contract_id="c-attente", actor=ANALYSTE)
+    svc.analyse(
+        PENDING_TEXT, contract_id="c-attente", actor=ANALYSTE, profile="fournisseur"
+    )
     mcp = Actor(canal="mcp", authentifie=False, operateur="assistant-1")
     with pytest.raises(Exception, match="jamais de décision"):
         svc.decide("c-attente", answer(mcp))
@@ -306,6 +321,7 @@ def test_aucun_texte_des_13_contrats_dans_les_traces(otel):
             contract_id=contract.id,
             actor=ANALYSTE,
             parties=list(contract.parties),
+            profile="fournisseur",
         )
         if svc.dossier(contract.id)["etat"] == "en_attente":
             svc.decide(contract.id, answer(CLI))

@@ -115,7 +115,12 @@ def make_service(extractor=None, opener=None) -> ContractService:
 def analysis_in_progress(service, extractor) -> Iterator[Future]:
     """Analyse du contrat `c-lent`, arrêtée dans l'extraction ; libérée à la sortie."""
     analysis = background(
-        lambda: service.analyse(SLOW_TEXT, contract_id="c-lent", actor=ACTEUR_ANALYSTE)
+        lambda: service.analyse(
+            SLOW_TEXT,
+            contract_id="c-lent",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
     )
     try:
         assert extractor.started.wait(WAIT), "l'analyse n'a pas atteint l'extraction"
@@ -177,7 +182,10 @@ def test_deux_analyses_simultanees_du_meme_contrat_une_seule_creee():
     calls = [
         background(
             lambda: service.analyse(
-                CONTRACT_TEXT, contract_id="c-double", actor=ACTEUR_ANALYSTE
+                CONTRACT_TEXT,
+                contract_id="c-double",
+                actor=ACTEUR_ANALYSTE,
+                profile="fournisseur",
             )
         )
         for _ in range(2)
@@ -196,11 +204,17 @@ def test_une_modification_attend_la_fin_de_l_analyse_en_cours(action):
     extractor = BlockingExtractor()
     service = make_service(extractor)
     service.analyse(
-        PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
     )  # en attente de revue
     calls = {
         "analyse": lambda: service.analyse(
-            CONTRACT_TEXT, contract_id="c-autre", actor=ACTEUR_ANALYSTE
+            CONTRACT_TEXT,
+            contract_id="c-autre",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
         ),
         "decide": lambda: service.decide("c-attente", ANSWER),
         "expire": lambda: service.expire(timedelta(hours=1), ACTEUR_RELECTEUR),
@@ -215,7 +229,12 @@ def test_une_modification_attend_la_fin_de_l_analyse_en_cours(action):
 def test_lectures_pendant_une_analyse_en_cours():
     extractor = BlockingExtractor()
     service = make_service(extractor)
-    service.analyse(CONTRACT_TEXT, contract_id="c-fini", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT,
+        contract_id="c-fini",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     with analysis_in_progress(service, extractor) as analysis:
         reads = background(
             lambda: (
@@ -349,7 +368,12 @@ def web_client(service) -> TestClient:
 def test_interface_sert_les_lectures_pendant_une_analyse_en_cours():
     extractor = BlockingExtractor()
     service = make_service(extractor)
-    service.analyse(CONTRACT_TEXT, contract_id="c-fini", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT,
+        contract_id="c-fini",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     pages = [
         "/",
         "/contrats/c-fini",

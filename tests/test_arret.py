@@ -50,7 +50,10 @@ def test_analyse_interrompue_reprise_depuis_son_checkpoint_scellee_une_fois():
     service = make_service(extractor)
     with pytest.raises(Death):
         service.analyse(
-            CONTRACT_TEXT, contract_id="c-interrompu", actor=ACTEUR_ANALYSTE
+            CONTRACT_TEXT,
+            contract_id="c-interrompu",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
         )
     [row] = service.contracts()
     assert row["etat"] == "en_cours" and service.journal() == []
@@ -70,7 +73,12 @@ def test_reprise_laisse_un_contrat_en_cours_ailleurs():
     locks = LocalContractLocks()
     service = make_service(DyingOnce(), locks=locks)
     with pytest.raises(Death):
-        service.analyse(CONTRACT_TEXT, contract_id="c-ailleurs", actor=ACTEUR_ANALYSTE)
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id="c-ailleurs",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
     with locks.hold("c-ailleurs"):  # son réplica le tient encore
         assert service.resume_interrupted() == []
     assert [s["thread_id"] for s in service.resume_interrupted()] == ["c-ailleurs"]
@@ -80,8 +88,18 @@ def test_reprise_ne_touche_ni_aux_contrats_finis_ni_a_ceux_en_attente():
     from test_service import PENDING_TEXT
 
     service = make_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c-fini", actor=ACTEUR_ANALYSTE)
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT,
+        contract_id="c-fini",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     assert service.resume_interrupted() == []
 
 
@@ -304,8 +322,15 @@ def test_chaque_appel_au_graphe_ecrit_ses_checkpoints_avant_l_etape_suivante():
 
     service = make_service(DyingOnce(), opener=spying)
     with pytest.raises(Death):
-        service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id="c1",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
     service.resume_interrupted()
-    service.analyse(PENDING_TEXT, contract_id="c2", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT, contract_id="c2", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     service.decide("c2", answer())
     assert seen and set(seen) == {"sync"}

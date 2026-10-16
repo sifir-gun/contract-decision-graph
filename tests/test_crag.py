@@ -628,6 +628,7 @@ def test_crag_reel_imbrique_lance_par_run_contract():
             config=CONFIG,
             actor=ACTEUR_ANALYSTE,
             code=CODE,
+            profile="fournisseur",
         )
     # aucun avertissement de LangGraph : il sortirait en texte, hors des journaux JSON
     assert [str(w.message) for w in seen if "langgraph" in w.filename] == []

@@ -413,7 +413,9 @@ def legacy_contract(service, thread: str) -> None:
     """Contrat d'identifiant ancien, créé par le moteur directement : la règle des
     identifiants ne vaut qu'à la création, les contrats existants restent lisibles."""
     local = Actor(canal="locale", authentifie=False)  # interface du poste
-    service.engine.run(thread, PENDING_TEXT, (), service.today(), local)
+    service.engine.run(
+        thread, PENDING_TEXT, (), service.today(), local, profile="fournisseur"
+    )
 
 
 def test_redirection_apres_revue_vers_le_dossier_quel_que_soit_l_identifiant():

@@ -493,6 +493,8 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
     pending = [i.value for i in snapshot.interrupts]
     return {
         "thread_id": thread_id,
+        # état d'avant les profils : le seul profil qui existait alors (`of_state`)
+        "profil": profiles.of_state(values),
         "analysis_date": values.get("analysis_date"),
         "statut": (
             "suspendu" if pending else "en_cours" if snapshot.next else "termine"
@@ -535,6 +537,7 @@ def run_contract(
     config: DecisionConfig,
     actor: Actor,
     code: CodeVersion,
+    profile: Profile,
     relaunch_of: str | None = None,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
@@ -545,9 +548,12 @@ def run_contract(
     écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
     produit la décision, modèles et version du code) est posé dans l'état initial, avant
     tout nœud : c'est lui qui est scellé, comme l'acteur qui lance l'analyse (quatre
-    yeux). `relaunch_of` : contrat escaladé pour changement de configuration dont
-    celui-ci est la relance, sous la configuration actuelle.
+    yeux). `profile` : profil du contrat, obligatoire, posé dans l'état initial avant tout
+    nœud ; un profil inconnu est refusé avant d'écrire quoi que ce soit. `relaunch_of` :
+    contrat escaladé pour changement de configuration dont celui-ci est la relance, sous
+    la configuration actuelle.
     """
+    profiles.parse(profile)  # jamais de profil par défaut : refusé avant tout thread
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
             f"le thread {contract_id} existe déjà : utiliser "
@@ -557,6 +563,7 @@ def run_contract(
     graph.invoke(
         {
             "contract_id": contract_id,
+            "profile": profile,
             "raw_text": masked.text,
             "analysis_date": analysis_date,
             **audit.analysis_context(config, code),

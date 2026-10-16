@@ -504,6 +504,7 @@ def create_app(
                 entry.text,
                 contract_id=contract_id,
                 actor=actor(request),
+                profile="fournisseur",  # provisoire : choix du profil en tâche 6
                 parties=entry.parties,
                 analysis_date=on,
             )
