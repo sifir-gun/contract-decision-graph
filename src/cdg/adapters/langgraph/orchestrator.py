@@ -45,6 +45,7 @@ from cdg.domain import audit, expiry, masking, policy, profiles, resumption
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
+from cdg.domain.profiles import Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.engine import ThreadError
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
@@ -161,13 +162,14 @@ def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) 
     graph = build_crag_graph(retriever, llm, config)
 
     def run(
-        domain: Domain, clauses: list[Clause], analysis_date: date
+        domain: Domain, clauses: list[Clause], analysis_date: date, profile: Profile
     ) -> RetrievalResult:
         return crag.per_clause(
             domain,
             clauses,
             analysis_date,
             lambda state: graph.invoke(state, CRAG_ROOT)["result"],
+            profile,
         )
 
     return run

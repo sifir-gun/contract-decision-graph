@@ -13,6 +13,7 @@ from cdg.application import crag, ingestion
 from cdg.application.deps import RetrievalResult
 from cdg.domain.corpus import by_domain
 from cdg.domain.models import Clause, Domain
+from cdg.domain.profiles import Profile
 from cdg.ports.retriever import Passage
 
 
@@ -37,7 +38,11 @@ class DeclaredCrag:
         ]
 
     def __call__(
-        self, domain: Domain, clauses: list[Clause], analysis_date: date
+        self,
+        domain: Domain,
+        clauses: list[Clause],
+        analysis_date: date,
+        profile: Profile,
     ) -> RetrievalResult:
         results = []
         for clause in clauses:
@@ -47,6 +52,7 @@ class DeclaredCrag:
                 if p.domain == domain and clause.kind in p.kinds
             ]
             state: crag.CragState = {
+                "profile": profile,
                 "domain": domain,
                 "clause": clause,
                 "analysis_date": analysis_date,

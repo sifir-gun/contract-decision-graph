@@ -294,9 +294,9 @@ class ByDomain:
     def __init__(self, real: dict):
         self.real, self.fake = real, FakeCrag()
 
-    def __call__(self, domain, clauses, analysis_date):
+    def __call__(self, domain, clauses, analysis_date, profile):
         crag = self.real.get(domain, self.fake)
-        return crag(domain, clauses, analysis_date)
+        return crag(domain, clauses, analysis_date, profile)
 
 
 # Règles d'abord : le CRAG ne cherche que pour les clauses qui portent un constat. Financier :

@@ -35,11 +35,11 @@ class DyingOnce:
     def __init__(self):
         self.inner, self.calls = FixedExtractor(clauses()), 0
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         self.calls += 1
         if self.calls == 1:
             raise Death()
-        return self.inner(raw_text, feedback)
+        return self.inner(raw_text, feedback, profile)
 
 
 # --- reprise d'une analyse interrompue ------------------------------------------------------

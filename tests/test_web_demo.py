@@ -6,6 +6,7 @@ instructions, revue humaine, scellement et vérification tournent pour de vrai, 
 
 import html
 import json
+from dataclasses import replace
 from datetime import date
 
 import demo_set as expected_set
@@ -158,17 +159,33 @@ def test_extraction_simulee_des_seuls_contrats_du_jeu():
     contract = contracts["demo-06-no-go-conseil"]
     extractor = ExpectedExtractor(contracts.values())
     masked = masking.mask(contract.text(), contract.parties).text
-    result = extractor(masked, [])
+    result = extractor(masked, [], contract.profile)
     assert result.clauses == list(contract.clauses)
     assert [u.model for u in result.usage] == ["simulation"]
     with pytest.raises(DemoExtractionError, match="contrats du jeu"):
-        extractor("Un contrat qui n'est pas dans le jeu.", [])
+        extractor("Un contrat qui n'est pas dans le jeu.", [], "fournisseur")
+
+
+def test_extraction_simulee_refuse_un_autre_profil():
+    """Chaque texte masqué est indexé avec le profil de son contrat : le profil que passe
+    le port doit être le sien, sans quoi les clauses attendues ne seraient pas celles du
+    genre de contrat analysé."""
+    _, contracts = demo_set.load()
+    contract = replace(
+        contracts["demo-06-no-go-conseil"], profile="autre"
+    )  # hors typage
+    masked = masking.mask(contract.text(), contract.parties).text
+    extractor = ExpectedExtractor([contract])
+    with pytest.raises(DemoExtractionError, match="profil") as raised:
+        extractor(masked, [], "fournisseur")
+    assert "autre" in str(raised.value) and "fournisseur" in str(raised.value)
+    assert extractor(masked, [], "autre").clauses == list(contract.clauses)
 
 
 def test_references_par_rattachement_declare():
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
-    result = crag("financier", [clause], date(2026, 9, 25))
+    result = crag("financier", [clause], date(2026, 9, 25), "fournisseur")
     [trace] = result.trace.clauses
     declared = {
         meta["reference"]
@@ -183,7 +200,7 @@ def test_references_par_rattachement_declare():
 def test_reference_expiree_signalee_jamais_retenue():
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
-    result = crag("financier", [clause], date(2027, 3, 1))
+    result = crag("financier", [clause], date(2027, 3, 1), "fournisseur")
     [trace] = result.trace.clauses
     assert "C. com., art. L441-10" in trace.expired
     assert "C. com., art. L441-10" not in trace.retained

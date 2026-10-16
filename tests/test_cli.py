@@ -456,7 +456,7 @@ def test_run_sans_cle_d_api_erreur_avant_tout_thread(
 class InvalidExtractor(FixedExtractor):
     """Extraction qui rend une clause présente sans citation : ValidationError."""
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         self.calls.append((raw_text, list(feedback)))
         Clause(
             kind=profiles.spec("fournisseur").kinds[0],

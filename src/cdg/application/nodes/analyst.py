@@ -16,10 +16,16 @@ def analyst(
 ) -> dict[str, Any]:
     domain, clauses = inp["domain"], inp["clauses"]
     # `of_state` : le `Send` d'une analyse interrompue avant les profils n'a pas de profil
-    assessment = RULES[profiles.of_state(inp)][domain](clauses, decision_config)
+    profile = profiles.of_state(inp)
+    assessment = RULES[profile][domain](clauses, decision_config)
     to_justify = set(assessment.kinds_to_justify())
     retrieval = RetrievalResult.model_validate(
-        crag(domain, [c for c in clauses if c.kind in to_justify], inp["analysis_date"])
+        crag(
+            domain,
+            [c for c in clauses if c.kind in to_justify],
+            inp["analysis_date"],
+            profile=profile,
+        )
     )
     verdict = justify(assessment, retrieval.trace)
     return {"verdicts": [verdict], "usage": retrieval.usage}

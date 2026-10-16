@@ -94,7 +94,7 @@ class AlwaysDying:
     def __init__(self):
         self.calls = 0
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         self.calls += 1
         raise Death()
 
@@ -149,12 +149,12 @@ class CrashingAnalysts(FakeCrag):
     """CRAG qui fait mourir le processus pour deux domaines, à chaque fois, après avoir
     laissé les deux autres analystes (instantanés) rendre leur verdict."""
 
-    def __call__(self, domain, clauses, analysis_date):
+    def __call__(self, domain, clauses, analysis_date, profile):
         if domain in {"conformite", "operationnel"}:
             self.calls.append(domain)
             threading.Event().wait(0.2)
             raise Death()
-        return super().__call__(domain, clauses, analysis_date)
+        return super().__call__(domain, clauses, analysis_date, profile)
 
 
 def test_plantage_pendant_les_analystes_verdicts_rendus_gardes():

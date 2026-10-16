@@ -104,6 +104,28 @@ def test_extract_clauses_incremente_les_essais_et_transmet_le_retour():
     )
     assert out["usage"][0].tokens_in == 100
     assert extractor.calls == [("Contrat.", ["citation introuvable: revision_prix"])]
+    # état sans clé `profile` (d'avant les profils) : le seul profil possible alors
+    assert extractor.profiles == ["fournisseur"]
+
+
+def test_extract_clauses_passe_le_profil_de_l_etat_par_mot_cle():
+    seen = {}
+
+    def extractor(raw_text, feedback, *, profile):
+        seen["profile"] = profile
+        return FixedExtractor(clauses())(raw_text, feedback, profile)
+
+    state = {"raw_text": "Contrat.", "extraction_attempts": 0, "profile": "fournisseur"}
+    extract_clauses(state, extractor=extractor)
+    assert seen == {"profile": "fournisseur"}
+
+
+def test_extract_clauses_refuse_un_profil_inconnu_sans_extraire():
+    extractor = FixedExtractor(clauses())
+    state = {"raw_text": "Contrat.", "extraction_attempts": 0, "profile": "inexistant"}
+    with pytest.raises(ValueError, match="profil inconnu"):
+        extract_clauses(state, extractor=extractor)
+    assert extractor.calls == []
 
 
 def test_extract_clauses_premier_essai_sans_retour():
@@ -136,9 +158,23 @@ def test_analyst_lit_le_profil_de_son_entree():
         "analysis_date": ANALYSIS_DATE,
     }
     expected = analyse("financier", FakeCrag(), penalites_execution=ABSENT)
-    assert analyst(inp, crag=FakeCrag(), decision_config=CONFIG) == expected
+    without, with_profile = FakeCrag(), FakeCrag()
+    assert analyst(inp, crag=without, decision_config=CONFIG) == expected
     inp["profile"] = "fournisseur"
-    assert analyst(inp, crag=FakeCrag(), decision_config=CONFIG) == expected
+    assert analyst(inp, crag=with_profile, decision_config=CONFIG) == expected
+    # le CRAG reçoit le profil lu par `of_state`, même quand l'entrée n'en a pas
+    assert without.profiles == with_profile.profiles == ["fournisseur"]
+
+
+def test_analyst_passe_le_profil_au_crag_par_mot_cle():
+    seen = {}
+
+    def crag(domain, clauses, analysis_date, *, profile):
+        seen["profile"] = profile
+        return RetrievalResult(trace=RetrievalTrace(clauses=[]), usage=[])
+
+    analyse("financier", crag, penalites_execution=ABSENT)
+    assert seen == {"profile": "fournisseur"}
 
 
 def test_analyst_refuse_un_profil_inconnu_sans_rien_chercher():
@@ -222,7 +258,7 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
     )
     received = []
 
-    def crag(domain, clauses, analysis_date):
+    def crag(domain, clauses, analysis_date, profile):
         assert analysis_date == ANALYSIS_DATE
         received.extend(c.kind for c in clauses)
         return RetrievalResult(trace=trace, usage=[])

@@ -37,6 +37,7 @@ from cdg.adapters.web.app import create_app
 from cdg.application.service import ContractService
 from cdg.domain import audit
 from cdg.domain.config import load_config
+from cdg.domain.profiles import Profile
 from cdg.ports.engine import ThreadError
 
 CONFIG = load_config()
@@ -60,12 +61,12 @@ class BlockingExtractor:
         self.inner = FixedExtractor(clauses())
         self.started, self.release = threading.Event(), threading.Event()
 
-    def __call__(self, raw_text: str, feedback: list[str]):
+    def __call__(self, raw_text: str, feedback: list[str], profile: Profile):
         if MARK in raw_text:
             self.started.set()
             if not self.release.wait(WAIT):
                 raise TimeoutError("extraction jamais libérée")
-        return self.inner(raw_text, feedback)
+        return self.inner(raw_text, feedback, profile)
 
 
 def background(call: Callable[[], Any]) -> Future:

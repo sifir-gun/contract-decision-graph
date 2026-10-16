@@ -18,6 +18,7 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.profiles import Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.identity import IdentityRejected, ProviderUnavailable
 from cdg.ports.retriever import Passage
@@ -156,9 +157,13 @@ class FixedExtractor:
     def __init__(self, clauses: list[Clause], tokens_in=0, tokens_out=0):
         self.clauses, self.tokens = clauses, (tokens_in, tokens_out)
         self.calls: list[tuple[str, list[str]]] = []
+        self.profiles: list[Profile] = []  # profil reçu à chaque appel
 
-    def __call__(self, raw_text: str, feedback: list[str]) -> ExtractionResult:
+    def __call__(
+        self, raw_text: str, feedback: list[str], profile: Profile
+    ) -> ExtractionResult:
         self.calls.append((raw_text, list(feedback)))
+        self.profiles.append(profile)
         return ExtractionResult(
             clauses=self.clauses, usage=[usage(*self.tokens, node="extract_clauses")]
         )
@@ -172,11 +177,13 @@ class FakeCrag:
         self.empty, self.tokens = set(empty), (tokens_in, tokens_out)
         self.calls: list[str] = []
         self.kinds: dict[str, list[str]] = {}  # clauses reçues, par domaine
+        self.profiles: list[Profile] = []  # profil reçu à chaque appel
 
     def __call__(
-        self, domain, clauses: list[Clause], analysis_date: date
+        self, domain, clauses: list[Clause], analysis_date: date, profile: Profile
     ) -> RetrievalResult:
         self.calls.append(domain)
+        self.profiles.append(profile)
         self.kinds[domain] = [c.kind for c in clauses]
         retained = [] if domain in self.empty else [f"{domain}-ref-1"]
         trace = RetrievalTrace(

@@ -208,7 +208,7 @@ def build_deps(config: DecisionConfig, code: CodeVersion) -> Deps:
 
 
 def _not_needed(what: str):
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise RuntimeError(
             f"{what} indisponible : cette commande n'analyse pas de contrat"
         )
@@ -321,7 +321,8 @@ def _mesure_recherche(args: argparse.Namespace) -> dict:
         batch_size=EMBEDDER_THREADS["batch_size"],
     )
     retriever = rag_store.PgvectorRetriever(app_pool(), embedder, config.crag.search)
-    report = evaluation.run(config, retriever, retriever, args.k)
+    # provisoire : --profil en tâche 5
+    report = evaluation.run(config, retriever, retriever, args.k, profile="fournisseur")
     return {"mesure_recherche": "ok", "modele": embedder.model, **report}
 
 

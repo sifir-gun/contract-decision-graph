@@ -16,7 +16,8 @@ import json
 from collections import Counter
 
 import pytest
-from demo_set import DEMO, files, load
+import yaml
+from demo_set import DEMO, EXPECTED, files, load
 from doubles import (
     ABSENT,
     ACTEUR_ANALYSTE,
@@ -33,6 +34,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from cdg import cli
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
+from cdg.application import demo_set
 from cdg.domain import input_checks, masking, profiles, verification
 from cdg.domain.config import load_config
 from cdg.domain.decision import decide
@@ -56,6 +58,7 @@ def ids(contracts):
 
 def test_composition_du_jeu():
     assert len(CONTRACTS) == 13
+    assert {c.profile for c in CONTRACTS} == {"fournisseur"}
     assert set(files().values()) == {p.name for p in DEMO.glob("*.txt")}
     proposed = Counter(c.expected.get("proposed_decision", "rejet") for c in CONTRACTS)
     # GO dont un à marge faible et un piégé ; NO_GO dont le piégé à injection ;
@@ -78,6 +81,46 @@ def test_composition_du_jeu():
         "demo-11-piege-injection",  # tentative d'instruction : revue obligatoire
         "demo-13-realiste-infogerance",
     ]
+
+
+# --- Profil de chaque contrat : champ obligatoire des attendus ------------------------------
+
+
+def expected_without(tmp_path, change):
+    """Copie des attendus, dont `change(contrats)` modifie les contrats."""
+    data = yaml.safe_load(EXPECTED.read_text(encoding="utf-8"))
+    change(data["contracts"])
+    path = tmp_path / "attendus.yaml"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+def test_chaque_contrat_du_jeu_declare_son_profil():
+    data = yaml.safe_load(EXPECTED.read_text(encoding="utf-8"))
+    assert [c["profile"] for c in data["contracts"].values()] == ["fournisseur"] * 13
+    _, contracts = demo_set.load()
+    assert {c.profile for c in contracts.values()} == {"fournisseur"}
+
+
+def test_contrat_du_jeu_sans_profil_refuse(tmp_path):
+    path = expected_without(
+        tmp_path,
+        lambda contracts: contracts["demo-04-go-reserves-transport"].pop("profile"),
+    )
+    with pytest.raises(
+        ValueError, match="profil absent du contrat demo-04.*attendus.yaml"
+    ):
+        demo_set.load(path)
+
+
+@pytest.mark.parametrize("value", ["inexistant", "", None])
+def test_contrat_du_jeu_de_profil_inconnu_refuse(tmp_path, value):
+    path = expected_without(
+        tmp_path,
+        lambda contracts: contracts["demo-01-go-maintenance"].update(profile=value),
+    )
+    with pytest.raises(ValueError, match="profil inconnu"):
+        demo_set.load(path)
 
 
 # --- Citations attendues : dans le texte masqué, vérifiées ------------------------------------
