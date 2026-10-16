@@ -534,7 +534,7 @@ class ChaineRompue(Exception):
 
 class ArchiveNonConforme(ChaineRompue):
     """Archive des configurations non conforme (configuration d'un enregistrement v2
-    absente, ou configuration archivée altérée) : code 1, avec le rapport."""
+    ou v3 absente, ou configuration archivée altérée) : code 1, avec le rapport."""
 
 
 def _verify(args: argparse.Namespace) -> dict:

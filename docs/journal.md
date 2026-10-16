@@ -3403,7 +3403,7 @@ Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmè
 - **État sans profil.** Une seule fonction lit le profil d'un état, `profiles.of_state` : absent, il vaut `fournisseur` (`LEGACY_PROFILE`), seul profil possible avant la PR ; présent et inconnu, `ValueError`. Tous les nœuds, le scellement et la relance y passent. `run_contract` pose toujours le profil, de sorte que la lecture « ancienne » ne sert qu'aux états d'avant la PR.
 - **`attendus.yaml`** reçoit un champ `profile` obligatoire dès la PR 1 (les treize contrats : `fournisseur`), et non en PR 3 : l'extraction simulée doit vérifier le profil que lui passe le port. Écart de calendrier avec la spec, sans effet sur le comportement.
 - **Prompt d'explication inchangé.** Il n'en existe qu'un et le port `Explainer` ne change pas ; le prompt d'explication par profil arrive en PR 2, avec le second prompt.
-- **Étape intermédiaire.** Entre la tâche 2 et les tâches 3 et 4, `evaluation.demo_queries` et `audit._rejustified` lisaient `RULES["fournisseur"]` ; elles dépendent du profil depuis. Chaque tâche est restée verte.
+- **Étape intermédiaire de la PR.** Entre le commit 16958b2 (règles par profil) et les commits a49b331 et ae68824 (ports de l'extraction et du CRAG, journal v3), `evaluation.demo_queries` et `audit._rejustified` lisaient `RULES["fournisseur"]` ; elles dépendent du profil depuis. Chaque commit est resté vert.
 - **Cluster.** `tests/test_cluster.py` est adapté (champ `profil` du formulaire, version 3), mais pas lancé en local (`check.sh --sans-cluster` : le profil local monte à 7 Go sur les 8 de la VM Docker) : le job `cluster` de la CI le vérifie.
 - **Documents historiques.** Les ADR 005 et 007 décrivent le format v2 à leur date : ils ne changent pas (l'ADR 007 gagne un amendement, ci-dessous). CLAUDE.md, README, exploitation, spec et ADR 010 sont à jour.
 
@@ -3411,9 +3411,9 @@ Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmè
 
 - **ADR 010, et non 009.** La branche de la mise à jour de L441-10 crée `docs/adr-009-versions-du-corpus.md` et fusionnera avant celle-ci : l'ADR des profils est renuméroté, avec tous ses renvois (spec, `attendus.yaml`, docstrings).
 - **L'analyste lit `profiles.of_state(inp)`**, pas `inp["profile"]` : un `Send` en attente dans un checkpoint d'avant la PR n'a pas de clé `profile`, et `inp["profile"]` lèverait `KeyError` à la reprise. Le test de l'analyse interrompue échoue si l'on revient à `inp["profile"]` (vérifié par mutation).
-- **Le profil de l'outil MCP passe par `saisie.profile`**, en plus du `Literal` du schéma : la spec veut une saisie commune à l'interface et au serveur MCP. Absent, vide, d'une autre casse ou inconnu, il est refusé aux trois portes (par argparse pour la CLI) ; le message de `saisie.profile` cite les profils admis et ne reprend jamais la valeur reçue.
-- **Lignes provisoires** entre les tâches, pour que chacune reste verte : `mesure-recherche`, l'interface et l'outil MCP passaient `fournisseur` en dur jusqu'aux tâches 5 et 6, qui les ont remplacées.
-- **Amendement de l'ADR 007** (« Erreurs »), à la suite de la relecture de la tâche 6.
+- **Le profil de l'outil MCP passe par `saisie.profile`**, en plus du `Literal` du schéma : la spec veut une saisie commune à l'interface et au serveur MCP. Absent, vide, d'une autre casse ou inconnu, il est refusé aux trois portes : par argparse pour la CLI, par `saisie.profile` pour l'interface ; pour l'outil MCP, par le middleware, avant la validation du SDK, qui nomme l'argument manquant, ou rend le message de `saisie.profile` pour un profil présent mais inconnu (relecture finale : le SDK rendait sinon le message de pydantic, en anglais, avec la valeur reçue ; la spec veut une erreur de l'outil sans message d'exception). Ces messages citent les profils admis et ne reprennent jamais la valeur reçue.
+- **Lignes provisoires**, étape intermédiaire de la PR, pour que chaque commit reste vert : `mesure-recherche`, l'interface et l'outil MCP passaient `fournisseur` en dur jusqu'aux commits b261889 et e338623, qui les ont remplacées.
+- **Amendement de l'ADR 007** (« Erreurs »), à la suite de la relecture du commit e338623, complété en relecture finale pour le profil inconnu.
 
 ### Ce qui change
 
@@ -3426,16 +3426,17 @@ Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmè
 
 ### Faits et pièges
 
-- **Une erreur du SDK MCP reprenait le texte du contrat** (relecture de la tâche 6). Un appel d'`analyser_contrat` sans l'argument obligatoire `profil` recevait l'erreur de validation du SDK, qui répète le début et la fin des arguments reçus : texte du contrat et noms des parties compris. Le middleware qui refuse déjà un argument inconnu refuse aussi un argument obligatoire manquant, avant la validation, avec un message qui le nomme et ne reprend aucune valeur. Reste, comme avant (ADR 007) : un argument du mauvais type, dont le SDK répète sa propre valeur tronquée.
+- **Une erreur du SDK MCP reprenait le texte du contrat** (relecture du commit e338623, corrigée par 408c6cc). Un appel d'`analyser_contrat` sans l'argument obligatoire `profil` recevait l'erreur de validation du SDK, qui répète le début et la fin des arguments reçus : texte du contrat et noms des parties compris. Le middleware qui refuse déjà un argument inconnu refuse aussi un argument obligatoire manquant, avant la validation, avec un message qui le nomme et ne reprend aucune valeur ; depuis la relecture finale, un profil présent mais inconnu aussi, avec le message de `saisie.profile`. Reste, comme avant (ADR 007) : un autre argument du mauvais type, dont le SDK répète sa propre valeur tronquée.
 - **Invariants, vérifiés sur toute la branche** : `data/evaluation/recherche.yaml`, `config/decision.yaml`, `pyproject.toml` et `uv.lock` sans diff ; `DecisionConfig` ne gagne aucun champ, donc l'empreinte de configuration ne change pas ; aucune dépendance ajoutée.
-- **Vrai journal du poste** : `pytest -m journal_reel --journal-reel` relit ses cinq enregistrements, tous v1, à l'identique. Il ne contient aucun v2 : la forme figée du v2 est prouvée par des aides de test, pas par un enregistrement réel.
+- **Vrai journal du poste** : `pytest -m journal_reel --journal-reel` relit ses cinq enregistrements, tous v1, à l'identique. Il ne contient aucun v2 : la forme figée du v2 est prouvée par un enregistrement de référence scellé par le code de 5e5a8f6, d'avant les profils (`tests/fixtures/journal-v2-reference.json`, `decision_hash` e1ed18e4…c136), que le code courant recalcule, vérifie et rejoue fidèlement (`tests/test_audit_v2_reference.py`) ; à ne jamais régénérer.
+- **Un v3 est illisible par le code d'avant les profils** (relecture finale : `verify` de 5e5a8f6, sur une chaîne v2 puis v3, rend « version d'enregistrement inconnue : 3 », chaîne rompue, code 1). Documenté (ADR 010, « Conséquences » ; exploitation) : rien ne se scelle en réel depuis cette branche sur la base du poste avant la fusion, et un nom de profil ne se renomme ni ne se retire.
 - **Base partagée** : la base locale porte la migration 009 de la branche de L441-10 (clé d'unicité des extraits par version). Les tests `pg` d'ingestion et de recherche (27 erreurs, 2 échecs) y échouent, sur le poste seulement : une base neuve, celle de la CI, ne l'a pas. Ils se lèveront quand cette branche intégrera `main`, après la fusion de L441-10.
 - **Test préexistant, hors périmètre** : `tests/test_cli_traces.py::test_destination_sans_cle_refusee` échoue dès que le `.env` du poste porte les clés `LANGFUSE_*`, sur `main` aussi. Défaut d'isolation du test, à corriger à part (CLAUDE.md : on corrige le test, on ne l'exclut pas).
 - **L'enregistrement du terminal du README** (`docs/images/demo-terminal.gif`) n'est pas refait dans cette PR (analyse payante, scellée dans le vrai journal) : il date d'avant `--profil`, alors que le script est à jour.
 
 ### Nombre de tests
 
-- La suite principale passe de 2 391 à 2 542 ; le total, de 2 573 à 2 724 (les charts, 119, l'image, 20, le proxy, 4, oauth2-proxy, 4, le cluster, 30 scénarios, et l'image du modèle, 5, ne changent pas).
+- La suite principale passe de 2 391 à 2 556 ; le total, de 2 573 à 2 738 (les charts, 119, l'image, 20, le proxy, 4, oauth2-proxy, 4, le cluster, 30 scénarios, et l'image du modèle, 5, ne changent pas).
 
 ### Suite
 

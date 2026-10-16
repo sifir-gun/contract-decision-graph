@@ -127,7 +127,8 @@ def actor_label(actor: Mapping[str, Any] | None) -> str:
 
 
 def human_label(human: Mapping[str, Any]) -> str:
-    """Auteur d'une décision humaine : relecteur nommé au format v1, acteur en v2."""
+    """Auteur d'une décision humaine : relecteur nommé au format v1, acteur en v2 et
+    v3."""
     if "reviewer" in human:
         return str(human["reviewer"])
     return actor_label(human["acteur"])
