@@ -1,15 +1,17 @@
-"""Journal d'audit v2 (PR D2, ADR 005).
+"""Journal d'audit v2 (PR D2, ADR 005), repris par le v3 (profils, `test_audit_v3.py`).
 
-- L'enregistrement porte sa version (2) ; l'acteur de l'analyse (`analyse_par`) et celui
-  de la décision humaine (`human.acteur`) remplacent le relecteur nommé : canal, iss et
-  sub, ou opérateur non nominatif ; jamais de nom ni d'e-mail.
+- L'enregistrement porte sa version (2, puis 3 depuis les profils) ; l'acteur de
+  l'analyse (`analyse_par`) et celui de la décision humaine (`human.acteur`) remplacent
+  le relecteur nommé : canal, iss et sub, ou opérateur non nominatif ; jamais de nom ni
+  d'e-mail. Le v3 garde tout cela et y ajoute le profil, dans la partie décision.
 - La version du code de l'analyse et celle du processus qui scelle (commit, et empreinte
   de l'image dans le cluster) sont scellées hors de la partie décision : decision_hash ne
   dépend que des entrées de la décision et de la configuration (critère 6), la chaîne
   couvre tout. Inconnue, elle le dit ; différentes, un constat.
-- Les enregistrements v1 (sans version, relecteur nommé) restent vérifiables et
-  rejouables : la vérification recalcule tout sur le JSON stocké, et le rejeu les relit
-  par leurs propres modèles, figés. Jeu v1 synthétique : aucune donnée du vrai journal.
+- Les enregistrements v1 (sans version, relecteur nommé) et v2 (sans profil) restent
+  vérifiables et rejouables : la vérification recalcule tout sur le JSON stocké, et le
+  rejeu les relit par leurs propres modèles, figés. Jeux v1 et v2 synthétiques : aucune
+  donnée du vrai journal.
 """
 
 import json
@@ -65,6 +67,7 @@ def v1_record() -> dict:
         "resume_escalation",
     ):
         data.pop(v2_only)
+    del data["decision"]["profile"]  # v3
     human = data["decision"]["human"]
     data["decision"]["human"] = HumanDecision(
         decision=human["decision"], reviewer="Relecteur de test", reason="revu"
@@ -72,12 +75,21 @@ def v1_record() -> dict:
     return audit.AuditRecordV1.model_validate(data).model_dump(mode="json")
 
 
-# --- format v2 -----------------------------------------------------------------------------
+def v2_record() -> dict:
+    """Enregistrement au format d'avant les profils (v2) : celui du v3, version 2, sans
+    profil dans la partie décision ; synthétique."""
+    data = record(reviewed()).model_dump(mode="json")
+    data["version"] = 2
+    del data["decision"]["profile"]
+    return audit.AuditRecordV2.model_validate(data).model_dump(mode="json")
+
+
+# --- format v2, repris par le v3 -----------------------------------------------------------
 
 
 def test_enregistrement_v2_versionne_avec_les_acteurs_sans_nom():
     data = record(reviewed()).model_dump(mode="json")
-    assert data["version"] == 2
+    assert data["version"] == 3  # le v3 garde les acteurs du v2
     assert data["analyse_par"] == ANALYSTE.model_dump(mode="json")
     assert data["decision"]["human"]["acteur"] == RELECTEUR.model_dump(mode="json")
     text = json.dumps(data)
@@ -104,10 +116,11 @@ def test_ancienne_decision_humaine_dans_l_etat_refusee_au_scellement():
 
 def test_analyse_mcp_scellee_et_relue():
     """Analyse lancée par le serveur MCP : son canal et son opérateur sont scellés, la
-    chaîne se vérifie et le rejeu est identique (format v2, sans nouvelle version)."""
+    chaîne se vérifie et le rejeu est identique (format courant, v3 ; le serveur MCP n'a
+    créé aucune version)."""
     mcp = Actor(canal="mcp", authentifie=False, operateur="assistant-poste-1")
     data = record(reviewed(analyse_par=mcp)).model_dump(mode="json")
-    assert data["version"] == 2
+    assert data["version"] == 3
     assert data["analyse_par"] == mcp.model_dump(mode="json")
     report = audit.verify_chain([entry(data, audit.GENESIS)])
     assert report.ok and report.count == 1
@@ -212,7 +225,7 @@ def test_version_du_code_du_scellement_exigee():
 
 def test_chaine_melee_v1_puis_v2_verifiable():
     first = entry(v1_record(), audit.GENESIS)
-    second = entry(record(reviewed()).model_dump(mode="json"), first.chain_hash)
+    second = entry(v2_record(), first.chain_hash)
     report = audit.verify_chain([first, second])
     assert report.ok and report.count == 2
 
@@ -227,13 +240,13 @@ def test_v1_relu_par_ses_modeles_a_l_identique():
 
 
 def test_v1_et_v2_rejoues_a_l_identique():
-    for data in (v1_record(), record(reviewed()).model_dump(mode="json")):
+    for data in (v1_record(), v2_record()):
         report = audit.replay(data, CONFIG.model_dump(mode="json"))
         assert report.identical and report.recomputed
 
 
 def test_version_inconnue_refusee():
-    data = record(reviewed()).model_dump(mode="json") | {"version": 3}
+    data = record(reviewed()).model_dump(mode="json") | {"version": 4}
     with pytest.raises(audit.ReplayError, match="version"):
         audit.replay(data, CONFIG.model_dump(mode="json"))
     with pytest.raises(audit.ReplayError, match="version"):

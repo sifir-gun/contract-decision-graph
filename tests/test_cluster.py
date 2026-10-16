@@ -1750,7 +1750,7 @@ def sealed_records(thread: str | None = None) -> list[dict]:
 def test_roles_quatre_yeux_et_acteurs_scelles_sans_nom(images):
     """Le polyvalent (analyste et relecteur) ne tranche pas ce qu'il a analysé : 403,
     tracé ; l'analyste ne tranche pas, le relecteur n'analyse pas : 403, tracés ; le
-    relecteur tranche. Scellé en v2 : les deux acteurs par leur sub, aucun courriel, et
+    relecteur tranche. Scellé en v3 : les deux acteurs par leur sub, aucun courriel, et
     la version du code, celle de l'analyse comme celle du scellement : le commit de la
     construction de l'image et l'empreinte que le chart déploie."""
     pod = web_pods()[0]["metadata"]["name"]
@@ -1765,7 +1765,7 @@ def test_roles_quatre_yeux_et_acteurs_scelles_sans_nom(images):
     polyvalent = claims(id_token("polyvalent"))["sub"]
     relecteur = claims(id_token("relecteur"))["sub"]
     [record] = sealed_records(thread)
-    assert record["version"] == 2
+    assert record["version"] == 3
     assert (record["analyse_par"]["canal"], record["analyse_par"]["sub"]) == (
         "interface",
         polyvalent,

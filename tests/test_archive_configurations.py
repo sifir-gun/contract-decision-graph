@@ -187,7 +187,7 @@ def test_journal_jetable_avec_son_archive_jetable(pg, journal):
     assert grants(pg, f"{journal}_configurations") == {"SELECT", "INSERT"}
 
 
-# --- verify : chaque enregistrement v2 a la configuration de sa décision --------------------
+# --- verify : chaque enregistrement v2 ou v3 a la configuration de sa décision -------------
 
 ARCHIVED = {audit.config_hash(CONFIG): CONFIG.model_dump(mode="json")}
 
@@ -202,6 +202,8 @@ def chain_of(*records: dict) -> list[audit.StoredAuditEntry]:
 
 
 def v2() -> dict:
+    """Enregistrement au format courant (v3), soumis à la règle du v2 ; le v2 lui-même :
+    `test_audit_v3.py`."""
     return record(reviewed()).model_dump(mode="json")
 
 
@@ -232,7 +234,7 @@ def test_configuration_archivee_relue_dans_un_autre_ordre_reste_conforme():
 
 
 def test_version_d_enregistrement_inconnue_journal_non_conforme():
-    report = audit.verify_journal(chain_of(v2() | {"version": 3}), ARCHIVED)
+    report = audit.verify_journal(chain_of(v2() | {"version": 4}), ARCHIVED)
     assert (report.ok, report.archive_fault, report.broken_id) == (False, False, 1)
     assert "version" in report.reason
 
