@@ -20,6 +20,7 @@ from cdg.domain.corpus import (
     Fiche,
     Manifest,
     by_domain,
+    check_chain,
     chunk,
     citations,
     claim_lines,
@@ -34,38 +35,63 @@ ROOT = Path(__file__).resolve().parents[3] / "data" / "corpus"
 RAW, FICHES, MANIFEST = ROOT / "raw", ROOT / "fiches", ROOT / "manifest.yaml"
 
 
-def load_manifest(path: Path = MANIFEST) -> Manifest:
-    return Manifest(sources=yaml.safe_load(path.read_text(encoding="utf-8"))["sources"])
+def load_manifest(path: Path | None = None) -> Manifest:
+    text = (path or MANIFEST).read_text(encoding="utf-8")
+    return Manifest(sources=yaml.safe_load(text)["sources"])
 
 
 def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[str]]]:
-    """Articles admis, nettoyés, avec les types de clause qu'ils peuvent justifier."""
+    """Articles admis, nettoyés, avec les types de clause qu'ils peuvent justifier : une
+    `Article` par version, dans l'ordre, toutes sous la même référence ; enchaînement des
+    versions contrôlé (`check_chain`)."""
     manifest = manifest or load_manifest()
     parsers = {"legifrance": parse_legifrance, "eurlex": parse_eurlex}
-    for path, (source_id, number) in manifest.files():
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for path, key in manifest.files():
+        grouped.setdefault(key, []).append(path)
+    for (source_id, number), paths in grouped.items():
         source = manifest.sources[source_id]
-        article = parsers[source["format"]]((RAW / path).read_text(encoding="utf-8"))
-        if article.article != number:
-            raise ValueError(
-                f"{path} : titre « Article {article.article} », attendu {number}"
+        # première version : date propre à l'article (ajouté plus tard), sinon celle de
+        # la source ; version suivante : la sienne, obligatoire
+        dates = [
+            source.get("retrieved_at_overrides", {}).get(number, source["retrieved_at"])
+        ]
+        for path, later in zip(
+            paths[1:], manifest.later(source_id, number), strict=True
+        ):
+            if "retrieved_at" not in later:
+                raise ValueError(
+                    f"{path} : date de récupération (retrieved_at) absente du manifeste"
+                )
+            dates.append(later["retrieved_at"])
+        versions = []
+        for path, retrieved_at in zip(paths, dates, strict=True):
+            article = parsers[source["format"]](
+                (RAW / path).read_text(encoding="utf-8")
             )
-        yield (
-            replace(
-                article,
-                source_id=source_id,
-                reference=f"{source['citation']}, art. {number}",
-                # date propre à l'article (ajouté plus tard), sinon celle de la source
-                retrieved_at=source.get("retrieved_at_overrides", {}).get(
-                    number, source["retrieved_at"]
-                ),
-            ),
-            source["articles"][number],
-        )
+            if article.article != number:
+                raise ValueError(
+                    f"{path} : titre « Article {article.article} », attendu {number}"
+                )
+            versions.append(
+                (
+                    path,
+                    replace(
+                        article,
+                        source_id=source_id,
+                        reference=f"{source['citation']}, art. {number}",
+                        retrieved_at=retrieved_at,
+                    ),
+                )
+            )
+        check_chain(versions)
+        for _, article in versions:
+            yield article, source["articles"][number]
 
 
-def load_fiches(directory: Path = FICHES) -> list[Fiche]:
+def load_fiches(directory: Path | None = None) -> list[Fiche]:
     fiches = []
-    for path in sorted(directory.glob("*.md")):
+    for path in sorted((directory or FICHES).glob("*.md")):
         _, front, body = path.read_text(encoding="utf-8").split("---\n", 2)
         meta = yaml.safe_load(front)
         fiches.append(

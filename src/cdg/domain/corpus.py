@@ -8,6 +8,7 @@ Règles de nettoyage explicites, testées sur les fichiers réels :
    des métadonnées (début, fin de validité, texte modificateur), pas du contenu indexé ;
 2. lignes d'interface en fin de fichier (« Voir les versions »…) : supprimées ;
 3. notes « Conformément à … » : sorties du texte, conservées en métadonnée `note` ;
+   l'étiquette « NOTA : » qui les précède sur la page est supprimée ;
 4. début et fin de validité sont stockés ; `expired` dit si une version a expiré à une
    date, `in_force` si elle y est en vigueur, et `drop_superseded` écarte les versions
    supplantées : la date d'analyse choisit la version (docs/spec-versions-corpus.md).
@@ -21,6 +22,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import PurePosixPath
 from typing import Any, Protocol
 
 from pydantic import BaseModel, model_validator
@@ -53,10 +55,12 @@ _MONTHS = {
 }
 _DATE = r"(\d{1,2}(?:er)? [a-zéû]+ \d{4})"
 _VERSION = re.compile(
-    rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE})$"
+    rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE}"
+    rf"|à partir du {_DATE})$"
 )
 _AMENDMENT = re.compile(r"^(Modifié par|Création) (.+)$")
 _NOTE = re.compile(r"^Conformément (?:à|aux?) ")
+_NOTE_LABEL = re.compile(r"^NOTA ?:$")  # étiquette de la page, avant la note
 _INTERFACE = ("Voir les versions", "Comparer les versions", "Textes liés")
 _TITLE = re.compile(r"^Article (\S+)$")
 
@@ -159,9 +163,11 @@ def parse_legifrance(raw: str) -> Article:
     for line in lines:
         stripped = line.strip()
         if version := _VERSION.match(stripped):
-            start, end, since = version.groups()
-            valid_from = french_date(start or since)
+            start, end, since, upcoming = version.groups()
+            valid_from = french_date(start or since or upcoming)
             valid_until = french_date(end) if end else None
+        elif _NOTE_LABEL.match(stripped):
+            continue
         elif amended := _AMENDMENT.match(stripped):
             kind = "modification" if amended[1] == "Modifié par" else "création"
             amendment = (kind, amended[2])
@@ -222,12 +228,33 @@ def chunk(text: str, max_words: int) -> list[str]:
 class Manifest:
     sources: dict[str, Any]
 
+    def __post_init__(self) -> None:
+        for sid, source in self.sources.items():
+            unknown = sorted(
+                set(source.get("later_versions", {})) - set(source["articles"])
+            )
+            if unknown:
+                raise ValueError(
+                    f"{sid} : versions suivantes d'un article non admis : "
+                    + ", ".join(unknown)
+                )
+
     def files(self) -> list[tuple[str, tuple[str, str]]]:
+        """Fichiers des articles admis, chaque version dans l'ordre : le fichier de
+        `file`, puis ceux des versions suivantes (`later_versions`)."""
         return [
-            (f"{s['directory']}/{s['file'].format(article=a)}", (sid, a))
+            (f"{s['directory']}/{name}", (sid, a))
             for sid, s in self.sources.items()
             for a in s["articles"]
+            for name in [
+                s["file"].format(article=a),
+                *(v["file"] for v in self.later(sid, a)),
+            ]
         ]
+
+    def later(self, source_id: str, article: str) -> list[dict[str, Any]]:
+        """Versions suivantes d'un article (fichier, url, date de récupération)."""
+        return list(self.sources[source_id].get("later_versions", {}).get(article, []))
 
     def excluded_files(self) -> list[str]:
         return [
@@ -238,6 +265,29 @@ class Manifest:
 
     def admits(self, source_id: str, article: str) -> bool:
         return article in self.sources.get(source_id, {}).get("articles", {})
+
+
+def check_chain(versions: Sequence[tuple[str, Article]]) -> None:
+    """Versions successives d'un article, (fichier, article) dans l'ordre du manifeste :
+    une version suivante est nommée par son début de validité (`…_AAAA-MM-JJ.txt`), la
+    fin de chacune est le début de la suivante, seule la dernière peut rester ouverte.
+    Tout écart est une erreur qui nomme le fichier."""
+    for index, (path, article) in enumerate(versions):
+        if index:
+            suffix = PurePosixPath(path).stem.rpartition("_")[2]
+            if article.valid_from is None or suffix != article.valid_from.isoformat():
+                raise ValueError(
+                    f"{path} : suffixe {suffix} différent du début de validité "
+                    f"{article.valid_from}"
+                )
+            previous_path, previous = versions[index - 1]
+            if previous.valid_until != article.valid_from:
+                raise ValueError(
+                    f"{path} : début de validité {article.valid_from}, fin de "
+                    f"{previous_path} : {previous.valid_until} : versions mal enchaînées"
+                )
+        if index < len(versions) - 1 and article.valid_until is None:
+            raise ValueError(f"{path} : version ouverte avant la dernière")
 
 
 # --- Rattachement aux types de clause --------------------------------------------------
