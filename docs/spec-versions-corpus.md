@@ -58,8 +58,9 @@ qui peut garder l'extrait de la version périmée.
 
 - Analyse datée jusqu'au 31/12/2026 : la version 2019 de L441-10 est retenue ; à partir
   du 01/01/2027 : la version 2027, sans constat « référence expirée » pour L441-10.
-- Une version pas encore en vigueur à la date d'analyse n'est jamais retenue, et elle est
-  signalée, pour toute source.
+- Une version pas encore en vigueur à la date d'analyse n'est jamais retenue, pour toute
+  source ; elle est signalée quand aucune version de sa référence n'est en vigueur (une
+  version à venir dont la devancière est en vigueur est écartée sans constat).
 - Le contrôle des échéances passe après le 01/11/2026 ; il garde sa défense : une fiche
   non relue contre une nouvelle version expire à l'entrée en vigueur de celle-ci.
 - Le dossier d'un contrat montre le texte de la version en vigueur à sa date d'analyse.
@@ -105,9 +106,14 @@ qui peut garder l'extrait de la version périmée.
 - Parseur (`domain/corpus.py`, `_VERSION`) : accepte aussi « Version en vigueur à partir
   du {date} » (début à cette date, sans fin). La note « Conformément à … » est déjà
   reconnue.
-- `articles()` rend une `Article` par version : même `reference`, même rattachement, date
-  de récupération propre à chaque version (`retrieved_at` de l'entrée, sinon celle de la
-  source et de `retrieved_at_overrides`, comme aujourd'hui).
+- `articles()` rend une `Article` par version : même `reference`, même rattachement
+  (toutes les versions d'un article ont donc les mêmes domaines et types de clause).
+  Date de récupération : pour la première version, celle de la source ou de
+  `retrieved_at_overrides`, comme aujourd'hui ; pour une version suivante, son
+  `retrieved_at`, **obligatoire** (absent : erreur, jamais la date de la source).
+- Toute ligne d'interface présente dans une copie (« À VENIR »…) est retirée par une
+  règle testée de `domain/corpus.py` (`_INTERFACE`), jamais à la main (`SOURCES.md`,
+  « Récupération »).
 - La hiérarchie déclarée (`hierarchy`) ne change pas : même sous-section.
 
 ### 2. Base de données et ingestion
@@ -158,20 +164,34 @@ qui peut garder l'extrait de la version périmée.
   résultat (`date`) ; la mesure voit ce que verrait le CRAG ce jour-là.
 - CRAG (`application/crag.py`) : `retrieve` passe `analysis_date` ; `generate` applique
   d'abord `drop_superseded` (la démonstration lui donne tous les extraits déclarés),
-  puis :
-  - en vigueur : retenue (inchangé) ;
-  - expirée : constat inchangé mot pour mot, ajout à `expired` (inchangé) ;
-  - pas encore en vigueur : constat « référence pas encore en vigueur à la date
-    d'analyse (AAAA-MM-JJ) : {référence}, version en vigueur à partir du AAAA-MM-JJ, non
-    retenue ({clause}) » ; rien n'est ajouté au résumé scellé ;
-  - aucune référence pertinente en vigueur : constat de clôture inchangé si toutes ont
-    expiré ; sinon « références pertinentes toutes hors de leur période de vigueur pour
-    la clause {clause} : elles ne peuvent pas justifier seules le verdict ».
+  puis, référence par référence, dans l'ordre de première apparition parmi les extraits
+  pertinents (comme aujourd'hui) :
+  - une version en vigueur : retenue (inchangé) ;
+  - aucune version en vigueur, versions expirées : constat inchangé mot pour mot, avec la
+    fin de la **dernière** version ; référence ajoutée à `expired` (inchangé) ;
+  - aucune version en vigueur, versions à venir : constat « référence pas encore en
+    vigueur à la date d'analyse (AAAA-MM-JJ) : {référence}, version en vigueur à partir
+    du AAAA-MM-JJ, non retenue ({clause}) », avec le début de la **première** version ;
+    la référence n'est ajoutée ni à `retained` ni à `expired` de `ClauseRetrieval` (le
+    constat va, comme les autres, dans `RetrievalTrace.findings`, champ existant).
+  Versions enchaînées sans trou (section 1) : une référence sans version en vigueur a
+  toutes ses versions expirées, ou toutes à venir, jamais un mélange.
+- Constat de clôture, quand il y a **au moins une** référence pertinente et **aucune** en
+  vigueur : texte inchangé si toutes ont expiré ; sinon « références pertinentes toutes
+  hors de leur période de vigueur pour la clause {clause} : elles ne peuvent pas
+  justifier seules le verdict ». Aucun extrait pertinent : aucun constat (inchangé).
 - Justification inchangée : sans référence en vigueur, `INSUFFISANT`, puis `ESCALADE`.
 - Démonstration (`adapters/demo/references.py`) : `valid_from` passé au `Passage`.
 - Effet de la portée (décision 6) : une analyse antidatée avant le 20/08/2026 ne retient
-  plus L442-1 (version en vigueur depuis cette date) ; elle le signale. Le jeu de
-  démonstration et les tests (25/09/2026) ne sont pas concernés.
+  plus L442-1 (version en vigueur depuis cette date), ni les deux fiches qui la citent
+  (« Plafonds et clauses de responsabilité », « Durée d'engagement et préavis de
+  résiliation » : leur fenêtre commence le 20/08/2026, section 4) ; elle les signale.
+  Les articles du Code civil, en vigueur depuis 2016 et 2018, restent retenus : les
+  clauses restent justifiées. Le jeu de démonstration et les tests (25/09/2026) ne sont
+  pas concernés.
+- Test de parité SQL/Python : `distinct_references: false` (un extrait par ligne), k au
+  moins égal au nombre de lignes du domaine, comparaison des **ensembles** de couples
+  (référence, début de validité).
 
 ### 4. Fiche et échéances
 
@@ -203,7 +223,8 @@ qui peut garder l'extrait de la version périmée.
     impositions sur les biens et services, le reste de l'article inchangé ;
   - « Comment le projet l'applique » : la dernière puce (expiration au 1er janvier 2027)
     devient la règle des versions (la date d'analyse choisit la version ; fiche vérifiée
-    contre les deux).
+    contre les deux) ; les trois premières puces restent mot pour mot (le jeu
+    d'évaluation figé cite les deux premières).
 - Échéances (`ingestion.source_validities`, `scripts/echeances_corpus.py`) : une par
   référence ; pour un article, la fin de sa dernière version ; pour une fiche, la fin de
   sa fenêtre. 29 références (22 articles, 7 fiches).
@@ -212,8 +233,15 @@ qui peut garder l'extrait de la version périmée.
 
 - `ingestion.reference_texts(on)` : pour chaque référence, le texte de sa version en
   vigueur à `on`, rien si aucune ne l'est (le dossier affiche alors une référence
-  absente, comme aujourd'hui) ; `service.dossier` passe la date d'analyse scellée. Web et
-  MCP inchangés.
+  absente, comme aujourd'hui) ; `service.dossier` passe la date d'analyse de l'état.
+  Ancien fil sans date d'analyse (`None`) : une référence à une seule version garde son
+  texte ; une référence à plusieurs versions n'en a pas (affichée absente), jamais une
+  version choisie au hasard. Web et MCP inchangés.
+- Jeu d'évaluation figé (`data/evaluation/recherche.yaml`, `test_jeu_fige_le_2026_10_01`) :
+  inchangé. Ses citations sont vérifiées contre les textes en vigueur le 01/10/2026, date
+  où il a été figé (`reference_texts(date(2026, 10, 1))`) : la citation de la facture
+  périodique « au sens du 3 du I de l'article 289 du code général des impôts » n'existe
+  que dans la version 2019, et le test ne doit pas casser le 01/01/2027.
 - `data/corpus/SOURCES.md` : ligne de la version 2027 (date de la copie), ligne actuelle
   « version en vigueur jusqu'au 01/01/2027 », rubrique « Versions successives » (un
   fichier par version, enchaînement, la date d'analyse choisit, fiches et versions
@@ -221,24 +249,40 @@ qui peut garder l'extrait de la version périmée.
 - `docs/exploitation.md`, « Corpus et versions des textes » : exemple L441-10 et
   procédure de mise à jour réécrits (copier la version, déclarer `later_versions`, relire
   la fiche, déclarer `versions_verifiees`, `setup-db`, `ingest`).
+- `docs/spec-phase1.md`, source de vérité du projet : signature de `Retriever.search`,
+  cas « pas encore en vigueur » de `generate`, validité des fiches, « la recherche rend
+  la fin de validité » ; renvoi à cette spec.
+- `docs/exploitation.md` : liste des migrations (« `001` à `008` » devient `009`) et
+  rubrique « Migrations » ; `docs/mise-en-production.md` : cases « Processus de mise à
+  jour » et « Première échéance ».
 - `docs/adr-009-versions-du-corpus.md` : port daté, clé d'unicité, règle des versions
-  supplantées, portée du contrôle du début de validité.
-- `docs/journal.md` : entrée du chantier, avec la piste « veille des versions à venir ».
+  supplantées, portée du contrôle du début de validité ; **retour arrière** : une image
+  antérieure à la 009 sur une base migrée échoue à l'ingestion (son `ON CONFLICT` à trois
+  colonnes n'a plus d'arbitre : erreur explicite), et sa recherche peut rendre en 2026
+  l'extrait de la version 2027 sans le signaler. Le crochet d'ingestion ne tourne pas au
+  retour arrière : limite consignée ; conduite à tenir dans `docs/exploitation.md` : un
+  retour arrière durable supprime les extraits des versions suivantes et rétablit
+  l'ancienne clé, sinon revenir à l'image courante.
+- `docs/journal.md` : entrée du chantier, avec la piste « veille des versions à venir »
+  et le rappel que `mesure-recherche`, désormais datée, ne se compare qu'à date égale de
+  part et d'autre d'un changement de version.
 
 ## Critères d'acceptation
 
 1. `uv run --no-sync python scripts/echeances_corpus.py --jours 60 --date 2026-11-02` et
    `--date 2027-03-01` : code 0, `"echeances": []`.
-2. Démonstration (`DeclaredCrag`), clause `delai_paiement` : au 31/12/2026, L441-10 et la
-   fiche retenues, l'extrait de L441-10 cite le code général des impôts ; au 01/01/2027,
-   mêmes références, l'extrait cite le code des impositions sur les biens et services ;
-   aucun constat contenant « expirée » aux deux dates.
+2. Démonstration (`DeclaredCrag`), clause `delai_paiement`, au 31/12/2026 et au
+   01/01/2027 : références retenues, L441-10 et sa fiche ; aucun constat (ni « expirée »,
+   ni « pas encore en vigueur »). `drop_superseded` appliqué aux extraits déclarés de la
+   démonstration garde, pour L441-10, les seuls extraits de début 2019-04-26 au
+   31/12/2026, et de début 2027-01-01 au 01/01/2027.
 3. Après `setup-db` et `ingest` (base de test) : pour L441-10, autant de lignes par
    domaine que d'extraits des deux versions réunis ; une seconde ingestion n'insère ni ne
    supprime rien.
-4. Recherche SQL datée : aux dates 19/08/2026, 31/12/2026 et 01/01/2027, les couples
-   (référence, début de validité) rendus sont ceux que garde `drop_superseded` (corpus
-   réel, `HashEmbedder`, k couvrant tout le domaine).
+4. Recherche SQL datée : aux dates 19/08/2026, 31/12/2026 et 01/01/2027, l'ensemble des
+   couples (référence, début de validité) rendus est celui que garde `drop_superseded`
+   (corpus réel, `HashEmbedder`, `distinct_references: false`, k couvrant tout le
+   domaine).
 5. Insertion d'un extrait sans début de validité déjà présent : ignorée
    (`NULLS NOT DISTINCT` arbitre de `ON CONFLICT`).
 6. Dossier d'une analyse de démonstration datée du 31/12/2026 : le texte de L441-10
@@ -246,8 +290,15 @@ qui peut garder l'extrait de la version périmée.
    sur les biens et services ».
 7. Fiche synthétique citant un article à deux versions, sans `versions_verifiees` : fin de
    validité au début de la seconde version, signalée par le contrôle des échéances.
-8. Analyse de démonstration datée du 01/06/2026 portant un constat de responsabilité :
-   L442-1 non retenue, constat « pas encore en vigueur », domaine `INSUFFISANT`.
+8. Analyses de démonstration antidatées :
+   - au 01/06/2026, clause de responsabilité qui porte un constat : C. civ. 1170, 1171
+     et 1231-3 retenus ; L442-1 et la fiche « Plafonds et clauses de responsabilité »
+     signalées « pas encore en vigueur » ; la clause reste justifiée (pas d'`INSUFFISANT`
+     de son fait) ;
+   - au 01/01/2019, clause `delai_paiement` qui porte un constat qui pénalise : L441-10
+     (début cité : 2019-04-26) et sa fiche signalées « pas encore en vigueur », constat de
+     clôture « … toutes hors de leur période de vigueur … », domaine financier
+     `INSUFFISANT`.
 9. Versions mal enchaînées (trou, chevauchement, version ouverte avant la dernière,
    suffixe différent du début) : `ingest` échoue avec une erreur qui nomme le fichier.
 10. Fichier copié : seul le 4e alinéa du I diffère entre les deux versions (comparaison
@@ -269,20 +320,46 @@ qui peut garder l'extrait de la version périmée.
 
 ## Réalisation
 
-Tests d'abord, un commit par tâche au vert, dans cet ordre :
+Tests d'abord, un commit par tâche au vert, dans cet ordre.
+
+**Corpus synthétique.** Avant le fichier du propriétaire, les versions multiples se
+testent sur un corpus de test (un article fictif à deux versions, une fiche qui le cite),
+écrit dans `tmp_path`. Les fonctions de lecture d'`application/ingestion.py`
+(`load_manifest`, `articles`, `load_fiches`, `pending_chunks`, `source_validities`,
+`reference_texts`) lisent `RAW`, `FICHES` et `MANIFEST` à l'appel, et non plus en valeur
+par défaut figée à la définition. Un fixture `corpus_synthetique` les remplace
+(`monkeypatch`) et vide le cache de `reference_texts`. Aucun réglage, aucune option de
+CLI n'est ajouté pour cela.
 
 1. Règle pure : `in_force`, `drop_superseded`.
-2. Parseur « à partir du » ; manifeste `later_versions` et contrôles d'enchaînement, sur
-   des fichiers synthétiques.
-3. Migration 009 et écriture des deux versions (tests `pg`).
+2. Parseur « à partir du » ; manifeste `later_versions` et contrôles d'enchaînement ;
+   fixture du corpus synthétique (critère 9).
+3. Migration 009 ; insertion des deux versions synthétiques (critère 5, tests `pg`).
 4. Port daté, filtre SQL, `indexed()` avec début de validité, mesure datée ; parité
-   SQL/Python (tests `pg`).
-5. CRAG : versions, constats « pas encore en vigueur » et de clôture ; démonstration aux
-   deux dates ; analyse antidatée avec L442-1.
-6. Fenêtre des fiches (`versions_verifiees`) et échéances par référence.
-7. Fichier du propriétaire : version 2027 au corpus, manifeste et `SOURCES.md`, fiche
-   réécrite, critère 10 ; échéances au 02/11/2026 et au 01/03/2027.
-8. Dossier daté ; ADR 009, exploitation, journal, CLAUDE.md ; `./scripts/check.sh`.
+   SQL/Python sur le corpus synthétique (tests `pg`).
+5. CRAG : versions, constats « pas encore en vigueur » et de clôture, sur le corpus
+   synthétique ; critère 8 sur le corpus réel (L442-1 et la version 2019 de L441-10
+   suffisent).
+6. Fenêtre des fiches (`versions_verifiees`) et échéances par référence (critère 7).
+7. Fichier du propriétaire, demandé au début de cette tâche : version 2027 au corpus,
+   manifeste et `SOURCES.md`, fiche réécrite ; critères 1, 2, 3, 4 (corpus réel) et 10.
+8. Dossier daté (critère 6) ; jeu d'évaluation daté ; ADR 009, `spec-phase1.md`,
+   exploitation, mise en production, journal, CLAUDE.md ; `./scripts/check.sh`
+   (critère 11).
 
-Les tâches 1 à 6 n'attendent pas le fichier du propriétaire, demandé au début de la
-tâche 7. Rien n'est poussé : le propriétaire lance `git push` et `gh pr create`.
+Rien n'est poussé : le propriétaire lance `git push` et `gh pr create`.
+
+**Tests existants touchés par construction** (relevés à la relecture, à confirmer au
+plan) :
+- `tests/test_web_demo.py` (L441-10 expirée au 01/03/2027) : le cas « expirée » passe
+  sur le corpus synthétique ;
+- `tests/test_echeances_corpus.py` : il ne reste aucune échéance réelle ; la branche
+  d'échec du script se teste sur le corpus synthétique ;
+- `tests/test_corpus.py` (fin de validité héritée par les fiches) ;
+- `tests/test_ingest.py` (une seule fin de validité attendue pour L441-10) ;
+- `tests/test_migrations.py` et `tests/test_cli.py` (dernière migration : la 008) ;
+- `tests/test_service.py` (texte des références du dossier) ;
+- `tests/test_evaluation_recherche.py` (citations vérifiées au 01/10/2026) ;
+- `tests/test_llm_criteres.py` (dictionnaire par (source, article) qui garderait la
+  dernière version sans le dire) ;
+- doublures du port (`tests/doubles.py`, `tests/test_crag.py`) : paramètre `on`.
