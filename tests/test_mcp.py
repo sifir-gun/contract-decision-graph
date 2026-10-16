@@ -15,7 +15,9 @@ import ast
 import json
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
+import anyio
 import pytest
 from demo_set import load as load_expected
 from doubles import CONTRACT_TEXT, FIXED_NOW
@@ -506,21 +508,121 @@ def test_arguments_incoherents_erreur_sans_analyse(real, arguments, message):
     assert service.contracts() == []
 
 
-def test_analyser_contrat_sans_profil_refuse(real):
-    """Assistant configuré avant la mise à jour : résultat d'erreur qui nomme le profil,
-    rien n'est analysé, aucun contrat créé."""
+HOSTILE_START = "PASSAGE-HOSTILE-DEBUT"
+HOSTILE_END = "PASSAGE-HOSTILE-FIN"
+HOSTILE_PARTY = "Zeta Synthétique"
+# arguments d'un appel dont le texte et les parties ne doivent jamais revenir à l'assistant
+# par une erreur ; l'ordre des clés compte : la validation répète le début et la fin du
+# dictionnaire (14 premiers et 22 derniers caractères), donc le début du texte, puis
+# sa fin ou les parties
+HOSTILE_ARGUMENTS = {
+    "texte": f"{HOSTILE_START} "
+    + "Le présent contrat lie les parties. " * 60
+    + HOSTILE_END,
+    "parties": [HOSTILE_PARTY],
+}
+
+
+def fragments(secret: str, size: int = 8) -> list[str]:
+    """Tous les morceaux de `size` caractères d'un secret : une fuite partielle se voit."""
+    return [secret[i : i + size] for i in range(len(secret) - size + 1)]
+
+
+def fragments_seen(result) -> list[str]:
+    """Morceaux du texte hostile et des parties présents dans ce que voit l'assistant."""
+    shown = seen(result)
+    return [
+        piece
+        for secret in (HOSTILE_START, HOSTILE_END, HOSTILE_PARTY)
+        for piece in fragments(secret)
+        if piece in shown
+    ]
+
+
+@pytest.mark.parametrize("given", [["texte"], ["texte", "parties"]])
+def test_analyser_contrat_sans_profil_refuse(real, given):
+    """Assistant configuré avant la mise à jour : résultat d'erreur qui nomme le profil
+    manquant, rien n'est analysé, aucun contrat créé. Le message est écrit par le code :
+    ni le texte du contrat, ni les noms des parties ne reviennent à l'assistant (la
+    validation du SDK répète le début et la fin des arguments reçus)."""
     server, service = real
-    result = call(server, "analyser_contrat", {"texte": CONTRACT_TEXT})
-    assert "profil" in error_text(result)
+    arguments = {name: HOSTILE_ARGUMENTS[name] for name in given}
+    result = call(server, "analyser_contrat", arguments)
+    assert error_text(result) == (
+        "argument obligatoire manquant de l'outil analyser_contrat : profil"
+    )
+    assert fragments_seen(result) == []
     assert service.contracts() == []
 
 
-@pytest.mark.parametrize("profil", ["", "Fournisseur", "sous_traitance"])
+@pytest.mark.parametrize(
+    "profil", ["", "Fournisseur", "sous_traitance", None, 3, ["fournisseur"]]
+)
 def test_analyser_contrat_profil_inconnu_refuse(real, profil):
+    """Profil présent mais invalide (inconnu, vide, `None`, d'un autre type) : refusé par
+    le schéma, qui ne répète que la valeur du profil, jamais le texte ni les parties."""
     server, service = real
-    arguments = {"profil": profil, "texte": CONTRACT_TEXT}
-    assert "profil" in error_text(call(server, "analyser_contrat", arguments))
+    result = call(server, "analyser_contrat", {"profil": profil, **HOSTILE_ARGUMENTS})
+    assert "profil" in error_text(result)
+    assert fragments_seen(result) == []
     assert service.contracts() == []
+
+
+def test_argument_obligatoire_manquant_d_un_autre_outil(real):
+    """La règle vaut pour tous les outils : `thread_id` de la consultation."""
+    server, _ = real
+    result = call(server, "consulter_dossier", {"citations": True})
+    assert error_text(result) == (
+        "argument obligatoire manquant de l'outil consulter_dossier : thread_id"
+    )
+
+
+def refused_by_middleware(parameters, required, tool, arguments):
+    """Le middleware seul, sur une requête `tools/call` : (réponse, suite appelée)."""
+    request = SimpleNamespace(
+        method="tools/call", params={"name": tool, "arguments": arguments}
+    )
+    reached = []
+
+    async def call_next(_):
+        reached.append(tool)
+        return "suite"
+
+    middleware = mcp_server._known_arguments(parameters, required)
+    return anyio.run(middleware, request, call_next), reached
+
+
+def test_middleware_nomme_tous_les_arguments_manquants_sans_valeur():
+    parameters = {"outil": frozenset({"a", "b", "c"})}
+    required = {"outil": frozenset({"a", "b"})}
+    result, reached = refused_by_middleware(
+        parameters, required, "outil", {"c": "VALEUR-RECUE"}
+    )
+    assert reached == [] and result.is_error
+    assert result.content[0].text == (
+        "argument obligatoire manquant de l'outil outil : a, b"
+    )
+    assert "VALEUR-RECUE" not in seen(result)
+
+
+@pytest.mark.parametrize("arguments", [None, {}])
+def test_middleware_sans_arguments_refuse_aussi(arguments):
+    """Requête sans `arguments` : traitée comme un dictionnaire vide."""
+    result, reached = refused_by_middleware(
+        {"outil": frozenset({"a"})}, {"outil": frozenset({"a"})}, "outil", arguments
+    )
+    assert reached == [] and result.is_error
+
+
+def test_middleware_laisse_passer_une_requete_complete_ou_d_un_autre_type():
+    parameters, required = {"outil": frozenset({"a", "b"})}, {"outil": frozenset({"a"})}
+    assert refused_by_middleware(parameters, required, "outil", {"a": 1})[1] == [
+        "outil"
+    ]
+    assert refused_by_middleware(parameters, required, "inconnu", {})[1] == ["inconnu"]
+    # un argument inconnu garde son message, avant le contrôle des obligatoires
+    result, _ = refused_by_middleware(parameters, required, "outil", {"z": 1})
+    assert result.content[0].text == "argument inconnu de l'outil outil : z"
 
 
 def test_profil_passe_par_la_saisie_commune(real, monkeypatch):

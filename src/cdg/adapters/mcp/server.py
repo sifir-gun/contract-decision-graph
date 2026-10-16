@@ -19,7 +19,10 @@ journalisé par son type, jamais leur message, qui pourrait citer une donnée re
 ne voit ainsi aucune exception imprévue (il en journaliserait toute la trace).
 
 Un argument inconnu d'un outil est refusé, nommé : le SDK l'ignorerait sans rien dire,
-et une faute de frappe (`citation` pour `citations`) changerait la réponse en silence.
+et une faute de frappe (`citation` pour `citations`) changerait la réponse en silence. Un
+argument obligatoire manquant (`profil`) l'est aussi, nommé par un message écrit par le
+code : celui de la validation du SDK reprendrait le début et la fin des arguments reçus,
+dont le texte du contrat.
 
 Les outils sont des fonctions ordinaires : le SDK les exécute dans un fil à part, et le
 service fait passer les modifications l'une après l'autre.
@@ -123,16 +126,29 @@ def _guarded[T](tool: str, call: Callable[[], T]) -> T:
         raise ToolError(f"erreur inattendue : {type(exc).__name__}") from None
 
 
-def _known_arguments(parameters: Mapping[str, frozenset[str]]) -> Any:
+def _known_arguments(
+    parameters: Mapping[str, frozenset[str]], required: Mapping[str, frozenset[str]]
+) -> Any:
     """Middleware du SDK (API provisoire en 2.x : un changement fait échouer les tests) :
-    un appel d'outil avec un argument inconnu rend une erreur qui le nomme, avant toute
-    validation ; les autres messages passent tels quels."""
+    un appel d'outil avec un argument inconnu, ou sans un argument obligatoire, rend une
+    erreur qui le nomme, avant toute validation ; les autres messages passent tels quels.
 
-    async def refuse_unknown(
+    Le message est écrit par le code et ne reprend aucune valeur reçue : pour un argument
+    manquant, la validation du SDK répéterait le début et la fin de tous les arguments
+    reçus, dont le texte du contrat et les noms des parties."""
+
+    def refused(message: str) -> CallToolResult:
+        return CallToolResult(
+            is_error=True, content=[TextContent(type="text", text=message)]
+        )
+
+    async def refuse_unknown_or_missing(
         ctx: ServerRequestContext[Any, Any], call_next: CallNext
     ) -> HandlerResult:
         params = ctx.params or {}
         tool, given = params.get("name"), params.get("arguments")
+        if given is None:  # requête sans `arguments` : aucun argument donné
+            given = {}
         if (
             ctx.method == "tools/call"
             and isinstance(tool, str)
@@ -141,13 +157,18 @@ def _known_arguments(parameters: Mapping[str, frozenset[str]]) -> Any:
         ):
             unknown = sorted(set(given) - parameters[tool])
             if unknown:
-                message = f"argument inconnu de l'outil {tool} : {', '.join(unknown)}"
-                return CallToolResult(
-                    is_error=True, content=[TextContent(type="text", text=message)]
+                return refused(
+                    f"argument inconnu de l'outil {tool} : {', '.join(unknown)}"
+                )
+            missing = sorted(required[tool] - set(given))
+            if missing:
+                return refused(
+                    f"argument obligatoire manquant de l'outil {tool} : "
+                    f"{', '.join(missing)}"
                 )
         return await call_next(ctx)
 
-    return refuse_unknown
+    return refuse_unknown_or_missing
 
 
 def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPServer:
@@ -164,13 +185,14 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
     # profils connus, énumérés de même : obligatoire, sans défaut
     ProfileChoice = Literal[PROFILES]  # type: ignore[valid-type]
     parameters: dict[str, frozenset[str]] = {}  # arguments de chaque outil
+    required: dict[str, frozenset[str]] = {}  # ceux qui n'ont pas de défaut
     server = MCPServer(
         name=NAME,
         instructions=INSTRUCTIONS + (DEMO_INSTRUCTIONS if demo else ""),
         # les bibliothèques ne passent qu'à partir des avertissements (ADR 005) ; le
         # SDK ne règle les journaux que si personne ne l'a fait (basicConfig)
         log_level="WARNING",
-        middleware=[_known_arguments(parameters)],
+        middleware=[_known_arguments(parameters, required)],
     )
 
     @server.tool(
@@ -338,5 +360,11 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         consulter_dossier,
         verifier_journal,
     ):
-        parameters[tool.__name__] = frozenset(inspect.signature(tool).parameters)
+        signature = inspect.signature(tool).parameters
+        parameters[tool.__name__] = frozenset(signature)
+        required[tool.__name__] = frozenset(
+            name
+            for name, parameter in signature.items()
+            if parameter.default is inspect.Parameter.empty
+        )
     return server
