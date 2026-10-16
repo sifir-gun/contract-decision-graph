@@ -8,6 +8,7 @@ from typing import Any
 
 from cdg.application.failures import escalate
 from cdg.application.state import ContractState
+from cdg.domain import profiles
 from cdg.domain.config import DecisionConfig
 from cdg.domain.verification import check_extraction
 
@@ -23,6 +24,7 @@ def verify_extraction(
         state["clauses"],
         state["extraction_attempts"],  # incrémenté par extract_clauses
         decision_config.extraction.max_attempts,
+        profile=profiles.of_state(state),
         absence_terms=decision_config.extraction.absence_terms,
         category_terms=decision_config.extraction.category_terms,
         instruction_patterns=decision_config.input.instruction_patterns,

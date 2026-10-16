@@ -28,11 +28,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
 from cdg.application import crag
+from cdg.domain import profiles
 from cdg.domain.config import load_config
-from cdg.domain.models import DOMAIN_KINDS, DOMAINS, ClauseRetrieval
+from cdg.domain.models import DOMAINS, ClauseRetrieval
 from cdg.ports.llm import LLMOutputError
 
 CONFIG = load_config()
+FOURNISSEUR = profiles.spec("fournisseur")
 L441 = "C. com., art. L441-10"
 FICHE = "Fiche projet : Délais de paiement entre professionnels"
 
@@ -66,7 +68,7 @@ def test_chaque_domaine_nomme_par_ce_qu_il_couvre():
     assert crag.DOMAIN_LABELS["financier"] == FINANCIER
     for domain, label in crag.DOMAIN_LABELS.items():
         assert label != domain and ":" in label  # ce qu'il couvre, après son intitulé
-        kind = DOMAIN_KINDS[domain][0]
+        kind = FOURNISSEUR.domain_kinds[domain][0]
         assert crag.clause_query(domain, clause_of(kind)).startswith(f"{label} ; ")
 
 
@@ -314,7 +316,9 @@ def test_combine_sans_clause():
 
 
 def _domain_clauses(domain, **overrides):
-    return [c for c in clauses(**overrides) if c.kind in DOMAIN_KINDS[domain]]
+    return [
+        c for c in clauses(**overrides) if c.kind in FOURNISSEUR.domain_kinds[domain]
+    ]
 
 
 def _not_run(state):
@@ -367,7 +371,7 @@ def test_une_requete_par_clause_une_passe_suffit():
     llm = FakeLLM({"crag_grade:financier": {"relevant": [1]}})
     run, retriever = _runner({"financier": [passage(L441)]}, llm)
     result = run("financier", _domain_clauses("financier"), ANALYSIS_DATE)
-    kinds = list(DOMAIN_KINDS["financier"])
+    kinds = list(FOURNISSEUR.domain_kinds["financier"])
     assert [c.kind for c in result.trace.clauses] == kinds
     assert all(c.passes == 1 and c.retained == [L441] for c in result.trace.clauses)
     assert [q for _, q, _ in retriever.calls] == [
@@ -407,7 +411,7 @@ def test_sous_graphe_reecrit_puis_conclut_sans_reference_apres_les_passes_permis
             crag.clause_query("financier", clause_of(trace.kind)),
             "requête reformulée",
         ]
-    assert len(retriever.calls) == 2 * len(DOMAIN_KINDS["financier"])
+    assert len(retriever.calls) == 2 * len(FOURNISSEUR.domain_kinds["financier"])
 
 
 def test_sous_graphe_top_k_de_la_configuration_par_requete():

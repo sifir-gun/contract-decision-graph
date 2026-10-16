@@ -21,8 +21,9 @@ from doubles import (
 from cdg import cli
 from cdg.application.explanation import LLMExplainer
 from cdg.application.observation import ObservedProvider
+from cdg.domain import profiles
 from cdg.domain.config import load_config
-from cdg.domain.models import REQUIRED_KINDS, Clause
+from cdg.domain.models import Clause
 
 
 @pytest.mark.pg
@@ -457,7 +458,12 @@ class InvalidExtractor(FixedExtractor):
 
     def __call__(self, raw_text, feedback):
         self.calls.append((raw_text, list(feedback)))
-        Clause(kind=REQUIRED_KINDS[0], present=True, quote="", value=None)
+        Clause(
+            kind=profiles.spec("fournisseur").kinds[0],
+            present=True,
+            quote="",
+            value=None,
+        )
         raise AssertionError("inatteignable")
 
 

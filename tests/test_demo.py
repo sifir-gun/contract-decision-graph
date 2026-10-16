@@ -33,19 +33,14 @@ from langgraph.checkpoint.memory import InMemorySaver
 from cdg import cli
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
-from cdg.domain import input_checks, masking, verification
+from cdg.domain import input_checks, masking, profiles, verification
 from cdg.domain.config import load_config
 from cdg.domain.decision import decide
-from cdg.domain.models import (
-    DOMAINS,
-    KIND_CATEGORIES,
-    REQUIRED_KINDS,
-    Clause,
-    category_required,
-)
+from cdg.domain.models import DOMAINS, Clause, category_required
 from cdg.domain.rules import RULES
 
 CONFIG = load_config()
+FOURNISSEUR = profiles.spec("fournisseur")
 ANALYSIS_DATE, CONTRACTS = load()
 BY_ID = {c.id: c for c in CONTRACTS}
 ANALYSED = [c for c in CONTRACTS if not c.rejected]
@@ -97,6 +92,7 @@ def test_citations_attendues_dans_le_texte_masque(contract):
         verification.problems_of(
             masked,
             contract.clauses,
+            profile="fournisseur",
             absence_terms=CONFIG.extraction.absence_terms,
             category_terms=CONFIG.extraction.category_terms,
             instruction_patterns=CONFIG.input.instruction_patterns,
@@ -267,14 +263,16 @@ def variants():
     d'essai (non chiffrée comprise) avec chaque catégorie admise pour son type. Une
     catégorie est toujours donnée quand la vérification de l'extraction l'exige."""
     values = [None, 0.0, 2.0, 5.0, 30.0, 45.0, 46.0, 60.0, 61.0, 90.0, 100.0, 150.0]
-    for kind in REQUIRED_KINDS:
+    for kind in FOURNISSEUR.kinds:
         yield favorable(**{kind: ABSENT})
         for value, category in itertools.product(
-            values, KIND_CATEGORIES.get(kind, (None,))
+            values, FOURNISSEUR.kind_categories.get(kind, (None,))
         ):
             found = favorable(**{kind: value}, categories={kind: category})
             [clause] = [c for c in found if c.kind == kind]
-            assert clause.category is not None or not category_required(clause)
+            assert clause.category is not None or not category_required(
+                clause, FOURNISSEUR.category_kinds
+            )
             yield found
 
 
@@ -316,6 +314,7 @@ def test_p1_paragraphe_injecte_et_version_propre():
         verification.problems_of(
             masked,
             contract.clauses,
+            profile="fournisseur",
             absence_terms=CONFIG.extraction.absence_terms,
             category_terms=CONFIG.extraction.category_terms,
             instruction_patterns=CONFIG.input.instruction_patterns,
@@ -432,7 +431,7 @@ def test_contrat_realiste_une_seule_quantite_non_fixee_ne_suffit_pas_a_escalader
     )
 
 
-@pytest.mark.parametrize("kind", REQUIRED_KINDS)
+@pytest.mark.parametrize("kind", FOURNISSEUR.kinds)
 def test_contrat_realiste_chaque_clause_declaree_absente_est_redemandee(kind):
     # formulations indirectes (« réfaction », « annuaire des collaborateurs », « prix
     # sont indexés », « le Client ne répond que ») : une omission ne passe pas en silence
@@ -444,6 +443,7 @@ def test_contrat_realiste_chaque_clause_declaree_absente_est_redemandee(kind):
     problems = verification.problems_of(
         masked,
         dropped,
+        profile="fournisseur",
         absence_terms=CONFIG.extraction.absence_terms,
         category_terms=CONFIG.extraction.category_terms,
         instruction_patterns=CONFIG.input.instruction_patterns,

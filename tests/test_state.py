@@ -10,12 +10,8 @@ from pydantic import ValidationError
 
 from cdg.application.state import AnalystInput, ContractState, Route
 from cdg.domain.models import (
-    CATEGORY_KINDS,
     CLAUSE_CATEGORIES,
-    DOMAIN_KINDS,
     DOMAINS,
-    KIND_CATEGORIES,
-    REQUIRED_KINDS,
     TRANSFER_CATEGORIES,
     AgentVerdict,
     Clause,
@@ -120,25 +116,7 @@ def test_usage_refuse_les_valeurs_negatives(field):
 def test_domaines_et_types_de_clauses():
     assert DOMAINS == ("juridique", "financier", "conformite", "operationnel")
     assert set(DOMAINS) == set(get_args(Domain))
-    assert REQUIRED_KINDS == (
-        "responsabilite_acheteur",
-        "responsabilite_fournisseur",
-        "revision_prix",
-        "penalites_execution",
-        "delai_paiement",
-        "duree_engagement",
-        "preavis_resiliation",
-        "donnees_personnelles",
-        "accord_traitement_donnees",
-        "transfert_hors_ue",
-    )
-    assert CATEGORY_KINDS == {"transfert_hors_ue", "delai_paiement"}
-    assert KIND_CATEGORIES["delai_paiement"] == (
-        "date_facture",
-        "fin_de_mois",
-        "facture_periodique",
-    )
-    assert KIND_CATEGORIES["transfert_hors_ue"] == TRANSFER_CATEGORIES
+    # types, partition, unités et catégories par type : tests/test_profiles.py
     assert CLAUSE_CATEGORIES == TRANSFER_CATEGORIES + (
         "date_facture",
         "fin_de_mois",
@@ -237,12 +215,6 @@ def test_revue_v2_systeme_ne_peut_etre_que_no_go(decision):
 
 
 # --- Clauses par domaine, résumé du CRAG ----------------------------------------------
-
-
-def test_chaque_type_de_clause_releve_d_un_seul_domaine():
-    assert set(DOMAIN_KINDS) == set(DOMAINS)
-    kinds = [k for d in DOMAINS for k in DOMAIN_KINDS[d]]
-    assert sorted(kinds) == sorted(REQUIRED_KINDS)  # partition : ni oubli, ni doublon
 
 
 def test_verdict_sans_resume_du_crag_par_defaut():

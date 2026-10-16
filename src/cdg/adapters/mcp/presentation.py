@@ -24,10 +24,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from cdg.application.service import state_label
-from cdg.domain import instructions
+from cdg.domain import instructions, profiles
 from cdg.domain.audit import ChainReport
 from cdg.domain.authorization import Actor
-from cdg.domain.models import REQUIRED_KINDS, Decision, Domain, RetrievalStatus
+from cdg.domain.models import Decision, Domain, RetrievalStatus
 
 # journal : motif d'une vérification, qui peut reprendre des valeurs stockées en base
 Origin = Literal["contrat", "llm", "relecteur", "journal"]
@@ -265,7 +265,7 @@ def _failure(failure: Mapping[str, Any]) -> FailureView:
 
 
 def _known_kind(kind: object) -> bool:
-    return kind in REQUIRED_KINDS
+    return kind in profiles.ALL_KINDS
 
 
 def _problem(problem: str) -> str:

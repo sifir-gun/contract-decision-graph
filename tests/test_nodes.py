@@ -20,15 +20,10 @@ from cdg.application.nodes.audit_seal import audit_seal
 from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
-from cdg.domain import audit
+from cdg.domain import audit, profiles
 from cdg.domain.config import load_config
 from cdg.domain.input_checks import rejection
-from cdg.domain.models import (
-    REQUIRED_KINDS,
-    AgentVerdict,
-    ClauseRetrieval,
-    RetrievalTrace,
-)
+from cdg.domain.models import AgentVerdict, ClauseRetrieval, RetrievalTrace
 
 CONFIG = load_config()
 
@@ -105,7 +100,7 @@ def test_extract_clauses_incremente_les_essais_et_transmet_le_retour():
     )
     assert set(out) == {"clauses", "extraction_attempts", "usage"}
     assert out["extraction_attempts"] == 2 and len(out["clauses"]) == len(
-        REQUIRED_KINDS
+        profiles.spec("fournisseur").kinds
     )
     assert out["usage"][0].tokens_in == 100
     assert extractor.calls == [("Contrat.", ["citation introuvable: revision_prix"])]

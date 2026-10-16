@@ -27,10 +27,10 @@ from typing import Annotated, Any, Literal, TypedDict
 from pydantic import BaseModel, StringConstraints
 
 from cdg.application.deps import RetrievalResult
+from cdg.domain import profiles
 from cdg.domain.corpus import expired
 from cdg.domain.models import (
     CLAUSE_CATEGORIES,
-    DOMAIN_KINDS,
     Clause,
     ClauseRetrieval,
     Domain,
@@ -299,7 +299,9 @@ def per_clause(
     """Une recherche par clause reçue, dans l'ordre reçu ; aucune clause, aucune recherche.
     Une clause hors du domaine ou répétée est une erreur explicite."""
     kinds = [c.kind for c in clauses]
-    if len(set(kinds)) != len(kinds) or not set(kinds) <= set(DOMAIN_KINDS[domain]):
+    if len(set(kinds)) != len(kinds) or not set(kinds) <= set(
+        profiles.kinds_of_domain(domain)
+    ):
         raise ValueError(
             f"CRAG {domain} : clauses hors du domaine ou répétées : {kinds}"
         )

@@ -8,12 +8,12 @@ import pytest
 from doubles import HashEmbedder
 
 from cdg.application import ingestion
-from cdg.domain import corpus, explanation
+from cdg.domain import corpus, explanation, profiles
 from cdg.domain.config import load_config
-from cdg.domain.models import REQUIRED_KINDS
 
 RAW = Path(__file__).resolve().parents[1] / "data" / "corpus" / "raw"
 CONFIG = load_config()
+FOURNISSEUR = profiles.spec("fournisseur")
 
 
 def real(path: str) -> str:
@@ -277,12 +277,12 @@ def test_chaque_source_declare_des_types_de_clause_connus():
     for source, kinds in articles + fiches:
         assert kinds, f"{source} : aucun type de clause déclaré"
         assert len(set(kinds)) == len(kinds), f"{source} : type répété"
-        assert set(kinds) <= set(REQUIRED_KINDS), (source, kinds)
+        assert set(kinds) <= set(FOURNISSEUR.kinds), (source, kinds)
 
 
 def test_chaque_type_de_clause_a_au_moins_un_article_et_une_fiche():
     articles, fiches = declared()
-    for kind in REQUIRED_KINDS:
+    for kind in FOURNISSEUR.kinds:
         assert any(kind in kinds for _, kinds in articles), f"{kind} : aucun article"
         assert any(kind in kinds for _, kinds in fiches), f"{kind} : aucune fiche"
 

@@ -6,24 +6,24 @@ from datetime import UTC, date, datetime
 # journal d'audit en mémoire des tests : celui du mode démonstration (adapters/demo)
 from cdg.adapters.demo.audit_store import MemoryAuditStore
 from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, TemplateOnly
-from cdg.domain import audit
+from cdg.domain import audit, profiles
 from cdg.domain.authorization import Actor, interface_actor
 from cdg.domain.config import load_config
 from cdg.domain.identity import Identity
 from cdg.domain.models import (
-    DOMAIN_KINDS,
     DOMAINS,
-    REQUIRED_KINDS,
     AgentVerdict,
     Clause,
     ClauseRetrieval,
     RetrievalTrace,
     Usage,
 )
-from cdg.domain.verification import VALUE_UNITS
 from cdg.domain.version import CodeVersion
 from cdg.ports.identity import IdentityRejected, ProviderUnavailable
 from cdg.ports.retriever import Passage
+
+# profil des contrats synthétiques des tests : le seul qui existe
+FOURNISSEUR = profiles.spec("fournisseur")
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
 ANALYSIS_DATE = date(2026, 9, 25)
@@ -57,7 +57,7 @@ PENALIZED = {
 def quote_of(kind: str, value) -> str:
     """Citation synthétique d'une clause présente : avec sa valeur et son unité quand elle
     est chiffrée, comme l'exige la vérification (correction 4 de la série 4)."""
-    unit = VALUE_UNITS.get(kind)
+    unit = FOURNISSEUR.value_units.get(kind)
     if value is None or unit is None:
         return f"Article synthétique : {kind}."
     return f"Article synthétique : la clause {kind} est fixée à {value:g} {unit}."
@@ -81,7 +81,7 @@ CONTRACT_TEXT = (
     "ci-après dénommée le Fournisseur, il est convenu ce qui suit.\n\n"
     + "".join(
         f"{quote_of(kind, value)}\n"
-        for kind in REQUIRED_KINDS
+        for kind in FOURNISSEUR.kinds
         for value in dict.fromkeys((None, FAVORABLE[kind], *TEST_VALUES.get(kind, ())))
     )
     + "\nLe présent contrat est soumis au droit français. Les parties s'engagent à exécuter "
@@ -103,11 +103,11 @@ def clauses(categories: dict | None = None, **overrides) -> list[Clause]:
     `kind=ABSENT` la rend absente ; `categories={kind: catégorie}` remplace une catégorie.
     """
     categories = CATEGORIES | (categories or {})
-    unknown = set(overrides) - set(REQUIRED_KINDS)
+    unknown = set(overrides) - set(FOURNISSEUR.kinds)
     if unknown:
         raise TypeError(f"types de clauses inconnus : {sorted(unknown)}")
     result = []
-    for kind in REQUIRED_KINDS:
+    for kind in FOURNISSEUR.kinds:
         value = overrides.get(kind, FAVORABLE[kind])
         if value is ABSENT:
             result.append(Clause(kind=kind, present=False, quote="", value=None))
@@ -272,7 +272,7 @@ def passage(
         text=text or f"Texte de {reference}.",
         distance=0.1,
         valid_until=valid_until,
-        kinds=list(DOMAIN_KINDS[domain]) if kinds is None else kinds,
+        kinds=list(FOURNISSEUR.domain_kinds[domain]) if kinds is None else kinds,
     )
 
 

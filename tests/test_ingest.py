@@ -8,9 +8,8 @@ from doubles import HashEmbedder
 
 from cdg.adapters.postgres import rag_store
 from cdg.application import ingestion
-from cdg.domain import corpus
+from cdg.domain import corpus, profiles
 from cdg.domain.config import load_config
-from cdg.domain.models import DOMAIN_KINDS
 
 pytestmark = pytest.mark.pg
 
@@ -136,7 +135,9 @@ def test_sync_remplace_un_extrait_dont_la_validite_change(pg, ingested):
 def test_lignes_rattachees_aux_clauses_de_leur_domaine(pg, ingested):
     rows, _ = ingested
     for row in rows:
-        assert row.kinds and set(row.kinds) <= set(DOMAIN_KINDS[row.domain]), row
+        assert row.kinds and set(row.kinds) <= set(
+            profiles.kinds_of_domain(row.domain)
+        ), row
     stored = dict(
         query(
             pg,

@@ -7,7 +7,8 @@ from doubles import CONTRACT_TEXT, FakeLLM, clauses
 from pydantic import ValidationError
 
 from cdg.application.extraction import ExtractionOutput, LLMExtractor
-from cdg.domain.models import CLAUSE_CATEGORIES, REQUIRED_KINDS
+from cdg.domain import profiles
+from cdg.domain.models import CLAUSE_CATEGORIES
 
 
 def output_of(items):
@@ -93,7 +94,7 @@ def test_type_de_clause_inconnu_refuse_par_le_schema():
 def test_schema_liste_les_types_attendus():
     schema = ExtractionOutput.model_json_schema()
     kinds = schema["$defs"]["ExtractedClause"]["properties"]["kind"]["enum"]
-    assert kinds == list(REQUIRED_KINDS)
+    assert kinds == list(profiles.spec("fournisseur").kinds)
 
 
 def test_clause_incoherente_leve_une_erreur_explicite():
@@ -116,7 +117,7 @@ def test_prompt_distingue_les_deux_sortes_de_penalites():
         Path(__file__).parents[1] / "src/cdg/application/prompts/extraction_system.md"
     ).read_text(encoding="utf-8")
     assert "10 types de clause" in system
-    for kind in REQUIRED_KINDS:
+    for kind in profiles.spec("fournisseur").kinds:
         assert f"- {kind} :" in system
     assert "penalites_retard" not in system
     assert "date_facture" in system and "fin_de_mois" in system

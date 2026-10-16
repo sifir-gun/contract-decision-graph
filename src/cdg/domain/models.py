@@ -4,6 +4,7 @@ La forme de l'état du graphe (réducteurs, route, entrée des analystes) est da
 `application/state.py`.
 """
 
+from collections.abc import Collection
 from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -15,32 +16,6 @@ Decision = Literal["GO", "GO_RESERVES", "NO_GO", "ESCALADE"]
 RetrievalStatus = Literal["OK", "INSUFFISANT"]
 
 DOMAINS: tuple[Domain, ...] = ("juridique", "financier", "conformite", "operationnel")
-
-REQUIRED_KINDS = (
-    "responsabilite_acheteur",
-    "responsabilite_fournisseur",
-    "revision_prix",
-    "penalites_execution",  # dues par le fournisseur qui exécute en retard (C. civ., art. 1231-5)
-    "delai_paiement",  # délai de paiement par l'acheteur (C. com., art. L441-10)
-    "duree_engagement",
-    "preavis_resiliation",
-    "donnees_personnelles",
-    "accord_traitement_donnees",
-    "transfert_hors_ue",
-)
-
-# Clauses jugées par chaque domaine : une partition des REQUIRED_KINDS. Sert aux requêtes
-# du CRAG, construites à partir des seuls types et valeurs des clauses du domaine.
-DOMAIN_KINDS: dict[Domain, tuple[str, ...]] = {
-    "juridique": ("responsabilite_acheteur", "responsabilite_fournisseur"),
-    "financier": ("revision_prix", "penalites_execution", "delai_paiement"),
-    "conformite": (
-        "donnees_personnelles",
-        "accord_traitement_donnees",
-        "transfert_hors_ue",
-    ),
-    "operationnel": ("duree_engagement", "preavis_resiliation"),
-}
 
 # Catégorie d'une clause de transfert (RGPD, art. 44 à 46) : ce que dit le contrat.
 TransferCategory = Literal[
@@ -66,21 +41,15 @@ PAYMENT_BASES: tuple[str, ...] = get_args(PaymentBasis)
 
 ClauseCategory = Literal[TransferCategory, PaymentBasis]
 CLAUSE_CATEGORIES: tuple[str, ...] = get_args(ClauseCategory)
-# types qui portent une catégorie, et catégories admises pour chacun
-KIND_CATEGORIES: dict[str, tuple[str, ...]] = {
-    "transfert_hors_ue": TRANSFER_CATEGORIES,
-    "delai_paiement": PAYMENT_BASES,
-}
-CATEGORY_KINDS = frozenset(KIND_CATEGORIES)
 
 
 class Clause(BaseModel):
-    kind: str  # un des REQUIRED_KINDS
+    kind: str  # un des types du profil (`domain/profiles.py`)
     present: bool  # la clause figure-t-elle dans le contrat ?
     quote: str  # citation exacte si present, "" sinon (alors non vérifiée)
     value: float | None  # quantité utile à la règle, voir « Règles par domaine »
     category: str | None = (
-        None  # types de CATEGORY_KINDS seulement, voir KIND_CATEGORIES
+        None  # types à catégorie du profil seulement (`ProfileSpec.kind_categories`)
     )
 
     @model_validator(mode="after")
@@ -92,10 +61,11 @@ class Clause(BaseModel):
         return self
 
 
-def category_required(clause: Clause) -> bool:
+def category_required(clause: Clause, category_kinds: Collection[str]) -> bool:
     """Catégorie exigée : transfert présent ; délai de paiement présent et chiffré (un délai
-    non chiffré peut ne pas dire son point de départ)."""
-    if clause.kind not in CATEGORY_KINDS or not clause.present:
+    non chiffré peut ne pas dire son point de départ). `category_kinds` : les types à
+    catégorie du profil (`ProfileSpec.category_kinds`)."""
+    if clause.kind not in category_kinds or not clause.present:
         return False
     return clause.kind != "delai_paiement" or clause.value is not None
 
