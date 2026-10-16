@@ -10,7 +10,7 @@ from datetime import date
 
 import demo_set as expected_set
 import pytest
-from corpus_de_test import SECOND_FILE, T1, edit_manifest, raw
+from corpus_de_test import SECOND_FILE, T1, edit_manifest, raw, replace_line
 from web_helpers import client, csrf
 
 from cdg import cli
@@ -185,6 +185,11 @@ def test_reference_expiree_signalee_jamais_retenue(corpus_synthetique):
     # corpus synthétique réduit à sa première version, expirée le 01/01/2027
     raw(corpus_synthetique, SECOND_FILE).unlink()
     edit_manifest(corpus_synthetique, lambda s: s.pop("later_versions"))
+    replace_line(
+        corpus_synthetique / "fiches" / "test.md",
+        "T1: [2019-04-26, 2027-01-01]",
+        "T1: [2019-04-26]",
+    )
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
     result = crag("financier", [clause], date(2027, 3, 1))
@@ -233,3 +238,42 @@ def test_demo_version_a_venir_signalee(corpus_synthetique):
         f.startswith("référence pas encore en vigueur") and T1 in f
         for f in result.trace.findings
     )
+
+
+# --- analyses antidatées : versions et fiches pas encore en vigueur ------------------------
+
+
+def test_demo_responsabilite_avant_l442_1():
+    crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
+    clause = Clause(
+        kind="responsabilite_fournisseur", present=True, quote="x", value=50
+    )
+    result = crag("juridique", [clause], date(2026, 6, 1))
+    [trace] = result.trace.clauses
+    assert {"C. civ., art. 1170", "C. civ., art. 1171", "C. civ., art. 1231-3"} <= set(
+        trace.retained
+    )
+    later = [f for f in result.trace.findings if f.startswith("référence pas encore")]
+    assert any("C. com., art. L442-1" in f for f in later)
+    assert any(
+        "Fiche projet : Plafonds et clauses de responsabilité" in f for f in later
+    )
+
+
+def test_demo_delai_avant_2019_insuffisant(demo):
+    web, service = demo
+    response = web.post(
+        "/analyse",
+        data={
+            "csrf": csrf(web),
+            "source": "jeu",
+            "contrat": "demo-06-no-go-conseil",
+            "identifiant": "demo-06-antidate",
+            "date": "2019-01-01",
+        },
+    )
+    assert response.status_code == 303, response.text
+    verdicts = {v["domain"]: v for v in service.dossier("demo-06-antidate")["verdicts"]}
+    financier = verdicts["financier"]
+    assert financier["retrieval_status"] == "INSUFFISANT"
+    assert any("hors de leur période de vigueur" in f for f in financier["findings"])

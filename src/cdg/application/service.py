@@ -218,7 +218,8 @@ class ContractService:
         status = self.engine.status(thread_id)
         values = self.engine.values(thread_id)
         history = self.engine.history(thread_id)
-        known = ingestion.reference_texts()
+        # texte de chaque référence dans sa version en vigueur à la date d'analyse
+        known = ingestion.reference_texts(status["analysis_date"])
         request = status["demande"]
         clauses: list[Clause] = values.get("clauses", [])
         usage: list[Usage] = values.get("usage", [])

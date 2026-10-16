@@ -238,16 +238,18 @@ def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     rows = ingestion.rows(
         HashEmbedder(), CONFIG.corpus.chunk_max_words, CONFIG.embedding.passage_prefix
     )
-    validity = {}
+    validity, window = {}, {}
     for row in rows:
         validity.setdefault(row.source_id, set()).add(row.valid_until)
-    assert validity["fiche-delais-paiement"] == {date(2027, 1, 1)}
-    assert validity["fiche-penalites-execution"] == {
-        None
-    }  # C. civ. 1231-5, version ouverte
-    assert validity["fiche-sous-traitance-rgpd"] == {
-        None
-    }  # articles sans fin de validité
+        window.setdefault(row.source_id, set()).add((row.valid_from, row.valid_until))
+    assert window["fiche-delais-paiement"] == {(date(2019, 4, 26), date(2027, 1, 1))}
+    # C. civ. 1231-5, version ouverte, en vigueur depuis le 01/10/2016
+    assert window["fiche-penalites-execution"] == {(date(2016, 10, 1), None)}
+    # articles sans dates (EUR-Lex)
+    assert window["fiche-sous-traitance-rgpd"] == {(None, None)}
+    # la plus tardive des versions citées : C. com. L442-1, en vigueur depuis le
+    # 20/08/2026
+    assert window["fiche-responsabilite-plafonds"] == {(date(2026, 8, 20), None)}
     assert validity["code-commerce"] >= {date(2027, 1, 1)}
 
 

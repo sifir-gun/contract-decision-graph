@@ -20,7 +20,7 @@ de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (
 import hashlib
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import PurePosixPath
 from typing import Any, Protocol
@@ -318,6 +318,9 @@ class Fiche:
     title: str
     kinds: list[str]  # types de clause que la fiche peut justifier
     body: str
+    # (source, article) -> débuts de validité des versions contre lesquelles la fiche a
+    # été relue (`versions_verifiees`) ; absent : la première version seule
+    verified: Mapping[tuple[str, str], Sequence[date]] = field(default_factory=dict)
 
     @property
     def domains(self) -> list[Domain]:
@@ -342,6 +345,60 @@ def fiche_sections(body: str) -> dict[str, list[str]]:
         elif line.strip() and not line.lstrip().startswith("#") and current is not None:
             current.append(line)
     return sections
+
+
+Window = tuple[date | None, date | None]  # début et fin de validité ; None : sans borne
+
+
+def fiche_window(
+    fiche_id: str,
+    cited: set[tuple[str, str]],
+    verified: Mapping[tuple[str, str], Sequence[date]],
+    versions: Mapping[tuple[str, str], Sequence[Window]],
+) -> Window:
+    """Période de validité d'une fiche : pour chaque article cité, les versions qu'elle
+    déclare avoir relues, sinon la première seule ; la fiche vaut sur l'intersection de
+    ces périodes. Une version ajoutée sans relecture la fait donc expirer à son entrée en
+    vigueur. Déclaration incohérente ou intersection vide : erreur qui nomme la fiche."""
+    foreign = sorted(set(verified) - cited)
+    if foreign:
+        raise ValueError(
+            f"{fiche_id} : versions déclarées pour un article non cité : "
+            + ", ".join(f"{s} {a}" for s, a in foreign)
+        )
+    start: date | None = None
+    end: date | None = None
+    for key in sorted(cited):
+        chain = list(versions[key])
+        covered = chain[:1]
+        if key in verified:
+            if not verified[key]:
+                raise ValueError(
+                    f"{fiche_id} : aucune version déclarée pour {key[0]} {key[1]}"
+                )
+            starts = [version_start for version_start, _ in chain]
+            indexes = []
+            for declared in verified[key]:
+                if declared not in starts:
+                    raise ValueError(
+                        f"{fiche_id} : version du {declared} de {key[0]} {key[1]} "
+                        "absente du corpus"
+                    )
+                indexes.append(starts.index(declared))
+            if indexes != list(range(indexes[0], indexes[0] + len(indexes))):
+                raise ValueError(
+                    f"{fiche_id} : versions déclarées non consécutives pour "
+                    f"{key[0]} {key[1]}"
+                )
+            covered = chain[indexes[0] : indexes[-1] + 1]
+        first, last = covered[0][0], covered[-1][1]
+        if first is not None:
+            start = first if start is None else max(start, first)
+        if last is not None:
+            end = last if end is None else min(end, last)
+    if start is not None and end is not None and start >= end:
+        raise ValueError(f"{fiche_id} : fenêtre de validité vide ({start} → {end})")
+    return start, end
 
 
 def claim_lines(body: str) -> list[str]:

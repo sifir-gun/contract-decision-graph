@@ -19,6 +19,7 @@ from cdg.domain.corpus import (
     ChunkRow,
     Fiche,
     Manifest,
+    Window,
     by_domain,
     check_chain,
     chunk,
@@ -26,6 +27,8 @@ from cdg.domain.corpus import (
     claim_lines,
     embedded_hash,
     embedded_text,
+    fiche_window,
+    in_force,
     parse_eurlex,
     parse_legifrance,
 )
@@ -100,6 +103,14 @@ def load_fiches(directory: Path | None = None) -> list[Fiche]:
                 title=meta["titre"],
                 kinds=meta["clauses"],
                 body=body.strip(),
+                # versions relues : {source: {article: [débuts de validité]}}
+                verified={
+                    (source_id, str(article)): list(starts)
+                    for source_id, by_article in meta.get(
+                        "versions_verifiees", {}
+                    ).items()
+                    for article, starts in by_article.items()
+                },
             )
         )
     return fiches
@@ -110,16 +121,33 @@ def fiche_reference(fiche: Fiche) -> str:
 
 
 @cache
-def reference_texts() -> dict[str, dict[str, str]]:
+def reference_texts(on: date | None) -> dict[str, dict[str, str]]:
     """Texte de chaque référence citable du corpus (article entier, ou corps de la fiche)
-    et sa source : l'état d'un contrat ne garde que le nom des références retenues. Lus
-    dans les fichiers du corpus au premier appel, pour afficher un dossier."""
-    texts = {
-        article.reference: {"source": article.source_id, "texte": article.text}
-        for article, _ in articles()
-    }
+    et sa source, dans sa version en vigueur à la date d'analyse `on` : l'état d'un
+    contrat ne garde que le nom des références retenues. Sans date (ancien fil), seules
+    les références à une seule version : jamais une version choisie au hasard. Lus dans
+    les fichiers du corpus au premier appel pour cette date, pour afficher un dossier."""
+    by_reference: dict[str, list[Article]] = {}
+    for article, _ in articles():
+        by_reference.setdefault(article.reference, []).append(article)
+    texts = {}
+    for reference, found in by_reference.items():
+        chosen = [
+            a
+            for a in found
+            if (
+                len(found) == 1
+                if on is None
+                else in_force(a.valid_from, a.valid_until, on)
+            )
+        ]
+        if chosen:
+            texts[reference] = {"source": chosen[0].source_id, "texte": chosen[0].text}
+    versions = _article_versions()
     for fiche in load_fiches():
-        texts[fiche_reference(fiche)] = {"source": fiche.id, "texte": fiche.body}
+        start, end = _fiche_window(fiche, versions)
+        if on is None or in_force(start, end, on):
+            texts[fiche_reference(fiche)] = {"source": fiche.id, "texte": fiche.body}
     return texts
 
 
@@ -134,11 +162,12 @@ def pending_chunks(max_words: int) -> Pending:
     embarquer, types de clause que la source peut justifier.
 
     Le texte embarqué est précédé d'un en-tête écrit par le code (`meta["header"]`) pour
-    la recherche ; le texte stocké reste celui de l'article, cité tel quel. Une fiche prend la plus proche
-    des fins de validité des articles qu'elle cite : elle les paraphrase, elle expire avec.
+    la recherche ; le texte stocké reste celui de l'article, cité tel quel. Une fiche vaut
+    sur la période des versions qu'elle a relues (`fiche_window`) : elle les paraphrase,
+    elle expire avec.
     """
     pending: Pending = []
-    validity = _article_validity()
+    versions = _article_versions()
     for article, kinds in articles():
         header = article.reference + (
             f" — {article.heading}" if article.heading else ""
@@ -165,6 +194,7 @@ def pending_chunks(max_words: int) -> Pending:
             pending.append((meta, embedded_text(header, text), kinds))
     for fiche in load_fiches():
         reference = fiche_reference(fiche)
+        start, end = _fiche_window(fiche, versions)
         for index, text in enumerate(chunk(fiche.body, max_words)):
             meta = {
                 "source_id": fiche.id,
@@ -172,34 +202,42 @@ def pending_chunks(max_words: int) -> Pending:
                 "text": text,
                 "header": reference,
                 "chunk_index": index,
-                "valid_until": _fiche_validity(fiche, validity),
+                "valid_from": start,
+                "valid_until": end,
             }
             pending.append((meta, embedded_text(reference, text), fiche.kinds))
     return pending
 
 
-def _article_validity() -> dict[tuple[str, str], date | None]:
-    return {(a.source_id, a.article): a.valid_until for a, _ in articles()}
+def _article_versions() -> dict[tuple[str, str], list[Window]]:
+    """Versions de chaque article admis, dans l'ordre : (début, fin) de validité."""
+    versions: dict[tuple[str, str], list[Window]] = {}
+    for a, _ in articles():
+        versions.setdefault((a.source_id, a.article), []).append(
+            (a.valid_from, a.valid_until)
+        )
+    return versions
 
 
-def _fiche_validity(
-    fiche: Fiche, validity: dict[tuple[str, str], date | None]
-) -> date | None:
-    """Une fiche prend la plus proche des fins de validité des articles qu'elle cite :
-    elle les paraphrase, elle expire avec."""
+def _fiche_window(
+    fiche: Fiche, versions: dict[tuple[str, str], list[Window]]
+) -> Window:
+    """Période de validité d'une fiche, d'après les articles qu'elle cite et les
+    versions qu'elle déclare avoir relues (`fiche_window`)."""
     cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
-    return min((end for c in cited if (end := validity[c]) is not None), default=None)
+    return fiche_window(fiche.id, cited, fiche.verified, versions)
 
 
 def source_validities() -> dict[str, date | None]:
-    """Fin de validité de chaque source du corpus, par référence : articles du
-    manifeste et fiches (contrôle des échéances, `scripts/echeances_corpus.py`)."""
-    validity = _article_validity()
-    sources: dict[str, date | None] = {
-        a.reference: a.valid_until for a, _ in articles()
-    }
+    """Fin de validité de chaque source du corpus, par référence : pour un article, la
+    fin de sa dernière version ; pour une fiche, la fin de sa période de validité
+    (contrôle des échéances, `scripts/echeances_corpus.py`)."""
+    sources: dict[str, date | None] = {}
+    for a, _ in articles():  # versions dans l'ordre : la dernière l'emporte
+        sources[a.reference] = a.valid_until
+    versions = _article_versions()
     for fiche in load_fiches():
-        sources[fiche_reference(fiche)] = _fiche_validity(fiche, validity)
+        sources[fiche_reference(fiche)] = _fiche_window(fiche, versions)[1]
     return sources
 
 

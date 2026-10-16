@@ -35,7 +35,8 @@ CONFIG = load_config()
 MAX_WORDS = CONFIG.corpus.chunk_max_words
 ON = date(2026, 10, 1)  # date à laquelle le jeu a été figé
 QUERIES = evaluation.load_queries()
-TEXTS = ingestion.reference_texts()
+# citations du jeu vérifiées contre les textes en vigueur à la date où il a été figé
+TEXTS = ingestion.reference_texts(ON)
 FICHES = {ingestion.fiche_reference(f) for f in ingestion.load_fiches()}
 
 

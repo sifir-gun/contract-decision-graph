@@ -5,7 +5,15 @@ from dataclasses import dataclass
 from datetime import date
 
 import pytest
-from corpus_de_test import SECOND_FILE, T1, edit_manifest, raw, replace_line
+from corpus_de_test import (
+    FICHE,
+    SECOND_FILE,
+    SECOND_TEXT,
+    T1,
+    edit_manifest,
+    raw,
+    replace_line,
+)
 
 from cdg.application import ingestion
 from cdg.domain import corpus
@@ -140,3 +148,114 @@ def test_versions_mal_enchainees_refusees(corpus_synthetique, change, message):
     change(corpus_synthetique)
     with pytest.raises(ValueError, match=message):
         list(ingestion.articles())
+
+
+# --- fiches : versions relues, fenêtre de validité ----------------------------------------
+
+DECLARED = "T1: [2019-04-26, 2027-01-01]"
+
+
+def _fiche(root):
+    return root / "fiches" / "test.md"
+
+
+def _window():
+    """Début et fin de validité des extraits de la fiche synthétique."""
+    [window] = {
+        (meta["valid_from"], meta["valid_until"])
+        for meta, _, _ in ingestion.pending_chunks(300)
+        if meta["source_id"] == "fiche-test"
+    }
+    return window
+
+
+def test_fiche_couvre_les_versions_declarees(corpus_synthetique):
+    assert _window() == (date(2019, 4, 26), None)
+
+
+def test_fiche_sans_declaration_expire_a_la_seconde_version(corpus_synthetique):
+    replace_line(_fiche(corpus_synthetique), "versions_verifiees:\n  code-test:\n", "")
+    replace_line(_fiche(corpus_synthetique), f"    {DECLARED}\n", "")
+    assert _window() == (date(2019, 4, 26), date(2027, 1, 1))
+
+
+def test_fiche_qui_ne_couvre_que_la_seconde_version(corpus_synthetique):
+    replace_line(_fiche(corpus_synthetique), DECLARED, "T1: [2027-01-01]")
+    assert _window() == (date(2027, 1, 1), None)
+
+
+def _not_cited(root):
+    replace_line(_fiche(root), DECLARED, DECLARED + "\n    T9: [2019-04-26]")
+
+
+def _unknown_date(root):
+    replace_line(_fiche(root), DECLARED, "T1: [2020-01-01]")
+
+
+def _not_consecutive(root):
+    later = "T1_2028-01-01.txt"
+    replace_line(
+        raw(root, SECOND_FILE),
+        "à partir du 01 janvier 2027",
+        "du 01 janvier 2027 au 01 janvier 2028",
+    )
+    raw(root, later).write_text(
+        SECOND_TEXT.replace(
+            "à partir du 01 janvier 2027", "à partir du 01 janvier 2028"
+        ),
+        encoding="utf-8",
+    )
+    entry = {
+        "file": later,
+        "url": "https://example.org/T1",
+        "retrieved_at": date(2026, 10, 16),
+    }
+    edit_manifest(root, lambda s: s["later_versions"]["T1"].append(entry))
+    replace_line(_fiche(root), DECLARED, "T1: [2019-04-26, 2028-01-01]")
+
+
+def _empty(root):
+    raw(root, "T2.txt").write_text(
+        "Article T2\nVersion en vigueur du 01 janvier 2010 au 01 janvier 2015\n"
+        "Création Texte de test n°0 - art. 1\n\nAlinéa d'un article ancien.\n",
+        encoding="utf-8",
+    )
+    edit_manifest(root, lambda s: s["articles"].update(T2=["delai_paiement"]))
+    replace_line(
+        _fiche(root),
+        "## Comment le projet",
+        "- Alinéa d'un article ancien (source : code-test, art. T2).\n\n"
+        "## Comment le projet",
+    )
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        (_not_cited, "fiche-test : versions déclarées pour un article non cité"),
+        (_unknown_date, "fiche-test : version du 2020-01-01 de code-test T1 absente"),
+        (_not_consecutive, "fiche-test : versions déclarées non consécutives"),
+        (_empty, "fiche-test : fenêtre de validité vide"),
+    ],
+    ids=["non-cite", "date-inconnue", "non-consecutives", "intersection-vide"],
+)
+def test_fiche_declaration_invalide_refusee(corpus_synthetique, change, message):
+    change(corpus_synthetique)
+    with pytest.raises(ValueError, match=message):
+        ingestion.source_validities()
+
+
+def test_echeances_par_reference(corpus_synthetique):
+    assert ingestion.source_validities() == {T1: None, FICHE: None}
+
+
+# --- texte d'une référence à la date d'analyse (dossier) ----------------------------------
+
+
+def test_textes_dates_par_reference(corpus_synthetique):
+    assert (
+        "première version" in ingestion.reference_texts(date(2026, 12, 31))[T1]["texte"]
+    )
+    assert "seconde version" in ingestion.reference_texts(date(2027, 1, 1))[T1]["texte"]
+    undated = ingestion.reference_texts(None)
+    assert T1 not in undated and FICHE in undated

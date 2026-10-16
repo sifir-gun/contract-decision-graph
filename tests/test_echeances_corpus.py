@@ -90,6 +90,22 @@ def test_script_echoue_avec_la_source_et_la_date(capsys):
     ]
 
 
+def test_script_echoue_sur_une_fiche_non_relue(corpus_synthetique, capsys):
+    """Une version ajoutée sans relecture de la fiche qui cite l'article : la fiche
+    expire à l'entrée en vigueur de cette version, et le contrôle le signale."""
+    fiche = corpus_synthetique / "fiches" / "test.md"
+    text = fiche.read_text(encoding="utf-8")
+    declared = "versions_verifiees:\n  code-test:\n    T1: [2019-04-26, 2027-01-01]\n"
+    assert declared in text
+    fiche.write_text(text.replace(declared, ""), encoding="utf-8")
+    assert script().main(["--jours", "60", "--date", "2026-11-02"]) == 1
+    err = json.loads(capsys.readouterr().err)
+    assert err["erreur"] == "sources du corpus qui expirent dans les 60 jours"
+    assert err["echeances"] == [
+        {"source": "Fiche projet : Fiche de test", "fin_de_validite": "2027-01-01"}
+    ]
+
+
 @pytest.mark.parametrize("days", ["0", "-5", "soixante"])
 def test_script_horizon_invalide_refuse(days):
     with pytest.raises(SystemExit) as exc:
