@@ -555,15 +555,35 @@ def test_analyser_contrat_sans_profil_refuse(real, given):
     assert service.contracts() == []
 
 
+PROFIL_REFUSE = "profil absent ou inconnu ; profils : fournisseur"
+PYDANTIC_TEXTS = ("validation error", "errors.pydantic.dev", "input_value")
+
+
+def test_message_du_profil_refuse_est_celui_de_la_saisie():
+    """Le message attendu de l'outil est celui de la saisie commune (interface web)."""
+    with pytest.raises(InputError) as refused:
+        saisie.profile("")
+    assert str(refused.value) == PROFIL_REFUSE
+
+
 @pytest.mark.parametrize(
     "profil", ["", "Fournisseur", "sous_traitance", None, 3, ["fournisseur"]]
 )
 def test_analyser_contrat_profil_inconnu_refuse(real, profil):
-    """Profil présent mais invalide (inconnu, vide, `None`, d'un autre type) : refusé par
-    le schéma, qui ne répète que la valeur du profil, jamais le texte ni les parties."""
+    """Profil présent mais invalide (inconnu, vide, d'une autre casse, `None`, d'un autre
+    type) : erreur de l'outil, avec le message de la saisie commune, avant la validation
+    du SDK (spec, « Erreurs » : sans message d'exception). Ni le message de pydantic, ni
+    la valeur reçue, ni le texte, ni les parties ; rien n'est analysé."""
     server, service = real
     result = call(server, "analyser_contrat", {"profil": profil, **HOSTILE_ARGUMENTS})
-    assert "profil" in error_text(result)
+    text = error_text(result)
+    assert text == PROFIL_REFUSE
+    shown = seen(result)
+    for pydantic_text in PYDANTIC_TEXTS:
+        assert pydantic_text not in shown
+    if profil != "":  # la chaîne vide est dans tout texte
+        for received in {str(profil), repr(profil), json.dumps(profil)}:
+            assert received not in text
     assert fragments_seen(result) == []
     assert service.contracts() == []
 
@@ -623,6 +643,24 @@ def test_middleware_laisse_passer_une_requete_complete_ou_d_un_autre_type():
     # un argument inconnu garde son message, avant le contrôle des obligatoires
     result, _ = refused_by_middleware(parameters, required, "outil", {"z": 1})
     assert result.content[0].text == "argument inconnu de l'outil outil : z"
+
+
+@pytest.mark.parametrize("profil", ["Fournisseur", None, ["fournisseur"]])
+def test_middleware_refuse_un_profil_inconnu_sans_aller_plus_loin(profil):
+    """Profil présent mais inconnu : refusé par le middleware, avant la validation du
+    SDK, avec le message de la saisie commune ; un profil connu passe."""
+    parameters = {"outil": frozenset({"profil", "a"})}
+    required = {"outil": frozenset({"profil"})}
+    result, reached = refused_by_middleware(
+        parameters, required, "outil", {"profil": profil, "a": "VALEUR-RECUE"}
+    )
+    assert reached == [] and result.is_error
+    assert result.content[0].text == PROFIL_REFUSE
+    assert "VALEUR-RECUE" not in seen(result)
+    passed = refused_by_middleware(
+        parameters, required, "outil", {"profil": "fournisseur"}
+    )
+    assert passed[1] == ["outil"]
 
 
 def test_profil_passe_par_la_saisie_commune(real, monkeypatch):
