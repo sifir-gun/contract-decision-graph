@@ -125,8 +125,15 @@ def test_retrieve_compte_les_passes_et_trace_les_requetes():
 class Unfiltered(FakeRetriever):
     """Adaptateur fautif : ignore la clause demandée."""
 
-    def search(self, domain, query, *, kind, k):
+    def search(self, domain, query, *, kind, k, on):
         return list(self.passages.get(domain, []))[:k]
+
+
+def test_retrieve_passe_la_date_d_analyse():
+    retriever = FakeRetriever({"financier": [passage(L441)]})
+    state = crag.start("financier", clause_of("delai_paiement"), date(2027, 2, 1))
+    crag.retrieve(state, retriever=retriever, top_k=3)
+    assert retriever.dates == [date(2027, 2, 1)]
 
 
 def test_retrieve_refuse_un_extrait_non_rattache_a_la_clause():

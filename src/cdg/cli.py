@@ -321,7 +321,8 @@ def _mesure_recherche(args: argparse.Namespace) -> dict:
         batch_size=EMBEDDER_THREADS["batch_size"],
     )
     retriever = rag_store.PgvectorRetriever(app_pool(), embedder, config.crag.search)
-    report = evaluation.run(config, retriever, retriever, args.k)
+    # versions des textes jugées à la date du jour, comme une analyse lancée ce jour
+    report = evaluation.run(config, retriever, retriever, args.k, on=today())
     return {"mesure_recherche": "ok", "modele": embedder.model, **report}
 
 

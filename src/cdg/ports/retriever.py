@@ -3,7 +3,9 @@
 La requête est un texte, pas un vecteur : l'adaptateur calcule le vecteur et filtre sur
 son propre modèle d'embedding, le CRAG ne peut donc pas mélanger deux modèles. Il filtre
 aussi sur le type de clause (J4) : seuls les extraits dont la source est déclarée pour
-cette clause sont rendus.
+cette clause sont rendus. Et sur la date d'analyse (docs/spec-versions-corpus.md) : les
+versions supplantées à cette date sont écartées avant le regroupement et la limite
+(`domain.corpus.drop_superseded`).
 """
 
 from datetime import date
@@ -23,6 +25,7 @@ class Passage(BaseModel):
     reference: str
     text: str
     distance: float
+    valid_from: date | None = None  # début de validité de la version
     valid_until: date | None = None
     note: str | None = None
     kinds: list[str]  # types de clause que la source de l'extrait peut justifier
@@ -30,7 +33,7 @@ class Passage(BaseModel):
 
 class Retriever(Protocol):
     def search(
-        self, domain: Domain, query: str, *, kind: str, k: int
+        self, domain: Domain, query: str, *, kind: str, k: int, on: date
     ) -> list[Passage]: ...
 
 
@@ -39,10 +42,10 @@ class CorpusSearch(Protocol):
     d'embedding, chaque extrait une fois : réservée à la mesure de la recherche seule
     (`application/evaluation.py`, ADR 006). Le CRAG passe toujours par `Retriever`."""
 
-    def search_unfiltered(self, query: str, *, k: int) -> list[Passage]: ...
+    def search_unfiltered(self, query: str, *, k: int, on: date) -> list[Passage]: ...
 
-    def indexed(self) -> list[tuple[str, str, str | None]]:
-        """Extraits indexés du modèle (référence, texte, empreinte du texte embarqué ;
-        None avant la migration 008), chacun une fois, quel que soit le réglage de la
-        recherche : la mesure les compare aux fichiers du corpus."""
+    def indexed(self) -> list[tuple[str, date | None, str, str | None]]:
+        """Extraits indexés du modèle (référence, début de validité, texte, empreinte du
+        texte embarqué ; None avant la migration 008), chacun une fois, quel que soit le
+        réglage de la recherche : la mesure les compare aux fichiers du corpus."""
         ...

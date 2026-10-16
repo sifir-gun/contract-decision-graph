@@ -172,7 +172,9 @@ def retrieve(state: CragState, retriever: Retriever, top_k: int) -> dict[str, An
     """Recherche filtrée par domaine et par clause (rattachement déclaré) ; un extrait
     non rattaché à la clause est une erreur de l'adaptateur, jamais écartée en silence."""
     kind = state["clause"].kind
-    docs = retriever.search(state["domain"], state["query"], kind=kind, k=top_k)
+    docs = retriever.search(
+        state["domain"], state["query"], kind=kind, k=top_k, on=state["analysis_date"]
+    )
     foreign = [p.reference for p in docs if kind not in p.kinds]
     if foreign:
         raise ValueError(

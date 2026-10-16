@@ -282,7 +282,7 @@ class FixedRetriever:
     def __init__(self, passages: list[Passage]):
         self.passages, self.queries = passages, []
 
-    def search(self, domain, query, *, kind, k):
+    def search(self, domain, query, *, kind, k, on):
         self.queries.append(query)
         return [p.model_copy(update={"kinds": [kind]}) for p in self.passages[:k]]
 

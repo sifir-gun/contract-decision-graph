@@ -2,6 +2,8 @@
 synchronisation, recherche exacte filtrée (CRAG) et sans filtre (mesure de la recherche).
 Les migrations sont dans `migrations.py`."""
 
+from datetime import date
+
 import psycopg
 from pgvector import Vector
 from pgvector.psycopg import register_vector
@@ -87,6 +89,20 @@ def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
 # ligne par domaine) ; le plus proche de chaque référence (ADR 006)
 _EACH, _ONCE, _PER_REFERENCE = "id", "reference, content_hash", "reference"
 
+# versions supplantées à la date d'analyse écartées, avant le regroupement et la limite :
+# un extrait est gardé s'il est en vigueur à cette date, ou si aucune version de sa
+# référence ne l'est (il sera signalé). Même règle que `domain.corpus.drop_superseded`
+# (test de parité) ; la date est le seul paramètre, répété quatre fois.
+_NOT_SUPERSEDED = (
+    "((valid_from IS NULL OR valid_from <= %s)"
+    " AND (valid_until IS NULL OR valid_until > %s))"
+    " OR NOT EXISTS (SELECT 1 FROM rag_chunks AS other"
+    " WHERE other.embedding_model = rag_chunks.embedding_model"
+    " AND other.reference = rag_chunks.reference"
+    " AND (other.valid_from IS NULL OR other.valid_from <= %s)"
+    " AND (other.valid_until IS NULL OR other.valid_until > %s))"
+)
+
 
 def _ranked(
     cur: psycopg.Cursor,
@@ -96,18 +112,20 @@ def _ranked(
     *,
     unique: str,
     k: int,
+    on: date,
 ) -> list[Passage]:
-    """Recherche exacte : filtre `where`, un extrait par groupe `unique` (le plus proche),
-    puis les k plus proches, à distance égale par identifiant."""
+    """Recherche exacte : filtre `where` et versions supplantées à la date `on`
+    écartées, un extrait par groupe `unique` (le plus proche), puis les k plus proches,
+    à distance égale par identifiant."""
     rows = cur.execute(
         "SELECT id, domain, source_id, reference, text, distance, valid_until, note,"
-        " kinds FROM ("
+        " kinds, valid_from FROM ("
         f" SELECT DISTINCT ON ({unique}) id, domain, source_id, reference, text,"
-        " embedding <=> %s AS distance, valid_until, note, kinds"
-        f" FROM rag_chunks WHERE {where}"
+        " embedding <=> %s AS distance, valid_until, note, kinds, valid_from"
+        f" FROM rag_chunks WHERE ({where}) AND ({_NOT_SUPERSEDED})"
         f" ORDER BY {unique}, distance, id) AS candidates"
         " ORDER BY distance, id LIMIT %s",
-        (Vector(query), *params, k),
+        (Vector(query), *params, on, on, on, on, k),
     ).fetchall()
     return _passages(rows)
 
@@ -121,9 +139,11 @@ def search(
     k: int,
     model: str,
     settings: SearchConfig,
+    on: date,
 ) -> list[Passage]:
-    """Recherche exacte : filtre (domaine, type de clause, modèle) AVANT l'ordre par
-    distance cosinus ; un extrait par référence si la configuration le demande. Des
+    """Recherche exacte : filtre (domaine, type de clause, modèle, versions en vigueur à
+    la date d'analyse `on`) AVANT l'ordre par distance cosinus ; un extrait par
+    référence si la configuration le demande. Des
     extraits du modèle sans rattachement (indexés avant la migration 005) sont une erreur
     explicite : ils ne sont jamais ignorés en silence."""
     with connection(source) as conn:
@@ -145,6 +165,7 @@ def search(
             (domain, kind, model),
             unique=_PER_REFERENCE if settings.distinct_references else _EACH,
             k=k,
+            on=on,
         )
 
 
@@ -155,8 +176,10 @@ def search_unfiltered(
     k: int,
     model: str,
     settings: SearchConfig,
+    on: date,
 ) -> list[Passage]:
-    """Recherche exacte sans filtre de domaine ni de clause, sur le seul modèle : réservée
+    """Recherche exacte sans filtre de domaine ni de clause, sur le seul modèle, versions
+    jugées à la date `on` comme le CRAG : réservée
     à la mesure de la recherche (ADR 006). Chaque extrait une fois (un extrait indexé dans
     plusieurs domaines a une ligne par domaine), ou un par référence, comme `search`."""
     with connection(source) as conn:
@@ -169,22 +192,25 @@ def search_unfiltered(
             (model,),
             unique=_PER_REFERENCE if settings.distinct_references else _ONCE,
             k=k,
+            on=on,
         )
 
 
-def indexed(source: Source, model: str) -> list[tuple[str, str, str | None]]:
-    """Extraits indexés du modèle (référence, texte, empreinte du texte embarqué),
-    chacun une fois ; deux lignes d'un même extrait qui divergeraient sur l'empreinte
-    sont rendues toutes deux."""
+def indexed(
+    source: Source, model: str
+) -> list[tuple[str, date | None, str, str | None]]:
+    """Extraits indexés du modèle (référence, début de validité de la version, texte,
+    empreinte du texte embarqué), chacun une fois ; deux lignes d'un même extrait qui
+    divergeraient sur l'empreinte sont rendues toutes deux."""
     with connection(source) as conn:
         cur = conn.cursor(row_factory=tuple_row)
         rows = cur.execute(
-            "SELECT DISTINCT reference, text, embedded_hash"
+            "SELECT DISTINCT reference, valid_from, text, embedded_hash"
             " FROM rag_chunks WHERE embedding_model = %s"
-            " ORDER BY reference, text, embedded_hash",
+            " ORDER BY reference, valid_from, text, embedded_hash",
             (model,),
         ).fetchall()
-    return [(r[0], r[1], r[2]) for r in rows]
+    return [(r[0], r[1], r[2], r[3]) for r in rows]
 
 
 def _passages(rows: list[tuple]) -> list[Passage]:
@@ -199,6 +225,7 @@ def _passages(rows: list[tuple]) -> list[Passage]:
             valid_until=r[6],
             note=r[7],
             kinds=r[8],
+            valid_from=r[9],
         )
         for r in rows
     ]
@@ -215,7 +242,9 @@ class PgvectorRetriever:
         self._embedder = embedder
         self._settings = settings  # crag.search de la configuration
 
-    def search(self, domain: Domain, query: str, *, kind: str, k: int) -> list[Passage]:
+    def search(
+        self, domain: Domain, query: str, *, kind: str, k: int, on: date
+    ) -> list[Passage]:
         vector = self._embedder.embed_query(query)
         return search(
             self._source,
@@ -225,9 +254,10 @@ class PgvectorRetriever:
             k=k,
             model=self._embedder.model,
             settings=self._settings,
+            on=on,
         )
 
-    def search_unfiltered(self, query: str, *, k: int) -> list[Passage]:
+    def search_unfiltered(self, query: str, *, k: int, on: date) -> list[Passage]:
         """Port CorpusSearch : mesure de la recherche seule, jamais le CRAG."""
         vector = self._embedder.embed_query(query)
         return search_unfiltered(
@@ -236,9 +266,10 @@ class PgvectorRetriever:
             k=k,
             model=self._embedder.model,
             settings=self._settings,
+            on=on,
         )
 
-    def indexed(self) -> list[tuple[str, str, str | None]]:
+    def indexed(self) -> list[tuple[str, date | None, str, str | None]]:
         return indexed(self._source, self._embedder.model)
 
 
