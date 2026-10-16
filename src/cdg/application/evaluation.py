@@ -96,7 +96,9 @@ def demo_queries(config: DecisionConfig) -> list[DemoQuery]:
         if not clauses:
             continue
         for domain in DOMAINS:
-            for kind in RULES[domain](clauses, config).kinds_to_justify():
+            # provisoire : le profil du contrat arrive avec les tâches suivantes
+            rules = RULES["fournisseur"][domain]
+            for kind in rules(clauses, config).kinds_to_justify():
                 clause = next(c for c in clauses if c.kind == kind)
                 key = (domain, kind, clause_query(domain, clause))
                 found.setdefault(key, []).append(contract.id)

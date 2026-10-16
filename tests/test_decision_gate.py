@@ -339,7 +339,7 @@ def test_pire_cumul_des_penalites_sans_blocage_reste_au_dessus_du_seuil_no_go():
         duree_engagement=48,  # opérationnel : engagement > 36 mois
         preavis_resiliation=12,  # opérationnel : préavis > 6 mois
     )
-    vs = [_justified(RULES[d](worst, CONFIG)) for d in DOMAINS]
+    vs = [_justified(RULES["fournisseur"][d](worst, CONFIG)) for d in DOMAINS]
     assert not any(v.hard_block for v in vs)
     assert {v.domain: v.score for v in vs} == {
         "juridique": 0.5,

@@ -122,8 +122,36 @@ def analyse(domain, crag, **overrides):
         "domain": domain,
         "clauses": clauses(**overrides),
         "analysis_date": ANALYSIS_DATE,
+        "profile": "fournisseur",
     }
     return analyst(inp, crag=crag, decision_config=CONFIG)
+
+
+def test_analyst_lit_le_profil_de_son_entree():
+    # le `Send` d'une analyse interrompue avant les profils n'a pas la clé `profile` :
+    # il est lu comme `fournisseur` (`profiles.of_state`), seul profil possible alors
+    inp = {
+        "domain": "financier",
+        "clauses": clauses(penalites_execution=ABSENT),
+        "analysis_date": ANALYSIS_DATE,
+    }
+    expected = analyse("financier", FakeCrag(), penalites_execution=ABSENT)
+    assert analyst(inp, crag=FakeCrag(), decision_config=CONFIG) == expected
+    inp["profile"] = "fournisseur"
+    assert analyst(inp, crag=FakeCrag(), decision_config=CONFIG) == expected
+
+
+def test_analyst_refuse_un_profil_inconnu_sans_rien_chercher():
+    crag = FakeCrag()
+    inp = {
+        "domain": "financier",
+        "clauses": clauses(penalites_execution=ABSENT),
+        "analysis_date": ANALYSIS_DATE,
+        "profile": "inexistant",
+    }
+    with pytest.raises(ValueError, match="profil inconnu"):
+        analyst(inp, crag=crag, decision_config=CONFIG)
+    assert crag.calls == []
 
 
 def test_analyst_ne_renvoie_que_verdicts_et_usage():

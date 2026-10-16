@@ -41,7 +41,7 @@ from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.observation import NoTelemetry
 from cdg.application.state import AnalystInput, ContractState
-from cdg.domain import audit, expiry, masking, policy, resumption
+from cdg.domain import audit, expiry, masking, policy, profiles, resumption
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
@@ -74,9 +74,11 @@ def read_crag_route(state: crag.CragState) -> str:
 
 
 def route_after_verify(state: ContractState) -> str | list[Send]:
-    """Route `analysts` : un `Send` par domaine ;
-    sinon la route telle quelle."""
+    """Route `analysts` : un `Send` par domaine, qui porte le profil du contrat (état
+    d'avant les profils : `fournisseur`, voir `profiles.of_state`) ; sinon la route telle
+    quelle."""
     if state["route"] == "analysts":  # décision lue dans l'état
+        profile = profiles.of_state(state)
         return [
             Send(
                 "analyst",
@@ -84,6 +86,7 @@ def route_after_verify(state: ContractState) -> str | list[Send]:
                     "domain": d,
                     "clauses": state["clauses"],
                     "analysis_date": state["analysis_date"],
+                    "profile": profile,
                 },
             )
             for d in DOMAINS

@@ -24,6 +24,7 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.profiles import Profile
 
 # --- Clause -------------------------------------------------------------------
 
@@ -146,9 +147,19 @@ def test_seuls_verdicts_usage_et_failures_ont_un_reducteur():
 
 
 def test_etat_prive_des_analystes():
-    assert set(get_type_hints(AnalystInput)) == {"domain", "clauses", "analysis_date"}
+    assert set(get_type_hints(AnalystInput)) == {
+        "domain",
+        "clauses",
+        "analysis_date",
+        "profile",
+    }
     assert get_type_hints(AnalystInput)["analysis_date"] is date
     assert get_type_hints(ContractState)["analysis_date"] is date
+
+
+def test_le_profil_est_dans_l_etat_et_dans_l_entree_des_analystes():
+    assert get_type_hints(ContractState)["profile"] == Profile
+    assert get_type_hints(AnalystInput)["profile"] == Profile
 
 
 # --- HumanDecision (format v1, figé : anciens états) ; source humaine ou système --------

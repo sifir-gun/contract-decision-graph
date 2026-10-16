@@ -255,7 +255,7 @@ def rules_of(finding) -> list[str]:
 
 
 def findings_of(found):
-    return [f for d in DOMAINS for f in RULES[d](found, CONFIG).findings]
+    return [f for d in DOMAINS for f in RULES["fournisseur"][d](found, CONFIG).findings]
 
 
 def variants():
@@ -353,7 +353,7 @@ def by_kind(contract):
 
 def gate(found):
     """Décision du gate sur les seules règles (CRAG supposé fournir les références)."""
-    assessed = [RULES[d](found, CONFIG) for d in DOMAINS]
+    assessed = [RULES["fournisseur"][d](found, CONFIG) for d in DOMAINS]
     return decide(
         [verdict(a.domain, score=a.score, hard_block=a.hard_block) for a in assessed],
         [],
@@ -399,7 +399,9 @@ def test_contrat_realiste_plafond_du_fournisseur_defini_dans_un_autre_article():
 def test_contrat_realiste_escalade_par_prudence_sur_les_quantites_non_fixees():
     fired = sorted(name for f in findings_of(REALISTIC.clauses) for name in rules_of(f))
     assert fired == ["engagement non chiffré", "préavis non chiffré"]
-    scores = {d: RULES[d](REALISTIC.clauses, CONFIG).score for d in DOMAINS}
+    scores = {
+        d: RULES["fournisseur"][d](REALISTIC.clauses, CONFIG).score for d in DOMAINS
+    }
     assert scores == {
         "juridique": 1.0,
         "financier": 1.0,

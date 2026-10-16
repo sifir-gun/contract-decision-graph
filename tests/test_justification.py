@@ -19,7 +19,7 @@ CONFIG = load_config()
 
 
 def assess(domain, **overrides):
-    return RULES[domain](clauses(**overrides), CONFIG)
+    return RULES["fournisseur"][domain](clauses(**overrides), CONFIG)
 
 
 def trace(findings=(), **retained) -> RetrievalTrace:

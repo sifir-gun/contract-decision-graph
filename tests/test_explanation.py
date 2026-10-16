@@ -48,7 +48,7 @@ def verdict(domain, found, retained, crag_findings=()):
         ],
         findings=list(crag_findings),
     )
-    return justify(RULES[domain](found, CONFIG), trace)
+    return justify(RULES["fournisseur"][domain](found, CONFIG), trace)
 
 
 def state(**overrides):

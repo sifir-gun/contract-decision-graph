@@ -111,14 +111,31 @@ def test_1_quatre_analystes_puis_un_seul_decision_gate():
     assert all(set(u) == {"verdicts", "usage"} for n, u in ups if n == "analyst")
 
 
+def base_state():
+    """État vérifié, route `analysts`, sans profil (état d'avant les profils)."""
+    return {"route": "analysts", "clauses": clauses(), "analysis_date": ANALYSIS_DATE}
+
+
 def test_route_apres_verification_construit_les_send():
-    state = {"route": "analysts", "clauses": clauses(), "analysis_date": ANALYSIS_DATE}
-    sends = route_after_verify(state)
+    sends = route_after_verify(base_state())
     assert all(isinstance(s, Send) and s.node == "analyst" for s in sends)
     assert [s.arg["domain"] for s in sends] == list(DOMAINS)
-    assert all(set(s.arg) == {"domain", "clauses", "analysis_date"} for s in sends)
+    assert all(
+        set(s.arg) == {"domain", "clauses", "analysis_date", "profile"} for s in sends
+    )
     assert all(s.arg["analysis_date"] == ANALYSIS_DATE for s in sends)
     assert route_after_verify({"route": "human_review"}) == "human_review"
+
+
+def test_send_porte_le_profil_de_l_etat_ou_fournisseur():
+    for state in (base_state(), {**base_state(), "profile": "fournisseur"}):
+        sends = route_after_verify({**state, "route": "analysts"})
+        assert {s.arg["profile"] for s in sends} == {"fournisseur"}
+
+
+def test_send_refuse_un_profil_inconnu():
+    with pytest.raises(ValueError, match="profil inconnu"):
+        route_after_verify({**base_state(), "profile": "inexistant"})
 
 
 # --- Critère d'acceptation n° 2, de bout en bout -----------------------------------

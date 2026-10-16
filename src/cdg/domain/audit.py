@@ -628,7 +628,9 @@ def _rejustified(
     for v in sealed.verdicts:
         if v.retrieval is None:
             raise ReplayError(f"verdict {v.domain} sans résumé du CRAG : non rejouable")
-        verdicts.append(justify(RULES[v.domain](sealed.clauses, config), v.retrieval))
+        # provisoire : le profil de l'enregistrement scellé arrive avec les tâches suivantes
+        rules = RULES["fournisseur"][v.domain]
+        verdicts.append(justify(rules(sealed.clauses, config), v.retrieval))
     return verdicts
 
 

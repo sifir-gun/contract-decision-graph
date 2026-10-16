@@ -5,6 +5,7 @@ from typing import Any
 
 from cdg.application.deps import Crag, RetrievalResult
 from cdg.application.state import AnalystInput
+from cdg.domain import profiles
 from cdg.domain.config import DecisionConfig
 from cdg.domain.justification import justify
 from cdg.domain.rules import RULES
@@ -14,7 +15,8 @@ def analyst(
     inp: AnalystInput, crag: Crag, decision_config: DecisionConfig
 ) -> dict[str, Any]:
     domain, clauses = inp["domain"], inp["clauses"]
-    assessment = RULES[domain](clauses, decision_config)
+    # `of_state` : le `Send` d'une analyse interrompue avant les profils n'a pas de profil
+    assessment = RULES[profiles.of_state(inp)][domain](clauses, decision_config)
     to_justify = set(assessment.kinds_to_justify())
     retrieval = RetrievalResult.model_validate(
         crag(domain, [c for c in clauses if c.kind in to_justify], inp["analysis_date"])
