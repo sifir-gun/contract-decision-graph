@@ -3392,3 +3392,31 @@ Les PR de Dependabot en attente, remises sur `main` (rebase par GitHub) et leurs
 ### Nombre de tests
 
 - La suite principale passe de 2 388 à 2 391 (variable refusée, deux tests de la télémétrie de FastAPI) ; le total, de 2 570 à 2 573.
+
+## 2026-10-16 · OpenSSL de la base corrigé : exceptions `libssl3t64` retirées (branche `securite-libssl-deb13u3`)
+
+Les quatre exceptions de `libssl3t64` 3.5.7-1~deb13u2 (CVE-2026-54873, CVE-2026-72897, CVE-2026-84782, CVE-2026-84784 ; entrée du 01/10) ont expiré le 15/10 : depuis, `check.sh` échoue sur toute branche à l'étape du scan (« exception CVE-2026-54873 expirée le 2026-10-15 », la première du fichier), comme le job `image` de la CI. Constaté le 16/10 par deux branches en attente (mise à jour de L441-10, `profils-sous-traitance`).
+
+### Vérifications (16/10)
+
+- **Debian** (security-tracker, DSA-6531-1) : les quatre failles corrigées dans trixie-security par openssl 3.5.7-1~deb13u3.
+- **Base distroless** `cc-debian13:nonroot@sha256:e792ab3…` (PR #36 de Dependabot, du 05/10, fusionnée le 15/10 au soir) : `libssl3t64` 3.5.7-1~deb13u3, lu dans `/var/lib/dpkg/status.d` des variantes amd64 (`20afe6a7…`) et arm64 (`2f0295ce…`) de l'index. Le point 3 de la liste du 01/10 est fait ; l'entrée du 14/10 sur les PR de Dependabot ne l'avait pas relevé.
+- **Chaîne du projet** (`scripts/chaine.py`, Syft puis Grype), fichier d'exceptions vidé, sur une image arm64 construite le 16/10 depuis le même `Dockerfile` et le même `uv.lock` que `main` : « aucune faille critique ou haute corrigeable (0 exception(s)) » ; aucune correspondance sur `libssl3t64` ni sur OpenSSL, retenue ou ignorée.
+- **Étapes chart et image de `check.sh`**, rejouées à l'identique sur la branche (signatures des bases, construction, vérifications, inventaire et scan de l'application, du proxy de sortie et d'oauth2-proxy) : trois scans sans faille critique ou haute corrigeable, 0 exception. Ses tests n'ont pas passé en entier sur le poste, pour deux causes sans rapport avec ce changement : la base locale porte la migration 009 de la branche des versions du corpus (contrainte d'unicité de `rag_chunks` remplacée : 29 tests de l'ingestion et de la recherche en erreur sur `ON CONFLICT`), et le `.env` du poste fournit les clés de Langfuse que `test_destination_sans_cle_refusee` suppose absentes. La CI part d'une base neuve, sans `.env`.
+
+### Changements
+
+- `securite/exceptions-vulnerabilites.yaml` : plus aucune exception (`exceptions: []`) ; le commentaire dit pourquoi, et renvoie ici pour les copies que le scanner ne voit pas.
+- Tests : le passage d'une exception à Grype se vérifie sur un fichier construit (celui du produit est vide), et le message d'une exception expirée qui nomme son fichier aussi ; le fichier du produit n'a plus d'exception `libssl3t64`.
+
+### Ce qui reste ouvert : les copies d'OpenSSL que le scanner ne voit pas
+
+- **psycopg-binary 3.3.6**, dernière version sur PyPI le 16/10 : OpenSSL 3.5.8 (chaîne de version de sa `libcrypto`, lue dans l'image), touchée par les quatre failles selon l'avis d'OpenSSL (de 3.5.0 à 3.5.9 exclu) ; et, sur arm64, OpenSSL 1.1.1k FIPS de Kerberos, toujours chargée avec libpq, son code jamais appelé (`gssencmode=disable`). Point 1 de la liste du 01/10, non fait.
+- **Pas de correctif en vue** : la branche principale de psycopg compile encore ses roues avec OpenSSL 3.5.8 (`OPENSSL_VERSION` de `.github/workflows/packages-bin.yml`), et la 3.3.7 en préparation n'annonce rien sur OpenSSL (`docs/news.rst`).
+- **Python** : OpenSSL 3.5.9 depuis le 12/10 (point 2, fait).
+- Aucune exception de Grype ne peut porter ce suivi : Grype ne voit pas ces copies (psycopg-binary n'est pour lui qu'un paquet Python), et une exception sur la `libssl3t64` deb13u2, absente de l'image, ne correspondrait à rien. Exposition inchangée depuis le 01/10, selon une lecture du code et non une preuve : cliente TLS seulement (libpq, httpx) ; ni DTLS, ni QUIC, ni serveur TLS.
+- **Décision du propriétaire (16/10)** : suivi au journal seulement, revu à chaque nouvelle version de psycopg-binary proposée par Dependabot (version d'OpenSSL de sa `libcrypto` et, sur arm64, de la copie de Kerberos, lues dans l'image construite) ; le scan ne signalera pas leur passage à OpenSSL 3.5.9 ou plus.
+
+### Nombre de tests
+
+- La suite principale passe de 2 391 à 2 392 (passage d'une exception à Grype, sur un fichier construit) ; le total, de 2 573 à 2 574.
