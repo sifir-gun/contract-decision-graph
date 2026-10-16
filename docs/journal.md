@@ -3407,7 +3407,7 @@ Les PR de Dependabot en attente, remises sur `main` (rebase par GitHub) et leurs
 ### Décisions du propriétaire (16/10)
 
 - Garder les deux versions ; la date d'analyse choisit (option A, de préférence au remplacement du fichier, avec ou sans contrôle du début de validité).
-- Même référence pour les deux versions ; une seule fiche, qui déclare les versions relues ; fichier brut copié à la main par le propriétaire.
+- Même référence pour les deux versions ; une seule fiche, qui déclare les versions relues ; fichier brut d'abord prévu copié à la main par le propriétaire, puis, à sa demande, transcrit par l'agent (voir « Écarts »).
 - Recherche datée, même règle en SQL et dans le CRAG (approche 1) ; contrôle du début de validité pour tout le corpus.
 
 ### Tests d'abord, réalisation
@@ -3424,6 +3424,15 @@ Les PR de Dependabot en attente, remises sur `main` (rebase par GitHub) et leurs
 - Recherche sans filtre : dédoublonnage laissé à (référence, empreinte du texte) ; le filtre de date ne laisse qu'une version par référence quand l'une est en vigueur.
 - Une déclaration `versions_verifiees` vide est refusée explicitement.
 - Les tests `pg` ont appliqué la migration `009` à la base locale du poste : un `ingest` lancé depuis `main` y échoue jusqu'à la fusion.
+- Fichier `L441-10_2027-01-01.txt` transcrit par l'agent, à la demande du propriétaire : page lue dans un navigateur, sans contourner la vérification anti-robots, texte reconstruit des éléments affichés du bloc de l'article ; empreinte SHA-256 du fichier identique à celle calculée dans la page ; relecture du propriétaire contre Légifrance demandée.
+
+### Relecture de toute la branche (sous-agent, 16/10)
+
+- Verdict « avec corrections », aucun défaut critique. Corrigés, chacun par un test d'abord en échec :
+  - en mode réel, la recherche groupée par référence (`DISTINCT ON (reference)`) pouvait rendre la version la plus éloignée d'une référence sans version en vigueur, et le constat scellé citer une date fausse : la règle ne garde plus que la version la plus proche de la date (la première à venir, sinon la dernière expirée), en Python comme en SQL (spec et ADR 009 mis à jour) ;
+  - l'étiquette « NOTA : » : espaces insécables et note sur la même ligne reconnues ; une note annoncée mais non reconnue est une erreur qui nomme le fichier, jamais du texte indexé en silence ;
+  - provenance du fichier transcrit, ici, et procédure de retour arrière (relancer `ingest` avec l'image antérieure).
+- Mineurs laissés : cache de `reference_texts` par date, commentaire périmé de la règle financière, forme générale du `DELETE` du retour arrière, dictionnaire par (source, article) d'un test payant, `valid_until` absent de `check_index`, messages d'erreur du manifeste et des fiches, lignes de docstrings.
 
 ### Constat en passant
 

@@ -278,6 +278,12 @@ def test_demo_delai_avant_2019_insuffisant(demo):
     financier = verdicts["financier"]
     assert financier["retrieval_status"] == "INSUFFISANT"
     assert any("hors de leur période de vigueur" in f for f in financier["findings"])
+    later = [f for f in financier["findings"] if f.startswith("référence pas encore")]
+    # début de la première version cité, jamais celui de la version 2027
+    assert any(
+        "C. com., art. L441-10" in f and "à partir du 2019-04-26" in f for f in later
+    )
+    assert any("Délais de paiement entre professionnels" in f for f in later)
 
 
 # --- L441-10 : la date d'analyse choisit la version (ADR 009) --------------------------

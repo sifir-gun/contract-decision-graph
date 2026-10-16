@@ -69,9 +69,12 @@ def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[s
             dates.append(later["retrieved_at"])
         versions = []
         for path, retrieved_at in zip(paths, dates, strict=True):
-            article = parsers[source["format"]](
-                (RAW / path).read_text(encoding="utf-8")
-            )
+            try:
+                article = parsers[source["format"]](
+                    (RAW / path).read_text(encoding="utf-8")
+                )
+            except ValueError as exc:  # le fichier fautif, nommé
+                raise ValueError(f"{path} : {exc}") from exc
             if article.article != number:
                 raise ValueError(
                     f"{path} : titre « Article {article.article} », attendu {number}"

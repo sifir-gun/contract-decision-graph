@@ -90,18 +90,27 @@ def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
 _EACH, _ONCE, _PER_REFERENCE = "id", "reference, content_hash", "reference"
 
 # versions supplantées à la date d'analyse écartées, avant le regroupement et la limite :
-# un extrait est gardé s'il est en vigueur à cette date, ou si aucune version de sa
-# référence ne l'est (il sera signalé). Même règle que `domain.corpus.drop_superseded`
-# (test de parité) ; la date est le seul paramètre, répété quatre fois.
+# un extrait est gardé s'il est en vigueur à cette date ; sinon, si aucune version de sa
+# référence ne l'est, s'il est de la version la plus proche de la date, la première à
+# venir, sinon la dernière expirée (signalée avec sa date). Même règle que
+# `domain.corpus.drop_superseded` (tests de parité) ; la date est le seul paramètre.
+_SAME = (
+    "FROM rag_chunks AS other WHERE other.embedding_model = rag_chunks.embedding_model"
+    " AND other.reference = rag_chunks.reference"
+)
 _NOT_SUPERSEDED = (
     "((valid_from IS NULL OR valid_from <= %s)"
     " AND (valid_until IS NULL OR valid_until > %s))"
-    " OR NOT EXISTS (SELECT 1 FROM rag_chunks AS other"
-    " WHERE other.embedding_model = rag_chunks.embedding_model"
-    " AND other.reference = rag_chunks.reference"
+    f" OR (NOT EXISTS (SELECT 1 {_SAME}"
     " AND (other.valid_from IS NULL OR other.valid_from <= %s)"
     " AND (other.valid_until IS NULL OR other.valid_until > %s))"
-)
+    # la première à venir
+    " AND ((valid_from > %s AND NOT EXISTS (SELECT 1 {same}"
+    " AND other.valid_from > %s AND other.valid_from < rag_chunks.valid_from))"
+    # sinon la dernière expirée
+    " OR (valid_until <= %s AND NOT EXISTS (SELECT 1 {same}"
+    " AND (other.valid_from > %s OR other.valid_until > rag_chunks.valid_until)))))"
+).replace("{same}", _SAME)
 
 
 def _ranked(
@@ -125,7 +134,7 @@ def _ranked(
         f" FROM rag_chunks WHERE ({where}) AND ({_NOT_SUPERSEDED})"
         f" ORDER BY {unique}, distance, id) AS candidates"
         " ORDER BY distance, id LIMIT %s",
-        (Vector(query), *params, on, on, on, on, k),
+        (Vector(query), *params, *[on] * _NOT_SUPERSEDED.count("%s"), k),
     ).fetchall()
     return _passages(rows)
 

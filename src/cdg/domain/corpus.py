@@ -60,7 +60,9 @@ _VERSION = re.compile(
 )
 _AMENDMENT = re.compile(r"^(Modifié par|Création) (.+)$")
 _NOTE = re.compile(r"^Conformément (?:à|aux?) ")
-_NOTE_LABEL = re.compile(r"^NOTA ?:$")  # étiquette de la page, avant la note
+# étiquette de la page devant la note, seule sur sa ligne ou suivie de la note ; espaces
+# insécables comprises (\s en Unicode)
+_NOTE_LABEL = re.compile(r"^NOTA\s*:\s*(.*)$")
 _INTERFACE = ("Voir les versions", "Comparer les versions", "Textes liés")
 _TITLE = re.compile(r"^Article (\S+)$")
 
@@ -97,15 +99,27 @@ class Versioned(Protocol):
 
 
 def drop_superseded[T: Versioned](items: Sequence[T], on: date) -> list[T]:
-    """Écarte les versions supplantées à la date `on` : pour une référence qui a au moins
-    une version en vigueur, ses autres versions. Une référence sans version en vigueur
-    garde toutes les siennes, que le CRAG signale. Ordre conservé."""
-    current = {i.reference for i in items if in_force(i.valid_from, i.valid_until, on)}
-    return [
-        i
-        for i in items
-        if i.reference not in current or in_force(i.valid_from, i.valid_until, on)
-    ]
+    """Écarte les versions supplantées à la date `on` : une référence garde sa version en
+    vigueur ; sans version en vigueur, sa version la plus proche de la date, la première à
+    venir, sinon la dernière expirée, que le CRAG signale avec sa date. Tous les extraits
+    de la version gardée restent ; ordre conservé."""
+    by_reference: dict[str, list[T]] = {}
+    for item in items:
+        by_reference.setdefault(item.reference, []).append(item)
+    kept: set[int] = set()
+    for versions in by_reference.values():
+        chosen = [i for i in versions if in_force(i.valid_from, i.valid_until, on)]
+        if not chosen:
+            future = [
+                i.valid_from for i in versions if i.valid_from and i.valid_from > on
+            ]
+            if future:
+                chosen = [i for i in versions if i.valid_from == min(future)]
+            else:  # aucune en vigueur, aucune à venir : toutes expirées, fin connue
+                last = max(i.valid_until for i in versions if i.valid_until)
+                chosen = [i for i in versions if i.valid_until == last]
+        kept.update(id(i) for i in chosen)
+    return [i for i in items if id(i) in kept]
 
 
 def expiring(
@@ -156,18 +170,35 @@ def _title(lines: list[str]) -> tuple[str, list[str]]:
     return match[1], lines[1:]
 
 
+def _check_note(text: str) -> str:
+    """Une note annoncée par « NOTA : » est une note reconnue (« Conformément à … ») :
+    sinon, elle entrerait en silence dans le texte indexé."""
+    if not _NOTE.match(text):
+        raise ValueError(
+            f"étiquette « NOTA : » suivie d'une note non reconnue : {text[:60]!r}"
+        )
+    return text
+
+
 def parse_legifrance(raw: str) -> Article:
     number, lines = _title(_lines_without_interface(raw))
     valid_from = valid_until = amendment = None
     body, notes = [], []
+    after_label = False  # l'étiquette « NOTA : » attend sa note à la ligne suivante
     for line in lines:
         stripped = line.strip()
+        if after_label and stripped:
+            _check_note(stripped)
+            after_label = False
         if version := _VERSION.match(stripped):
             start, end, since, upcoming = version.groups()
             valid_from = french_date(start or since or upcoming)
             valid_until = french_date(end) if end else None
-        elif _NOTE_LABEL.match(stripped):
-            continue
+        elif label := _NOTE_LABEL.match(stripped):
+            if label[1]:
+                notes.append(_check_note(label[1]))
+            else:
+                after_label = True
         elif amended := _AMENDMENT.match(stripped):
             kind = "modification" if amended[1] == "Modifié par" else "création"
             amendment = (kind, amended[2])
@@ -175,6 +206,8 @@ def parse_legifrance(raw: str) -> Article:
             notes.append(stripped)
         else:
             body.append(line)
+    if after_label:
+        raise ValueError("étiquette « NOTA : » sans note")
     return Article(
         article=number,
         heading=None,

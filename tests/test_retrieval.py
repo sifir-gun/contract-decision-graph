@@ -410,3 +410,48 @@ def test_parite_sql_python_corpus_reel(pg, reel, on):
     assert rendus == attendus
     l441 = {start for ref, start in rendus if ref == "C. com., art. L441-10"}
     assert l441 == {date(2027, 1, 1) if on >= date(2027, 1, 1) else date(2019, 4, 26)}
+
+
+def test_recherche_groupee_sans_version_en_vigueur_rend_la_plus_proche(pg, synthetique):
+    """Un extrait par référence (réglage de production) : avant ses deux versions,
+    l'extrait rendu pour T1 est celui de la première, jamais celui de la seconde, même
+    plus proche de la requête ; le constat « pas encore en vigueur » cite sa date."""
+    for query in ("Alinéa propre à la seconde version", "Alinéa propre à la première"):
+        found = search(
+            pg, "financier", query, DELAI, k=10, settings=DISTINCT, on=date(2019, 1, 1)
+        )
+        [t1] = [p for p in found if p.source_id == "code-test"]
+        assert t1.valid_from == date(2019, 4, 26)
+
+
+@pytest.fixture
+def expirees(pg):
+    """Une référence à deux versions, toutes deux expirées au 01/03/2027."""
+    lignes = [
+        rows()[3].model_copy(
+            update={
+                "reference": "X",
+                "valid_from": start,
+                "valid_until": end,
+                "text": t,
+            }
+        )
+        for start, end, t in [
+            (date(2015, 1, 1), date(2019, 4, 26), "Ancienne rédaction."),
+            (date(2019, 4, 26), date(2027, 1, 1), "Rédaction suivante."),
+        ]
+    ]
+    assert rag_store.insert(pg.admin, lignes) == 2
+    yield lignes
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute("DELETE FROM rag_chunks WHERE source_id = %s", (SOURCE,))
+
+
+def test_parite_toutes_expirees_la_derniere(pg, expirees):
+    on = date(2027, 3, 1)
+    found = search(pg, "financier", "rédaction", DELAI, k=10, on=on)
+    rendus = {(p.reference, p.valid_from) for p in found if p.reference == "X"}
+    attendus = {
+        (r.reference, r.valid_from) for r in corpus_text.drop_superseded(expirees, on)
+    }
+    assert rendus == attendus == {("X", date(2019, 4, 26))}

@@ -47,10 +47,17 @@ def test_drop_superseded_garde_la_version_en_vigueur():
     assert corpus.drop_superseded(items, D27) == [NEW, other]
 
 
-def test_drop_superseded_sans_version_en_vigueur_garde_tout():
-    assert corpus.drop_superseded([NEW, OLD], date(2019, 1, 1)) == [NEW, OLD]
-    expired = V("C", D19, D27)
-    assert corpus.drop_superseded([expired], date(2027, 3, 1)) == [expired]
+def test_drop_superseded_sans_version_en_vigueur_garde_la_plus_proche():
+    """Sans version en vigueur, la plus proche de la date : la première à venir, sinon
+    la dernière expirée ; le constat cite sa date, quelle que soit celle des extraits
+    que la recherche a trouvés."""
+    assert corpus.drop_superseded([NEW, OLD], date(2019, 1, 1)) == [OLD]
+    older, last = V("C", date(2015, 1, 1), D19), V("C", D19, D27)
+    twin = V("C", D19, D27)  # autre extrait de la même version
+    assert corpus.drop_superseded([older, last, twin], date(2027, 3, 1)) == [last, twin]
+    # base périmée, trou entre deux versions : la version à venir l'emporte
+    gone, later = V("D", date(2015, 1, 1), D19), V("D", D27, None)
+    assert corpus.drop_superseded([gone, later], date(2026, 6, 1)) == [later]
 
 
 # --- fichiers : version à venir, manifeste, enchaînement ----------------------------------
@@ -259,3 +266,39 @@ def test_textes_dates_par_reference(corpus_synthetique):
     assert "seconde version" in ingestion.reference_texts(date(2027, 1, 1))[T1]["texte"]
     undated = ingestion.reference_texts(None)
     assert T1 not in undated and FICHE in undated
+
+
+# --- étiquette « NOTA : » : écartée, jamais une note perdue en silence ---------------------
+
+HEAD = "Article T9\nVersion en vigueur depuis le 01 janvier 2020\n\nTexte de l'article.\n\n"
+NOTE = "Conformément à l'article 3 du texte de test, ces dispositions s'appliquent."
+
+
+def test_etiquette_nota_espaces_insecables():
+    article = corpus.parse_legifrance(HEAD + "NOTA : \n" + NOTE + "\n")
+    assert article.text == "Texte de l'article." and article.note == NOTE
+
+
+def test_etiquette_nota_sur_la_ligne_de_la_note():
+    article = corpus.parse_legifrance(HEAD + "NOTA : " + NOTE + "\n")
+    assert article.text == "Texte de l'article." and article.note == NOTE
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "NOTA :\nSe reporter aux conditions d'application de l'article 9.\n",
+        "NOTA : Se reporter aux conditions d'application de l'article 9.\n",
+        "NOTA :\n",
+    ],
+    ids=["ligne-suivante", "meme-ligne", "sans-note"],
+)
+def test_etiquette_nota_sans_note_reconnue_refusee(tail):
+    with pytest.raises(ValueError, match="NOTA"):
+        corpus.parse_legifrance(HEAD + tail)
+
+
+def test_erreur_de_lecture_nomme_le_fichier(corpus_synthetique):
+    replace_line(raw(corpus_synthetique, SECOND_FILE), "Conformément", "Se reporter")
+    with pytest.raises(ValueError, match=r"T1_2027-01-01\.txt : .*NOTA"):
+        list(ingestion.articles())

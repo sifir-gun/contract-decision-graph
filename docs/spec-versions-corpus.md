@@ -150,15 +150,20 @@ qui peut garder l'extrait de la version périmée.
     et non expirée (`expired`, inchangé) ;
   - `drop_superseded(items, on)` : pour chaque référence qui a au moins une version en
     vigueur à `on`, écarte ses autres versions ; une référence sans version en vigueur
-    garde toutes les siennes (signalées par le CRAG) ; ordre conservé. Elle vaut pour
+    garde sa version la plus proche de la date, la première à venir, sinon la dernière
+    expirée (signalée par le CRAG avec sa date) ; ordre conservé. Correction du
+    16/10/2026, après la relecture de la branche : garder toutes les versions laissait
+    `DISTINCT ON (reference)` rendre n'importe laquelle, et le constat scellé pouvait
+    citer une date fausse. Elle vaut pour
     tout objet qui porte `reference`, `valid_from` et `valid_until` (`Protocol` du
     domaine, qui n'importe pas `Passage`).
 - Port : `Retriever.search(domain, query, *, kind, k, on)` et
   `CorpusSearch.search_unfiltered(query, *, k, on)`, `on` obligatoire. Adaptateurs et
   doublures suivent (`tests/test_ports.py`).
 - Adaptateur PostgreSQL : la condition s'ajoute au filtre, avant `DISTINCT ON` et
-  `LIMIT` ; un extrait est gardé s'il est en vigueur à `on`, ou si aucune ligne de même
-  référence et même modèle ne l'est (`NOT EXISTS`). Même règle que `drop_superseded`,
+  `LIMIT` ; un extrait est gardé s'il est en vigueur à `on`, ou, si aucune ligne de même
+  référence et même modèle ne l'est (`NOT EXISTS`), s'il est de la version la plus proche
+  de la date. Même règle que `drop_superseded`,
   vérifiée par un test de parité.
 - `mesure-recherche` : date du jour (heure de Paris, `cli.today`), écrite dans le
   résultat (`date`) ; la mesure voit ce que verrait le CRAG ce jour-là.
