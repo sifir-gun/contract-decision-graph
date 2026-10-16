@@ -104,6 +104,7 @@ def test_trace_d_une_analyse(otel):
     # tarif de test du modèle double : 1 $ et 2 $ par million
     assert root.attributes["cdg.cout_usd"] == 0.003
     assert root.attributes["cdg.etat"] == "termine"
+    assert root.attributes["cdg.profil"] == "fournisseur"
 
 
 def test_revue_et_expiration_ont_leur_trace_de_meme_session(otel):
@@ -213,6 +214,8 @@ def test_une_trace_par_analyse_reprise(otel):
         (r.name, r.attributes["langfuse.session.id"], r.attributes["cdg.etat"])
         for r in roots
     ] == [("cdg.reprise", "c-a", "termine"), ("cdg.reprise", "c-b", "termine")]
+    # le profil n'est lu qu'une fois la trace ouverte : la reprise n'en porte pas
+    assert all("cdg.profil" not in r.attributes for r in roots)
     # chaque contrat compte ses propres tentatives
     assert [
         s.attributes["cdg.tentative"]

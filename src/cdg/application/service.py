@@ -161,7 +161,7 @@ class ContractService:
         on = analysis_date if analysis_date is not None else self.today()
         with (
             self.telemetry.operation(
-                "analyse", contract_id=contract_id, actor=actor
+                "analyse", contract_id=contract_id, actor=actor, profile=profile
             ) as finish,
             self._writes,
         ):
@@ -284,7 +284,7 @@ class ContractService:
         profile = profiles.of_state(values)
         with (
             self.telemetry.operation(
-                "relance", contract_id=target, actor=actor
+                "relance", contract_id=target, actor=actor, profile=profile
             ) as finish,
             self._writes,
         ):

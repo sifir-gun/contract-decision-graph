@@ -5,10 +5,10 @@ Adaptateur : `adapters/otel/` (OpenTelemetry), seul à importer la bibliothèque
 destination : `application.observation.NoTelemetry`, qui ne fait rien.
 
 Le port ne reçoit que des données écrites par le code : nom d'opération, identifiant du
-contrat, acteur (dont l'adaptateur ne tire que le canal, et le `sub` sur réglage), nom de
-nœud, numéro de tentative, domaine, statut final (état et décisions, jamais un motif),
-consommation (modèle, tokens, latence). Jamais un texte de contrat, un prompt, une
-réponse du LLM, ni le message d'une exception.
+contrat, acteur (dont l'adaptateur ne tire que le canal, et le `sub` sur réglage), nom du
+profil de l'analyse, nom de nœud, numéro de tentative, domaine, statut final (état et
+décisions, jamais un motif), consommation (modèle, tokens, latence). Jamais un texte de
+contrat, un prompt, une réponse du LLM, ni le message d'une exception.
 """
 
 from collections.abc import Callable, Mapping
@@ -17,6 +17,7 @@ from typing import Any, Literal, Protocol
 
 from cdg.domain.authorization import Actor
 from cdg.domain.models import Usage
+from cdg.domain.profiles import Profile
 
 Operation = Literal["analyse", "revue", "expiration", "relance", "reprise"]
 # rappel de fin d'une opération : le statut du moteur (seuls `statut`,
@@ -32,9 +33,16 @@ class LLMCall(Protocol):
 
 class Telemetry(Protocol):
     def operation(
-        self, name: Operation, *, contract_id: str | None, actor: Actor | None
+        self,
+        name: Operation,
+        *,
+        contract_id: str | None,
+        actor: Actor | None,
+        profile: Profile | None = None,
     ) -> AbstractContextManager[Finish]:
-        """Une trace par opération ; le rappel rendu reçoit le statut final."""
+        """Une trace par opération ; le rappel rendu reçoit le statut final. `profile` :
+        profil de l'analyse, pour les opérations qui le connaissent à l'ouverture
+        (analyse, relance) ; `None`, la trace n'en porte pas."""
         ...
 
     def step(

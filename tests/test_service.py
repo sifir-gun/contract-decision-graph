@@ -2,6 +2,7 @@
 analyse, revue humaine, liste, dossier, expiration, journal, vérification et rejeu, sur le
 vrai graphe avec un checkpointer en mémoire, doublures à la place du LLM et du CRAG."""
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -25,6 +26,7 @@ from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.application import ingestion
+from cdg.application.observation import NoTelemetry
 from cdg.application.service import (
     ContractService,
     FourEyesRefused,
@@ -243,6 +245,48 @@ def test_relance_d_un_etat_sans_profil_en_fournisseur():
     service, engine = escalated_service()
     service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
     assert engine.ran == [("c-coupe-relance", "fournisseur", "c-coupe")]
+
+
+class RecordingTelemetry(NoTelemetry):
+    """Note le profil que le service passe au port à l'ouverture de chaque opération."""
+
+    def __init__(self):
+        self.operations: list[tuple[str, str | None]] = []
+
+    @contextmanager
+    def operation(self, name, *, contract_id, actor, profile=None):
+        self.operations.append((name, profile))
+        yield lambda status: None
+
+
+def test_trace_de_l_analyse_porte_le_profil():
+    telemetry = RecordingTelemetry()
+    service = replace(make_service(), telemetry=telemetry)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
+    assert telemetry.operations == [("analyse", "fournisseur")]
+
+
+@pytest.mark.parametrize("values", [{"profile": "fournisseur"}, {}])
+def test_trace_de_la_relance_porte_le_profil_d_origine(values):
+    """Le profil de la trace est celui que la relance scelle : celui de l'état d'origine,
+    `fournisseur` pour un état d'avant les profils."""
+    service, engine = escalated_service(**values)
+    telemetry = RecordingTelemetry()
+    service = replace(service, telemetry=telemetry)
+    service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert telemetry.operations == [("relance", "fournisseur")]
+    assert engine.ran == [("c-coupe-relance", "fournisseur", "c-coupe")]
+
+
+def test_relance_d_un_profil_inconnu_refusee_sans_trace():
+    service, _ = escalated_service(profile="sous_traitance")
+    telemetry = RecordingTelemetry()
+    service = replace(service, telemetry=telemetry)
+    with pytest.raises(ValueError, match="profil inconnu"):
+        service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert telemetry.operations == []
 
 
 def test_relance_d_un_profil_inconnu_refusee_sans_rien_lancer():

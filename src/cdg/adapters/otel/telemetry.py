@@ -51,6 +51,7 @@ from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import CONTRACT_ID
 from cdg.domain.models import Usage
 from cdg.domain.numeric import rounded
+from cdg.domain.profiles import Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.telemetry import Finish, LLMCall, Operation, Telemetry
 
@@ -166,7 +167,12 @@ class OtelTelemetry:
 
     @contextmanager
     def operation(
-        self, name: Operation, *, contract_id: str | None, actor: Actor | None
+        self,
+        name: Operation,
+        *,
+        contract_id: str | None,
+        actor: Actor | None,
+        profile: Profile | None = None,
     ) -> Iterator[Finish]:
         state = _Operation()
         token = _CURRENT.set(state)
@@ -188,6 +194,7 @@ class OtelTelemetry:
                 "langfuse.user.id": user,
                 "cdg.operation": name,
                 "cdg.canal": actor.canal if actor is not None else None,
+                "cdg.profil": profile,
             }
             try:
                 yield state.finish
