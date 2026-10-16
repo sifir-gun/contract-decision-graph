@@ -165,7 +165,7 @@ def test_analyse_sans_profil_refusee():
     web = client(service)
     response = post_analyse(web, PENDING_TEXT, profil=None)
     assert response.status_code == 400
-    assert "profil" in text_of(response.text)
+    assert "profil absent ou inconnu" in text_of(response.text)
     assert service.contracts() == []
 
 

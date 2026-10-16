@@ -203,20 +203,20 @@ def chain_of(*records: dict) -> list[audit.StoredAuditEntry]:
     return entries
 
 
-def v2() -> dict:
+def current_record() -> dict:
     """Enregistrement au format courant (v3), soumis à la règle du v2 ; le v2 lui-même :
     `test_audit_v3.py`."""
     return record(reviewed()).model_dump(mode="json")
 
 
 def test_journal_conforme_configurations_archivees_v1_exemptes():
-    report = audit.verify_journal(chain_of(v1_record(), v2()), ARCHIVED)
+    report = audit.verify_journal(chain_of(v1_record(), current_record()), ARCHIVED)
     assert report.ok and not report.archive_fault
     assert (report.count, report.archived, report.v1_exempted) == (2, 1, 1)
 
 
-def test_v2_sans_sa_configuration_archivee_journal_non_conforme():
-    entries = chain_of(v1_record(), v2())
+def test_enregistrement_courant_sans_sa_configuration_archivee_non_conforme():
+    entries = chain_of(v1_record(), current_record())
     report = audit.verify_journal(entries, {})
     assert (report.ok, report.archive_fault, report.broken_id) == (False, True, 2)
     assert "non archivée" in report.reason and entries[1].config_hash in report.reason
@@ -224,7 +224,7 @@ def test_v2_sans_sa_configuration_archivee_journal_non_conforme():
 
 def test_configuration_archivee_alteree_journal_non_conforme():
     altered = {key: data | {"min_margin": 0.5} for key, data in ARCHIVED.items()}
-    report = audit.verify_journal(chain_of(v2()), altered)
+    report = audit.verify_journal(chain_of(current_record()), altered)
     assert (report.ok, report.archive_fault) == (False, True)
     assert "altérée" in report.reason
 
@@ -232,17 +232,19 @@ def test_configuration_archivee_alteree_journal_non_conforme():
 def test_configuration_archivee_relue_dans_un_autre_ordre_reste_conforme():
     [(key, data)] = ARCHIVED.items()
     reordered = {key: {k: data[k] for k in sorted(data, reverse=True)}}
-    assert audit.verify_journal(chain_of(v2()), reordered).ok
+    assert audit.verify_journal(chain_of(current_record()), reordered).ok
 
 
 def test_version_d_enregistrement_inconnue_journal_non_conforme():
-    report = audit.verify_journal(chain_of(v2() | {"version": 4}), ARCHIVED)
+    report = audit.verify_journal(chain_of(current_record() | {"version": 4}), ARCHIVED)
     assert (report.ok, report.archive_fault, report.broken_id) == (False, False, 1)
     assert "version" in report.reason
 
 
 def test_chaine_rompue_signalee_avant_l_archive():
-    entries = chain_of(v2(), v2() | {"thread_id": "c-2", "contract_id": "c-2"})
+    entries = chain_of(
+        current_record(), current_record() | {"thread_id": "c-2", "contract_id": "c-2"}
+    )
     tampered = entries[0].model_copy(update={"prev_hash": "0" * 63 + "1"})
     report = audit.verify_journal([tampered, entries[1]], {})
     assert (report.ok, report.archive_fault, report.broken_id) == (False, False, 1)
@@ -268,17 +270,17 @@ JSON = CONFIG.model_dump(mode="json")
 
 
 def test_rejeu_sur_la_forme_validee_archivee():
-    assert audit.replay(v2(), JSON).identical
+    assert audit.replay(current_record(), JSON).identical
 
 
 def test_rejeu_empreinte_recalculee_par_la_forme_canonique():
     reordered = {key: JSON[key] for key in sorted(JSON, reverse=True)}
-    assert audit.replay(v2(), reordered).identical
+    assert audit.replay(current_record(), reordered).identical
 
 
 def test_rejeu_configuration_d_une_autre_empreinte_refuse():
     with pytest.raises(audit.ReplayError, match="configuration différente"):
-        audit.replay(v2(), OTHER.model_dump(mode="json"))
+        audit.replay(current_record(), OTHER.model_dump(mode="json"))
 
 
 def test_rejeu_configuration_illisible_par_le_code_courant_erreur_explicite():

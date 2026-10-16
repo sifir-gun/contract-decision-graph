@@ -87,7 +87,7 @@ def v2_record() -> dict:
 # --- format v2, repris par le v3 -----------------------------------------------------------
 
 
-def test_enregistrement_v2_versionne_avec_les_acteurs_sans_nom():
+def test_enregistrement_courant_versionne_avec_les_acteurs_sans_nom():
     data = record(reviewed()).model_dump(mode="json")
     assert data["version"] == 3  # le v3 garde les acteurs du v2
     assert data["analyse_par"] == ANALYSTE.model_dump(mode="json")
