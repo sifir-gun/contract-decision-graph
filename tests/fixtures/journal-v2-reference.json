@@ -1,0 +1,510 @@
+{
+  "_provenance": "Enregistrement v2 de référence, produit par le code du commit 5e5a8f6 (avant les profils de contrat) : audit.build_record puis audit.seal sur un état d'analyse fictif, reviewed() de tests/test_audit_v2.py de ce commit (aides recopiées dans un script à part, données synthétiques), avec la configuration archivée de sa décision (audit.configurations_to_archive). À ne jamais régénérer : c'est la preuve figée de la forme v2 ; un écart avec le code courant est un défaut du code, pas de ce fichier (tests/test_audit_v2_reference.py).",
+  "configurations": {
+    "2cdf493d0cfa8a6259e9360cad4f2cc6b77e791734cff5a77c72a8ead512c03d": {
+      "analyst_retry": {
+        "backoff_factor": 2.0,
+        "initial_interval_seconds": 1.0,
+        "jitter": false,
+        "max_attempts": 3,
+        "max_interval_seconds": 10.0
+      },
+      "budget": {
+        "max_tokens_per_contract": 60000
+      },
+      "conflict_gap": 0.5,
+      "corpus": {
+        "chunk_max_words": 300
+      },
+      "crag": {
+        "max_passes": 2,
+        "search": {
+          "distinct_references": true
+        },
+        "top_k": 4
+      },
+      "embedding": {
+        "dimension": 1024,
+        "model": "intfloat/multilingual-e5-large",
+        "passage_prefix": "passage: ",
+        "query_prefix": "query: "
+      },
+      "explain": {
+        "max_attempts": 2
+      },
+      "explain_retry": {
+        "backoff_factor": 2.0,
+        "initial_interval_seconds": 2.0,
+        "jitter": false,
+        "max_attempts": 3,
+        "max_interval_seconds": 20.0
+      },
+      "extraction": {
+        "absence_terms": {
+          "accord_traitement_donnees": [
+            "accord de traitement",
+            "accord de sous-traitance",
+            "article 28 du règlement"
+          ],
+          "delai_paiement": [
+            "payables à",
+            "payable à",
+            "payables dans",
+            "payable dans",
+            "délai de paiement",
+            "délai de règlement"
+          ],
+          "donnees_personnelles": [
+            "données à caractère personnel",
+            "données personnelles",
+            "annuaire",
+            "noms et prénoms",
+            "nom et prénom",
+            "adresse électronique",
+            "adresses électroniques",
+            "données des utilisateurs",
+            "données des salariés"
+          ],
+          "duree_engagement": [
+            "conclu pour une durée",
+            "conclu pour la durée",
+            "durée ferme",
+            "durée d'engagement",
+            "durée du contrat"
+          ],
+          "penalites_execution": [
+            "pénalités d'exécution",
+            "clause pénale",
+            "redevable de pénalités",
+            "donne lieu à des pénalités",
+            "pénalités de retard de livraison",
+            "pénalités de retard d'exécution",
+            "réfaction",
+            "refaction"
+          ],
+          "preavis_resiliation": [
+            "préavis"
+          ],
+          "responsabilite_acheteur": [
+            "responsabilité de l'acheteur",
+            "l'acheteur répond",
+            "responsabilité du client",
+            "le client répond",
+            "le client ne répond",
+            "l'acheteur ne répond"
+          ],
+          "responsabilite_fournisseur": [
+            "responsabilité du prestataire",
+            "responsabilité du fournisseur",
+            "responsabilité du titulaire",
+            "le prestataire répond",
+            "le fournisseur répond"
+          ],
+          "revision_prix": [
+            "révision des prix",
+            "révision du prix",
+            "révision des tarifs",
+            "prix sont révisés",
+            "prix peuvent être révisés",
+            "peut être révisé",
+            "peuvent être révisés",
+            "indexation",
+            "prix sont indexés",
+            "tarifs sont indexés",
+            "prix indexés"
+          ],
+          "transfert_hors_ue": [
+            "données sont hébergées",
+            "hébergement des données",
+            "transfert de données",
+            "transfert des données",
+            "pays tiers",
+            "hors de l'union",
+            "sont traitées et hébergées",
+            "données sont stockées",
+            "localisation des données",
+            "serveurs sont situés",
+            "centre de données situé",
+            "centres de données situés",
+            "territoire de l'union",
+            "hors de l'ue",
+            "hors de l'espace économique européen",
+            "en dehors de l'union"
+          ]
+        },
+        "category_terms": {
+          "delai_paiement": {
+            "date_facture": [
+              "date d'émission",
+              "date de facture",
+              "date de la facture",
+              "date de facturation"
+            ],
+            "facture_periodique": [
+              "factures périodiques",
+              "facture périodique",
+              "factures récapitulatives",
+              "facture récapitulative",
+              "facturation périodique"
+            ],
+            "fin_de_mois": [
+              "jours fin de mois",
+              "jours fin du mois"
+            ]
+          },
+          "transfert_hors_ue": {
+            "aucune_garantie": [
+              "sans garantie particulière",
+              "sans garantie appropriée",
+              "sans garanties appropriées",
+              "aucune garantie appropriée",
+              "consentement explicite"
+            ],
+            "certification": [
+              "mécanisme de certification",
+              "mécanismes de certification"
+            ],
+            "clauses_contractuelles_ad_hoc": [
+              "clauses ad hoc",
+              "clauses contractuelles ad hoc",
+              "négociées entre les parties",
+              "clauses contractuelles spécifiques"
+            ],
+            "clauses_contractuelles_ad_hoc_autorisees": [
+              "autorisées par l'autorité de contrôle",
+              "autorisation de l'autorité de contrôle",
+              "autorisées par la cnil",
+              "autorisation de la cnil"
+            ],
+            "clauses_contractuelles_types": [
+              "clauses types",
+              "clauses contractuelles types",
+              "clauses contractuelles standard"
+            ],
+            "code_conduite": [
+              "code de conduite"
+            ],
+            "decision_adequation": [
+              "décision d'adéquation",
+              "niveau de protection adéquat"
+            ],
+            "regles_entreprise_contraignantes": [
+              "règles d'entreprise contraignantes"
+            ],
+            "sans_transfert": [
+              "aucun transfert",
+              "exclusivement dans l'union",
+              "exclusivement dans l'espace économique européen",
+              "exclusivement en france",
+              "aucun pays tiers"
+            ]
+          }
+        },
+        "max_attempts": 2
+      },
+      "extraction_retry": {
+        "backoff_factor": 2.0,
+        "initial_interval_seconds": 2.0,
+        "jitter": false,
+        "max_attempts": 3,
+        "max_interval_seconds": 20.0
+      },
+      "human_policy": {
+        "allow_block_override": true,
+        "allowed_decisions": [
+          "GO",
+          "GO_RESERVES",
+          "NO_GO"
+        ],
+        "hard_block_review": false
+      },
+      "input": {
+        "instruction_patterns": [
+          "(?:^|[.:;!?]\\s+)(?:ignore|ignorez|oublie|oubliez)\\s+(?:les|toutes\\s+les|tous\\s+les|la|le|ces|vos|tes)\\b[^.\\n]{0,60}\\b(?:règles?|consignes?|instructions?|critères?)\\b",
+          "\\b(?:ignore|disregard|forget)\\s+(?:all\\s+|any\\s+|the\\s+|your\\s+)?(?:previous\\s+|prior\\s+|above\\s+)?(?:rules|instructions|guidelines)\\b",
+          "\\b(?:consignes?|instructions?|note|message)\\s+(?:pour|à|au|aux|à\\s+l'attention\\s+de|destinée?s?\\s+à)\\s+(?:l'|le\\s+|la\\s+|les\\s+|un\\s+|une\\s+)?(?:outil|intelligence\\s+artificielle|ia|modèle|assistant|analyste|lecteur\\s+automatique)s?\\b",
+          "\\bà\\s+l'attention\\s+(?:de\\s+l'|du\\s+|des\\s+)(?:outil|ia|intelligence\\s+artificielle|modèle|assistant|analyste)s?\\b",
+          "\\b(?:en\\s+tant\\s+qu'|tu\\s+es|vous\\s+êtes|you\\s+are)\\s*(?:un|une|an?)?\\s*(?:ia|intelligence\\s+artificielle|assistant|modèle\\s+de\\s+langage|ai|language\\s+model)\\b",
+          "\\b(?:conclus|concluez|conclure\\s+à|rends|rendez|retiens|retenez|donne|donnez)\\b[^.\\n]{0,40}(?-i:\\b(?:NO[\\s_-]?GO|GO[\\s_-]?RESERVES|GO)\\b)",
+          "\\bne\\s+(?:signale|signalez)\\s+(?:aucun|aucune|rien)\\b"
+        ],
+        "max_chars": 200000,
+        "min_french_ratio": 0.15,
+        "min_words": 30
+      },
+      "interrupted": {
+        "max_resumes": 3
+      },
+      "llm": {
+        "max_output_tokens": 4096,
+        "models": {
+          "anthropic": {
+            "light": "claude-haiku-4-5-20251001",
+            "main": "claude-sonnet-5"
+          },
+          "mistral": {
+            "light": "ministral-8b-2512",
+            "main": "mistral-small-2603"
+          }
+        },
+        "provider": "mistral",
+        "temperature": 0.0,
+        "timeout_seconds": 60
+      },
+      "min_margin": 0.05,
+      "rules": {
+        "conformite": {
+          "transfer_authorization_score_penalty": 0.3,
+          "transfer_authorization_to_verify": [
+            "clauses_contractuelles_ad_hoc"
+          ],
+          "transfer_safeguards": [
+            "decision_adequation",
+            "clauses_contractuelles_types",
+            "clauses_contractuelles_ad_hoc_autorisees",
+            "regles_entreprise_contraignantes",
+            "code_conduite",
+            "certification"
+          ],
+          "unlocated_data_score_penalty": 0.3
+        },
+        "financier": {
+          "execution_penalties_min_cap_pct": 5.0,
+          "execution_penalties_score_penalty": 0.4,
+          "payment_delay_max_days_end_of_month": 45.0,
+          "payment_delay_max_days_invoice": 60.0,
+          "payment_delay_max_days_periodic_invoice": 45.0,
+          "payment_delay_score_penalty": 0.2
+        },
+        "juridique": {
+          "supplier_cap_min_pct": 100.0,
+          "supplier_cap_score_penalty": 0.5
+        },
+        "operationnel": {
+          "commitment_max_months": 36.0,
+          "commitment_score_penalty": 0.3,
+          "notice_max_months": 6.0,
+          "notice_score_penalty": 0.3
+        }
+      },
+      "thresholds": {
+        "go": 0.75,
+        "go_reserves": 0.5
+      },
+      "weights": {
+        "conformite": 0.25,
+        "financier": 0.25,
+        "juridique": 0.3,
+        "operationnel": 0.2
+      }
+    }
+  },
+  "entry": {
+    "chain_hash": "ae34c94fbb15cf2c3790bd40ee67afcd625c1f4ec951db1588ff4f5787f8e9e1",
+    "config_hash": "2cdf493d0cfa8a6259e9360cad4f2cc6b77e791734cff5a77c72a8ead512c03d",
+    "contract_id": "c-1",
+    "decision_hash": "e1ed18e449e3af77af9da86d651f824b6da5a1b68f44b29e403b9a450a8cc136",
+    "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "record": {
+      "analyse_par": {
+        "authentifie": true,
+        "canal": "interface",
+        "iss": "https://idp.example.org",
+        "operateur": null,
+        "sub": "sub-analyste",
+        "urgence": false
+      },
+      "code_version": {
+        "commit": "c0dec0dec0dec0dec0dec0dec0dec0dec0dec0de",
+        "image": null
+      },
+      "contract_id": "c-1",
+      "decision": {
+        "analysis_date": "2026-09-25",
+        "clauses": [
+          {
+            "category": null,
+            "kind": "responsabilite_acheteur",
+            "present": true,
+            "quote": "Article synthétique : la clause responsabilite_acheteur est fixée à 100 %.",
+            "value": 100.0
+          },
+          {
+            "category": null,
+            "kind": "responsabilite_fournisseur",
+            "present": true,
+            "quote": "Article synthétique : la clause responsabilite_fournisseur est fixée à 150 %.",
+            "value": 150.0
+          },
+          {
+            "category": null,
+            "kind": "revision_prix",
+            "present": true,
+            "quote": "Article synthétique : la clause revision_prix est fixée à 3 %.",
+            "value": 3.0
+          },
+          {
+            "category": null,
+            "kind": "penalites_execution",
+            "present": true,
+            "quote": "Article synthétique : la clause penalites_execution est fixée à 10 %.",
+            "value": 10.0
+          },
+          {
+            "category": "date_facture",
+            "kind": "delai_paiement",
+            "present": true,
+            "quote": "Article synthétique : la clause delai_paiement est fixée à 30 jours.",
+            "value": 30.0
+          },
+          {
+            "category": null,
+            "kind": "duree_engagement",
+            "present": true,
+            "quote": "Article synthétique : la clause duree_engagement est fixée à 24 mois.",
+            "value": 24.0
+          },
+          {
+            "category": null,
+            "kind": "preavis_resiliation",
+            "present": true,
+            "quote": "Article synthétique : la clause preavis_resiliation est fixée à 3 mois.",
+            "value": 3.0
+          },
+          {
+            "category": null,
+            "kind": "donnees_personnelles",
+            "present": true,
+            "quote": "Article synthétique : donnees_personnelles.",
+            "value": null
+          },
+          {
+            "category": null,
+            "kind": "accord_traitement_donnees",
+            "present": true,
+            "quote": "Article synthétique : accord_traitement_donnees.",
+            "value": null
+          },
+          {
+            "category": "sans_transfert",
+            "kind": "transfert_hors_ue",
+            "present": true,
+            "quote": "Article synthétique : transfert_hors_ue.",
+            "value": null
+          }
+        ],
+        "config_hash": "2cdf493d0cfa8a6259e9360cad4f2cc6b77e791734cff5a77c72a8ead512c03d",
+        "failure_report": null,
+        "final_decision": "GO",
+        "human": {
+          "acteur": {
+            "authentifie": true,
+            "canal": "interface",
+            "iss": "https://idp.example.org",
+            "operateur": null,
+            "sub": "sub-relecteur",
+            "urgence": false
+          },
+          "decision": "GO",
+          "overrides_block": false,
+          "reason": "revu",
+          "source": "humain"
+        },
+        "input_findings": [],
+        "margin": 0.25,
+        "proposed_decision": "GO",
+        "reject_reason": null,
+        "verdicts": [
+          {
+            "domain": "juridique",
+            "evidence_ids": [],
+            "finding_kinds": [],
+            "findings": [],
+            "hard_block": false,
+            "retrieval": {
+              "clauses": [],
+              "findings": []
+            },
+            "retrieval_status": "OK",
+            "score": 1.0
+          },
+          {
+            "domain": "financier",
+            "evidence_ids": [],
+            "finding_kinds": [],
+            "findings": [],
+            "hard_block": false,
+            "retrieval": {
+              "clauses": [],
+              "findings": []
+            },
+            "retrieval_status": "OK",
+            "score": 1.0
+          },
+          {
+            "domain": "conformite",
+            "evidence_ids": [],
+            "finding_kinds": [],
+            "findings": [],
+            "hard_block": false,
+            "retrieval": {
+              "clauses": [],
+              "findings": []
+            },
+            "retrieval_status": "OK",
+            "score": 1.0
+          },
+          {
+            "domain": "operationnel",
+            "evidence_ids": [],
+            "finding_kinds": [],
+            "findings": [],
+            "hard_block": false,
+            "retrieval": {
+              "clauses": [],
+              "findings": []
+            },
+            "retrieval_status": "OK",
+            "score": 1.0
+          }
+        ]
+      },
+      "explanation": null,
+      "failure_report": null,
+      "failures": [],
+      "models": {
+        "embedding": "intfloat/multilingual-e5-large",
+        "llm_light": "ministral-8b-2512",
+        "llm_main": "mistral-small-2603",
+        "llm_provider": "mistral"
+      },
+      "resume_escalation": null,
+      "sealed_at": "2026-09-26T08:00:00Z",
+      "sealing_code_version": {
+        "commit": "c0dec0dec0dec0dec0dec0dec0dec0dec0dec0de",
+        "image": null
+      },
+      "sealing_config_hash": "2cdf493d0cfa8a6259e9360cad4f2cc6b77e791734cff5a77c72a8ead512c03d",
+      "sealing_findings": [],
+      "thread_id": "c-1",
+      "usage": [
+        {
+          "latency_ms": 0,
+          "model": "double",
+          "node": "extract_clauses",
+          "tokens_in": 1000,
+          "tokens_out": 200
+        },
+        {
+          "latency_ms": 0,
+          "model": "double",
+          "node": "crag_grade:financier:penalites_execution",
+          "tokens_in": 300,
+          "tokens_out": 20
+        }
+      ],
+      "version": 2
+    },
+    "thread_id": "c-1"
+  }
+}
