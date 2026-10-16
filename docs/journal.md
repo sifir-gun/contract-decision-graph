@@ -3415,7 +3415,7 @@ Les quatre exceptions de `libssl3t64` 3.5.7-1~deb13u2 (CVE-2026-54873, CVE-2026-
 - **Pas de correctif en vue** : la branche principale de psycopg compile encore ses roues avec OpenSSL 3.5.8 (`OPENSSL_VERSION` de `.github/workflows/packages-bin.yml`), et la 3.3.7 en préparation n'annonce rien sur OpenSSL (`docs/news.rst`).
 - **Python** : OpenSSL 3.5.9 depuis le 12/10 (point 2, fait).
 - Aucune exception de Grype ne peut porter ce suivi : Grype ne voit pas ces copies (psycopg-binary n'est pour lui qu'un paquet Python), et une exception sur la `libssl3t64` deb13u2, absente de l'image, ne correspondrait à rien. Exposition inchangée depuis le 01/10, selon une lecture du code et non une preuve : cliente TLS seulement (libpq, httpx) ; ni DTLS, ni QUIC, ni serveur TLS.
-- **À décider par le propriétaire** : comment suivre la sortie de psycopg-binary sur OpenSSL 3.5.9 ou plus, que le scan ne signalera pas.
+- **Décision du propriétaire (16/10)** : suivi au journal seulement, revu à chaque nouvelle version de psycopg-binary proposée par Dependabot (version d'OpenSSL de sa `libcrypto` et, sur arm64, de la copie de Kerberos, lues dans l'image construite) ; le scan ne signalera pas leur passage à OpenSSL 3.5.9 ou plus.
 
 ### Nombre de tests
 
