@@ -19,7 +19,7 @@ Un cabinet d'assistance à maîtrise d'ouvrage, qui coordonne l'aménagement int
 
 **Option A.**
 
-- B est écartée : un contrat de prestation de nettoyage serait pénalisé pour une obligation de certification absente, et l'empreinte de toute nouvelle décision changerait pour des clauses sans rapport avec le contrat.
+- B est écartée : un contrat de prestation de nettoyage serait pénalisé pour une obligation de certification absente, et chaque contrat devrait rendre des clauses sans rapport avec lui (extraction plus longue, plus d'occasions d'erreur du modèle).
 - C est écartée : moins de travail tout de suite, mais une instance de plus par famille, dès les contrats d'architectes ; le profil d'une décision ne serait lisible que dans l'empreinte de la configuration.
 
 Conséquences de A, retenues :
@@ -28,10 +28,13 @@ Conséquences de A, retenues :
 - **Profil dans l'état**, avant tout nœud, et dans la partie décision de l'enregistrement d'audit : **format v3**. Les v1 et v2 restent vérifiables et sont relus comme profil `fournisseur`, le seul qui existait.
 - **Configuration** : les sections actuelles restent le profil `fournisseur`, pour que les configurations archivées se relisent sans changement ; chaque nouveau profil a sa section, absente par défaut dans le modèle, exigée dans le fichier du projet (règle de l'ADR 006).
 - **Quatre domaines inchangés**, donc le graphe et le fan-out aussi : seul le contenu de chaque domaine dépend du profil. Un type commun à deux profils reste dans le même domaine.
+- **Tables et schéma par profil** : sujets et catégories du CRAG, prompts d'extraction et d'explication, schéma de sortie de l'extraction (un type hors du profil échoue à la validation du schéma).
 
 ## Conséquences
 
-- Tout appel existant à `run` doit passer `--profil fournisseur` : scripts, scénarios du cluster, documentation.
+- Tout appel existant à `run` et à `mesure-recherche` doit passer `--profil fournisseur` : scripts, scénarios du cluster, documentation.
+- La démonstration au cabinet ne traite que des contrats fictifs : un vrai contrat n'entre ni dans le dépôt, ni dans le journal du poste du propriétaire (« Aucun contrat réel », CLAUDE.md, inchangé). Ses vrais contrats relèveront de sa propre instance, chantier à part.
 - La cible de `spec-phase1.md` (directions achats et juridiques de PME et d'ETI) s'élargit au donneur d'ordre d'un contrat de sous-traitance.
 - Le périmètre figé depuis la v1.1 est rouvert le 16/10/2026, à la demande explicite du propriétaire, pour ce seul chantier.
+- **Empreinte commune** : l'empreinte couvre toute la configuration. Modifier un réglage du profil `sous_traitance` fait escalader les analyses fournisseur interrompues, et signale « configuration modifiée » aux revues fournisseur en attente. Accepté : une empreinte par profil compliquerait l'archive et le rejeu pour un cas rare.
 - Aucune dépendance ajoutée.
