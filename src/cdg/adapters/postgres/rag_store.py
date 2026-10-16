@@ -44,7 +44,8 @@ def check_dimension(admin_conninfo: Conninfo, dimension: int) -> None:
 
 
 def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
-    """Insère les extraits ; un extrait déjà présent (même hash, même modèle) est ignoré."""
+    """Insère les extraits ; un extrait déjà présent (même hash, même modèle, même début
+    de validité : migration 009) est ignoré."""
     inserted = 0
     with psycopg.connect(resolve(admin_conninfo)) as conn:
         register_vector(conn)
@@ -55,7 +56,8 @@ def insert(admin_conninfo: Conninfo, rows: list[ChunkRow]) -> int:
                 " amendment, note, retrieved_at, kinds, header, embedded_hash)"
                 " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,"
                 " %s)"
-                " ON CONFLICT (domain, content_hash, embedding_model) DO NOTHING",
+                " ON CONFLICT (domain, content_hash, embedding_model, valid_from)"
+                " DO NOTHING",
                 (
                     row.domain,
                     row.source_id,

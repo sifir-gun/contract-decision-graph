@@ -107,6 +107,28 @@ def test_insertion_idempotente(pg, corpus):
     assert corpus == len(CHUNKS) and rag_store.insert(pg.admin, rows()) == 0
 
 
+@pytest.fixture
+def l441_row(pg):
+    """La ligne de L441-10 de CHUNKS, seule, nettoyée après le test."""
+    yield rows()[3]
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute("DELETE FROM rag_chunks WHERE source_id = %s", (SOURCE,))
+
+
+def test_meme_texte_deux_debuts_deux_lignes(pg, l441_row):
+    """Migration 009 : un paragraphe commun à deux versions a une ligne par version."""
+    old = l441_row.model_copy(update={"valid_from": date(2019, 4, 26)})
+    new = l441_row.model_copy(update={"valid_from": date(2027, 1, 1)})
+    assert rag_store.insert(pg.admin, [old]) == 1
+    assert rag_store.insert(pg.admin, [new]) == 1
+
+
+def test_insertion_sans_debut_deja_presente_ignoree(pg, l441_row):
+    """NULLS NOT DISTINCT : un extrait sans début de validité reste dédoublonné."""
+    assert rag_store.insert(pg.admin, [l441_row]) == 1
+    assert rag_store.insert(pg.admin, [l441_row]) == 0
+
+
 def test_filtre_par_domaine_et_clause_avant_la_recherche(pg, corpus):
     found = search(pg, "conformite", "sous-traitant instruction documentée", ACCORD)
     assert [c.reference for c in found] == ["RGPD, art. 28", "RGPD, art. 32"]

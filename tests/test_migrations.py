@@ -179,17 +179,35 @@ def _catalog(conninfo: str) -> dict:
             "extensions": conn.execute(
                 "SELECT extname FROM pg_extension ORDER BY 1"
             ).fetchall(),
+            "index": conn.execute(
+                "SELECT indexname, indexdef FROM pg_indexes"
+                " WHERE schemaname = 'public' ORDER BY 1"
+            ).fetchall(),
+            "contraintes": conn.execute(
+                "SELECT conname FROM pg_constraint"
+                " WHERE conrelid = 'rag_chunks'::regclass ORDER BY 1"
+            ).fetchall(),
         }
 
 
 @pytest.mark.pg
 def test_base_vide_toutes_les_migrations_dans_l_ordre_puis_rien(empty_database):
     names = [p.name for p in sorted((ROOT / "migrations").glob("0*.sql"))]
-    assert names[0] == "001_audit.sql" and names[-1] == "008_rag_texte_embarque.sql"
+    assert names[0] == "001_audit.sql" and names[-1] == "009_rag_versions.sql"
     assert migrations.apply(empty_database) == names
     before = _catalog(empty_database)
     assert ("app_role", "audit_decisions", "INSERT") in before["droits"]
     assert ("vector",) in before["extensions"]
+    # 009 : une ligne par version d'un extrait ; l'ancienne clé, sans la version, retirée
+    indexes = dict(before["index"])
+    assert "NULLS NOT DISTINCT" in indexes["rag_chunks_version_key"]
+    assert (
+        "(domain, content_hash, embedding_model, valid_from)"
+        in (indexes["rag_chunks_version_key"])
+    )
+    assert ("rag_chunks_domain_content_hash_embedding_model_key",) not in before[
+        "contraintes"
+    ]
     # relancé : la 001 n'est pas rejouée, rien ne change
     assert migrations.apply(empty_database) == names[1:]
     assert _catalog(empty_database) == before
