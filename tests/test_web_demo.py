@@ -20,6 +20,7 @@ from cdg.adapters.web import server
 from cdg.application import demo_set, ingestion
 from cdg.domain import masking
 from cdg.domain.config import load_config
+from cdg.domain.corpus import drop_superseded
 from cdg.domain.models import Clause
 
 CONFIG = load_config()
@@ -277,3 +278,47 @@ def test_demo_delai_avant_2019_insuffisant(demo):
     financier = verdicts["financier"]
     assert financier["retrieval_status"] == "INSUFFISANT"
     assert any("hors de leur période de vigueur" in f for f in financier["findings"])
+
+
+# --- L441-10 : la date d'analyse choisit la version (ADR 009) --------------------------
+
+L441 = "C. com., art. L441-10"
+FICHE_DELAIS = "Fiche projet : Délais de paiement entre professionnels"
+
+
+@pytest.mark.parametrize(
+    "on,start",
+    [(date(2026, 12, 31), date(2019, 4, 26)), (date(2027, 1, 1), date(2027, 1, 1))],
+)
+def test_demo_l441_10_selon_la_date(on, start):
+    crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
+    clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
+    result = crag("financier", [clause], on)
+    [trace] = result.trace.clauses
+    assert trace.retained == [L441, FICHE_DELAIS] and trace.expired == []
+    assert result.trace.findings == []
+    declared = [p for p in crag._passages if p.reference == L441]
+    assert {p.valid_from for p in drop_superseded(declared, on)} == {start}
+
+
+def test_dossier_texte_de_la_version_de_sa_date(demo):
+    web, service = demo
+    for identifier, on in [
+        ("demo-06-2026", "2026-12-31"),
+        ("demo-06-2027", "2027-01-01"),
+    ]:
+        response = web.post(
+            "/analyse",
+            data={
+                "csrf": csrf(web),
+                "source": "jeu",
+                "contrat": "demo-06-no-go-conseil",
+                "identifiant": identifier,
+                "date": on,
+            },
+        )
+        assert response.status_code == 303, response.text
+    old = service.dossier("demo-06-2026")["references"][L441]["texte"]
+    new = service.dossier("demo-06-2027")["references"][L441]["texte"]
+    assert "code général des impôts" in old and "code des impositions" not in old
+    assert "code des impositions sur les biens et services" in new

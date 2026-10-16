@@ -17,6 +17,10 @@ Conséquence de la règle de périmètre, ne sont pas dans le corpus :
 
 Les dérogations de l'art. 49 du RGPD (consentement explicite, exécution d'un contrat, motifs d'intérêt public…) ne sont donc pas couvertes : un contrat qui fonde un transfert sur une dérogation est classé « aucune garantie », donc bloqué. Erreur dans le sens prudent, à lever par un humain.
 
+## Versions successives (ADR 009)
+
+Un article peut avoir plusieurs versions au corpus : un fichier par version, la première nommée par le motif `file` du manifeste, les suivantes déclarées dans `later_versions` et nommées par leur début de validité (`L441-10_2027-01-01.txt`). Les versions s'enchaînent sans trou ni chevauchement (contrôlé à l'ingestion), portent la même référence et le même rattachement. La date d'analyse choisit la version en vigueur ; une version pas encore en vigueur n'est jamais retenue. Une fiche déclare dans son en-tête (`versions_verifiees`) les versions contre lesquelles elle a été relue ; sans déclaration, elle ne couvre que la première version de chaque article cité, et expire à l'entrée en vigueur d'une version qu'elle n'a pas relue.
+
 ## Règle de rattachement (J4)
 
 Chaque source déclare les **types de clause qu'elle peut justifier** : dans `manifest.yaml` pour un article, dans l'en-tête `clauses` pour une fiche. Les domaines d'indexation s'en déduisent. La recherche ne rend, pour une clause, que les extraits des sources rattachées à cette clause : le juge du CRAG ne peut plus retenir une source d'une autre clause du même domaine.
@@ -26,6 +30,7 @@ Un article est rattaché aux clauses des règles qu'il sert ; un article admis p
 ## Récupération
 
 - Manuelle, depuis un navigateur, le **24/09/2026**. EUR-Lex et Légifrance bloquent les requêtes automatiques par une vérification anti-robots, que l'agent n'a pas contournée.
+- Version de L441-10 en vigueur à partir du 01/01/2027 : le **16/10/2026**, lue par l'agent dans un navigateur, page par page, sans contourner la vérification anti-robots, et transcrite à la demande du propriétaire depuis les éléments affichés du bloc de l'article ; empreinte SHA-256 du fichier identique à celle calculée dans la page.
 - Un fichier `.txt` UTF-8 par article, texte copié tel qu'affiché. Le nettoyage (métadonnées de version, notes, lignes d'interface) se fait à l'ingestion, par des règles testées (`src/cdg/domain/corpus.py`).
 
 ## Licences et mentions (vérifiées le 26/09/2026)
@@ -58,7 +63,8 @@ Les textes publics de `raw/` gardent leurs conditions d'origine : ils ne sont pa
 | `rgpd` | art. 82 | `rgpd/art-82.txt` | Cité par l'art. 28 | `accord_traitement_donnees` | 24/09/2026 |
 | `rgpd` | art. 83 | `rgpd/art-83.txt` | Cité par l'art. 28 ; paraphrasé aussi par la fiche transferts (sanctions) | `accord_traitement_donnees`, `transfert_hors_ue` | 24/09/2026 |
 | `rgpd` | art. 84 | `rgpd/art-84.txt` | Cité par l'art. 28 | `accord_traitement_donnees` | 24/09/2026 |
-| `code-commerce` | L441-10 | `code-commerce/L441-10.txt` | Sert la règle financière : délai de paiement par l'acheteur (délai supplétif, délais maximaux). **Version en vigueur jusqu'au 01/01/2027** | `delai_paiement` | 24/09/2026 |
+| `code-commerce` | L441-10 | `code-commerce/L441-10.txt` | Sert la règle financière : délai de paiement par l'acheteur (délai supplétif, délais maximaux). **Version en vigueur du 26/04/2019 au 01/01/2027** | `delai_paiement` | 24/09/2026 |
+| `code-commerce` | L441-10 | `code-commerce/L441-10_2027-01-01.txt` | Version suivante (ordonnance n° 2026-671 du 27 juillet 2026, art. 2) : seul le 4e alinéa du I change, la facture périodique relevant du code des impositions sur les biens et services. **Version en vigueur à partir du 01/01/2027** | `delai_paiement` | 16/10/2026 |
 | `code-commerce` | L442-1 | `code-commerce/L442-1.txt` | Sert les règles opérationnelle (préavis, rupture brutale) et juridique (déséquilibre significatif) | `responsabilite_acheteur`, `responsabilite_fournisseur`, `preavis_resiliation` | 24/09/2026 |
 | `code-civil` | 1170 | `code-civil/1170.txt` | Sert la règle juridique : clause privant de sa substance l'obligation essentielle | `responsabilite_acheteur`, `responsabilite_fournisseur` | 24/09/2026 |
 | `code-civil` | 1171 | `code-civil/1171.txt` | Sert la règle juridique : déséquilibre significatif | `responsabilite_acheteur`, `responsabilite_fournisseur` | 24/09/2026 |
@@ -76,7 +82,7 @@ URL officielles :
 
 ## Fiches de référence
 
-Rédigées pour ce projet, dans `fiches/`. Chaque fiche commence par « Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique » et comporte deux sections : « Ce que dit le texte », uniquement des paraphrases fidèles, chacune avec l'article qu'elle paraphrase (`source_id`, `art.`) ; « Comment le projet l'applique », les règles et seuils du projet, présentés comme des choix de politique d'achat. Des tests vérifient la structure, et que chaque citation désigne un article admis ci-dessus. Paraphrases vérifiées mot à mot contre les fichiers bruts le 25/09/2026.
+Rédigées pour ce projet, dans `fiches/`. Chaque fiche commence par « Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique » et comporte deux sections : « Ce que dit le texte », uniquement des paraphrases fidèles, chacune avec l'article qu'elle paraphrase (`source_id`, `art.`) ; « Comment le projet l'applique », les règles et seuils du projet, présentés comme des choix de politique d'achat. Des tests vérifient la structure, et que chaque citation désigne un article admis ci-dessus. Paraphrases vérifiées mot à mot contre les fichiers bruts le 25/09/2026 ; celles de la fiche des délais de paiement, contre les deux versions de L441-10, le 16/10/2026.
 
 | source_id | Fiche | Clauses rattachées | Articles cités |
 | --- | --- | --- | --- |

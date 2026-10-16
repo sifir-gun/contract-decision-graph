@@ -2,8 +2,9 @@
 source du corpus cesse d'être valide dans les 60 jours, avec la source et la date.
 
 Première échéance du corpus : l'article L441-10 du Code de commerce, et la fiche qui le
-paraphrase, cessent d'être valides le 01/01/2027 ; le contrôle échoue donc à partir du
-02/11/2026."""
+paraphrase, cessaient d'être valides le 01/01/2027 ; le contrôle échouait donc à partir du
+02/11/2026. Levée le 16/10/2026 (ADR 009) : la version suivante est au corpus, la fiche a
+été relue contre les deux ; l'échec se teste désormais sur le corpus synthétique."""
 
 import importlib.util
 import json
@@ -18,9 +19,6 @@ from cdg.domain.corpus import expiring
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMAND = "uv run --no-sync python scripts/echeances_corpus.py --jours 60"
-L441_10 = "C. com., art. L441-10"
-FICHE = "Fiche projet : Délais de paiement entre professionnels"
-END = date(2027, 1, 1)
 
 
 def script():
@@ -61,33 +59,20 @@ def test_echeances_triees_par_date_puis_par_source():
 
 def test_fins_de_validite_des_sources_du_corpus():
     validities = ingestion.source_validities()
-    # une fiche expire avec les articles qu'elle paraphrase
-    assert validities[L441_10] == END and validities[FICHE] == END
-    assert {ref for ref, end in validities.items() if end is not None} == {
-        L441_10,
-        FICHE,
-    }
-    assert len(validities) == 22 + 7  # articles du manifeste et fiches
+    # L441-10 : la fin de sa dernière version (ouverte) ; sa fiche, relue contre ses
+    # deux versions, sans fin
+    assert {ref for ref, end in validities.items() if end is not None} == set()
+    assert len(validities) == 22 + 7  # références des articles et fiches
 
 
 # --- script lancé par la CI -------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("on", ["2026-09-27", "2026-11-01"])
+@pytest.mark.parametrize("on", ["2026-09-27", "2026-11-01", "2026-11-02", "2027-03-01"])
 def test_script_reussit_hors_horizon(on, capsys):
     assert script().main(["--jours", "60", "--date", on]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out == {"date": on, "horizon_jours": 60, "echeances": []}
-
-
-def test_script_echoue_avec_la_source_et_la_date(capsys):
-    assert script().main(["--jours", "60", "--date", "2026-11-02"]) == 1
-    err = json.loads(capsys.readouterr().err)
-    assert err["erreur"] == "sources du corpus qui expirent dans les 60 jours"
-    assert err["echeances"] == [
-        {"source": L441_10, "fin_de_validite": "2027-01-01"},
-        {"source": FICHE, "fin_de_validite": "2027-01-01"},
-    ]
 
 
 def test_script_echoue_sur_une_fiche_non_relue(corpus_synthetique, capsys):

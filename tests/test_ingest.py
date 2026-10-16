@@ -48,16 +48,47 @@ def test_ingestion_rejouable(pg, ingested):
 
 
 def test_version_bornee_stockee(pg, ingested):
-    [(valid_until, amendment)] = set(
+    versions = set(
         query(
             pg,
-            "SELECT valid_until, amendment FROM rag_chunks WHERE embedding_model = %s "
-            "AND reference = 'C. com., art. L441-10'",
+            "SELECT valid_from, valid_until, amendment FROM rag_chunks"
+            " WHERE embedding_model = %s AND reference = 'C. com., art. L441-10'",
             EMBEDDER.model,
         )
     )
-    assert valid_until == date(2027, 1, 1)
-    assert amendment == "modification : Ordonnance n°2019-359 du 24 avril 2019 - art. 1"
+    assert versions == {
+        (
+            date(2019, 4, 26),
+            date(2027, 1, 1),
+            "modification : Ordonnance n°2019-359 du 24 avril 2019 - art. 1",
+        ),
+        (
+            date(2027, 1, 1),
+            None,
+            "modification : Ordonnance n°2026-671 du 27 juillet 2026 - art. 2",
+        ),
+    }
+
+
+def test_deux_versions_de_l441_10_stockees(pg, ingested):
+    """Migration 009 : chaque version a toutes ses lignes, paragraphes communs compris
+    (le II et le III sont identiques dans les deux versions)."""
+    rows, _ = ingested
+    expected = sum(r.reference == "C. com., art. L441-10" for r in rows)
+    [(stored,)] = query(
+        pg,
+        "SELECT count(*) FROM rag_chunks WHERE embedding_model = %s"
+        " AND reference = 'C. com., art. L441-10'",
+        EMBEDDER.model,
+    )
+    shared = query(
+        pg,
+        "SELECT content_hash FROM rag_chunks WHERE embedding_model = %s"
+        " AND reference = 'C. com., art. L441-10'"
+        " GROUP BY domain, content_hash HAVING count(*) = 2",
+        EMBEDDER.model,
+    )
+    assert stored == expected and shared
 
 
 def test_note_stockee_hors_du_texte(pg, ingested):
@@ -124,11 +155,12 @@ def test_sync_remplace_un_extrait_dont_la_validite_change(pg, ingested):
     [(valid_until,)] = query(
         pg,
         "SELECT valid_until FROM rag_chunks WHERE embedding_model = %s AND reference = %s"
-        " AND chunk_index = %s AND domain = %s",
+        " AND chunk_index = %s AND domain = %s AND valid_from IS NOT DISTINCT FROM %s",
         EMBEDDER.model,
         target.reference,
         target.chunk_index,
         target.domain,
+        target.valid_from,
     )
     assert valid_until == date(2028, 1, 1)
 
@@ -167,12 +199,13 @@ def test_rattachement_modifie_extrait_remplace(pg, ingested):
 
 
 def stored_hashes(pg) -> dict[tuple, str]:
+    """Empreinte stockée de chaque extrait : (référence, version, domaine, rang)."""
     return {
-        (reference, domain, index): embedded
-        for reference, domain, index, embedded in query(
+        (reference, start, domain, index): embedded
+        for reference, start, domain, index, embedded in query(
             pg,
-            "SELECT reference, domain, chunk_index, embedded_hash FROM rag_chunks "
-            "WHERE embedding_model = %s",
+            "SELECT reference, valid_from, domain, chunk_index, embedded_hash"
+            " FROM rag_chunks WHERE embedding_model = %s",
             EMBEDDER.model,
         )
     }
@@ -185,7 +218,8 @@ def test_en_tete_et_empreinte_du_texte_embarque_stockes(pg, ingested):
         assert row.embedded_hash == corpus.embedded_hash(
             PREFIX, corpus.embedded_text(row.header, row.text)
         )
-        assert stored[(row.reference, row.domain, row.chunk_index)] == row.embedded_hash
+        key = (row.reference, row.valid_from, row.domain, row.chunk_index)
+        assert stored[key] == row.embedded_hash
     [(header,)] = set(
         query(
             pg,

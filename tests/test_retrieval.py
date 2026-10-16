@@ -380,3 +380,33 @@ def test_parite_sql_python_corpus_synthetique(pg, synthetique, on, domain, kind)
         (r.reference, r.valid_from) for r in corpus_text.drop_superseded(lignes, on)
     }
     assert rendus == attendus and rendus
+
+
+@pytest.fixture
+def reel(pg):
+    """Corpus réel indexé (embedding de test) : L441-10 et ses deux versions."""
+    lignes = ingestion.rows(EMBEDDER, MAX_WORDS, "")
+    sources = sorted({r.source_id for r in lignes})
+    assert rag_store.insert(pg.admin, lignes) == len(lignes)
+    yield lignes, sources
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute(
+            "DELETE FROM rag_chunks WHERE embedding_model = %s AND source_id = ANY(%s)",
+            (EMBEDDER.model, sources),
+        )
+
+
+@pytest.mark.parametrize(
+    "on", [date(2026, 8, 19), date(2026, 12, 31), date(2027, 1, 1)]
+)
+def test_parite_sql_python_corpus_reel(pg, reel, on):
+    lignes, sources = reel
+    found = search(pg, "financier", "délai de paiement", DELAI, k=1000, on=on)
+    rendus = {(p.reference, p.valid_from) for p in found if p.source_id in sources}
+    candidates = [r for r in lignes if r.domain == "financier" and DELAI in r.kinds]
+    attendus = {
+        (r.reference, r.valid_from) for r in corpus_text.drop_superseded(candidates, on)
+    }
+    assert rendus == attendus
+    l441 = {start for ref, start in rendus if ref == "C. com., art. L441-10"}
+    assert l441 == {date(2027, 1, 1) if on >= date(2027, 1, 1) else date(2019, 4, 26)}
