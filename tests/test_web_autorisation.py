@@ -85,6 +85,7 @@ def analyse(web: TestClient, who: str, identifier: str = "c-attente"):
         "/analyse",
         data={
             "csrf": form_token(web, who),
+            "profil": "fournisseur",
             "source": "texte",
             "texte": PENDING_TEXT,
             "identifiant": identifier,

@@ -51,6 +51,7 @@ def analyse_demo(web, contract_id: str) -> str:
         "/analyse",
         data={
             "csrf": token,
+            "profil": "fournisseur",
             "source": "jeu",
             "contrat": contract_id,
             "identifiant": contract_id,
@@ -78,7 +79,12 @@ def test_formulaire_limite_aux_contrats_du_jeu(demo):
     token = csrf(web)
     response = web.post(
         "/analyse",
-        data={"csrf": token, "source": "texte", "texte": "Contrat collé."},
+        data={
+            "csrf": token,
+            "profil": "fournisseur",
+            "source": "texte",
+            "texte": "Contrat collé.",
+        },
     )
     assert response.status_code == 400
     assert "contrats du jeu" in response.text

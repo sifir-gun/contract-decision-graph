@@ -334,6 +334,7 @@ def analyse(client: httpx.Client, contract: str, identifier: str) -> httpx.Respo
         "/analyse",
         data={
             "csrf": token[1],
+            "profil": "fournisseur",
             "source": "jeu",
             "contrat": contract,
             "identifiant": identifier,

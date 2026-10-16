@@ -98,6 +98,8 @@ def test_fiche_sans_texte_du_contrat(piege):
         None,
     )
     assert fiche.revue_humaine_en_attente
+    assert fiche.profil == "fournisseur"
+    assert presentation.dossier(piege, citations=False).profil == "fournisseur"
     assert fiche.decisions_permises == ["GO", "GO_RESERVES", "NO_GO"]
     assert fiche.tentatives_d_instruction == 2
     assert fiche.analyse_par == MCP
@@ -176,6 +178,7 @@ def test_masquage_compte_seulement(service):
 def test_fiche_liste_blanche():
     assert set(presentation.Summary.model_fields) == {
         "thread_id",
+        "profil",
         "etat",
         "date_analyse",
         "decision_proposee",
@@ -385,7 +388,19 @@ def test_liste_des_contrats(service, piege):
         None,
     )
     assert row.debut and row.mise_a_jour
+    assert row.profil == "fournisseur"
     json.loads(listing.model_dump_json())
+
+
+def test_profil_inconnu_jamais_rendu(service, piege):
+    """Le profil rendu est l'un des profils connus : un autre est refusé par la vue, pas
+    transmis à l'assistant."""
+    status = {**piege["status"], "profil": "sous_traitance"}
+    with pytest.raises(ValidationError):
+        presentation.summary(status)
+    [row] = [r for r in service.contracts() if r["thread_id"] == "piege"]
+    with pytest.raises(ValidationError):
+        presentation.contracts([{**row, "profil": "sous_traitance"}])
 
 
 def test_citation_non_verifiee_attribuee_au_llm(piege):

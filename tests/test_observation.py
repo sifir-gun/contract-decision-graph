@@ -248,6 +248,7 @@ def test_contexte_d_un_client_mcp_ignore(otel, monkeypatch):
     trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
     for flags in ("01", "00"):
         arguments = {
+            "profil": "fournisseur",
             "contrat_du_jeu": "demo-01-go-maintenance",
             "identifiant": f"c-{flags}",
         }

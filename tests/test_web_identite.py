@@ -154,7 +154,13 @@ def test_origine_des_formulaires_comparee_a_l_adresse_publique():
     web = authenticated()
     page = web.get("/analyse", headers=BEARER)
     token = page.text.split('name="csrf" value="')[1].split('"')[0]
-    form = {"csrf": token, "source": "texte", "texte": CONTRACT_TEXT, "partie": "X"}
+    form = {
+        "csrf": token,
+        "profil": "fournisseur",
+        "source": "texte",
+        "texte": CONTRACT_TEXT,
+        "partie": "X",
+    }
     local = web.post(
         "/analyse", data=form, headers=BEARER | {"origin": "http://127.0.0.1:8000"}
     )

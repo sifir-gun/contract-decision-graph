@@ -12,7 +12,7 @@
     <span class="badge badge-{{ s.proposed_decision|lower }}">{{ decisions[s.proposed_decision] }}</span>
     {% endif %}
     <span class="state state-{{ d.etat }}">{{ states[d.etat] }}</span>
-    <span class="meta">analysé à la date du {{ s.analysis_date or "—" }}</span>
+    <span class="meta">profil {{ s.profil }}, analysé à la date du {{ s.analysis_date or "—" }}</span>
   </p>
   {% if s.reject_reason %}
   <p class="error">Rejeté à l'entrée : {{ s.reject_reason }}</p>

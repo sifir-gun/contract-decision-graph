@@ -133,7 +133,10 @@ def test_ordre_d_arret_rend_pas_pret():
 @pytest.mark.parametrize(
     ("path", "data"),
     [
-        ("/analyse", {"source": "texte", "texte": CONTRACT_TEXT}),
+        (
+            "/analyse",
+            {"profil": "fournisseur", "source": "texte", "texte": CONTRACT_TEXT},
+        ),
         ("/contrats/c1/decision", {"decision": "NO_GO"}),
         ("/administration/expiration", {"heures": "24", "confirme": "oui"}),
     ],
@@ -185,6 +188,7 @@ def post_slow(base: str, token: str, cookies, results: list):
     with httpx.Client(base_url=base, cookies=cookies, timeout=WAIT) as web:
         data = {
             "csrf": token,
+            "profil": "fournisseur",
             "source": "texte",
             "texte": SLOW_TEXT,
             "identifiant": "c-lent",

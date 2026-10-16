@@ -44,6 +44,7 @@ from cdg.application.service import ContractService
 from cdg.domain import audit
 from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import ContractIdError
+from cdg.domain.profiles import PROFILES
 from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
 from cdg.ports.locks import ContractBusy
@@ -160,6 +161,8 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
     _, contracts = demo_set.load()
     # identifiants du jeu, énumérés dans le schéma de l'outil d'analyse
     DemoContract = Literal[tuple(sorted(contracts))]  # type: ignore[valid-type]
+    # profils connus, énumérés de même : obligatoire, sans défaut
+    ProfileChoice = Literal[PROFILES]  # type: ignore[valid-type]
     parameters: dict[str, frozenset[str]] = {}  # arguments de chaque outil
     server = MCPServer(
         name=NAME,
@@ -174,7 +177,8 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         name="analyser_contrat",
         title="Analyser un contrat",
         description=(
-            "Lance l'analyse d'un contrat : un contrat du jeu de démonstration "
+            "Lance l'analyse d'un contrat sous le profil indiqué (profil, obligatoire : "
+            "jamais déduit du texte) : un contrat du jeu de démonstration "
             "(contrat_du_jeu) ou un texte fourni (texte), l'un ou l'autre. Le texte est "
             "masqué avant l'analyse (adresses, téléphones, IBAN, SIRET, parties "
             "déclarées), comme par l'interface et la CLI. Rend la fiche du contrat : "
@@ -194,6 +198,10 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         ),
     )
     def analyser_contrat(
+        profil: Annotated[
+            ProfileChoice,  # type: ignore[valid-type]
+            Field(description="profil du contrat : " + ", ".join(PROFILES)),
+        ],
         contrat_du_jeu: Annotated[
             DemoContract | None,  # type: ignore[valid-type]
             Field(description="identifiant d'un contrat du jeu de démonstration"),
@@ -221,6 +229,9 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         ] = None,
     ) -> presentation.Summary:
         def run() -> presentation.Summary:
+            # le schéma refuse déjà un profil inconnu ; la saisie commune le vérifie
+            # aussi, comme à l'interface web
+            profile = saisie.profile(profil)
             if (contrat_du_jeu is None) == (texte is None):
                 raise InputError(
                     "un contrat du jeu (contrat_du_jeu) ou un texte (texte), l'un ou "
@@ -241,7 +252,7 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
                     entry.text,
                     contract_id=contract_id,
                     actor=actor,
-                    profile="fournisseur",  # provisoire : choix du profil en tâche 6
+                    profile=profile,
                     parties=entry.parties,
                     analysis_date=on,
                 )

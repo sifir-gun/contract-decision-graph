@@ -35,8 +35,10 @@ from web_helpers import CONFIG, PENDING_TEXT, memory_service
 
 from cdg import cli
 from cdg.adapters.mcp import server as mcp_server
-from cdg.application import demo_set
+from cdg.application import demo_set, saisie
+from cdg.application.saisie import InputError
 from cdg.application.service import FourEyesRefused
+from cdg.domain import profiles
 from cdg.domain.authorization import Actor
 
 _, _EXPECTED = load_expected()
@@ -143,12 +145,25 @@ def test_schema_enumere_les_contrats_du_jeu(real):
     enums = [option["enum"] for option in choice["anyOf"] if "enum" in option]
     assert enums == [sorted(demo_set.load()[1])]
     assert set(schema["properties"]) == {
+        "profil",
         "contrat_du_jeu",
         "texte",
         "parties",
         "identifiant",
         "date_analyse",
     }
+
+
+def test_schema_exige_un_profil_enumere(real):
+    """Le profil est obligatoire, sans défaut, et limité aux profils connus."""
+    server, _ = real
+    schema = tools(server)["analyser_contrat"].input_schema
+    assert schema["required"] == ["profil"]
+    profil = schema["properties"]["profil"]
+    # un Literal à une seule valeur s'écrit `const` en JSON Schema, `enum` à plusieurs
+    assert profil.get("enum", [profil.get("const")]) == list(profiles.PROFILES)
+    assert "default" not in profil
+    assert "fournisseur" in profil["description"]
 
 
 def test_schemas_de_sortie_en_liste_blanche(real):
@@ -188,7 +203,11 @@ def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
     result = call(
         server,
         "analyser_contrat",
-        {"contrat_du_jeu": contract_id, "identifiant": contract_id},
+        {
+            "profil": "fournisseur",
+            "contrat_du_jeu": contract_id,
+            "identifiant": contract_id,
+        },
     )
     assert not result.is_error, seen(result)
     fiche = result.structured_content
@@ -210,7 +229,9 @@ def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
 
 def test_demo_texte_libre_refuse(demo):
     server, service = demo
-    result = call(server, "analyser_contrat", {"texte": CONTRACT_TEXT})
+    result = call(
+        server, "analyser_contrat", {"profil": "fournisseur", "texte": CONTRACT_TEXT}
+    )
     assert "contrats du jeu seulement" in error_text(result)
     assert service.contracts() == []
 
@@ -219,7 +240,9 @@ def test_analyse_du_jeu_parties_masquees(demo):
     server, service = demo
     contract_id = "demo-06-no-go-conseil"
     result = call(
-        server, "analyser_contrat", {"contrat_du_jeu": contract_id, "parties": ["X"]}
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "contrat_du_jeu": contract_id, "parties": ["X"]},
     )
     fiche = result.structured_content
     assert fiche["masquage"]["PARTIE"] > 0
@@ -234,7 +257,12 @@ def test_analyse_d_un_texte_fourni_masque(real):
     result = call(
         server,
         "analyser_contrat",
-        {"texte": text, "parties": ["Alpha Synthétique"], "identifiant": "c-1"},
+        {
+            "profil": "fournisseur",
+            "texte": text,
+            "parties": ["Alpha Synthétique"],
+            "identifiant": "c-1",
+        },
     )
     fiche = result.structured_content
     assert fiche["masquage"] == {"EMAIL": 1, "PARTIE": 1}
@@ -253,7 +281,9 @@ def answer(actor: Actor) -> dict:
 def test_analyse_mcp_scellee_avec_son_canal(real):
     server, service = real
     result = call(
-        server, "analyser_contrat", {"texte": PENDING_TEXT, "identifiant": "c-attente"}
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "texte": PENDING_TEXT, "identifiant": "c-attente"},
     )
     assert result.structured_content["etat"] == "en_attente"
     # revue dans l'interface authentifiée : autre canal, refusée (quatre yeux)
@@ -276,7 +306,11 @@ def test_ni_decision_ni_expiration_par_le_canal_mcp_meme_hors_outils(real):
     """Défense en profondeur : même sans outil, le service refuse une décision ou une
     expiration du canal mcp, avant le graphe ; le contrat reste en attente."""
     server, service = real
-    call(server, "analyser_contrat", {"texte": PENDING_TEXT, "identifiant": "c-mcp"})
+    call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "texte": PENDING_TEXT, "identifiant": "c-mcp"},
+    )
     with pytest.raises(FourEyesRefused, match="jamais de décision"):
         service.decide("c-mcp", answer(MCP_ACTOR))
     with pytest.raises(FourEyesRefused, match="jamais de décision"):
@@ -298,8 +332,16 @@ def test_ni_decision_ni_expiration_par_le_canal_mcp_meme_hors_outils(real):
 
 def test_lister_contrats(real):
     server, _ = real
-    call(server, "analyser_contrat", {"texte": PENDING_TEXT, "identifiant": "c-a"})
-    call(server, "analyser_contrat", {"texte": CONTRACT_TEXT, "identifiant": "c-b"})
+    call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "texte": PENDING_TEXT, "identifiant": "c-a"},
+    )
+    call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "texte": CONTRACT_TEXT, "identifiant": "c-b"},
+    )
     every = call(server, "lister_contrats").structured_content["contrats"]
     assert {r["thread_id"]: r["etat"] for r in every} == {
         "c-a": "en_attente",
@@ -311,7 +353,11 @@ def test_lister_contrats(real):
 
 def test_consulter_dossier(real):
     server, _ = real
-    call(server, "analyser_contrat", {"texte": CONTRACT_TEXT, "identifiant": "c-1"})
+    call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "texte": CONTRACT_TEXT, "identifiant": "c-1"},
+    )
     result = call(server, "consulter_dossier", {"thread_id": "c-1"})
     dossier = result.structured_content
     assert (dossier["etat"], dossier["decision_finale"]) == ("termine", "GO")
@@ -328,7 +374,11 @@ def test_verifier_journal(real):
     server, _ = real
     empty = call(server, "verifier_journal").structured_content
     assert (empty["conforme"], empty["enregistrements"]) == (True, 0)
-    call(server, "analyser_contrat", {"texte": CONTRACT_TEXT, "identifiant": "c-1"})
+    call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "texte": CONTRACT_TEXT, "identifiant": "c-1"},
+    )
     report = call(server, "verifier_journal").structured_content
     assert (report["conforme"], report["enregistrements"]) == (True, 1)
     other = call(server, "verifier_journal", {"tete_attendue": "0" * 64})
@@ -360,7 +410,8 @@ def test_contrat_piege_analyse_sans_texte_du_contrat(demo):
 
     async def steps(client):
         analysed = await client.call_tool(
-            "analyser_contrat", {"contrat_du_jeu": PIEGE, "identifiant": "piege"}
+            "analyser_contrat",
+            {"profil": "fournisseur", "contrat_du_jeu": PIEGE, "identifiant": "piege"},
         )
         consulted = await client.call_tool("consulter_dossier", {"thread_id": "piege"})
         return analysed, consulted
@@ -376,7 +427,11 @@ def test_contrat_piege_analyse_sans_texte_du_contrat(demo):
 
 def test_contrat_piege_citations_enveloppees(demo):
     server, service = demo
-    call(server, "analyser_contrat", {"contrat_du_jeu": PIEGE, "identifiant": "piege"})
+    call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "contrat_du_jeu": PIEGE, "identifiant": "piege"},
+    )
     result = call(
         server, "consulter_dossier", {"thread_id": "piege", "citations": True}
     )
@@ -400,7 +455,11 @@ def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
         analysed = call(
             server,
             "analyser_contrat",
-            {"contrat_du_jeu": contract_id, "identifiant": contract_id},
+            {
+                "profil": "fournisseur",
+                "contrat_du_jeu": contract_id,
+                "identifiant": contract_id,
+            },
         )
         consulted = call(
             server,
@@ -420,7 +479,7 @@ def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
 
 def test_identifiant_deja_pris_erreur_explicite(real):
     server, _ = real
-    arguments = {"texte": CONTRACT_TEXT, "identifiant": "c-1"}
+    arguments = {"profil": "fournisseur", "texte": CONTRACT_TEXT, "identifiant": "c-1"}
     assert not call(server, "analyser_contrat", arguments).is_error
     refused = error_text(call(server, "analyser_contrat", arguments))
     assert "c-1 existe déjà" in refused
@@ -442,8 +501,54 @@ def test_identifiant_deja_pris_erreur_explicite(real):
 )
 def test_arguments_incoherents_erreur_sans_analyse(real, arguments, message):
     server, service = real
-    assert message in error_text(call(server, "analyser_contrat", arguments))
+    given = {"profil": "fournisseur", **arguments}
+    assert message in error_text(call(server, "analyser_contrat", given))
     assert service.contracts() == []
+
+
+def test_analyser_contrat_sans_profil_refuse(real):
+    """Assistant configuré avant la mise à jour : résultat d'erreur qui nomme le profil,
+    rien n'est analysé, aucun contrat créé."""
+    server, service = real
+    result = call(server, "analyser_contrat", {"texte": CONTRACT_TEXT})
+    assert "profil" in error_text(result)
+    assert service.contracts() == []
+
+
+@pytest.mark.parametrize("profil", ["", "Fournisseur", "sous_traitance"])
+def test_analyser_contrat_profil_inconnu_refuse(real, profil):
+    server, service = real
+    arguments = {"profil": profil, "texte": CONTRACT_TEXT}
+    assert "profil" in error_text(call(server, "analyser_contrat", arguments))
+    assert service.contracts() == []
+
+
+def test_profil_passe_par_la_saisie_commune(real, monkeypatch):
+    """En plus du schéma, le profil est validé par `saisie.profile`, comme à l'interface
+    web ; un refus de la saisie est une erreur d'outil explicite, sans analyse."""
+    server, service = real
+    seen_by_input = []
+    genuine = saisie.profile
+
+    def spy(raw):
+        seen_by_input.append(raw)
+        return genuine(raw)
+
+    monkeypatch.setattr(saisie, "profile", spy)
+    arguments = {"profil": "fournisseur", "texte": CONTRACT_TEXT, "identifiant": "c-1"}
+    assert not call(server, "analyser_contrat", arguments).is_error
+    assert seen_by_input == ["fournisseur"]
+    assert service.dossier("c-1")["status"]["profil"] == "fournisseur"
+
+    def refuse(raw):
+        raise InputError("profil refusé par la saisie")
+
+    monkeypatch.setattr(saisie, "profile", refuse)
+    refused = error_text(
+        call(server, "analyser_contrat", {**arguments, "identifiant": "c-2"})
+    )
+    assert refused.endswith("profil refusé par la saisie")
+    assert [r["thread_id"] for r in service.contracts()] == ["c-1"]
 
 
 @pytest.mark.parametrize(
@@ -451,7 +556,11 @@ def test_arguments_incoherents_erreur_sans_analyse(real, arguments, message):
     [
         ("lister_contrats", {"en_attente_seulement": True}, "en_attente_seulement"),
         ("consulter_dossier", {"thread_id": "c-1", "citation": True}, "citation"),
-        ("analyser_contrat", {"texte": CONTRACT_TEXT, "decision": "GO"}, "decision"),
+        (
+            "analyser_contrat",
+            {"profil": "fournisseur", "texte": CONTRACT_TEXT, "decision": "GO"},
+            "decision",
+        ),
     ],
 )
 def test_argument_inconnu_erreur_explicite(real, tool, arguments, unknown):
@@ -493,7 +602,11 @@ def test_texte_trop_long_rejete_et_scelle(real):
     server, service = real
     text = "Le présent contrat " * (CONFIG.input.max_chars // 10)
     assert len(text) > CONFIG.input.max_chars
-    result = call(server, "analyser_contrat", {"texte": text, "identifiant": "long"})
+    result = call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "texte": text, "identifiant": "long"},
+    )
     fiche = result.structured_content
     assert fiche["etat"] == "rejete" and fiche["rejet"].startswith("texte trop long")
     assert [e["thread_id"] for e in service.journal()] == ["long"]

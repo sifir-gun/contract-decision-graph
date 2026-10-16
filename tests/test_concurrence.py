@@ -355,7 +355,13 @@ def test_journal_en_memoire_supporte_les_ajouts_simultanes():
 
 
 def post_analysis(web: TestClient, token: str, text: str, identifier: str):
-    data = {"csrf": token, "source": "texte", "texte": text, "identifiant": identifier}
+    data = {
+        "csrf": token,
+        "profil": "fournisseur",
+        "source": "texte",
+        "texte": text,
+        "identifiant": identifier,
+    }
     return web.post("/analyse", data=data)
 
 

@@ -1,8 +1,8 @@
 """Saisie d'un contrat à analyser, commune aux portes qui reçoivent un texte : l'interface
 web (formulaire) et le serveur MCP (arguments d'un outil). Une règle, deux portes :
-contrat du jeu de démonstration ou texte fourni, parties à masquer, identifiant et date
-d'analyse. La CLI lit un fichier et nomme son contrat d'après lui : elle ne passe pas par
-ici.
+profil du contrat, contrat du jeu de démonstration ou texte fourni, parties à masquer,
+identifiant et date d'analyse. La CLI lit un fichier et nomme son contrat d'après lui : elle
+ne passe pas par ici (son option `--profil` est limitée aux profils connus par argparse).
 
 Rien n'est masqué ici : le texte part tel quel au service, qui le masque avant le graphe
 (`orchestrator.run_contract`). Les messages d'erreur ne citent jamais le texte du contrat
@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from cdg.application import demo_set
+from cdg.domain import profiles
 from cdg.domain.identifiers import ContractIdError, check_contract_id
+from cdg.domain.profiles import Profile
 
 # caractères de contrôle hors tabulation et fins de ligne : pas du texte brut
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -31,6 +33,17 @@ class ContractInput:
     text: str
     parties: list[str]  # noms à masquer avant l'analyse
     base: str  # base de l'identifiant par défaut
+
+
+def profile(raw: str) -> Profile:
+    """Profil saisi, obligatoire et jamais déduit : absent, vide, d'une autre casse ou
+    inconnu, il est refusé. Le message cite les profils admis, jamais la valeur reçue."""
+    try:
+        return profiles.parse(raw)
+    except ValueError:
+        raise InputError(
+            f"profil absent ou inconnu ; profils : {', '.join(profiles.PROFILES)}"
+        ) from None
 
 
 def _names(parties: Sequence[str]) -> list[str]:
