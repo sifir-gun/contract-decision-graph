@@ -52,6 +52,9 @@ def autre_profil(monkeypatch):
         domain_kinds={"financier": ("delai_paiement", "frais_x")},
         value_units={"delai_paiement": "jours"},
         kind_categories={"delai_paiement": ("date_facture",)},
+        parties=profiles.Parties(
+            "donneur d'ordre", "du donneur d'ordre", "sous-traitant", "du sous-traitant"
+        ),
     )
     monkeypatch.setattr(profiles, "PROFILES", ("fournisseur", "autre"))
     monkeypatch.setattr(
