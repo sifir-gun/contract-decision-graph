@@ -218,8 +218,17 @@ def test_retrieve_compte_les_passes_et_trace_les_requetes():
 class Unfiltered(FakeRetriever):
     """Adaptateur fautif : ignore la clause demandée."""
 
-    def search(self, domain, query, *, kind, k):
+    def search(self, domain, query, *, kind, k, on):
         return list(self.passages.get(domain, []))[:k]
+
+
+def test_retrieve_passe_la_date_d_analyse():
+    retriever = FakeRetriever({"financier": [passage(L441)]})
+    state = crag.start(
+        "financier", clause_of("delai_paiement"), date(2027, 2, 1), "fournisseur"
+    )
+    crag.retrieve(state, retriever=retriever, top_k=3)
+    assert retriever.dates == [date(2027, 2, 1)]
 
 
 def test_retrieve_refuse_un_extrait_non_rattache_a_la_clause():
@@ -381,6 +390,69 @@ def test_generate_sans_extrait_pertinent():
     result = _generated([], queries=["q1", "q2"], attempts=2)
     assert result.trace.retained == []
     assert (result.trace.passes, result.trace.queries) == (2, ["q1", "q2"])
+    assert result.findings == []
+
+
+# --- versions successives : la date d'analyse choisit (docs/spec-versions-corpus.md) ----
+
+D19, D27 = date(2019, 4, 26), date(2027, 1, 1)
+OUT_OF_FORCE = (
+    "références pertinentes toutes hors de leur période de vigueur pour la clause "
+    "delai_paiement : elles ne peuvent pas justifier seules le verdict"
+)
+
+
+def not_yet(reference, on, start):
+    return (
+        f"référence pas encore en vigueur à la date d'analyse ({on}) : {reference}, "
+        f"version en vigueur à partir du {start}, non retenue (delai_paiement)"
+    )
+
+
+@pytest.mark.parametrize("on", [date(2026, 12, 31), D27])
+def test_generate_version_a_venir_ecartee_sans_constat(on):
+    relevant = [
+        passage(L441, valid_from=D27),
+        passage(L441, id=2, valid_from=D19, valid_until=D27),
+    ]
+    result = _generated(relevant, on=on)
+    assert (result.trace.retained, result.trace.expired) == ([L441], [])
+    assert result.findings == []
+
+
+def test_generate_reference_a_venir_signalee():
+    relevant = [
+        passage(L441, valid_from=D19, valid_until=D27),
+        passage(L441, id=2, valid_from=D27),
+    ]
+    result = _generated(relevant, on=date(2019, 1, 1))
+    assert (result.trace.retained, result.trace.expired) == ([], [])
+    assert result.findings == [
+        not_yet(L441, "2019-01-01", "2019-04-26"),
+        OUT_OF_FORCE,
+    ]
+
+
+def test_generate_cloture_mixte():
+    relevant = [passage(L441, valid_until=D19), passage(FICHE, id=2, valid_from=D27)]
+    result = _generated(relevant, on=date(2026, 6, 1))
+    assert (result.trace.retained, result.trace.expired) == ([], [L441])
+    expired, later, closing = result.findings
+    assert expired.startswith("référence expirée") and L441 in expired
+    assert later == not_yet(FICHE, "2026-06-01", "2027-01-01")
+    assert closing == OUT_OF_FORCE
+
+
+def test_generate_expiree_cite_la_fin_de_la_derniere_version():
+    relevant = [
+        passage(L441, valid_until=D19),
+        passage(L441, id=2, valid_from=D19, valid_until=D27),
+    ]
+    result = _generated(relevant, on=date(2027, 3, 1))
+    assert result.trace.expired == [L441]
+    finding, closing = result.findings
+    assert "jusqu'au 2027-01-01" in finding and "2019-04-26" not in finding
+    assert closing.startswith("références pertinentes toutes expirées")
 
 
 # --- combine : les clauses recherchées, sans statut (déduit par la justification) ---------

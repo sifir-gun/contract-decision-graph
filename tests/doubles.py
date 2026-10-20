@@ -9,6 +9,7 @@ from cdg.application.deps import Deps, ExtractionResult, RetrievalResult, Templa
 from cdg.domain import audit, profiles
 from cdg.domain.authorization import Actor, interface_actor
 from cdg.domain.config import load_config
+from cdg.domain.corpus import drop_superseded
 from cdg.domain.identity import Identity
 from cdg.domain.models import (
     DOMAINS,
@@ -268,7 +269,13 @@ class HashEmbedder:
 
 
 def passage(
-    reference: str, domain="financier", valid_until=None, text=None, id=1, kinds=None
+    reference: str,
+    domain="financier",
+    valid_until=None,
+    text=None,
+    id=1,
+    kinds=None,
+    valid_from=None,
 ) -> Passage:
     """Extrait de test ; rattaché par défaut à toutes les clauses de son domaine."""
     return Passage(
@@ -278,6 +285,7 @@ def passage(
         reference=reference,
         text=text or f"Texte de {reference}.",
         distance=0.1,
+        valid_from=valid_from,
         valid_until=valid_until,
         kinds=list(FOURNISSEUR.domain_kinds[domain]) if kinds is None else kinds,
     )
@@ -285,7 +293,8 @@ def passage(
 
 class FakeRetriever:
     """Doublure des ports Retriever et CorpusSearch : extraits fixes par domaine, filtrés
-    par clause comme l'adaptateur ; requêtes et clauses enregistrées."""
+    par clause et par date (versions supplantées écartées) comme l'adaptateur ; requêtes,
+    clauses et dates enregistrées."""
 
     def __init__(
         self, passages: dict | None = None, embedded_hashes: dict | None = None
@@ -296,31 +305,40 @@ class FakeRetriever:
         self.calls: list[tuple[str, str, int]] = []
         self.searched_kinds: list[str] = []
         self.unfiltered_calls: list[tuple[str, int]] = []
+        self.dates: list[date] = []
 
-    def search(self, domain, query: str, *, kind: str, k: int) -> list[Passage]:
+    def search(
+        self, domain, query: str, *, kind: str, k: int, on: date
+    ) -> list[Passage]:
         self.calls.append((domain, query, k))
         self.searched_kinds.append(kind)
-        return [p for p in self.passages.get(domain, []) if kind in p.kinds][:k]
+        self.dates.append(on)
+        found = [p for p in self.passages.get(domain, []) if kind in p.kinds]
+        return drop_superseded(found, on)[:k]
 
-    def search_unfiltered(self, query: str, *, k: int) -> list[Passage]:
-        """Port CorpusSearch : tous les extraits, chacun une fois (même référence, même
-        texte), dans l'ordre des domaines puis des extraits."""
+    def search_unfiltered(self, query: str, *, k: int, on: date) -> list[Passage]:
+        """Port CorpusSearch : versions supplantées écartées, puis tous les extraits,
+        chacun une fois (même référence, même texte), dans l'ordre des domaines puis des
+        extraits."""
         self.unfiltered_calls.append((query, k))
+        self.dates.append(on)
+        every = [p for passages in self.passages.values() for p in passages]
         unique: dict[tuple[str, str], Passage] = {}
-        for passages in self.passages.values():
-            for p in passages:
-                unique.setdefault((p.reference, p.text), p)
+        for p in drop_superseded(every, on):
+            unique.setdefault((p.reference, p.text), p)
         return list(unique.values())[:k]
 
-    def indexed(self) -> list[tuple[str, str, str | None]]:
-        """Port CorpusSearch : extraits (référence, texte, empreinte du texte embarqué),
-        chacun une fois."""
+    def indexed(self) -> list[tuple[str, date | None, str, str | None]]:
+        """Port CorpusSearch : extraits (référence, début de validité, texte, empreinte
+        du texte embarqué), chacun une fois."""
         unique = dict.fromkeys(
-            (p.reference, p.text)
+            (p.reference, p.valid_from, p.text)
             for passages in self.passages.values()
             for p in passages
         )
-        return [(r, t, self.embedded_hashes.get((r, t))) for r, t in unique]
+        return [
+            (r, start, t, self.embedded_hashes.get((r, t))) for r, start, t in unique
+        ]
 
 
 # horloge fixe des tests : l'horodatage scellé ne varie pas d'une exécution à l'autre

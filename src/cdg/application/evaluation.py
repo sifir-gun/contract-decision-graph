@@ -16,6 +16,7 @@ Les métriques sont des fonctions pures de `domain/evaluation.py`.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -134,12 +135,18 @@ class EvaluationSetOutdated(Exception):
 
 
 def check_index(corpus: CorpusSearch, max_words: int, passage_prefix: str) -> int:
-    """Extraits indexés du modèle, comparés un à un (référence, texte, empreinte du
-    texte embarqué) aux extraits que donnent les fichiers du corpus et le code de
+    """Extraits indexés du modèle, comparés un à un (référence, début de validité de la
+    version, texte, empreinte du texte embarqué) aux extraits que donnent les fichiers du
+    corpus et le code de
     l'en-tête ; leur nombre, s'ils sont identiques. Un en-tête changé sans réindexer
     laisse des vecteurs périmés : jamais mesurés."""
     wanted = {
-        (meta["reference"], meta["text"], embedded_hash(passage_prefix, embedded))
+        (
+            meta["reference"],
+            meta.get("valid_from"),
+            meta["text"],
+            embedded_hash(passage_prefix, embedded),
+        )
         for meta, embedded, _ in ingestion.pending_chunks(max_words)
     }
     found = corpus.indexed()
@@ -199,11 +206,12 @@ def measure(
     retriever: Retriever,
     corpus: CorpusSearch,
     ks: Sequence[int],
+    on: date,
 ) -> dict[str, Any]:
     """Rappel et précision de chaque requête aux rangs `ks`, avec et sans filtre, pour
     toutes les références et pour les articles seuls ; puis leurs moyennes. Une recherche
     par requête et par mode, au rang le plus grand : la recherche exacte rend les mêmes
-    premiers extraits à tout rang."""
+    premiers extraits à tout rang. Versions jugées à la date `on`, comme le CRAG."""
     fiches = {ingestion.fiche_reference(f) for f in ingestion.load_fiches()}
     k_max = max(ks)
     rows: list[dict[str, Any]] = []
@@ -213,8 +221,8 @@ def measure(
             "articles": [r.reference for r in q.expected if r.type == "article"],
         }
         found = {
-            "filtre": retriever.search(q.domain, q.query, kind=q.kind, k=k_max),
-            "sans_filtre": corpus.search_unfiltered(q.query, k=k_max),
+            "filtre": retriever.search(q.domain, q.query, kind=q.kind, k=k_max, on=on),
+            "sans_filtre": corpus.search_unfiltered(q.query, k=k_max, on=on),
         }
         row: dict[str, Any] = {
             "domaine": q.domain,
@@ -249,6 +257,7 @@ def run(
     ks: Sequence[int] = DEFAULT_KS,
     *,
     profile: Profile,
+    on: date,
 ) -> dict[str, Any]:
     """Mesure de la recherche seule (commande `mesure-recherche`), avec les réglages de
     recherche que l'appelant a donnés à l'adaptateur, ceux de la configuration : le jeu du
@@ -263,9 +272,10 @@ def run(
     )
     ranks = sorted(set(ks))
     return {
+        "date": on.isoformat(),  # versions jugées à cette date
         "recherche": config.crag.search.model_dump(),
         "extraits": chunks,
         "requetes": len(queries),
         "k": ranks,
-        **measure(queries, retriever, corpus, ranks),
+        **measure(queries, retriever, corpus, ranks, on),
     }

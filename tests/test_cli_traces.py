@@ -80,6 +80,14 @@ def keys(monkeypatch):
 
 
 @pytest.fixture
+def no_keys(monkeypatch):
+    """Aucune clé, comme en CI, quel que soit le .env du poste : vides, car load_env (dans
+    `cli.main`) ne remplace pas une variable présente, et un secret vide vaut absent."""
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "")
+
+
+@pytest.fixture
 def analysed_by_mcp(monkeypatch):
     """`run_stdio` remplacé : le serveur MCP de démonstration analyse le contrat piégé
     pendant la commande ; la télémétrie du processus est relevée à ce moment."""
@@ -129,7 +137,7 @@ def test_destination_par_variable_d_environnement(
     assert [path for path, _, _ in receiver.requests] == ["/otel/v1/traces"]
 
 
-def test_destination_sans_cle_refusee(receiver, analysed_by_mcp, capsys):
+def test_destination_sans_cle_refusee(receiver, no_keys, analysed_by_mcp, capsys):
     assert launch("--traces", f"http://127.0.0.1:{receiver.port}/otel") == 1
     error = json.loads(capsys.readouterr().err)
     assert (

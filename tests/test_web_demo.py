@@ -11,6 +11,7 @@ from datetime import date
 
 import demo_set as expected_set
 import pytest
+from corpus_de_test import SECOND_FILE, T1, edit_manifest, raw, replace_line
 from web_helpers import client, csrf
 
 from cdg import cli
@@ -20,6 +21,7 @@ from cdg.adapters.web import server
 from cdg.application import demo_set, ingestion
 from cdg.domain import masking
 from cdg.domain.config import load_config
+from cdg.domain.corpus import drop_superseded
 from cdg.domain.models import Clause
 
 CONFIG = load_config()
@@ -203,14 +205,21 @@ def test_references_par_rattachement_declare():
     assert result.usage == []  # ni recherche vectorielle ni juge LLM
 
 
-def test_reference_expiree_signalee_jamais_retenue():
+def test_reference_expiree_signalee_jamais_retenue(corpus_synthetique):
+    # corpus synthétique réduit à sa première version, expirée le 01/01/2027
+    raw(corpus_synthetique, SECOND_FILE).unlink()
+    edit_manifest(corpus_synthetique, lambda s: s.pop("later_versions"))
+    replace_line(
+        corpus_synthetique / "fiches" / "test.md",
+        "T1: [2019-04-26, 2027-01-01]",
+        "T1: [2019-04-26]",
+    )
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
     result = crag("financier", [clause], date(2027, 3, 1), "fournisseur")
     [trace] = result.trace.clauses
-    assert "C. com., art. L441-10" in trace.expired
-    assert "C. com., art. L441-10" not in trace.retained
-    assert any("expirée" in f for f in result.trace.findings)
+    assert T1 in trace.expired and T1 not in trace.retained
+    assert any("expirée" in f and T1 in f for f in result.trace.findings)
 
 
 def test_commande_web_demo(monkeypatch, capsys):
@@ -237,3 +246,112 @@ def test_date_d_analyse_par_defaut_celle_des_attendus(demo):
     status = service.dossier("demo-01-go-maintenance")["status"]
     assert status["analysis_date"] == expected_on == date(2026, 9, 25)
     assert "25 septembre 2026" in web.get("/analyse").text
+
+
+def test_demo_version_a_venir_signalee(corpus_synthetique):
+    """Démonstration : la date d'analyse choisit la version ; avant la première, la
+    référence est signalée « pas encore en vigueur » et jamais retenue."""
+    crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
+    clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
+    [trace] = crag(
+        "financier", [clause], date(2026, 12, 31), "fournisseur"
+    ).trace.clauses
+    assert T1 in trace.retained
+    result = crag("financier", [clause], date(2019, 1, 1), "fournisseur")
+    [trace] = result.trace.clauses
+    assert T1 not in trace.retained and T1 not in trace.expired
+    assert any(
+        f.startswith("référence pas encore en vigueur") and T1 in f
+        for f in result.trace.findings
+    )
+
+
+# --- analyses antidatées : versions et fiches pas encore en vigueur ------------------------
+
+
+def test_demo_responsabilite_avant_l442_1():
+    crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
+    clause = Clause(
+        kind="responsabilite_fournisseur", present=True, quote="x", value=50
+    )
+    result = crag("juridique", [clause], date(2026, 6, 1), "fournisseur")
+    [trace] = result.trace.clauses
+    assert {"C. civ., art. 1170", "C. civ., art. 1171", "C. civ., art. 1231-3"} <= set(
+        trace.retained
+    )
+    later = [f for f in result.trace.findings if f.startswith("référence pas encore")]
+    assert any("C. com., art. L442-1" in f for f in later)
+    assert any(
+        "Fiche projet : Plafonds et clauses de responsabilité" in f for f in later
+    )
+
+
+def test_demo_delai_avant_2019_insuffisant(demo):
+    web, service = demo
+    response = web.post(
+        "/analyse",
+        data={
+            "csrf": csrf(web),
+            "profil": "fournisseur",
+            "source": "jeu",
+            "contrat": "demo-06-no-go-conseil",
+            "identifiant": "demo-06-antidate",
+            "date": "2019-01-01",
+        },
+    )
+    assert response.status_code == 303, response.text
+    verdicts = {v["domain"]: v for v in service.dossier("demo-06-antidate")["verdicts"]}
+    financier = verdicts["financier"]
+    assert financier["retrieval_status"] == "INSUFFISANT"
+    assert any("hors de leur période de vigueur" in f for f in financier["findings"])
+    later = [f for f in financier["findings"] if f.startswith("référence pas encore")]
+    # début de la première version cité, jamais celui de la version 2027
+    assert any(
+        "C. com., art. L441-10" in f and "à partir du 2019-04-26" in f for f in later
+    )
+    assert any("Délais de paiement entre professionnels" in f for f in later)
+
+
+# --- L441-10 : la date d'analyse choisit la version (ADR 009) --------------------------
+
+L441 = "C. com., art. L441-10"
+FICHE_DELAIS = "Fiche projet : Délais de paiement entre professionnels"
+
+
+@pytest.mark.parametrize(
+    "on,start",
+    [(date(2026, 12, 31), date(2019, 4, 26)), (date(2027, 1, 1), date(2027, 1, 1))],
+)
+def test_demo_l441_10_selon_la_date(on, start):
+    crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
+    clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
+    result = crag("financier", [clause], on, "fournisseur")
+    [trace] = result.trace.clauses
+    assert trace.retained == [L441, FICHE_DELAIS] and trace.expired == []
+    assert result.trace.findings == []
+    declared = [p for p in crag._passages if p.reference == L441]
+    assert {p.valid_from for p in drop_superseded(declared, on)} == {start}
+
+
+def test_dossier_texte_de_la_version_de_sa_date(demo):
+    web, service = demo
+    for identifier, on in [
+        ("demo-06-2026", "2026-12-31"),
+        ("demo-06-2027", "2027-01-01"),
+    ]:
+        response = web.post(
+            "/analyse",
+            data={
+                "csrf": csrf(web),
+                "profil": "fournisseur",
+                "source": "jeu",
+                "contrat": "demo-06-no-go-conseil",
+                "identifiant": identifier,
+                "date": on,
+            },
+        )
+        assert response.status_code == 303, response.text
+    old = service.dossier("demo-06-2026")["references"][L441]["texte"]
+    new = service.dossier("demo-06-2027")["references"][L441]["texte"]
+    assert "code général des impôts" in old and "code des impositions" not in old
+    assert "code des impositions sur les biens et services" in new

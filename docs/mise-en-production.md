@@ -52,8 +52,8 @@ Le verrou du service (analyse, décision humaine, expiration) ne vaut que dans u
 
 ### Mise à jour du corpus
 
-- [ ] **Processus de mise à jour** des textes publics et des fiches, avec leurs dates de validité : récupération, nettoyage, fiches revues, `ingest`, série de contrôle.
-- [ ] **Première échéance** : la version de l'article L441-10 du corpus et la fiche qui la reprend cessent d'être valides le 01/01/2027 (journal, mode démonstration).
+- [ ] **Processus de mise à jour** des textes publics et des fiches, avec leurs dates de validité : récupération, nettoyage, fiches revues, `ingest`, série de contrôle. Procédure des versions successives écrite (16/10, ADR 009, `docs/exploitation.md`) ; reste la série de contrôle.
+- [x] **Première échéance** (16/10) : la version de L441-10 en vigueur à partir du 01/01/2027 est au corpus à côté de celle de 2019, la date d'analyse choisit ; la fiche a été relue contre les deux (ADR 009).
 - [x] **Alerte avant l'échéance** d'une version du corpus (27/09) : le job `audit` de la CI, à chaque pull request et chaque lundi, échoue si une source cesse d'être valide dans les 60 jours, avec la source et la date (`scripts/echeances_corpus.py`).
 
 ### Évaluation en CI

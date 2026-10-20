@@ -14,6 +14,7 @@ seuls, requête par requête et en moyenne ; sans LLM.
 
 import re
 from dataclasses import replace
+from datetime import date
 
 import psycopg
 import pytest
@@ -34,8 +35,10 @@ from cdg.ports.retriever import Passage
 
 CONFIG = load_config()
 MAX_WORDS = CONFIG.corpus.chunk_max_words
+ON = date(2026, 10, 1)  # date à laquelle le jeu a été figé
 QUERIES = evaluation.load_queries()
-TEXTS = ingestion.reference_texts()
+# citations du jeu vérifiées contre les textes en vigueur à la date où il a été figé
+TEXTS = ingestion.reference_texts(ON)
 FICHES = {ingestion.fiche_reference(f) for f in ingestion.load_fiches()}
 
 
@@ -170,14 +173,17 @@ PREFIX = CONFIG.embedding.passage_prefix
 
 
 def corpus_double(
-    drop: int | None = None, extra: bool = False, stale: int | None = None
+    drop: int | None = None,
+    extra: bool = False,
+    stale: int | None = None,
+    max_words: int = MAX_WORDS,
 ) -> FakeRetriever:
     """Corpus réel (fichiers) dans la doublure, à distance nulle : l'ordre des extraits
     est celui de l'ingestion. `drop` retire un extrait, `extra` en ajoute un inconnu,
     `stale` laisse à un extrait l'empreinte d'un ancien texte embarqué."""
     passages: dict[str, list[Passage]] = {}
     hashes: dict[tuple[str, str], str] = {}
-    pending = ingestion.pending_chunks(MAX_WORDS)
+    pending = ingestion.pending_chunks(max_words)
     for index, (meta, embedded, declared) in enumerate(pending):
         if index == drop:
             continue
@@ -192,6 +198,8 @@ def corpus_double(
                     reference=meta["reference"],
                     text=meta["text"],
                     distance=0.0,
+                    valid_from=meta.get("valid_from"),
+                    valid_until=meta["valid_until"],
                     kinds=kinds,
                 )
             )
@@ -231,7 +239,7 @@ def test_mesure_avec_filtre_rappel_plein_sauf_les_ecarts_au_rattachement():
     clause : l'article 1211 (durée non chiffrée), déclaré pour le préavis seul, et
     l'article 28 du RGPD (localisation des données), déclaré pour l'accord seul."""
     double = corpus_double()
-    report = evaluation.measure(QUERIES, double, double, ks=(1, 500))
+    report = evaluation.measure(QUERIES, double, double, ks=(1, 500), on=ON)
     rows = by_query(report)
     assert len(rows) == 21
     for query, row in rows.items():
@@ -247,7 +255,7 @@ def test_mesure_avec_filtre_rappel_plein_sauf_les_ecarts_au_rattachement():
 
 def test_mesure_sans_filtre_tout_le_corpus_et_moyennes_par_k():
     double = corpus_double()
-    report = evaluation.measure(QUERIES, double, double, ks=(4, 500))
+    report = evaluation.measure(QUERIES, double, double, ks=(4, 500), on=ON)
     rows = by_query(report)
     for row in rows.values():
         assert row["sans_filtre"]["toutes"][500]["rappel"] == 1.0
@@ -290,7 +298,7 @@ def test_articles_seuls_les_fiches_occupent_leur_rang_sans_compter():
         {"financier": [passage(1, fiche), passage(2, "C. com., art. L441-10")]}
         | {"juridique": [passage(3, article)]}
     )
-    row = evaluation.measure([q], double, double, ks=(1, 2, 3))["par_requete"][0]
+    row = evaluation.measure([q], double, double, ks=(1, 2, 3), on=ON)["par_requete"][0]
     toutes, articles = row["sans_filtre"]["toutes"], row["sans_filtre"]["articles"]
     assert toutes[1] == {"rappel": 0.5, "precision": 1.0}
     # au rang 1, la fiche seule : elle ne compte ni pour ni contre
@@ -324,6 +332,24 @@ def test_corpus_indexe_different_des_fichiers_erreur_explicite(double, detail):
         evaluation.check_index(double, MAX_WORDS, PREFIX)
 
 
+def test_corpus_indexe_sans_une_version_erreur_explicite(corpus_synthetique):
+    """Un paragraphe commun aux deux versions (découpage à 5 mots) indexé pour une seule
+    version, comme sous la clé d'avant la migration 009 : la comparaison par version le
+    voit, celle par texte seul ne le voyait pas."""
+    double = corpus_double(max_words=5)
+    for passages in double.passages.values():
+        passages[:] = [
+            p
+            for p in passages
+            if not (
+                p.valid_from == date(2027, 1, 1)
+                and p.text == "Alinéa commun aux deux versions."
+            )
+        ]
+    with pytest.raises(evaluation.IndexMismatch, match="1 extrait\\(s\\) manquant"):
+        evaluation.check_index(double, 5, PREFIX)
+
+
 def test_jeu_en_retard_sur_le_jeu_de_demonstration_erreur_explicite(monkeypatch):
     real = evaluation.demo_queries(CONFIG, "fournisseur")
     added = evaluation.DemoQuery("financier", "delai_paiement", "requête neuve", ("x",))
@@ -332,7 +358,7 @@ def test_jeu_en_retard_sur_le_jeu_de_demonstration_erreur_explicite(monkeypatch)
     )
     double = corpus_double()
     with pytest.raises(evaluation.EvaluationSetOutdated) as exc:
-        evaluation.run(CONFIG, double, double, ks=(4,), profile="fournisseur")
+        evaluation.run(CONFIG, double, double, ks=(4,), profile="fournisseur", on=ON)
     assert "requête neuve" in str(exc.value) and real[0].query in str(exc.value)
 
 
@@ -345,7 +371,7 @@ def test_run_compare_au_jeu_du_profil(monkeypatch, tmp_path):
     monkeypatch.setitem(evaluation.EVALUATION_SETS, "fournisseur", reduced)
     double = corpus_double()
     with pytest.raises(evaluation.EvaluationSetOutdated, match="requêtes des constats"):
-        evaluation.run(CONFIG, double, double, ks=(4,), profile="fournisseur")
+        evaluation.run(CONFIG, double, double, ks=(4,), profile="fournisseur", on=ON)
 
 
 def test_run_exige_le_profil():
@@ -356,8 +382,11 @@ def test_run_exige_le_profil():
 
 def test_run_verifie_puis_mesure():
     double = corpus_double()
-    report = evaluation.run(CONFIG, double, double, ks=(1, 4), profile="fournisseur")
+    report = evaluation.run(
+        CONFIG, double, double, ks=(1, 4), profile="fournisseur", on=ON
+    )
     assert report["requetes"] == 21 and report["k"] == [1, 4]
+    assert report["date"] == "2026-10-01"  # date à laquelle les versions sont jugées
     # réglages de la recherche mesurée, ceux de la configuration
     assert report["recherche"] == CONFIG.crag.search.model_dump()
     assert report["extraits"] == len(ingestion.pending_chunks(MAX_WORDS))
@@ -410,11 +439,15 @@ def test_commande_mesure_recherche_mesure_le_profil_demande(
         return {"requetes": 0}
 
     monkeypatch.setattr(cli.evaluation, "run", run)
+    monkeypatch.setattr(cli, "today", lambda: ON)
     code, out = run_cli(
         capsys, "mesure-recherche", "--profil", "fournisseur", "--k", "4"
     )
     assert code == 0 and out["mesure_recherche"] == "ok"
-    assert seen == {"retriever": "retriever", "kwargs": {"profile": "fournisseur"}}
+    assert seen == {
+        "retriever": "retriever",
+        "kwargs": {"profile": "fournisseur", "on": ON},
+    }
 
 
 @pytest.mark.pg

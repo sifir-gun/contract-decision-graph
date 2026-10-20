@@ -8,7 +8,10 @@ Règles de nettoyage explicites, testées sur les fichiers réels :
    des métadonnées (début, fin de validité, texte modificateur), pas du contenu indexé ;
 2. lignes d'interface en fin de fichier (« Voir les versions »…) : supprimées ;
 3. notes « Conformément à … » : sorties du texte, conservées en métadonnée `note` ;
-4. la fin de validité est stockée ; `expired` dit si une version a expiré à une date.
+   l'étiquette « NOTA : » qui les précède sur la page est supprimée ;
+4. début et fin de validité sont stockés ; `expired` dit si une version a expiré à une
+   date, `in_force` si elle y est en vigueur, et `drop_superseded` écarte les versions
+   supplantées : la date d'analyse choisit la version (docs/spec-versions-corpus.md).
 
 Rattachement déclaré (J4) : chaque article du manifeste et chaque fiche déclarent les types
 de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (`by_domain`).
@@ -16,10 +19,11 @@ de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (
 
 import hashlib
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any
+from pathlib import PurePosixPath
+from typing import Any, Protocol
 
 from pydantic import BaseModel, model_validator
 
@@ -52,10 +56,14 @@ _MONTHS = {
 }
 _DATE = r"(\d{1,2}(?:er)? [a-zéû]+ \d{4})"
 _VERSION = re.compile(
-    rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE})$"
+    rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE}"
+    rf"|à partir du {_DATE})$"
 )
 _AMENDMENT = re.compile(r"^(Modifié par|Création) (.+)$")
 _NOTE = re.compile(r"^Conformément (?:à|aux?) ")
+# étiquette de la page devant la note, seule sur sa ligne ou suivie de la note ; espaces
+# insécables comprises (\s en Unicode)
+_NOTE_LABEL = re.compile(r"^NOTA\s*:\s*(.*)$")
 _INTERFACE = ("Voir les versions", "Comparer les versions", "Textes liés")
 _TITLE = re.compile(r"^Article (\S+)$")
 
@@ -70,6 +78,49 @@ def french_date(text: str) -> date:
 def expired(valid_until: date | None, on: date) -> bool:
     """Version expirée à la date `on` : sa fin de validité est atteinte."""
     return valid_until is not None and on >= valid_until
+
+
+def in_force(valid_from: date | None, valid_until: date | None, on: date) -> bool:
+    """Version en vigueur à la date `on` : commencée (aucun début, ou début atteint) et
+    non expirée."""
+    return (valid_from is None or valid_from <= on) and not expired(valid_until, on)
+
+
+class Versioned(Protocol):
+    """Extrait ou ligne d'une version d'une référence du corpus."""
+
+    @property
+    def reference(self) -> str: ...
+
+    @property
+    def valid_from(self) -> date | None: ...
+
+    @property
+    def valid_until(self) -> date | None: ...
+
+
+def drop_superseded[T: Versioned](items: Sequence[T], on: date) -> list[T]:
+    """Écarte les versions supplantées à la date `on` : une référence garde sa version en
+    vigueur ; sans version en vigueur, sa version la plus proche de la date, la première à
+    venir, sinon la dernière expirée, que le CRAG signale avec sa date. Tous les extraits
+    de la version gardée restent ; ordre conservé."""
+    by_reference: dict[str, list[T]] = {}
+    for item in items:
+        by_reference.setdefault(item.reference, []).append(item)
+    kept: set[int] = set()
+    for versions in by_reference.values():
+        chosen = [i for i in versions if in_force(i.valid_from, i.valid_until, on)]
+        if not chosen:
+            future = [
+                i.valid_from for i in versions if i.valid_from and i.valid_from > on
+            ]
+            if future:
+                chosen = [i for i in versions if i.valid_from == min(future)]
+            else:  # aucune en vigueur, aucune à venir : toutes expirées, fin connue
+                last = max(i.valid_until for i in versions if i.valid_until)
+                chosen = [i for i in versions if i.valid_until == last]
+        kept.update(id(i) for i in chosen)
+    return [i for i in items if id(i) in kept]
 
 
 def expiring(
@@ -120,16 +171,35 @@ def _title(lines: list[str]) -> tuple[str, list[str]]:
     return match[1], lines[1:]
 
 
+def _check_note(text: str) -> str:
+    """Une note annoncée par « NOTA : » est une note reconnue (« Conformément à … ») :
+    sinon, elle entrerait en silence dans le texte indexé."""
+    if not _NOTE.match(text):
+        raise ValueError(
+            f"étiquette « NOTA : » suivie d'une note non reconnue : {text[:60]!r}"
+        )
+    return text
+
+
 def parse_legifrance(raw: str) -> Article:
     number, lines = _title(_lines_without_interface(raw))
     valid_from = valid_until = amendment = None
     body, notes = [], []
+    after_label = False  # l'étiquette « NOTA : » attend sa note à la ligne suivante
     for line in lines:
         stripped = line.strip()
+        if after_label and stripped:
+            _check_note(stripped)
+            after_label = False
         if version := _VERSION.match(stripped):
-            start, end, since = version.groups()
-            valid_from = french_date(start or since)
+            start, end, since, upcoming = version.groups()
+            valid_from = french_date(start or since or upcoming)
             valid_until = french_date(end) if end else None
+        elif label := _NOTE_LABEL.match(stripped):
+            if label[1]:
+                notes.append(_check_note(label[1]))
+            else:
+                after_label = True
         elif amended := _AMENDMENT.match(stripped):
             kind = "modification" if amended[1] == "Modifié par" else "création"
             amendment = (kind, amended[2])
@@ -137,6 +207,8 @@ def parse_legifrance(raw: str) -> Article:
             notes.append(stripped)
         else:
             body.append(line)
+    if after_label:
+        raise ValueError("étiquette « NOTA : » sans note")
     return Article(
         article=number,
         heading=None,
@@ -190,12 +262,33 @@ def chunk(text: str, max_words: int) -> list[str]:
 class Manifest:
     sources: dict[str, Any]
 
+    def __post_init__(self) -> None:
+        for sid, source in self.sources.items():
+            unknown = sorted(
+                set(source.get("later_versions", {})) - set(source["articles"])
+            )
+            if unknown:
+                raise ValueError(
+                    f"{sid} : versions suivantes d'un article non admis : "
+                    + ", ".join(unknown)
+                )
+
     def files(self) -> list[tuple[str, tuple[str, str]]]:
+        """Fichiers des articles admis, chaque version dans l'ordre : le fichier de
+        `file`, puis ceux des versions suivantes (`later_versions`)."""
         return [
-            (f"{s['directory']}/{s['file'].format(article=a)}", (sid, a))
+            (f"{s['directory']}/{name}", (sid, a))
             for sid, s in self.sources.items()
             for a in s["articles"]
+            for name in [
+                s["file"].format(article=a),
+                *(v["file"] for v in self.later(sid, a)),
+            ]
         ]
+
+    def later(self, source_id: str, article: str) -> list[dict[str, Any]]:
+        """Versions suivantes d'un article (fichier, url, date de récupération)."""
+        return list(self.sources[source_id].get("later_versions", {}).get(article, []))
 
     def excluded_files(self) -> list[str]:
         return [
@@ -206,6 +299,29 @@ class Manifest:
 
     def admits(self, source_id: str, article: str) -> bool:
         return article in self.sources.get(source_id, {}).get("articles", {})
+
+
+def check_chain(versions: Sequence[tuple[str, Article]]) -> None:
+    """Versions successives d'un article, (fichier, article) dans l'ordre du manifeste :
+    une version suivante est nommée par son début de validité (`…_AAAA-MM-JJ.txt`), la
+    fin de chacune est le début de la suivante, seule la dernière peut rester ouverte.
+    Tout écart est une erreur qui nomme le fichier."""
+    for index, (path, article) in enumerate(versions):
+        if index:
+            suffix = PurePosixPath(path).stem.rpartition("_")[2]
+            if article.valid_from is None or suffix != article.valid_from.isoformat():
+                raise ValueError(
+                    f"{path} : suffixe {suffix} différent du début de validité "
+                    f"{article.valid_from}"
+                )
+            previous_path, previous = versions[index - 1]
+            if previous.valid_until != article.valid_from:
+                raise ValueError(
+                    f"{path} : début de validité {article.valid_from}, fin de "
+                    f"{previous_path} : {previous.valid_until} : versions mal enchaînées"
+                )
+        if index < len(versions) - 1 and article.valid_until is None:
+            raise ValueError(f"{path} : version ouverte avant la dernière")
 
 
 # --- Rattachement aux types de clause --------------------------------------------------
@@ -235,6 +351,9 @@ class Fiche:
     title: str
     kinds: list[str]  # types de clause que la fiche peut justifier
     body: str
+    # (source, article) -> débuts de validité des versions contre lesquelles la fiche a
+    # été relue (`versions_verifiees`) ; absent : la première version seule
+    verified: Mapping[tuple[str, str], Sequence[date]] = field(default_factory=dict)
 
     @property
     def domains(self) -> list[Domain]:
@@ -259,6 +378,60 @@ def fiche_sections(body: str) -> dict[str, list[str]]:
         elif line.strip() and not line.lstrip().startswith("#") and current is not None:
             current.append(line)
     return sections
+
+
+Window = tuple[date | None, date | None]  # début et fin de validité ; None : sans borne
+
+
+def fiche_window(
+    fiche_id: str,
+    cited: set[tuple[str, str]],
+    verified: Mapping[tuple[str, str], Sequence[date]],
+    versions: Mapping[tuple[str, str], Sequence[Window]],
+) -> Window:
+    """Période de validité d'une fiche : pour chaque article cité, les versions qu'elle
+    déclare avoir relues, sinon la première seule ; la fiche vaut sur l'intersection de
+    ces périodes. Une version ajoutée sans relecture la fait donc expirer à son entrée en
+    vigueur. Déclaration incohérente ou intersection vide : erreur qui nomme la fiche."""
+    foreign = sorted(set(verified) - cited)
+    if foreign:
+        raise ValueError(
+            f"{fiche_id} : versions déclarées pour un article non cité : "
+            + ", ".join(f"{s} {a}" for s, a in foreign)
+        )
+    start: date | None = None
+    end: date | None = None
+    for key in sorted(cited):
+        chain = list(versions[key])
+        covered = chain[:1]
+        if key in verified:
+            if not verified[key]:
+                raise ValueError(
+                    f"{fiche_id} : aucune version déclarée pour {key[0]} {key[1]}"
+                )
+            starts = [version_start for version_start, _ in chain]
+            indexes = []
+            for declared in verified[key]:
+                if declared not in starts:
+                    raise ValueError(
+                        f"{fiche_id} : version du {declared} de {key[0]} {key[1]} "
+                        "absente du corpus"
+                    )
+                indexes.append(starts.index(declared))
+            if indexes != list(range(indexes[0], indexes[0] + len(indexes))):
+                raise ValueError(
+                    f"{fiche_id} : versions déclarées non consécutives pour "
+                    f"{key[0]} {key[1]}"
+                )
+            covered = chain[indexes[0] : indexes[-1] + 1]
+        first, last = covered[0][0], covered[-1][1]
+        if first is not None:
+            start = first if start is None else max(start, first)
+        if last is not None:
+            end = last if end is None else min(end, last)
+    if start is not None and end is not None and start >= end:
+        raise ValueError(f"{fiche_id} : fenêtre de validité vide ({start} → {end})")
+    return start, end
 
 
 def claim_lines(body: str) -> list[str]:

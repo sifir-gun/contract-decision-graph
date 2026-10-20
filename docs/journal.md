@@ -3393,6 +3393,94 @@ Les PR de Dependabot en attente, remises sur `main` (rebase par GitHub) et leurs
 
 - La suite principale passe de 2 388 à 2 391 (variable refusée, deux tests de la télémétrie de FastAPI) ; le total, de 2 570 à 2 573.
 
+## 2026-10-16 · OpenSSL de la base corrigé : exceptions `libssl3t64` retirées (branche `securite-libssl-deb13u3`)
+
+Les quatre exceptions de `libssl3t64` 3.5.7-1~deb13u2 (CVE-2026-54873, CVE-2026-72897, CVE-2026-84782, CVE-2026-84784 ; entrée du 01/10) ont expiré le 15/10 : depuis, `check.sh` échoue sur toute branche à l'étape du scan (« exception CVE-2026-54873 expirée le 2026-10-15 », la première du fichier), comme le job `image` de la CI. Constaté le 16/10 par deux branches en attente (mise à jour de L441-10, `profils-sous-traitance`).
+
+### Vérifications (16/10)
+
+- **Debian** (security-tracker, DSA-6531-1) : les quatre failles corrigées dans trixie-security par openssl 3.5.7-1~deb13u3.
+- **Base distroless** `cc-debian13:nonroot@sha256:e792ab3…` (PR #36 de Dependabot, du 05/10, fusionnée le 15/10 au soir) : `libssl3t64` 3.5.7-1~deb13u3, lu dans `/var/lib/dpkg/status.d` des variantes amd64 (`20afe6a7…`) et arm64 (`2f0295ce…`) de l'index. Le point 3 de la liste du 01/10 est fait ; l'entrée du 14/10 sur les PR de Dependabot ne l'avait pas relevé.
+- **Chaîne du projet** (`scripts/chaine.py`, Syft puis Grype), fichier d'exceptions vidé, sur une image arm64 construite le 16/10 depuis le même `Dockerfile` et le même `uv.lock` que `main` : « aucune faille critique ou haute corrigeable (0 exception(s)) » ; aucune correspondance sur `libssl3t64` ni sur OpenSSL, retenue ou ignorée.
+- **Étapes chart et image de `check.sh`**, rejouées à l'identique sur la branche (signatures des bases, construction, vérifications, inventaire et scan de l'application, du proxy de sortie et d'oauth2-proxy) : trois scans sans faille critique ou haute corrigeable, 0 exception. Ses tests n'ont pas passé en entier sur le poste, pour deux causes sans rapport avec ce changement : la base locale porte la migration 009 de la branche des versions du corpus (contrainte d'unicité de `rag_chunks` remplacée : 29 tests de l'ingestion et de la recherche en erreur sur `ON CONFLICT`), et le `.env` du poste fournit les clés de Langfuse que `test_destination_sans_cle_refusee` suppose absentes. La CI part d'une base neuve, sans `.env`.
+
+### Changements
+
+- `securite/exceptions-vulnerabilites.yaml` : plus aucune exception (`exceptions: []`) ; le commentaire dit pourquoi, et renvoie ici pour les copies que le scanner ne voit pas.
+- Tests : le passage d'une exception à Grype se vérifie sur un fichier construit (celui du produit est vide), et le message d'une exception expirée qui nomme son fichier aussi ; le fichier du produit n'a plus d'exception `libssl3t64`.
+
+### Ce qui reste ouvert : les copies d'OpenSSL que le scanner ne voit pas
+
+- **psycopg-binary 3.3.6**, dernière version sur PyPI le 16/10 : OpenSSL 3.5.8 (chaîne de version de sa `libcrypto`, lue dans l'image), touchée par les quatre failles selon l'avis d'OpenSSL (de 3.5.0 à 3.5.9 exclu) ; et, sur arm64, OpenSSL 1.1.1k FIPS de Kerberos, toujours chargée avec libpq, son code jamais appelé (`gssencmode=disable`). Point 1 de la liste du 01/10, non fait.
+- **Pas de correctif en vue** : la branche principale de psycopg compile encore ses roues avec OpenSSL 3.5.8 (`OPENSSL_VERSION` de `.github/workflows/packages-bin.yml`), et la 3.3.7 en préparation n'annonce rien sur OpenSSL (`docs/news.rst`).
+- **Python** : OpenSSL 3.5.9 depuis le 12/10 (point 2, fait).
+- Aucune exception de Grype ne peut porter ce suivi : Grype ne voit pas ces copies (psycopg-binary n'est pour lui qu'un paquet Python), et une exception sur la `libssl3t64` deb13u2, absente de l'image, ne correspondrait à rien. Exposition inchangée depuis le 01/10, selon une lecture du code et non une preuve : cliente TLS seulement (libpq, httpx) ; ni DTLS, ni QUIC, ni serveur TLS.
+- **Décision du propriétaire (16/10)** : suivi au journal seulement, revu à chaque nouvelle version de psycopg-binary proposée par Dependabot (version d'OpenSSL de sa `libcrypto` et, sur arm64, de la copie de Kerberos, lues dans l'image construite) ; le scan ne signalera pas leur passage à OpenSSL 3.5.9 ou plus.
+
+### Nombre de tests
+
+- La suite principale passe de 2 391 à 2 392 (passage d'une exception à Grype, sur un fichier construit) ; le total, de 2 573 à 2 574.
+
+## 2026-10-16 · Versions successives du corpus : L441-10 au 01/01/2027 (ADR 009)
+
+À partir du 02/11/2026, le contrôle des échéances de la CI échouait à chaque pull request : la version indexée de L441-10 cesse d'être en vigueur le 01/01/2027. Spec `docs/spec-versions-corpus.md`, plan `docs/plan-versions-corpus.md`.
+
+### Constat sur Légifrance (16/10, dans un navigateur, page par page)
+
+- Version suivante publiée : LEGIARTI000054567689, « Version en vigueur à partir du 01 janvier 2027 », « Modifié par Ordonnance n°2026-671 du 27 juillet 2026 - art. 2 », marquée « À VENIR ».
+- Comparaison officielle des deux versions : une seule modification, au 4e alinéa du I (facture périodique : du code général des impôts au code des impositions sur les biens et services). Délais inchangés : ni `payment_delay_*` ni la règle financière ne bougent.
+- Une version intermédiaire (ordonnance n° 2025-1247), remplacée avant d'entrer en vigueur, hors du corpus.
+- La page de l'ordonnance a déclenché la vérification anti-robots : non contournée, non lue.
+
+### Décisions du propriétaire (16/10)
+
+- Garder les deux versions ; la date d'analyse choisit (option A, de préférence au remplacement du fichier, avec ou sans contrôle du début de validité).
+- Même référence pour les deux versions ; une seule fiche, qui déclare les versions relues ; fichier brut d'abord prévu copié à la main par le propriétaire, puis, à sa demande, transcrit par l'agent (voir « Écarts »).
+- Recherche datée, même règle en SQL et dans le CRAG (approche 1) ; contrôle du début de validité pour tout le corpus.
+
+### Tests d'abord, réalisation
+
+- Règle pure `in_force`, `drop_superseded` ; `later_versions` au manifeste et `check_chain` ; parseur « à partir du » et étiquette « NOTA : » ; corpus synthétique des tests (`tests/corpus_de_test.py`, fixture `corpus_synthetique`).
+- Migration `009` : clé d'unicité avec `valid_from`, en `NULLS NOT DISTINCT` ; le rôle d'arbitre de `ON CONFLICT` d'un tel index, que la documentation de PostgreSQL 16 ne décrit pas, est prouvé par un test.
+- Recherche datée (port `Retriever`, recherche sans filtre, mesure) ; test de parité SQL/Python sur deux domaines et quatre dates ; `check_index` compare aussi la version (mutation : sans elle, une version manquante passait).
+- CRAG : constat « pas encore en vigueur », constat de clôture « hors de leur période de vigueur » ; rien d'ajouté au résumé scellé.
+- Fiches : `versions_verifiees`, fenêtre de validité par intersection ; échéances par référence ; texte daté des références dans le dossier ; jeu d'évaluation figé vérifié au 01/10/2026.
+
+### Écarts et décisions d'exécution
+
+- Ordre : le texte daté des références et les analyses antidatées passent de la tâche 8 et de la tâche 5 à la tâche 6 (sinon le jeu d'évaluation figé cassait dès le fichier 2027, et une fiche sans début de validité restait retenue) ; la documentation, avancée avant le fichier du propriétaire.
+- Recherche sans filtre : dédoublonnage laissé à (référence, empreinte du texte) ; le filtre de date ne laisse qu'une version par référence quand l'une est en vigueur.
+- Une déclaration `versions_verifiees` vide est refusée explicitement.
+- Les tests `pg` ont appliqué la migration `009` à la base locale du poste : un `ingest` lancé depuis `main` y échoue jusqu'à la fusion.
+- Fichier `L441-10_2027-01-01.txt` transcrit par l'agent, à la demande du propriétaire : page lue dans un navigateur, sans contourner la vérification anti-robots, texte reconstruit des éléments affichés du bloc de l'article ; empreinte SHA-256 du fichier identique à celle calculée dans la page ; relecture du propriétaire contre Légifrance demandée.
+
+### Relecture de toute la branche (sous-agent, 16/10)
+
+- Verdict « avec corrections », aucun défaut critique. Corrigés, chacun par un test d'abord en échec :
+  - en mode réel, la recherche groupée par référence (`DISTINCT ON (reference)`) pouvait rendre la version la plus éloignée d'une référence sans version en vigueur, et le constat scellé citer une date fausse : la règle ne garde plus que la version la plus proche de la date (la première à venir, sinon la dernière expirée), en Python comme en SQL (spec et ADR 009 mis à jour) ;
+  - l'étiquette « NOTA : » : espaces insécables et note sur la même ligne reconnues ; une note annoncée mais non reconnue est une erreur qui nomme le fichier, jamais du texte indexé en silence ;
+  - provenance du fichier transcrit, ici, et procédure de retour arrière (relancer `ingest` avec l'image antérieure).
+- Mineurs laissés : cache de `reference_texts` par date, commentaire périmé de la règle financière, forme générale du `DELETE` du retour arrière, dictionnaire par (source, article) d'un test payant, `valid_until` absent de `check_index`, messages d'erreur du manifeste et des fiches, lignes de docstrings.
+
+### Constat en passant
+
+- `tests/test_cli_traces.py::test_destination_sans_cle_refusee` dépend de l'environnement du poste : avec les clés Langfuse du `.env` (ajoutées le 15/10 pour l'observabilité locale), la commande trouve ses clés et le test échoue. La CI, sans `.env`, ne le voit pas. Hors de ce chantier : à corriger dans le test (CLAUDE.md : « on corrige le test, on ne l'exclut pas »). Ce chantier a tourné avec un `.env` réduit aux variables de la base, comme la CI. Corrigé à part par la PR #55 (fixture `no_keys` : les deux clés posées vides), fusionnée dans `main`, puis dans cette branche le 20/10.
+
+### Pistes
+
+- Veille des versions à venir des autres articles : la CI ne connaît que les fins déjà annoncées.
+- `mesure-recherche` est désormais datée : ne comparer deux mesures qu'à date égale de part et d'autre d'un changement de version.
+
+### Vérifications
+
+- `./scripts/check.sh --sans-cluster` (a66fd05, 16/10) : lint, types, audit, échéances du corpus (aucune au 16/10), 2 449 tests passés, PostgreSQL compris, 2 sautés, couverture de 98,60 % ; 119 tests du rendu des charts ; 20 sur l'image ; puis échec au scan de l'image, l'exception CVE-2026-54873 ayant expiré le 15/10/2026 (hors de ce chantier, réglé par la PR #56).
+- Après la fusion de `main` (PR #55 et #56, conflit du journal résolu en gardant les deux entrées du 16/10), `./scripts/check.sh --sans-cluster` (a3dfc1e, 20/10), avec le `.env` complet du poste, clés de Langfuse comprises : « check.sh : SUCCÈS » ; 2 450 tests passés, 2 sautés, couverture de 98,60 % ; 119 tests du rendu des charts, 20 sur l'image ; trois scans sans faille critique ou haute corrigeable, 0 exception.
+- Cluster : sauté en local (profil à 7 Go sur 8, pile Langfuse en marche) ; job `cluster` de la CI.
+
+### Nombre de tests
+
+- La suite principale passe de 2 389 à 2 449 tests passés (60 de plus : règle des versions, manifeste, migration, recherche datée et parité, CRAG, fiches, échéances, texte daté, étiquette NOTA, version 2027) ; 2 450 après la fusion de `main` (un test de la PR #56). Décompte de `pytest` (« passed ») : les entrées précédentes en comptent 2 de plus pour la même suite.
+
 ## 2026-10-16 · Profils de contrat, PR 1 : le profil explicite (branche `profils-sous-traitance`)
 
 Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmètre figé depuis la v1.1 pour ce seul chantier : servir un cabinet d'assistance à maîtrise d'ouvrage, avec un second genre de contrat, la sous-traitance. Spec : [spec-profils-sous-traitance.md](spec-profils-sous-traitance.md) ; décision : [ADR 010](adr-010-profils-de-contrat.md). Quatre PR. Celle-ci rend le profil explicite et ne change aucun comportement : le seul profil est `fournisseur`, qui reprend à l'identique les constantes, les règles, les tables du CRAG, les prompts et le schéma d'extraction.
