@@ -48,9 +48,11 @@ _PERCENT = ("%", 1)
 # chiffres seuls, puis « € », « euro(s) » ou « eur » (texte plié). Ni centimes (« 1,50 € »,
 # « 1.50 € »), ni lettres (« deux millions d'euros »), ni multiple (« 2 M€ ») : non lus,
 # ce qui mène à une nouvelle extraction puis à la revue humaine, sens prudent. Jamais le
-# reste d'un nombre (précédé d'un chiffre, d'un point ou d'une virgule).
+# reste d'un nombre, lu en partie : le montant n'est précédé ni d'un chiffre, d'un point
+# ou d'une virgule, ni d'un chiffre et d'une espace (« 1234 000 € », « 2 0000 € » : mal
+# groupés, non lus, jamais « 000 € »).
 _AMOUNT = re.compile(
-    r"(?<![\d.,])(\d{1,3}(?:[ .]\d{3})+|\d+)\s*(?:€|(?:euros?|eur)(?!\w))"
+    r"(?<![\d.,])(?<!\d )(\d{1,3}(?:[ .]\d{3})+|\d+)\s*(?:€|(?:euros?|eur)(?!\w))"
 )
 _EURO = "€"
 

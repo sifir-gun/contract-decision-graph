@@ -503,6 +503,23 @@ def test_formes_de_montant_non_lues(quote):
     assert not {q for q in verification.quantities(quote) if q[1] == "€"}
 
 
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "1234 000 €",  # premier groupe de quatre chiffres
+        "1 000000 €",  # dernier groupe de six chiffres
+        "2 0000 €",  # dernier groupe de quatre chiffres
+        "1.0000 €",  # idem, avec le point
+        "Le plafond est de 1234 000 € par sinistre.",  # au milieu d'une phrase
+    ],
+)
+def test_montant_mal_groupe_jamais_lu_en_partie(quote):
+    # le dernier groupe d'un nombre mal groupé n'est pas un montant : jamais (0.0, "€")
+    found = verification.quantities(quote)
+    assert (0.0, "€") not in found
+    assert not {q for q in found if q[1] == "€"}
+
+
 def test_montant_et_pourcentage_jamais_confondus():
     found = verification.quantities("5 % du montant, soit 2 000 000 €")
     assert (5.0, "%") in found and (2000000.0, "€") in found
