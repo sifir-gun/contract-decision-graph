@@ -14,7 +14,7 @@ import pytest
 from mistral_factice import serve
 
 from cdg.adapters.llm.mistral import MistralProvider
-from cdg.application import demo_set
+from cdg.application import demo_set, ingestion
 from cdg.application.crag import GradeOutput, RewriteOutput
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
@@ -155,7 +155,7 @@ def test_explication_acceptee_par_les_controles_du_domaine(factice):
         ],
     )
     draft, _ = LLMExplainer(provider(factice))(request, [], profile="fournisseur")
-    assert refusals(draft, request) == []
+    assert refusals(draft, request, names=ingestion.source_names()) == []
 
 
 def test_delai_reglable_et_appels_comptes(factice):

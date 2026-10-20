@@ -2,7 +2,8 @@
 versions successives, rattaché à deux domaines, et une fiche qui le cite. Données de
 test, aucun texte réel ; écrites dans un dossier temporaire par le fixture
 `corpus_synthetique` (conftest.py), qui y redirige `application/ingestion.py`.
-`add_points` y ajoute, à la demande d'un test, une source EUR-Lex à points d'annexe."""
+`add_points` y ajoute, à la demande d'un test, une source EUR-Lex à points d'annexe ;
+`write_homonyms` le réduit à deux sources homonymes."""
 
 from collections.abc import Callable
 from datetime import date
@@ -203,3 +204,49 @@ def replace_line(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     assert old in text, (path, old)
     path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+# --- paire d'homonymes (spec des profils, « Homonymes comparés par source ») -------------
+# Deux sources fictives au même numéro d'article, comme CPI, art. L112-2 et C. mon. fin.,
+# art. L112-2 : `write_homonyms` remplace par elles seules les sources du manifeste.
+
+HOMONYM = "L1-1"
+CODE_A, CODE_B = "code-a", "code-b"
+# noms de chaque source : sa citation et son titre au manifeste
+HOMONYM_NAMES = {
+    CODE_A: ("Code A", "Code synthétique A"),
+    CODE_B: ("Code B", "Code synthétique B"),
+}
+CODE_A_REF, CODE_B_REF = (
+    f"{HOMONYM_NAMES[code][0]}, art. {HOMONYM}" for code in (CODE_A, CODE_B)
+)
+
+
+def homonym_text(code: str) -> str:
+    return f"""Article {HOMONYM}
+Version en vigueur depuis le 01 janvier 2020
+Création Texte de test n°3 - art. 1
+
+Alinéa fictif de l'article {HOMONYM} du {code}.
+"""
+
+
+def write_homonyms(root: Path) -> None:
+    """Corpus écrit par `write` réduit à la paire d'homonymes : leurs fichiers, et le
+    manifeste qui ne déclare qu'elles."""
+    sources = {}
+    for code, (citation, title) in HOMONYM_NAMES.items():
+        (root / "raw" / code).mkdir()
+        (root / "raw" / code / f"{HOMONYM}.txt").write_text(
+            homonym_text(code), encoding="utf-8"
+        )
+        sources[code] = {
+            "format": "legifrance",
+            "citation": citation,
+            "title": title,
+            "directory": code,
+            "file": "{article}.txt",
+            "retrieved_at": date(2026, 10, 21),
+            "articles": {HOMONYM: ["responsabilite_fournisseur"]},
+        }
+    write_manifest(root, {"sources": sources})

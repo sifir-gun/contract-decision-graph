@@ -4,10 +4,12 @@ Le LLM n'explique que les constats ; la synthèse du parcours est écrite par le
 Jamais bloquante : une explication refusée est régénérée une fois (essais de la section
 `explain`), puis remplacée par le gabarit ; une erreur du LLM mène au gabarit, sauf une
 erreur passagère que la reprise du nœud relance (`retrying`, fourni par l'orchestrateur).
-La source, les essais et les motifs sont scellés avec l'explication.
+La source, les essais et les motifs sont scellés avec l'explication. Les noms des sources
+du corpus (`source_names`, lus dans le manifeste par l'orchestrateur à la construction du
+graphe) rattachent une citation à sa source : le nœud ne lit aucun fichier.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from cdg.application.deps import Explainer, TemplateOnly
@@ -23,6 +25,7 @@ def explain(
     state: ContractState,
     explainer: Explainer | TemplateOnly,
     decision_config: DecisionConfig,
+    source_names: Mapping[str, Sequence[str]],
     retrying: Callable[[Exception], bool],
 ) -> dict[str, Any]:
     request = explanation.request(state)
@@ -53,7 +56,7 @@ def explain(
             result = explanation.template(request, reasons=reasons, attempts=attempt)
             break
         usage.append(spent)
-        refused = explanation.refusals(draft, request)
+        refused = explanation.refusals(draft, request, names=source_names)
         if not refused:
             result = explanation.accepted(
                 draft, request, attempts=attempt, reasons=reasons

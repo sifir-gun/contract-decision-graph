@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 from corpus_de_test import (
+    CODE_A,
+    CODE_A_REF,
+    CODE_B,
+    CODE_B_REF,
     FICHE,
+    HOMONYM,
+    HOMONYM_NAMES,
     NBSP,
     POINT_A,
     POINT_A_REF,
@@ -18,6 +24,7 @@ from corpus_de_test import (
     point_raw,
     point_source,
     replace_line,
+    write_homonyms,
 )
 from doubles import HashEmbedder
 
@@ -326,21 +333,99 @@ def test_articles_ingérés():
     assert all(domains for _, domains in rows)
 
 
-def test_aucun_numero_d_article_commun_a_deux_sources():
-    # l'explication compare les articles et les points d'annexe cités par leur seul
-    # numéro normalisé (domain/explanation.py) : un numéro partagé par deux sources
-    # rendrait citable l'article d'une source quand seul celui de l'autre est retenu ;
-    # le numéro d'un point est lu dans sa référence comme celui d'un article
-    sources: dict[str, set[str]] = {}
+def shared_numbers() -> dict[str, dict[str, str]]:
+    """Numéros d'articles ou de points communs à plusieurs sources du corpus :
+    {numéro : {source : référence}}."""
+    by_number: dict[str, dict[str, str]] = {}
     for article, _ in ingestion.articles():
-        [number] = explanation.articles(article.reference)
-        sources.setdefault(number, set()).add(article.source_id)
-    shared = {n: sorted(s) for n, s in sources.items() if len(s) > 1}
-    assert not shared, (
-        f"numéros d'articles communs à plusieurs sources : {shared}. Passer, dans "
-        "domain/explanation.py, à une comparaison des articles cités par source et "
-        "numéro, puis retirer ce test."
+        by_number.setdefault(article.article, {})[article.source_id] = article.reference
+    return {n: sources for n, sources in by_number.items() if len(sources) > 1}
+
+
+def retaining(reference: str) -> explanation.ExplanationRequest:
+    """Demande d'explication d'un constat dont seule `reference` est retenue ; son texte,
+    écrit par les règles, ne cite aucun article."""
+    finding = explanation.FindingToExplain(
+        id="juridique-1",
+        domain="juridique",
+        kind="responsabilite_fournisseur",
+        text="Constat des règles, sans article cité.",
+        references=[reference],
     )
+    return explanation.ExplanationRequest(
+        decision="NO_GO",
+        proposed_decision="NO_GO",
+        margin=None,
+        human=None,
+        failure_stage=None,
+        findings=[finding],
+    )
+
+
+def citing(req: explanation.ExplanationRequest, text: str) -> explanation.Draft:
+    [finding] = req.findings
+    return explanation.Draft(
+        findings=[
+            explanation.ExplainedFinding(
+                id=finding.id,
+                kind=finding.kind,
+                references=finding.references,
+                text=text,
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize("corpus_lu", ["depot", "paire_synthetique"])
+def test_numeros_partages_du_corpus_compares_par_source(corpus_lu, request):
+    # l'explication rattache une citation à la source dont un nom la touche (citation ou
+    # titre du manifeste) et la compare par source et numéro ; sans nom, par son seul
+    # numéro (domain/explanation.py). Aucun homonyme au dépôt avant la sous-traitance
+    # (CPI et C. mon. fin., art. L112-2) : la paire synthétique donne son sens au test.
+    if corpus_lu == "paire_synthetique":
+        write_homonyms(request.getfixturevalue("corpus_synthetique"))
+    manifest = ingestion.load_manifest()
+    names = ingestion.source_names()
+    assert set(names) == set(manifest.sources)
+    # chaque source a des noms que le contrôle reconnaît, avant et après le numéro de
+    # chacun de ses articles, lu dans sa référence
+    for article, _ in ingestion.articles():
+        source, number = article.source_id, article.article
+        unit = manifest.unit(source)
+        assert explanation.citations(article.reference, names) == {(source, number)}
+        for name in names[source]:
+            for form in (f"{name}, {unit} {number}", f"{unit} {number} du {name}"):
+                assert explanation.citations(form, names) == {(source, number)}, form
+    shared = shared_numbers()
+    if corpus_lu == "paire_synthetique":
+        assert names == HOMONYM_NAMES
+        assert shared == {HOMONYM: {CODE_A: CODE_A_REF, CODE_B: CODE_B_REF}}
+    # chaque numéro partagé : la source retenue acceptée, l'autre refusée, sous les deux
+    # formes et par chacun de ses noms ; sans nom de source, accepté comme aujourd'hui
+    for number, sources in shared.items():
+        for retained, reference in sources.items():
+            req = retaining(reference)
+            for source in sources:
+                unit = manifest.unit(source)
+                for name in names[source]:
+                    for form in (
+                        f"{name}, {unit} {number}",
+                        f"{unit} {number} du {name}",
+                    ):
+                        reasons = explanation.refusals(
+                            citing(req, f"Voir {form}."), req, names=names
+                        )
+                        assert (reasons == []) == (source == retained), (form, reasons)
+            unnamed = citing(req, f"Voir {manifest.unit(retained)} {number}.")
+            assert explanation.refusals(unnamed, req, names=names) == []
+
+
+def test_source_sans_nom_refusee():
+    sources = {"code-x": {"citation": "C. x", "articles": {}}}
+    with pytest.raises(
+        ValueError, match="code-x : nom de source absent ou illisible .clé title."
+    ):
+        ingestion.source_names(corpus.Manifest(sources=sources))
 
 
 def test_date_de_recuperation_propre_a_un_article():

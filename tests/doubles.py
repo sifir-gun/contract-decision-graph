@@ -288,10 +288,12 @@ class FaithfulExplainer:
 
 class FakeCrag:
     """Doublure du CRAG : une référence par clause reçue (celles qui portent un constat),
-    aucune pour les domaines de `empty`, où le corpus ne justifie rien."""
+    `reference` si elle est donnée, aucune pour les domaines de `empty`, où le corpus ne
+    justifie rien."""
 
-    def __init__(self, empty=(), tokens_in=0, tokens_out=0):
+    def __init__(self, empty=(), tokens_in=0, tokens_out=0, reference=None):
         self.empty, self.tokens = set(empty), (tokens_in, tokens_out)
+        self.reference = reference
         self.calls: list[str] = []
         self.kinds: dict[str, list[str]] = {}  # clauses reçues, par domaine
         self.profiles: list[Profile] = []  # profil reçu à chaque appel
@@ -302,7 +304,7 @@ class FakeCrag:
         self.calls.append(domain)
         self.profiles.append(profile)
         self.kinds[domain] = [c.kind for c in clauses]
-        retained = [] if domain in self.empty else [f"{domain}-ref-1"]
+        retained = [] if domain in self.empty else [self.reference or f"{domain}-ref-1"]
         trace = RetrievalTrace(
             clauses=[
                 ClauseRetrieval(

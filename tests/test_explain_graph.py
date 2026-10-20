@@ -2,10 +2,12 @@
 motifs, hors de la partie décision ; reprise sur erreur passagère, puis gabarit ;
 l'explication ne bloque jamais le scellement. Doublures, journal en mémoire."""
 
+from corpus_de_test import CODE_A_REF, write_homonyms
 from doubles import (
     ANALYSIS_DATE,
     CONTRACT_TEXT,
     FaithfulExplainer,
+    FakeCrag,
     FakeLLM,
     FixedExtractor,
     MemoryAuditStore,
@@ -41,9 +43,11 @@ def transient(user: str) -> dict:
     raise LLMTransientError("503 : service indisponible")
 
 
-def run(explainer, config=CONFIG, cid="c-explain", **initial):
+def run(explainer, config=CONFIG, cid="c-explain", crag=None, **initial):
     store = MemoryAuditStore()
-    deps = make_deps(FixedExtractor(FOUND), audit_store=store, explainer=explainer)
+    deps = make_deps(
+        FixedExtractor(FOUND), crag=crag, audit_store=store, explainer=explainer
+    )
     graph = orchestrator.build_graph(config, deps).compile(
         checkpointer=InMemorySaver(serde=strict_serializer())
     )
@@ -135,3 +139,33 @@ def test_explication_recoit_le_profil_de_l_etat_dans_le_graphe():
     run(with_profile, cid="c-profil", profile="fournisseur")
     assert without.profiles == with_profile.profiles == ["fournisseur"]
     assert entry.record["explanation"]["source"] == "llm"
+
+
+def citing(text):
+    """Réponse du LLM d'explication : chaque constat recopié, le premier expliqué par
+    `text`."""
+
+    def answer(user):
+        faithful = faithful_explanation(user)
+        faithful["findings"][0]["text"] = text
+        return faithful
+
+    return answer
+
+
+def test_noms_des_sources_lus_dans_le_manifeste_a_la_construction(corpus_synthetique):
+    # corpus de test réduit à deux homonymes (code A, code B, art. L1-1) : seul
+    # « Code A, art. L1-1 » est retenu ; le contrôle reçoit les noms de leur manifeste
+    write_homonyms(corpus_synthetique)
+    crag = FakeCrag(reference=CODE_A_REF)
+    wrong = LLMExplainer(FakeLLM({"explain": citing("Voir l'article L1-1 du code B.")}))
+    _, refused = run(wrong, crag=crag, cid="c-code-b")
+    sealed = refused.record["explanation"]
+    assert sealed["source"] == "gabarit"
+    assert sealed["reasons"][0] == (
+        "essai 1 : juridique-1 : article cité hors des références retenues pour la "
+        "clause responsabilite_fournisseur : L1-1 (code-b)"
+    )
+    right = LLMExplainer(FakeLLM({"explain": citing("Voir l'article L1-1 du code A.")}))
+    _, accepted = run(right, crag=crag, cid="c-code-a")
+    assert accepted.record["explanation"]["source"] == "llm"

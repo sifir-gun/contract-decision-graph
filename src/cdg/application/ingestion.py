@@ -42,6 +42,22 @@ def load_manifest(path: Path | None = None) -> Manifest:
     return Manifest(sources=yaml.safe_load(text)["sources"])
 
 
+def source_names(manifest: Manifest | None = None) -> dict[str, tuple[str, ...]]:
+    """Noms de chaque source du manifeste, sa citation et son titre : le contrôle de
+    l'explication rattache par eux une citation à sa source (`explanation.citations`).
+    Un nom absent ou illisible est une erreur, qui nomme la source et la clé."""
+    manifest = manifest or load_manifest()
+    names: dict[str, tuple[str, ...]] = {}
+    for source_id, source in manifest.sources.items():
+        for key in ("citation", "title"):
+            if not isinstance(source.get(key), str) or not source[key].strip():
+                raise ValueError(
+                    f"{source_id} : nom de source absent ou illisible (clé {key})"
+                )
+        names[source_id] = (source["citation"], source["title"])
+    return names
+
+
 def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[str]]]:
     """Articles et points d'annexe admis, nettoyés, avec les types de clause qu'ils peuvent
     justifier : une `Article` par version, dans l'ordre, toutes sous la même référence

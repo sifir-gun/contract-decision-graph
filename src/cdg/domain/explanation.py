@@ -10,13 +10,19 @@ LLM peut décrire le parcours à tort. L'explication est refusée :
   libellés de décision) ;
 - si elle cite une référence non retenue pour la clause du constat : dans le champ
   `references`, ou un article ou un point d'annexe dans le texte. Un article que le texte
-  du constat cite lui-même reste citable : ce texte vient du code des règles, pas du LLM ;
+  du constat cite lui-même reste citable : ce texte vient du code des règles, pas du LLM.
+  Une citation qui nomme une source du corpus (citation ou titre du manifeste, reçus en
+  paramètre : le domaine ne lit aucun fichier) est comparée par source et numéro, une
+  citation sans nom par son seul numéro : deux sources peuvent porter le même numéro
+  (CPI et C. mon. fin., art. L112-2). Limite : un numéro partagé cité sans nom de source
+  passe, même s'il vise l'autre source ; le lecteur voit les références du constat, qui
+  la nomment ;
 - si elle n'explique pas chaque constat une fois et une seule, ou change sa clause.
 Le gabarit, sans LLM, passe ces contrôles ; il prend le relais après les essais refusés.
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -29,6 +35,7 @@ from cdg.domain.models import (
     HumanDecision,
     HumanReview,
 )
+from cdg.domain.text import folded
 
 Source = Literal["llm", "gabarit"]
 
@@ -159,6 +166,19 @@ _POINT = re.compile(
     rf"\bpoints?\s+({_POINT_NUMBER}(?:\s+(?:et|à|ou)\s+{_POINT_NUMBER})*)",
     re.IGNORECASE,
 )
+# Ce qui sépare une citation du nom de sa source, sur le texte sans casse
+# (`text.folded`). Avant elle, sous la forme des références : virgules et espaces, et
+# l'annexe d'un point (« Règl. (UE) 748/2012, annexe I, point 21.A.307 »). Après elle :
+# l'annexe d'un point, puis une préposition (« l'article L112-2 du code monétaire et
+# financier », « art. 28 RGPD ») ; une virgule l'arrête (« art. 46, par. 3, a) RGPD »).
+_BEFORE = re.compile(r"(?:[\s,]*\bannexes?(?:\s+[ivxlc]+\b)?)?[\s,]*\Z")
+_AFTER = re.compile(
+    r"\A\s*(?:de\s+l'annexe(?:\s+[ivxlc]+\b)?\s+)?(?:(?:du|des|de\s+la|de)\s+|de\s+l'|d')?"
+)
+_WORD = re.compile(r"\w")
+# noms des sources, sans casse, du plus long au plus court : (nom, source)
+_Lookup = list[tuple[str, str]]
+Citation = tuple[str | None, str]  # (source rattachée, ou None ; numéro)
 
 
 def named_decisions(text: str) -> set[Decision]:
@@ -171,32 +191,120 @@ def named_decisions(text: str) -> set[Decision]:
     return found
 
 
+def _lookup(names: Mapping[str, Sequence[str]]) -> _Lookup:
+    """Noms des sources sans casse, du plus long au plus court : le nom le plus long
+    l'emporte (« Code civil local » sur « Code civil »). Un nom vide, ou commun à deux
+    sources, est une erreur : il ne rattacherait une citation à aucune source sûre ; une
+    chaîne seule aussi, qui serait lue lettre par lettre."""
+    owners: dict[str, str] = {}
+    for source, own in names.items():
+        if isinstance(own, str):
+            raise TypeError(f"{source} : noms de source attendus en liste")
+        for name in own:
+            key = folded(name)
+            if not key:
+                raise ValueError(f"{source} : nom de source vide")
+            owner = owners.setdefault(key, source)
+            if owner != source:
+                raise ValueError(f"nom de source commun à {owner} et {source} : {name}")
+    return sorted(owners.items(), key=lambda item: len(item[0]), reverse=True)
+
+
+def _glued(char: str) -> bool:
+    return bool(_WORD.match(char))
+
+
+def _source_before(head: str, lookup: _Lookup) -> str | None:
+    """Source dont un nom finit `head`, le texte qui précède une citation."""
+    head = _BEFORE.sub("", head, count=1)
+    for name, source in lookup:
+        if head.endswith(name) and not _glued(head[-len(name) - 1 : -len(name)]):
+            return source
+    return None
+
+
+def _source_after(tail: str, lookup: _Lookup) -> str | None:
+    """Source dont un nom commence `tail`, le texte qui suit une citation."""
+    tail = _AFTER.sub("", tail, count=1)
+    for name, source in lookup:
+        if tail.startswith(name) and not _glued(tail[len(name) : len(name) + 1]):
+            return source
+    return None
+
+
+def _citations(text: str, lookup: _Lookup) -> set[Citation]:
+    text = folded(text)
+    found: set[Citation] = set()
+    for pattern, number, form in (
+        (_ARTICLE, _NUMBER, lambda n: re.sub(r"[.\s]", "", n).upper()),
+        (_POINT, _POINT_NUMBER, str.upper),
+    ):
+        for match in pattern.finditer(text):
+            # le nom qui précède l'emporte : celui qui suit peut ouvrir la référence
+            # suivante (« C. com., art. L441-10 C. civ., art. 1231-5 »)
+            source = _source_before(text[: match.start()], lookup) or _source_after(
+                text[match.end() :], lookup
+            )
+            found |= {
+                (source, form(n)) for n in re.findall(number, match[1], re.IGNORECASE)
+            }
+    return found
+
+
+def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
+    """Articles cités (« art. 28 », « article L. 441-10 », « articles 44 à 46 »), numéros
+    normalisés (L441-10), et points d'annexe (« point 4.2.10.2.1 », « points 21.A.307 et
+    21.A.308 »), qui gardent leurs points (21.A.307) ; chacun rattaché à la source dont un
+    nom (`names` : citation et titre de chaque source du corpus) le touche, avant lui
+    (« C. mon. fin., art. L112-2 ») ou après lui (« l'article L112-2 du code monétaire et
+    financier »), casse ignorée, sur le texte normalisé ; sinon à aucune (None). Un nom
+    absent du corpus (« code de la consommation ») ne rattache rien."""
+    return _citations(text, _lookup(names))
+
+
 def articles(text: str) -> set[str]:
-    """Numéros d'articles cités (« art. 28 », « article L. 441-10 », « articles 44 à 46 »),
-    normalisés (L441-10), et de points d'annexe (« point 4.2.10.2.1 », « points 21.A.307 et
-    21.A.308 »), qui gardent leurs points (21.A.307). La source (RGPD, code) n'est pas
-    comparée."""
-    cited = {
-        re.sub(r"[.\s]", "", number).upper()
-        for match in _ARTICLE.finditer(text)
-        for number in re.findall(_NUMBER, match[1], re.IGNORECASE)
-    }
-    return cited | {
-        number.upper()
-        for match in _POINT.finditer(text)
-        for number in re.findall(_POINT_NUMBER, match[1], re.IGNORECASE)
-    }
+    """Numéros des articles et des points d'annexe cités (`citations`), sans leur
+    source."""
+    return {number for _, number in _citations(text, [])}
 
 
-def _citable(finding: FindingToExplain) -> set[str]:
-    return articles(" ".join(finding.references)) | articles(finding.text)
+def _citable(finding: FindingToExplain, lookup: _Lookup) -> set[Citation]:
+    """Ce que l'explication d'un constat peut citer : ses références retenues, chacune
+    lue à part (le nom de la suivante ne rattache pas l'article de la précédente), et le
+    texte du constat, écrit par le code des règles."""
+    found = _citations(finding.text, lookup)
+    for reference in finding.references:
+        found |= _citations(reference, lookup)
+    return found
+
+
+def _uncitable(cited: set[Citation], citable: set[Citation]) -> list[str]:
+    """Citations du LLM hors de `citable`, chacune avec sa source si elle en nomme une.
+    Sans source : comparée par son seul numéro, comme avant les homonymes. Avec une
+    source : par source et numéro ; un numéro que le texte du constat cite sans nom de
+    source reste citable sous tout nom."""
+    numbers = {number for _, number in citable}
+    unnamed = {number for source, number in citable if source is None}
+    return sorted(
+        number if source is None else f"{number} ({source})"
+        for source, number in cited
+        if not (
+            number in numbers
+            if source is None
+            else (source, number) in citable or number in unnamed
+        )
+    )
 
 
 # --- Contrôles ---------------------------------------------------------------------------
 
 
-def refusals(draft: Draft, req: ExplanationRequest) -> list[str]:
-    """Motifs de refus d'une explication ; vide : acceptée."""
+def refusals(
+    draft: Draft, req: ExplanationRequest, *, names: Mapping[str, Sequence[str]]
+) -> list[str]:
+    """Motifs de refus d'une explication ; vide : acceptée. `names` : noms de chaque
+    source du corpus, qui rattachent une citation à sa source (`citations`)."""
+    lookup = _lookup(names)
     expected = {f.id: f for f in req.findings}
     ids = [e.id for e in draft.findings]
     reasons = []
@@ -235,11 +343,11 @@ def refusals(draft: Draft, req: ExplanationRequest) -> list[str]:
                 + f"référence non retenue pour la clause {finding.kind} : "
                 + ", ".join(foreign)
             )
-        cited = articles(entry.text) - _citable(finding)
+        cited = _uncitable(_citations(entry.text, lookup), _citable(finding, lookup))
         if cited:
             reasons.append(
                 prefix + "article cité hors des références retenues pour la clause "
-                f"{finding.kind} : {', '.join(sorted(cited))}"
+                f"{finding.kind} : {', '.join(cited)}"
             )
 
     return reasons

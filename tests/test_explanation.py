@@ -7,9 +7,25 @@ Python pur et doublures : aucun appel réseau. Le graphe complet est testé dans
 """
 
 import pytest
-from doubles import ABSENT, CONTRACT_TEXT, FaithfulExplainer, FakeLLM, clauses
+from corpus_de_test import (
+    CODE_A_REF,
+    HOMONYM_NAMES,
+    POINT_A,
+    POINT_B,
+    POINTS,
+    point_source,
+)
+from doubles import (
+    ABSENT,
+    CONTRACT_TEXT,
+    FaithfulExplainer,
+    FakeLLM,
+    clauses,
+    faithful_explanation,
+)
 
 from cdg.application import explanation as application_explanation
+from cdg.application import ingestion
 from cdg.application.deps import TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.nodes.explain import explain
@@ -26,6 +42,9 @@ from cdg.domain.rules import RULES
 from cdg.ports.llm import LLMOutputError, LLMTransientError
 
 CONFIG = load_config()
+# noms des sources du corpus du dépôt (citation et titre du manifeste), que l'orchestrateur
+# passe au nœud explain
+NAMES = ingestion.source_names()
 
 # conformité : données personnelles sans accord (blocage, clause de l'accord) et transfert
 # sur clauses ad hoc (pénalité, clause du transfert), chacune avec sa propre référence
@@ -211,20 +230,251 @@ def test_article_4_point_8_reste_l_article_4():
     req = REQUEST.model_copy(update={"findings": [finding, TRANSFERT]})
     text = "Données personnelles au sens de l'article 4, point 8 du RGPD."
     assert (
-        explanation.refusals(draft(entry(finding, text=text), entry(TRANSFERT)), req)
+        explanation.refusals(
+            draft(entry(finding, text=text), entry(TRANSFERT)), req, names=NAMES
+        )
         == []
     )
+
+
+# --- Citations rattachées à leur source --------------------------------------------------------
+
+CMF = "code-monetaire-financier"
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        # nom avant le numéro, sous la forme des références
+        ("C. mon. fin., art. L112-2", {(CMF, "L112-2")}),
+        ("RGPD art. 28", {("rgpd", "28")}),
+        # nom après le numéro, casse ignorée, texte normalisé
+        ("l'article L112-2 du code monétaire et financier", {(CMF, "L112-2")}),
+        ("l’article L. 441-10 du Code de commerce", {("code-commerce", "L441-10")}),
+        ("ART. 1231-5 DU CODE CIVIL", {("code-civil", "1231-5")}),
+        ("(art. 28 RGPD)", {("rgpd", "28")}),
+        ("articles 44 à 46 du RGPD", {("rgpd", "44"), ("rgpd", "46")}),
+        # chaque citation a sa source ; le nom qui précède l'emporte sur celui qui suit
+        (
+            "RGPD, art. 28 ; C. civ., art. 1231-5",
+            {("rgpd", "28"), ("code-civil", "1231-5")},
+        ),
+        (
+            "C. com., art. L441-10 C. civ., art. 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # aucun nom ne touche la citation : aucune source
+        ("article 28", {(None, "28")}),
+        ("art. 46, par. 3, a) RGPD", {(None, "46")}),
+        ("l'article 4, point 8 du RGPD", {(None, "4")}),
+        ("le RGPD. Article 28 : sous-traitant", {(None, "28")}),
+        ("art. 28 RGPDX", {(None, "28")}),
+        # nom absent du corpus : ne rattache rien
+        ("l'article L212-1 du code de la consommation", {(None, "L212-1")}),
+    ],
+)
+def test_citations_rattachees_a_leur_source(text, found):
+    assert explanation.citations(text, NAMES) == found
+
+
+POINT_NAMES = {POINTS: (point_source()["citation"], point_source()["title"])}
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        (f"Règl. (UE) test, annexe, point {POINT_B}", {(POINTS, POINT_B)}),
+        (f"règl. (UE) test, annexe I, point {POINT_A}", {(POINTS, POINT_A)}),
+        (f"le point {POINT_A} de l'annexe du Règlement de test", {(POINTS, POINT_A)}),
+        (f"le point {POINT_B} du règlement 748/2012", {(None, POINT_B)}),
+    ],
+)
+def test_points_d_annexe_rattaches_a_leur_source(text, found):
+    assert explanation.citations(text, POINT_NAMES) == found
+
+
+def test_sans_noms_de_source_numeros_seuls():
+    text = "C. mon. fin., art. L112-2 ; point 21.A.307"
+    assert explanation.citations(text, {}) == {(None, "L112-2"), (None, "21.A.307")}
+    assert explanation.articles(text) == {"L112-2", "21.A.307"}
+
+
+@pytest.mark.parametrize(
+    ("names", "message"),
+    [
+        (
+            {"code-a": ("Code X",), "code-b": ("code  x",)},
+            "nom de source commun à code-a et code-b",
+        ),
+        ({"code-a": ("Code A", " ")}, "code-a : nom de source vide"),
+    ],
+    ids=["commun", "vide"],
+)
+def test_noms_de_source_ambigus_ou_vides_refuses(names, message):
+    with pytest.raises(ValueError, match=message):
+        explanation.citations("art. 1", names)
+
+
+def test_noms_de_source_en_chaine_seule_refuses():
+    # une chaîne serait lue lettre par lettre : « RGPD » rattacherait « r », « g »…
+    with pytest.raises(TypeError, match="code-a : noms de source attendus en liste"):
+        explanation.citations("art. 1", {"code-a": "RGPD"})
+
+
+def homonym_request():
+    """Code A et code B, même numéro L1-1 : seul « Code A, art. L1-1 » est retenu pour
+    le premier constat."""
+    finding = ACCORD.model_copy(update={"references": [CODE_A_REF]})
+    return finding, REQUEST.model_copy(update={"findings": [finding, TRANSFERT]})
+
+
+def test_homonymes_compares_par_source():
+    finding, req = homonym_request()
+
+    def reasons(text, names=HOMONYM_NAMES):
+        d = draft(entry(finding, text=text), entry(TRANSFERT))
+        return explanation.refusals(d, req, names=names)
+
+    refused = [
+        (
+            "conformite-1 : article cité hors des références retenues pour la clause "
+            "accord_traitement_donnees : L1-1 (code-b)"
+        )
+    ]
+    assert reasons("Voir l'article L1-1 du code B.") == refused
+    assert reasons("Voir Code synthétique B, art. L1-1.") == refused
+    # la source retenue, ou aucun nom de source : acceptés
+    assert reasons("Voir l'article L1-1 du code A.") == []
+    assert reasons("Voir Code A, art. L1-1.") == []
+    assert reasons("Voir l'article L1-1.") == []
+    # sans les noms des sources, par le seul numéro, comme avant
+    assert reasons("Voir l'article L1-1 du code B.", names={}) == []
+
+
+# Explications acceptées aujourd'hui (par le seul numéro, sans nom de source) : celles des
+# tests de ce fichier, celle de `faithful_explanation`, et des citations nommées justes.
+
+FAITHFUL, _ = LLMExplainer(FakeLLM({"explain": faithful_explanation}))(
+    REQUEST, [], profile="fournisseur"
+)
+
+
+def alone(finding, text):
+    """Le seul constat `finding`, expliqué par `text`."""
+    return draft(entry(finding, text=text)), REQUEST.model_copy(
+        update={"findings": [finding]}
+    )
+
+
+def retained_alone(kind, references, domain="financier"):
+    return explanation.FindingToExplain(
+        id=f"{domain}-1",
+        domain=domain,
+        kind=kind,
+        text="Constat des règles, sans article cité.",
+        references=references,
+    )
+
+
+DELAI = retained_alone("delai_paiement", ["C. com., art. L441-10"])
+REVISION = retained_alone("revision_prix", ["C. mon. fin., art. L112-2"])
+PENALITES = retained_alone("penalites_execution", ["C. civ., art. 1231-5"])
+RESPONSABILITE = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1170", "C. civ., art. 1231-3"],
+    domain="juridique",
+)
+POINT_RETENU = TRANSFERT.model_copy(
+    update={"references": ["Règl. (UE) 748/2012, annexe I, point 21.A.307"]}
+)
+# transfert sans référence retenue : l'art. 46 n'est cité que par le texte du constat,
+# sans nom qui le touche (« art. 46, par. 3, a) RGPD »)
+TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
+
+
+@pytest.mark.parametrize(
+    ("d", "req"),
+    [
+        pytest.param(draft(), REQUEST, id="sans-article"),
+        pytest.param(
+            explanation.template(REQUEST, reasons=[]).draft(), REQUEST, id="recopie"
+        ),
+        pytest.param(FAITHFUL, REQUEST, id="faithful_explanation"),
+        pytest.param(
+            *alone(
+                ACCORD.model_copy(update={"references": ["RGPD, art. 4"]}),
+                "Données personnelles au sens de l'article 4, point 8 du RGPD.",
+            ),
+            id="article-4-point-8",
+        ),
+        pytest.param(
+            *alone(POINT_RETENU, "Le point 21.A.307 exige un certificat."),
+            id="point-retenu",
+        ),
+        pytest.param(
+            *alone(
+                TRANSFERT,
+                "Clauses ad hoc : autorisation à vérifier (art. 46, par. 3, a) RGPD).",
+            ),
+            id="article-du-constat",
+        ),
+        pytest.param(
+            *alone(ACCORD, "Sans accord de traitement : l'article 28 du RGPD l'exige."),
+            id="nom-apres",
+        ),
+        pytest.param(
+            *alone(ACCORD, "Accord de traitement absent (RGPD, art. 28)."),
+            id="nom-avant",
+        ),
+        pytest.param(
+            *alone(TRANSFERT_SEUL, "L'article 46 du RGPD exige une autorisation."),
+            id="article-du-constat-nomme",
+        ),
+        pytest.param(
+            *alone(DELAI, "Délai au-delà de l'article L. 441-10 du Code de commerce."),
+            id="code-de-commerce",
+        ),
+        pytest.param(
+            *alone(DELAI, "Délai au-delà du plafond (C. com., art. L441-10, I)."),
+            id="c-com",
+        ),
+        pytest.param(
+            *alone(REVISION, "Indexation encadrée par l'article L112-2."),
+            id="numero-seul",
+        ),
+        pytest.param(
+            *alone(
+                REVISION,
+                "Indexation encadrée par l'article L112-2 du code monétaire et "
+                "financier.",
+            ),
+            id="code-monetaire",
+        ),
+        pytest.param(
+            *alone(PENALITES, "Clause pénale : art. 1231-5 du Code civil."),
+            id="code-civil",
+        ),
+        pytest.param(
+            *alone(RESPONSABILITE, "Plafond : articles 1170 et 1231-3 du Code civil."),
+            id="deux-articles",
+        ),
+    ],
+)
+def test_explications_acceptees_aujourd_hui_le_restent(d, req):
+    # acceptée aujourd'hui : par le seul numéro, aucune source n'étant nommée
+    assert explanation.refusals(d, req, names={}) == []
+    assert explanation.refusals(d, req, names=NAMES) == []
 
 
 # --- Contrôles : critère 7 ---------------------------------------------------------------------
 
 
 def test_explication_fidele_acceptee():
-    assert explanation.refusals(draft(), REQUEST) == []
+    assert explanation.refusals(draft(), REQUEST, names=NAMES) == []
 
 
 def test_7_explication_qui_contredit_le_verdict_rejetee():
-    assert explanation.refusals(bad(), REQUEST) == [
+    assert explanation.refusals(bad(), REQUEST, names=NAMES) == [
         "conformite-1 : nomme une autre décision que la décision finale (NO_GO) : GO"
     ]
 
@@ -236,6 +486,7 @@ def test_7_autre_libelle_dans_un_constat_rejete():
             entry(TRANSFERT),
         ),
         REQUEST,
+        names=NAMES,
     )
     assert reasons == [
         (
@@ -248,7 +499,7 @@ def test_7_autre_libelle_dans_un_constat_rejete():
 def test_7_escalade_nommee_rejetee():
     text = "Constat relevé après escalade du dossier."
     reasons = explanation.refusals(
-        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
     )
     assert any("ESCALADE" in r for r in reasons)
 
@@ -257,6 +508,7 @@ def test_reference_non_retenue_rejetee():
     reasons = explanation.refusals(
         draft(entry(ACCORD, references=["C. civ., art. 1170"]), entry(TRANSFERT)),
         REQUEST,
+        names=NAMES,
     )
     assert reasons == [
         (
@@ -269,7 +521,9 @@ def test_reference_non_retenue_rejetee():
 def test_reference_d_une_autre_clause_rejetee():
     # art. 28 est retenu, mais pour l'accord de traitement, pas pour le transfert
     reasons = explanation.refusals(
-        draft(entry(ACCORD), entry(TRANSFERT, references=["RGPD, art. 28"])), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, references=["RGPD, art. 28"])),
+        REQUEST,
+        names=NAMES,
     )
     assert reasons == [
         (
@@ -282,12 +536,13 @@ def test_reference_d_une_autre_clause_rejetee():
 def test_article_cite_dans_le_texte_hors_des_references_de_la_clause_rejete():
     text = "Le transfert relève de l'art. 28 RGPD."
     reasons = explanation.refusals(
-        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
     )
+    # « art. 28 RGPD » nomme sa source : le motif la donne
     assert reasons == [
         (
             "conformite-2 : article cité hors des références retenues pour la clause "
-            "transfert_hors_ue : 28"
+            "transfert_hors_ue : 28 (rgpd)"
         )
     ]
 
@@ -295,7 +550,7 @@ def test_article_cite_dans_le_texte_hors_des_references_de_la_clause_rejete():
 def test_point_d_annexe_hors_references_refuse():
     text = "Le transfert relève du point 21.A.307 de l'annexe I du règlement 748/2012."
     reasons = explanation.refusals(
-        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
     )
     assert reasons == [
         (
@@ -311,7 +566,10 @@ def test_point_d_annexe_retenu_citable():
     req = REQUEST.model_copy(update={"findings": [ACCORD, finding]})
     text = "Le point 21.A.307 exige un certificat pour la pièce installée."
     assert (
-        explanation.refusals(draft(entry(ACCORD), entry(finding, text=text)), req) == []
+        explanation.refusals(
+            draft(entry(ACCORD), entry(finding, text=text)), req, names=NAMES
+        )
+        == []
     )
 
 
@@ -319,14 +577,18 @@ def test_article_du_texte_du_constat_citable():
     # le constat de transfert cite lui-même l'art. 46 (texte du code, non du LLM)
     text = "Clauses ad hoc : autorisation à vérifier (art. 46, par. 3, a) RGPD)."
     assert (
-        explanation.refusals(draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST)
+        explanation.refusals(
+            draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
+        )
         == []
     )
 
 
 def test_constats_manquants_inconnus_ou_repetes_rejetes():
     stray = ExplainedFinding(id="juridique-9", kind=None, references=[], text="x")
-    reasons = explanation.refusals(draft(entry(ACCORD), entry(ACCORD), stray), REQUEST)
+    reasons = explanation.refusals(
+        draft(entry(ACCORD), entry(ACCORD), stray), REQUEST, names=NAMES
+    )
     assert reasons[:3] == [
         "constats non expliqués : conformite-2",
         "constats inconnus : juridique-9",
@@ -338,6 +600,7 @@ def test_clause_erronee_ou_texte_vide_rejetes():
     reasons = explanation.refusals(
         draft(entry(ACCORD, kind="transfert_hors_ue"), entry(TRANSFERT, text=" ")),
         REQUEST,
+        names=NAMES,
     )
     assert (
         "conformite-1 : clause transfert_hors_ue, attendue accord_traitement_donnees"
@@ -389,7 +652,7 @@ def test_gabarit_passe_ses_propres_controles(overrides):
         request.decision,
         0,
     )
-    assert explanation.refusals(result.draft(), request) == []
+    assert explanation.refusals(result.draft(), request, names=NAMES) == []
     assert result.reasons == ["motif"]
 
 
@@ -567,6 +830,7 @@ def run_explain(explainer, retrying=never_retried, **overrides):
         state(**overrides),
         explainer=explainer,
         decision_config=CONFIG,
+        source_names=NAMES,
         retrying=retrying,
     )
 
@@ -614,6 +878,7 @@ def test_nombre_d_essais_lu_dans_la_configuration():
         state(),
         explainer=LLMExplainer(llm),
         decision_config=config,
+        source_names=NAMES,
         retrying=never_retried,
     )
     assert (out["explanation"].source, len(llm.calls)) == ("gabarit", 1)
@@ -643,6 +908,38 @@ def test_explication_refuse_un_profil_inconnu_sans_gabarit_de_repli():
     with pytest.raises(ValueError, match="profil inconnu"):
         run_explain(explainer, profile="inexistant")
     assert explainer.profiles == []
+
+
+def test_noeud_explain_compare_par_les_noms_recus():
+    # seul « Code A, art. L1-1 » est retenu pour l'accord ; l'explication cite le code B
+    retained = {**RETAINED, "accord_traitement_donnees": [CODE_A_REF]}
+    homonyms = state(verdicts=[verdict("conformite", CONFORMITE, retained)])
+
+    def explainer(request, feedback, *, profile):
+        faithful, spent = FaithfulExplainer()(request, feedback, profile=profile)
+        first, *rest = faithful.findings
+        wrong = first.model_copy(update={"text": "Voir l'article L1-1 du code B."})
+        return Draft(findings=[wrong, *rest]), spent
+
+    def run_with(names):
+        return explain(
+            homonyms,
+            explainer=explainer,
+            decision_config=CONFIG,
+            source_names=names,
+            retrying=never_retried,
+        )["explanation"]
+
+    refused = run_with(HOMONYM_NAMES)
+    assert (refused.source, refused.reasons[0]) == (
+        "gabarit",
+        (
+            "essai 1 : conformite-1 : article cité hors des références retenues pour "
+            "la clause accord_traitement_donnees : L1-1 (code-b)"
+        ),
+    )
+    # sans les noms des sources, par le seul numéro : acceptée
+    assert run_with({}).source == "llm"
 
 
 class Failing:

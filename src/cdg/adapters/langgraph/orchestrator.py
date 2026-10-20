@@ -28,7 +28,7 @@ from langgraph.types import (
 )
 
 from cdg.adapters.langgraph import checkpointer
-from cdg.application import crag
+from cdg.application import crag, ingestion
 from cdg.application.deps import Crag, Deps, RetrievalResult
 from cdg.application.failures import escalate
 from cdg.application.nodes.analyst import analyst
@@ -405,7 +405,9 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
             deps.telemetry,
         ),
     )
-    # explain se replie sur le gabarit, sauf pour une erreur passagère encore reprise
+    # explain se replie sur le gabarit, sauf pour une erreur passagère encore reprise ;
+    # les noms des sources du corpus, lus dans le manifeste à la construction du graphe,
+    # rattachent une citation de l'explication à sa source
     builder.add_node(
         "explain",
         guarded(
@@ -414,6 +416,7 @@ def build_graph(config: DecisionConfig, deps: Deps) -> StateGraph:
                 explain,
                 explainer=deps.explainer,
                 decision_config=config,
+                source_names=ingestion.source_names(),
                 retrying=will_retry("explain", explain_retry),
             ),
             retry=explain_retry,
