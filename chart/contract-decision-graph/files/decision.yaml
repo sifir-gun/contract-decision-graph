@@ -339,10 +339,13 @@ sous_traitance:
   # est la conformité générale, non « norme sans preuves »). La conformité générale vient
   # avant les preuves : des procès-verbaux remis ne nomment pas de norme, et une citation
   # qui renvoie aux normes en vigueur n'est jamais lue `norme_et_preuves` (acceptée). Les
-  # termes de la catégorie acceptée sont des formes positives ancrées (preuves remises) :
-  # un terme qui manque ne peut que pousser le modèle vers une pénalité, sens prudent, alors
-  # qu'un terme large y pousserait une négation (« aucun procès-verbal d'essai n'est
-  # exigé »). Ceux des catégories pénalisées restent larges.
+  # termes de la catégorie acceptée sont des formes positives ancrées (preuves remises),
+  # ceux des catégories pénalisées restent larges. Une forme positive qui manque pousse le
+  # modèle vers une pénalité si la citation contient un terme d'une catégorie pénalisée
+  # (« conforme à la norme »…), sens prudent ; sinon, la citation n'est pas contrôlée. Un
+  # terme large de la catégorie acceptée, au contraire, y pousserait une négation : ni nom
+  # de preuve seul (« aucun procès-verbal d'essai n'est exigé »), ni « … à remettre »
+  # (« aucun certificat de conformité à remettre »).
   category_terms:
     protection_design:
       reutilisation_autorisee:
@@ -368,14 +371,13 @@ sous_traitance:
         - normes en vigueur
         - normes applicables
       norme_et_preuves:
-        # formes positives ancrées : jamais un nom de preuve seul, qu'une négation
-        # (« aucun procès-verbal », « sans certificat de conformité ») contient aussi
+        # formes positives ancrées : ni nom de preuve seul, ni « … à remettre », qu'une
+        # négation (« aucun procès-verbal », « sans certificat de conformité à remettre »)
+        # contient aussi
         # procès-verbaux d'essais
         - procès-verbaux d'essais remis
         - procès-verbaux d'essai remis
         - procès-verbal d'essai remis
-        - procès-verbaux d'essais à remettre
-        - procès-verbal d'essai à remettre
         - remet les procès-verbaux
         - remettra les procès-verbaux
         - remet un procès-verbal
@@ -396,8 +398,6 @@ sous_traitance:
         # certificats de conformité ou d'essai
         - certificats de conformité remis
         - certificat de conformité remis
-        - certificats de conformité à remettre
-        - certificat de conformité à remettre
         - remet les certificats de conformité
         - remettra les certificats de conformité
         - remet un certificat de conformité
@@ -415,8 +415,6 @@ sous_traitance:
         - livrés avec un certificat de conformité
         - certificats d'essai remis
         - certificat d'essai remis
-        - certificats d'essai à remettre
-        - certificat d'essai à remettre
         - remet les certificats d'essai
         - remettra les certificats d'essai
         - remet un certificat d'essai
@@ -435,8 +433,6 @@ sous_traitance:
         # rapports d'essais
         - rapports d'essais remis
         - rapport d'essai remis
-        - rapports d'essais à remettre
-        - rapport d'essai à remettre
         - remet les rapports d'essais
         - remettra les rapports d'essais
         - remet un rapport d'essai

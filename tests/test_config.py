@@ -631,6 +631,19 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
         ),
         (
             "protection_design",
+            "Les dessins remis sont confidentiels et ne servent que pour le projet.",
+            "usage_limite_au_projet",
+        ),
+        (
+            "protection_design",
+            (
+                "Les plans remis restent confidentiels et ne valent que pour le présent "
+                "projet."
+            ),
+            "usage_limite_au_projet",
+        ),
+        (
+            "protection_design",
             (
                 "Les pièces dessinées remises sont confidentielles et ne peuvent être "
                 "utilisées que pour la commande."
@@ -846,6 +859,16 @@ NEGATIONS = [
         form.format(proof)
         for proof in PROOFS_PLURAL
         for form in ("sans {}", "{} non exigés")
+    ),
+    # « … à remettre » après une négation : jamais un terme de la catégorie acceptée
+    *(
+        form.format(proof)
+        for proof in PROOFS_SINGULAR + PROOFS_PLURAL
+        for form in (
+            "aucun {} à remettre",
+            "sans {} à remettre",
+            "pas de {} à remettre",
+        )
     ),
 ]
 
