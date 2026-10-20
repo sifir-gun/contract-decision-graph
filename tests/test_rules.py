@@ -680,3 +680,50 @@ def test_commun_delai_au_dela_du_seuil_de_son_point_de_depart(
 )
 def test_commun_delai_dans_le_seuil_sans_constat(value, basis):
     assert paid_within(value, basis) == []
+
+
+# Un dictionnaire de seuils qui ne couvre pas exactement les trois points de départ est une
+# erreur de programmation : refusé, jamais une bascule en silence sur le seuil le plus strict
+# (décision du contrôleur, tâche 6). Les clés sont celles de `DELAY_BASIS_LABELS`.
+@pytest.mark.parametrize(
+    ("limits", "named"),
+    [
+        ({"date_facture": 70.0, "fin_de_mois": 50.0}, ["facture_periodique"]),
+        ({"fin_de_mois": 50.0, "facture_periodique": 40.0}, ["date_facture"]),
+        ({}, ["date_facture", "fin_de_mois", "facture_periodique"]),
+        ({**LIMITS, "autre": 30.0}, ["autre"]),
+        (
+            {"date_facture": 70.0, "fin_de_mois": 50.0, "facture_perodique": 40.0},
+            [
+                "facture_periodique",
+                "facture_perodique",
+            ],  # une faute de frappe : les deux
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "c",
+    [
+        stipulated("delai_paiement", 90.0, category="date_facture"),
+        stipulated("delai_paiement", None, category=None),
+        stipulated("delai_paiement", None, present=False),
+    ],
+    ids=["chiffre", "non_chiffre", "absent"],
+)
+def test_commun_delai_refuse_des_seuils_qui_ne_sont_pas_les_trois_points_de_depart(
+    c, limits, named
+):
+    with pytest.raises(ValueError, match="seuils du délai de paiement") as error:
+        _common.payment_delay(c, limits, 0.25)
+    assert all(key in str(error.value) for key in named)
+
+
+def test_commun_delai_accepte_les_trois_points_de_depart_dans_un_autre_ordre():
+    reordered = {
+        "facture_periodique": 40.0,
+        "date_facture": 70.0,
+        "fin_de_mois": 50.0,
+    }
+    c = stipulated("delai_paiement", 71.0, category="date_facture")
+    [found] = _common.payment_delay(c, reordered, 0.25)
+    assert "au-delà de 70 jours" in found.text

@@ -172,7 +172,18 @@ def payment_delay(
     c: Clause, limits: Mapping[str, float], penalty: float
 ) -> list[RuleFinding]:
     """Délai de paiement (C. com., art. L441-10) : `limits` donne le plafond en jours de
-    chaque point de départ (`DELAY_BASIS_LABELS`)."""
+    chaque point de départ (`DELAY_BASIS_LABELS`), les trois et eux seuls : un point de
+    départ oublié ou inconnu est refusé, jamais remplacé en silence par le seuil le plus
+    strict."""
+    missing = sorted(set(DELAY_BASIS_LABELS) - set(limits))
+    extra = sorted(set(limits) - set(DELAY_BASIS_LABELS))
+    if missing or extra:
+        details = [
+            f"{name} : {', '.join(keys)}"
+            for name, keys in (("manquantes", missing), ("en trop", extra))
+            if keys
+        ]
+        raise ValueError(f"seuils du délai de paiement, clés {' ; '.join(details)}")
     if not c.present:  # pas de pénalité : le délai supplétif s'applique
         return [note(c.kind, DEFAULT_DELAY_NOTE)]
     if c.value is None:  # présent mais non chiffré : pénalité par prudence
