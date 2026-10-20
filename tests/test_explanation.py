@@ -196,6 +196,34 @@ def test_articles_cites(text, found):
     assert explanation.articles(text) == found
 
 
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        ("Cass. com., 13 mai 2026, n° 24-17.137", {"24-17.137"}),
+        ("Pourvoi n° Y 24-17.137", {"24-17.137"}),
+        ("pourvois n° 19-13.533 et 19-16.344", {"19-13.533", "19-16.344"}),
+        ("articles 1231-5 et L441-10", set()),
+        ("arrêt du 13-05.2026", set()),
+        ("plafond de 10 000 euros, 30 jours", set()),
+    ],
+)
+def test_pourvois_cites(text, found):
+    assert explanation.pourvois(text) == found
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        ("ECLI:FR:CCASS:2026:CO00224", {"ECLI:FR:CCASS:2026:CO00224"}),
+        ("(ecli:fr:ccass:2026:co00224).", {"ECLI:FR:CCASS:2026:CO00224"}),
+        ("voir ECLI:EU:C:2014:317.", {"ECLI:EU:C:2014:317"}),
+        ("Cass. com., 13 mai 2026, n° 24-17.137", set()),
+    ],
+)
+def test_ecli_cites(text, found):
+    assert explanation.eclis(text) == found
+
+
 # --- Contrôles : critère 7 ---------------------------------------------------------------------
 
 

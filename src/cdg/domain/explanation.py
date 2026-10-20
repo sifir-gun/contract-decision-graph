@@ -152,6 +152,11 @@ _ARTICLE = re.compile(
     rf"\bart(?:icles?|s?\.?)\s*({_NUMBER}(?:\s+(?:et|à|ou)\s+{_NUMBER})*)",
     re.IGNORECASE,
 )
+_POURVOI = re.compile(r"\b\d{2}-\d{2}\.\d{3}\b")
+# le point final d'une phrase ne fait pas partie d'un ECLI
+_ECLI = re.compile(
+    r"\bECLI:[A-Z]{2}:[A-Z0-9]{1,7}:\d{4}:[A-Z0-9.]{0,24}[A-Z0-9]", re.IGNORECASE
+)
 
 
 def named_decisions(text: str) -> set[Decision]:
@@ -172,6 +177,16 @@ def articles(text: str) -> set[str]:
         for match in _ARTICLE.finditer(text)
         for number in re.findall(_NUMBER, match[1], re.IGNORECASE)
     }
+
+
+def pourvois(text: str) -> set[str]:
+    """Numéros de pourvoi cités (« n° 24-17.137 »), tels qu'écrits."""
+    return set(_POURVOI.findall(text))
+
+
+def eclis(text: str) -> set[str]:
+    """ECLI cités, en majuscules."""
+    return {code.upper() for code in _ECLI.findall(text)}
 
 
 def _citable(finding: FindingToExplain) -> set[str]:
