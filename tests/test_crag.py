@@ -136,6 +136,19 @@ def test_requete_selon_les_tables_du_profil(autre_profil):
     )
 
 
+def test_requete_grand_nombre_groupe_par_milliers():
+    # un entier de 10 000 ou plus est groupé (« 2 000 000 »), jamais en notation
+    # scientifique ; sous 10 000, l'affichage reste celui d'avant
+    big = clause_of("delai_paiement", delai_paiement=20000.0)
+    assert crag.clause_query("financier", big, "fournisseur") == (
+        f"{FINANCIER} ; délai de paiement par l'acheteur : 20 000 jours date de facture"
+    )
+    small = clause_of("delai_paiement", delai_paiement=9999.0)
+    assert crag.clause_query("financier", small, "fournisseur").endswith(
+        ": 9999 jours date de facture"
+    )
+
+
 def test_requete_limitee_a_sa_clause():
     query = crag.clause_query(
         "operationnel", clause_of("preavis_resiliation"), "fournisseur"

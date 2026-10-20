@@ -452,6 +452,112 @@ def test_nombre_en_lettres_dans_un_autre_mot_ou_une_autre_expression_non_lu(quot
     assert verification.quantities(quote) == set()
 
 
+# --- Montants en euros (profil sous-traitance, PR 2) ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "2 000 000 €",
+        "2.000.000 euros",
+        "2 000 000 EUR",
+        "2\xa0000\xa0000\xa0€",  # espace insécable
+        "2000000 €",  # chiffres seuls
+        "2 000 000€",  # sans espace avant le symbole
+        "2 000 000 Euros",  # casse
+    ],
+)
+def test_montant_en_euros_lu(quote):
+    found = verification.quantities(f"Le plafond garanti est de {quote} par sinistre.")
+    assert (2000000.0, "€") in found
+
+
+def test_montant_espace_fine_insecable_lu():
+    # U+202F (espace fine insécable, usage typographique français) : ramenée à une
+    # espace par la normalisation NFKC
+    quote = "Le plafond est de 2\u202f000\u202f000\u202f€ par sinistre."
+    assert "\u202f" in quote
+    assert (2000000.0, "€") in verification.quantities(quote)
+
+
+def test_montant_avec_centimes_non_lu():
+    assert not {
+        q for q in verification.quantities("2 000 000,00 € par sinistre") if q[1] == "€"
+    }
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "2 M€",  # multiple
+        "deux millions d'euros",  # en lettres
+        "1.50 €",  # centimes avec un point
+        "1,50 €",  # centimes avec une virgule
+        "2 000 000,5 €",
+        "2.000.000,00 euros",
+        "2 000 000",  # sans monnaie
+        "2 000 000 eurosystème",  # autre mot
+    ],
+)
+def test_formes_de_montant_non_lues(quote):
+    assert not {q for q in verification.quantities(quote) if q[1] == "€"}
+
+
+def test_montant_et_pourcentage_jamais_confondus():
+    found = verification.quantities("5 % du montant, soit 2 000 000 €")
+    assert (5.0, "%") in found and (2000000.0, "€") in found
+    assert (2000000.0, "%") not in found and (5.0, "€") not in found
+    assert verification.quantities("1.500 €") == {(1500.0, "€")}
+    assert verification.quantities("1.5 %") == {(1.5, "%")}
+
+
+def test_montant_n_ajoute_rien_aux_quantites_existantes():
+    # un montant seul ne produit ni pourcentage, ni durée
+    assert verification.quantities("assurance de 2 000 000 € par sinistre") == {
+        (2000000.0, "€")
+    }
+    # et une durée ou un pourcentage seuls ne produisent aucun montant
+    assert verification.quantities("45 jours, 5 %, deux ans") == {
+        (45.0, "jours"),
+        (5.0, "%"),
+        (24.0, "mois"),
+    }
+
+
+def test_assurance_en_pourcentage_refusee():
+    c = Clause(
+        kind="assurance_sous_traitant",
+        present=True,
+        quote="5 % du montant du contrat",
+        value=5.0,
+    )
+    assert verification.value_mismatches([c], {"assurance_sous_traitant": "€"}) == [
+        "valeur absente de la citation (5 €): assurance_sous_traitant"
+    ]
+
+
+def test_assurance_en_euros_acceptee():
+    c = Clause(
+        kind="assurance_sous_traitant",
+        present=True,
+        quote="une assurance de 2 000 000 € par sinistre",
+        value=2000000.0,
+    )
+    assert verification.value_mismatches([c], {"assurance_sous_traitant": "€"}) == []
+
+
+def test_message_de_valeur_absente_affiche_le_grand_nombre_groupe():
+    c = Clause(
+        kind="assurance_sous_traitant",
+        present=True,
+        quote="une assurance de 1 000 000 € par sinistre",
+        value=2000000.0,
+    )
+    assert verification.value_mismatches([c], {"assurance_sous_traitant": "€"}) == [
+        "valeur absente de la citation (2 000 000 €): assurance_sous_traitant"
+    ]
+
+
 def test_clause_sans_valeur_non_controlee():
     items, text = with_quote(
         "revision_prix", "Les prix sont révisés sans plafond.", None

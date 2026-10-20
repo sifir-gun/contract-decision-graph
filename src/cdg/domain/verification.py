@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 from cdg.domain import instructions, profiles
 from cdg.domain.models import Clause, category_required
-from cdg.domain.numeric import rounded
+from cdg.domain.numeric import rounded, shown
 from cdg.domain.profiles import Profile
 from cdg.domain.text import folded, normalize
 
@@ -43,6 +43,16 @@ _UNIT: dict[str, tuple[str, int]] = {
     "années": ("mois", 12),
 }
 _PERCENT = ("%", 1)
+# montant en euros (profil sous-traitance) : chiffres groupés par trois avec une espace
+# (la normalisation NFKC y ramène les espaces insécables, dont U+202F) ou un point, ou
+# chiffres seuls, puis « € », « euro(s) » ou « eur » (texte plié). Ni centimes (« 1,50 € »,
+# « 1.50 € »), ni lettres (« deux millions d'euros »), ni multiple (« 2 M€ ») : non lus,
+# ce qui mène à une nouvelle extraction puis à la revue humaine, sens prudent. Jamais le
+# reste d'un nombre (précédé d'un chiffre, d'un point ou d'une virgule).
+_AMOUNT = re.compile(
+    r"(?<![\d.,])(\d{1,3}(?:[ .]\d{3})+|\d+)\s*(?:€|(?:euros?|eur)(?!\w))"
+)
+_EURO = "€"
 
 
 def _quantity(number: float, unit: str) -> tuple[float, str]:
@@ -119,11 +129,15 @@ def _extends_a_number(before: list[str]) -> bool:
 def quantities(quote: str) -> set[tuple[float, str]]:
     """Quantités d'une citation avec leur unité : « 1,5 % » donne (1.5, "%") ;
     « quarante-cinq (45) jours » et « quarante-cinq jours » donnent (45.0, "jours") ;
-    « trois ans » donne (36.0, "mois")."""
+    « trois ans » donne (36.0, "mois") ; « 2 000 000 € » donne (2000000.0, "€")."""
     text = folded(quote)
     found = {
         _quantity(float((in_parentheses or number).replace(",", ".")), unit)
         for in_parentheses, number, unit in _QUANTITY.findall(text)
+    }
+    found |= {
+        (rounded(float(re.sub(r"[ .]", "", amount))), _EURO)
+        for amount in _AMOUNT.findall(text)
     }
     words = re.sub(r"\s+", " ", text.replace("-", " "))
     for match in _SPELLED_QUANTITY.finditer(words):
@@ -142,7 +156,7 @@ def value_mismatches(clauses: list[Clause], units: Mapping[str, str]) -> list[st
             continue
         if (rounded(c.value), unit) not in quantities(c.quote):
             problems.append(
-                f"valeur absente de la citation ({c.value:g} {unit}): {c.kind}"
+                f"valeur absente de la citation ({shown(c.value)} {unit}): {c.kind}"
             )
     return problems
 

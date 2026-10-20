@@ -39,6 +39,7 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.numeric import shown
 from cdg.domain.profiles import Profile
 from cdg.ports.llm import LLMOutputError, LLMProvider
 from cdg.ports.retriever import Passage, Retriever
@@ -160,7 +161,7 @@ def _describe(clause: Clause, profile: Profile) -> str:
         )
         detail = category or none_label or "clause présente"
     else:
-        detail = f"{clause.value:g} {unit}"
+        detail = f"{shown(clause.value)} {unit}"
         if clause.category is not None:  # point de départ d'un délai de paiement
             detail += f" {categories[clause.category]}"
     return f"{subject} : {detail}"
