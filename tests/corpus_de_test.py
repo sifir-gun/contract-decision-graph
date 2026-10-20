@@ -1,7 +1,8 @@
 """Corpus synthétique des tests (docs/spec-versions-corpus.md) : un article fictif à deux
 versions successives, rattaché à deux domaines, et une fiche qui le cite. Données de
 test, aucun texte réel ; écrites dans un dossier temporaire par le fixture
-`corpus_synthetique` (conftest.py), qui y redirige `application/ingestion.py`."""
+`corpus_synthetique` (conftest.py), qui y redirige `application/ingestion.py`.
+`add_points` y ajoute, à la demande d'un test, une source EUR-Lex à points d'annexe."""
 
 from collections.abc import Callable
 from datetime import date
@@ -108,6 +109,94 @@ def edit_manifest(root: Path, change: Callable[[dict[str, Any]], None]) -> None:
 
 def raw(root: Path, name: str) -> Path:
     return root / "raw" / "code-test" / name
+
+
+# --- source EUR-Lex à points d'annexe (spec des profils, « Nouvelles sources EUR-Lex ») ---
+# Formes relevées sur EUR-Lex le 20/10/2026 (règl. 1302/2014, point 4.2.10.2.1 ; règl.
+# 748/2012, point 21.A.307), texte fictif : numéro et intitulé sur une même ligne, séparés
+# par des espaces insécables, avec ou sans point final ; sous-points seuls sur leur ligne ;
+# marques de consolidation sur leur propre ligne ; appel de note « ( 9 ) ».
+
+POINTS = "annexe-test"
+POINT_A, POINT_B = "9.1.2.1", "9.A.12"
+POINT_A_REF = f"Règl. (UE) test, annexe, point {POINT_A}"
+POINT_B_REF = f"Règl. (UE) test, annexe, point {POINT_B}"
+NBSP = "\xa0"
+
+POINT_A_TEXT = f"""9.1.2.1.{NBSP * 3}Exigences de test
+
+1){NBSP}Premier alinéa du point de test.
+
+2){NBSP}Second alinéa du point de test, pour les catégories définies ci-dessous:
+
+—{NBSP}
+première catégorie de test;
+—{NBSP}
+seconde catégorie de test.
+"""
+
+POINT_B_TEXT = f"""9.A.12{NBSP * 3} Conditions de test applicables aux pièces
+
+a){NBSP}
+
+Premier sous-point du point de test.
+
+b){NBSP}
+
+Second sous-point, qui renvoie à un texte de test{NBSP}( 9 ); et
+
+▼M12
+
+c){NBSP}
+
+Troisième sous-point, ajouté par un texte modificateur de test.
+
+▼M7
+
+d){NBSP}
+
+Quatrième sous-point du point de test.
+"""
+
+# citée par la fiche de test : deux entrées, la seconde avec un sous-point « 2) »
+POINT_CLAIM = (
+    "- Alinéas des points de test (sources : annexe-test, point 9.A.12 ; "
+    "annexe-test, point 9.1.2.1, 2)).\n"
+)
+
+
+def point_source() -> dict[str, Any]:
+    return {
+        "format": "eurlex",
+        "citation": "Règl. (UE) test",
+        "title": "Règlement de test",
+        "unit": "annexe, point",
+        "directory": POINTS,
+        "file": "point-{article}.txt",
+        "retrieved_at": date(2026, 10, 20),
+        "articles": {POINT_A: ["delai_paiement"], POINT_B: ["delai_paiement"]},
+    }
+
+
+def add_points(root: Path) -> None:
+    """Ajoute au corpus écrit par `write` la source à points d'annexe : ses deux
+    fichiers, sa source au manifeste, et une paraphrase de la fiche qui les cite."""
+    directory = root / "raw" / POINTS
+    directory.mkdir()
+    (directory / f"point-{POINT_A}.txt").write_text(POINT_A_TEXT, encoding="utf-8")
+    (directory / f"point-{POINT_B}.txt").write_text(POINT_B_TEXT, encoding="utf-8")
+    content = yaml.safe_load((root / "manifest.yaml").read_text(encoding="utf-8"))
+    content["sources"][POINTS] = point_source()
+    write_manifest(root, content)
+    replace_line(
+        root / "fiches" / "test.md",
+        "\n## Comment le projet",
+        POINT_CLAIM + "\n## Comment le projet",
+    )
+
+
+def point_raw(root: Path, number: str) -> Path:
+    return root / "raw" / POINTS / f"point-{number}.txt"
 
 
 def replace_line(path: Path, old: str, new: str) -> None:

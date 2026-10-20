@@ -191,10 +191,29 @@ def test_libelles_de_decision_nommes(text, labels):
         ("art. 46, par. 3, a) RGPD", {"46"}),
         ("articles 44 à 46 et 1231-5", {"44", "46", "1231-5"}),
         ("les parties au contrat, 30 jours", set()),
+        # points d'annexe : un numéro à points, qui garde ses points
+        ("le point 4.2.10.2.1 de l'annexe", {"4.2.10.2.1"}),
+        ("Règl. (UE) 748/2012, annexe I, point 21.A.307", {"21.A.307"}),
+        ("au point 21.a.307.", {"21.A.307"}),
+        ("points 4.2.10.2.1 et 21.A.307", {"4.2.10.2.1", "21.A.307"}),
+        ("art. 83, par. 5, point c", {"83"}),
+        ("le point de départ du délai, point 8", set()),
     ],
 )
 def test_articles_cites(text, found):
     assert explanation.articles(text) == found
+
+
+def test_article_4_point_8_reste_l_article_4():
+    assert explanation.articles("l'article 4, point 8 du RGPD") == {"4"}
+    # acceptée aujourd'hui, elle le reste : l'art. 4 est retenu pour la clause
+    finding = ACCORD.model_copy(update={"references": ["RGPD, art. 4"]})
+    req = REQUEST.model_copy(update={"findings": [finding, TRANSFERT]})
+    text = "Données personnelles au sens de l'article 4, point 8 du RGPD."
+    assert (
+        explanation.refusals(draft(entry(finding, text=text), entry(TRANSFERT)), req)
+        == []
+    )
 
 
 # --- Contrôles : critère 7 ---------------------------------------------------------------------
@@ -271,6 +290,29 @@ def test_article_cite_dans_le_texte_hors_des_references_de_la_clause_rejete():
             "transfert_hors_ue : 28"
         )
     ]
+
+
+def test_point_d_annexe_hors_references_refuse():
+    text = "Le transfert relève du point 21.A.307 de l'annexe I du règlement 748/2012."
+    reasons = explanation.refusals(
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST
+    )
+    assert reasons == [
+        (
+            "conformite-2 : article cité hors des références retenues pour la clause "
+            "transfert_hors_ue : 21.A.307"
+        )
+    ]
+
+
+def test_point_d_annexe_retenu_citable():
+    point = "Règl. (UE) 748/2012, annexe I, point 21.A.307"
+    finding = TRANSFERT.model_copy(update={"references": [point]})
+    req = REQUEST.model_copy(update={"findings": [ACCORD, finding]})
+    text = "Le point 21.A.307 exige un certificat pour la pièce installée."
+    assert (
+        explanation.refusals(draft(entry(ACCORD), entry(finding, text=text)), req) == []
+    )
 
 
 def test_article_du_texte_du_constat_citable():

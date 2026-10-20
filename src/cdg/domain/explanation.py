@@ -9,8 +9,8 @@ LLM peut décrire le parcours à tort. L'explication est refusée :
 - si elle nomme une autre décision que la décision finale (détection par règles sur les
   libellés de décision) ;
 - si elle cite une référence non retenue pour la clause du constat : dans le champ
-  `references`, ou un article dans le texte. Un article que le texte du constat cite
-  lui-même reste citable : ce texte vient du code des règles, pas du LLM ;
+  `references`, ou un article ou un point d'annexe dans le texte. Un article que le texte
+  du constat cite lui-même reste citable : ce texte vient du code des règles, pas du LLM ;
 - si elle n'explique pas chaque constat une fois et une seule, ou change sa clause.
 Le gabarit, sans LLM, passe ces contrôles ; il prend le relais après les essais refusés.
 """
@@ -152,6 +152,13 @@ _ARTICLE = re.compile(
     rf"\bart(?:icles?|s?\.?)\s*({_NUMBER}(?:\s+(?:et|à|ou)\s+{_NUMBER})*)",
     re.IGNORECASE,
 )
+# point d'annexe : numéro à points, au moins un (« 4.2.10.2.1 », « 21.A.307 ») ; « point 8 »
+# précise un article (« l'article 4, point 8 ») et n'est pas lu
+_POINT_NUMBER = r"\d+(?:\.[0-9A-Z]+)+"
+_POINT = re.compile(
+    rf"\bpoints?\s+({_POINT_NUMBER}(?:\s+(?:et|à|ou)\s+{_POINT_NUMBER})*)",
+    re.IGNORECASE,
+)
 
 
 def named_decisions(text: str) -> set[Decision]:
@@ -166,11 +173,18 @@ def named_decisions(text: str) -> set[Decision]:
 
 def articles(text: str) -> set[str]:
     """Numéros d'articles cités (« art. 28 », « article L. 441-10 », « articles 44 à 46 »),
-    normalisés (L441-10). La source (RGPD, code) n'est pas comparée."""
-    return {
+    normalisés (L441-10), et de points d'annexe (« point 4.2.10.2.1 », « points 21.A.307 et
+    21.A.308 »), qui gardent leurs points (21.A.307). La source (RGPD, code) n'est pas
+    comparée."""
+    cited = {
         re.sub(r"[.\s]", "", number).upper()
         for match in _ARTICLE.finditer(text)
         for number in re.findall(_NUMBER, match[1], re.IGNORECASE)
+    }
+    return cited | {
+        number.upper()
+        for match in _POINT.finditer(text)
+        for number in re.findall(_POINT_NUMBER, match[1], re.IGNORECASE)
     }
 
 

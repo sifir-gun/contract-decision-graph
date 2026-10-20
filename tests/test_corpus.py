@@ -5,6 +5,20 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from corpus_de_test import (
+    FICHE,
+    NBSP,
+    POINT_A,
+    POINT_A_REF,
+    POINT_B,
+    POINT_B_REF,
+    POINTS,
+    T1,
+    add_points,
+    point_raw,
+    point_source,
+    replace_line,
+)
 from doubles import HashEmbedder
 
 from cdg.application import ingestion
@@ -138,6 +152,149 @@ def test_eurlex_intitule(path, number, heading):
     assert article.valid_until is None and article.note is None
 
 
+# --- EUR-Lex : points d'annexe, marques de consolidation (spec des profils, PR 2) --------
+# Premières lignes relevées sur EUR-Lex le 20/10/2026 : numéro et intitulé sur une même
+# ligne, séparés par des espaces insécables ; texte des paragraphes fictif.
+
+BODY = f"1){NBSP}Premier alinéa.\n\n2){NBSP}Second alinéa :\n\n—{NBSP}\nun tiret.\n"
+
+
+@pytest.mark.parametrize(
+    "title,number,heading",
+    [
+        (
+            f"4.2.10.2.1.{NBSP * 3}Exigences relatives aux matériaux",
+            "4.2.10.2.1",
+            "Exigences relatives aux matériaux",
+        ),
+        (
+            (
+                f"21.A.307{NBSP * 3} Conditions d’admissibilité pour l’installation "
+                "applicables aux pièces et équipements"
+            ),
+            "21.A.307",
+            (
+                "Conditions d’admissibilité pour l’installation applicables aux pièces "
+                "et équipements"
+            ),
+        ),
+    ],
+    ids=["point-final", "sans-point-final"],
+)
+def test_point_eurlex_numero_et_intitule_sur_une_ligne(title, number, heading):
+    article = corpus.parse_eurlex(f"{title}\n\n{BODY}")
+    assert (article.article, article.heading) == (number, heading)
+    # aucun paragraphe pris pour l'intitulé : le texte les garde tous
+    assert article.text.split("\n\n") == [
+        f"1){NBSP}Premier alinéa.",
+        f"2){NBSP}Second alinéa :",
+        "—\nun tiret.",
+    ]
+    assert (article.valid_from, article.valid_until, article.note) == (None,) * 3
+
+
+def test_point_sans_intitule_sur_sa_ligne_refuse():
+    # forme que la page n'affiche pas : jamais un paragraphe pris pour l'intitulé
+    with pytest.raises(ValueError, match="première ligne"):
+        corpus.parse_eurlex(f"4.2.10.2.1.\nExigences\n\n{BODY}")
+
+
+def test_marques_de_consolidation_sur_leur_ligne_retirees():
+    raw = (
+        f"▼B\n9.A.12{NBSP * 3} Conditions de test\n\na){NBSP}\n\nPremier.\n\n▼M12\n\n"
+        f"b){NBSP}\n\nSecond{NBSP}( 9 ); et\n\n▼M7\n\nc){NBSP}\n\nTroisième.\n"
+    )
+    article = corpus.parse_eurlex(raw)
+    assert (article.article, article.heading) == ("9.A.12", "Conditions de test")
+    # l'appel de note reste, tel qu'affiché
+    assert article.text.split("\n\n") == [
+        "a)",
+        "Premier.",
+        "b)",
+        f"Second{NBSP}( 9 ); et",
+        "c)",
+        "Troisième.",
+    ]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [f"►M5{NBSP * 3}point ◄", "texte ►M5 modifié ◄ suite", "▼M12 texte", "◄"],
+    ids=["seule", "dans-le-texte", "suivie-du-texte", "fermante"],
+)
+def test_marque_de_consolidation_dans_une_ligne_refusee_par_la_lecture(line):
+    with pytest.raises(ValueError, match="marque de consolidation"):
+        corpus.parse_eurlex(f"9.A.12{NBSP * 3} Conditions de test\n\n{line}\n")
+
+
+def test_marque_de_consolidation_dans_une_ligne_refusee(corpus_synthetique):
+    add_points(corpus_synthetique)
+    replace_line(
+        point_raw(corpus_synthetique, POINT_A),
+        "Premier alinéa",
+        f"►M5{NBSP * 3}point ◄ Premier alinéa",
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"annexe-test/point-9\.1\.2\.1\.txt : marque de consolidation",
+    ):
+        list(ingestion.articles())
+
+
+def test_reference_d_un_point(corpus_synthetique):
+    add_points(corpus_synthetique)
+    by_ref = {a.reference: (a, kinds) for a, kinds in ingestion.articles()}
+    # unité déclarée au manifeste ; « art. » par défaut, références inchangées
+    assert set(by_ref) == {T1, POINT_A_REF, POINT_B_REF}
+    point, kinds = by_ref[POINT_A_REF]
+    assert (point.source_id, point.article, point.heading, kinds) == (
+        POINTS,
+        POINT_A,
+        "Exigences de test",
+        ["delai_paiement"],
+    )
+    assert (point.valid_from, point.valid_until, point.retrieved_at) == (
+        None,
+        None,
+        date(2026, 10, 20),
+    )
+    assert point.text.startswith(f"1){NBSP}Premier alinéa du point de test.")
+    other = by_ref[POINT_B_REF][0]
+    assert "▼" not in other.text and f"texte de test{NBSP}( 9 )" in other.text
+    # la fiche qui cite les deux points garde sa fenêtre ; chaque point a son texte
+    assert ingestion.source_validities() == {
+        T1: None,
+        POINT_A_REF: None,
+        POINT_B_REF: None,
+        FICHE: None,
+    }
+    assert {POINT_A_REF, POINT_B_REF, FICHE} <= set(ingestion.reference_texts(None))
+    # numéro lu dans la référence par l'explication, points gardés (numéros partagés)
+    assert [explanation.articles(r) for r in (POINT_A_REF, POINT_B_REF)] == [
+        {POINT_A},
+        {POINT_B},
+    ]
+
+
+def test_numero_de_point_different_du_manifeste_refuse(corpus_synthetique):
+    add_points(corpus_synthetique)
+    replace_line(point_raw(corpus_synthetique, POINT_A), "9.1.2.1.", "9.1.2.2.")
+    with pytest.raises(
+        ValueError,
+        match=r"annexe-test/point-9\.1\.2\.1\.txt : numéro « 9\.1\.2\.2 » lu en "
+        r"première ligne, attendu « 9\.1\.2\.1 »",
+    ):
+        list(ingestion.articles())
+
+
+@pytest.mark.parametrize(
+    "unit", ["", " ", None, 3], ids=["vide", "blanc", "nul", "nombre"]
+)
+def test_unite_de_reference_illisible_refusee(unit):
+    with pytest.raises(ValueError, match="annexe-test : unité de référence illisible"):
+        corpus.Manifest(sources={POINTS: {**point_source(), "unit": unit}})
+
+
 # --- Découpage -------------------------------------------------------------------------
 
 
@@ -170,9 +327,10 @@ def test_articles_ingérés():
 
 
 def test_aucun_numero_d_article_commun_a_deux_sources():
-    # l'explication compare les articles cités par leur seul numéro normalisé
-    # (domain/explanation.py) : un numéro partagé par deux sources rendrait citable
-    # l'article d'une source quand seul celui de l'autre est retenu
+    # l'explication compare les articles et les points d'annexe cités par leur seul
+    # numéro normalisé (domain/explanation.py) : un numéro partagé par deux sources
+    # rendrait citable l'article d'une source quand seul celui de l'autre est retenu ;
+    # le numéro d'un point est lu dans sa référence comme celui d'un article
     sources: dict[str, set[str]] = {}
     for article, _ in ingestion.articles():
         [number] = explanation.articles(article.reference)
@@ -245,6 +403,103 @@ def test_comment_le_projet_l_applique_citations_facultatives_mais_admises():
         for line in corpus.fiche_sections(fiche.body)[corpus.APPLICATION_SECTION]:
             for source_id, number in corpus.citations(line):
                 assert manifest.admits(source_id, number), (fiche.id, source_id, number)
+
+
+@pytest.mark.parametrize(
+    "line,cited",
+    [
+        (
+            "- Texte (source : sti-materiel-roulant, point 4.2.10.2.1).",
+            [("sti-materiel-roulant", "4.2.10.2.1")],
+        ),
+        (
+            (
+                "- Texte (sources : certification-navigabilite, point 21.A.307 ; "
+                "rgpd, art. 28, par. 3)."
+            ),
+            [("certification-navigabilite", "21.A.307"), ("rgpd", "28")],
+        ),
+    ],
+    ids=["seul", "avec-un-article"],
+)
+def test_citation_d_un_point(line, cited):
+    assert corpus.citations(line) == cited
+
+
+def test_citation_d_un_point_avec_sous_point():
+    line = "- Texte (source : sti-materiel-roulant, point 4.2.10.2.1, 2))."
+    assert corpus.citations(line) == [("sti-materiel-roulant", "4.2.10.2.1")]
+
+
+@pytest.mark.parametrize(
+    "block,cited",
+    [
+        ("rgpd, art. 4, point 8", [("rgpd", "4")]),
+        ("rgpd, art. 83, par. 5, point c", [("rgpd", "83")]),
+        ("rgpd, art. 46, par. 2, points b, c et d", [("rgpd", "46")]),
+    ],
+)
+def test_suites_rgpd_non_lues_comme_point(block, cited):
+    # un point n'est lu qu'avec un numéro à points : ceux-ci précisent l'article
+    assert corpus.citations(f"- Texte (source : {block}).") == cited
+
+
+@pytest.mark.parametrize(
+    "line,entry",
+    [
+        ("(sources : code-civil, art. 1171 ; ailleurs)", "ailleurs"),
+        ("(source : le code civil, art. 1171)", "le code civil, art. 1171"),
+        ("(sources : code-civil, art. 1171 ; )", ""),
+        ("(source : code-civil, point 8)", "code-civil, point 8"),
+    ],
+    ids=["seconde-entree", "premiere-entree", "entree-vide", "point-sans-points"],
+)
+def test_entree_de_citation_illisible_refusee(line, entry):
+    message = re.escape(f"entrée de citation illisible : {entry!r}")
+    with pytest.raises(ValueError, match=message):
+        corpus.citations(f"- Texte {line}.")
+
+
+def test_entree_de_citation_hors_du_bloc_refusee():
+    # la parenthèse d'un sous-point ferme le bloc : l'entrée suivante en sortirait, en
+    # silence
+    line = (
+        "- Texte (sources : sti-materiel-roulant, point 4.2.10.2.1, 2) ; "
+        "certification-navigabilite, point 21.A.307)."
+    )
+    with pytest.raises(ValueError, match="entrée de citation hors de son bloc"):
+        corpus.citations(line)
+    # une phrase qui suit un bloc après « ; » reste admise (fiche des plafonds)
+    prose = "- Texte (source : code-civil, art. 1231-3) ; l'article ne dit pas tout."
+    assert corpus.citations(prose) == [("code-civil", "1231-3")]
+
+
+def test_fiche_avec_une_entree_de_citation_illisible_refusee(corpus_synthetique):
+    replace_line(
+        corpus_synthetique / "fiches" / "test.md",
+        "(source : code-test, art. T1)",
+        "(sources : code-test, art. T1 ; ailleurs)",
+    )
+    with pytest.raises(
+        ValueError, match="fiche-test : entrée de citation illisible : 'ailleurs'"
+    ):
+        ingestion.load_fiches()
+
+
+def test_entrees_de_citation_des_fiches_du_corpus_toutes_lues():
+    # chaque entrée commence par une citation : aucune n'est ignorée en silence
+    entries = [
+        entry
+        for fiche in ingestion.load_fiches()
+        for line in corpus.claim_lines(fiche.body)
+        for block in re.findall(r"\(sources? : ([^)]+)\)", line)
+        for entry in block.split(";")
+    ]
+    assert entries and sum(
+        len(corpus.citations(line))
+        for fiche in ingestion.load_fiches()
+        for line in corpus.claim_lines(fiche.body)
+    ) == len(entries)
 
 
 def test_sections_d_une_fiche():
