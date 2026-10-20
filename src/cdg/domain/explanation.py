@@ -11,6 +11,9 @@ LLM peut décrire le parcours à tort. L'explication est refusée :
 - si elle cite une référence non retenue pour la clause du constat : dans le champ
   `references`, ou un article dans le texte. Un article que le texte du constat cite
   lui-même reste citable : ce texte vient du code des règles, pas du LLM ;
+- si elle cite un numéro de pourvoi absent des références retenues pour la clause du
+  constat et de son texte, ou un ECLI, jamais citable : les noms des références n'en
+  portent pas, et le domaine ne lit pas le corpus ;
 - si elle n'explique pas chaque constat une fois et une seule, ou change sa clause.
 Le gabarit, sans LLM, passe ces contrôles ; il prend le relais après les essais refusés.
 """
@@ -241,6 +244,18 @@ def refusals(draft: Draft, req: ExplanationRequest) -> list[str]:
             reasons.append(
                 prefix + "article cité hors des références retenues pour la clause "
                 f"{finding.kind} : {', '.join(sorted(cited))}"
+            )
+        numbers = pourvois(entry.text) - (
+            pourvois(" ".join(finding.references)) | pourvois(finding.text)
+        )
+        if numbers:
+            reasons.append(
+                prefix + "pourvoi cité hors des références retenues pour la clause "
+                f"{finding.kind} : {', '.join(sorted(numbers))}"
+            )
+        if codes := eclis(entry.text):
+            reasons.append(
+                prefix + f"ECLI cité, jamais citable : {', '.join(sorted(codes))}"
             )
 
     return reasons

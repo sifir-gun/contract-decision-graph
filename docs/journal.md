@@ -3530,3 +3530,30 @@ Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmè
 
 - **PR 2** : `sous_traitance` ajouté à `Profile`, avec ses types, ses règles, sa section de configuration, ses prompts (extraction et explication), ses tables du CRAG et son corpus (spec, « Découpage »).
 - **Notés pour la PR 2** : `models.category_required` garde `delai_paiement` en dur (seul `category_kinds` est paramétré) ; avec un seul profil, les tests de passage du profil (`run`, `mesure-recherche`, `relaunch`) ne distinguent pas une valeur écrite en dur : à renforcer avec le second profil ; `web --demo` demande un profil alors que chaque contrat du jeu déclare le sien ; la trace d'une revue, d'une expiration ou d'une reprise ne porte pas le profil.
+
+## 2026-10-20 · Jurisprudence, PR A : pourvois et ECLI dans l'explication (branche `claude/sad-curran-0fbe4f`)
+
+Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmètre figé depuis la v1.1 pour ce seul chantier. Le 20/10/2026, étude de l'API JUDILIBRE de PISTE (spécification OpenAPI 1.2.5, CGU open data V8 du 6 janvier 2022), puis spec validée section par section et approuvée par écrit : [`docs/spec-jurisprudence-judilibre.md`](spec-jurisprudence-judilibre.md) (commit 1a2d985). Deux PR : celle-ci, puis la source « décision » (PR B : Com., 13 mai 2026, n° 24-17.137, indexé et scellé, qui comble le renvoi « hors corpus » de la fiche des plafonds sur l'articulation entre 1171 et L442-1).
+
+### Pourquoi ce contrôle d'abord
+
+- **Faille existante, relevée par l'étude.** Le contrôle de l'explication ne repérait que les articles (`_ARTICLE`) : une explication du LLM qui citait de mémoire un arrêt numéroté (« Cass. com., 26 janv. 2022, n° 20-16.782 ») n'était pas refusée. Le contrôle ne dépend pas de la PR B : sans décision au corpus, tout arrêt numéroté cité est refusé.
+
+### Ce qui change
+
+- **`domain/explanation.py`** : `pourvois` et `eclis` relèvent les numéros de pourvoi (`NN-NN.NNN`, lettre éventuelle devant) et les ECLI (mis en majuscules, sans le point final d'une phrase). `refusals` refuse un pourvoi absent des noms des références retenues pour la clause du constat et du texte du constat, et tout ECLI : les noms des références n'en portent pas, et le domaine ne lit pas le corpus.
+- **Inchangés** : le nœud `explain` (un refus mène à un nouvel essai, puis au gabarit), le prompt, `FindingToExplain`, `ExplanationRequest` et la configuration (empreinte inchangée).
+- **CLAUDE.md** : contrôles de l'explication.
+
+### Limites
+
+- Un arrêt nommé sans numéro (« l'arrêt Chronopost ») n'est pas détecté.
+- Un faux positif (un nombre de la forme `NN-NN.NNN` qui ne serait pas un pourvoi) mène au gabarit : sens prudent. Les textes des constats, écrits par les règles, n'en contiennent aucun.
+
+### Nombre de tests
+
+- Suite principale : de 2 617 à 2 633 tests collectés (16 de plus : 10 cas de relevé, 6 de refus).
+
+### Suite
+
+- **PR B** : source « décision », dans l'ordre de la spec (« Découpage ») ; elle commence par la mesure de référence de la recherche.
