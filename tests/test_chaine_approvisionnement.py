@@ -332,27 +332,31 @@ def test_scan_rend_1_si_grype_trouve_une_faille(tmp_path, capsys):
 
 def test_exceptions_justifiees_datees_et_passees_a_grype(tmp_path):
     module = chaine()
+    module.scan(tmp_path, exceptions(tmp_path), today=TODAY, run=ok)
+    config = yaml.safe_load((tmp_path / "grype.yaml").read_text(encoding="utf-8"))
+    assert config["ignore"] == [
+        {
+            "vulnerability": "CVE-2026-1",
+            "package": {"name": "zlib1g", "type": "deb", "version": "1.3"},
+            "reason": "justification",
+        }
+    ]
+
+
+def test_exceptions_du_produit(tmp_path):
+    module = chaine()
     module.scan(tmp_path, EXCEPTIONS, today=TODAY, run=ok)
     config = yaml.safe_load((tmp_path / "grype.yaml").read_text(encoding="utf-8"))
-    rules = {rule["vulnerability"]: rule for rule in config["ignore"]}
     # CPython 3.12.15 (12/10) corrige CVE-2026-82049 (tarfile) : plus d'exception
     assert not any(rule["package"]["name"] == "python" for rule in config["ignore"])
     # oauth2-proxy v7.15.5 compilé par nous (amendement du 12/10 à l'ADR 005) : gRPC 1.84.0
     # et x/crypto 0.57.0, plus d'exception pour ses modules
     assert not any(rule["package"]["type"] == "go-module" for rule in config["ignore"])
-    # distroless cc-debian13 (01/10/2026) : libssl3t64 de l'image de base, présente mais
-    # chargée par aucun processus (DT_NEEDED, /proc/<pid>/maps), correctif pas encore
-    # republié par distroless
-    libssl = {"name": "libssl3t64", "type": "deb", "version": "3.5.7-1~deb13u2"}
-    for name in (
-        "CVE-2026-54873",
-        "CVE-2026-72897",
-        "CVE-2026-84782",
-        "CVE-2026-84784",
-    ):
-        assert rules[name]["package"] == libssl
-        assert "DT_NEEDED" in rules[name]["reason"] and "maps" in rules[name]["reason"]
-    assert len(rules) == 4
+    # distroless cc-debian13 e792ab3 (fusionnée le 15/10) : libssl3t64 3.5.7-1~deb13u3,
+    # correctif de Debian (DSA-6531-1) des quatre failles d'OpenSSL du 01/10 ; plus
+    # d'exception pour la base
+    assert not any(rule["package"]["name"] == "libssl3t64" for rule in config["ignore"])
+    assert config["ignore"] == []
 
 
 def exceptions(tmp_path, **changes) -> Path:
@@ -386,12 +390,17 @@ def test_exception_expiree_ou_incomplete_refusee(tmp_path, changes, message):
 @pytest.mark.parametrize(
     "name", ["exceptions-vulnerabilites.yaml", "exceptions-vulnerabilites-tests.yaml"]
 )
-def test_exception_expiree_nomme_le_fichier_ou_la_revoir(name):
+def test_exception_expiree_nomme_le_fichier_ou_la_revoir(tmp_path, name):
     """Le message nomme le fichier de l'exception expirée : il nommait toujours celui
-    du produit, même pour une exception des images de test (signalé le 06/10)."""
+    du produit, même pour une exception des images de test (signalé le 06/10). Fichiers
+    construits : celui du produit n'a plus d'exception depuis le 16/10."""
     module = chaine()
+    module.ROOT = tmp_path
+    source = tmp_path / "securite" / name
+    source.parent.mkdir()
+    exceptions(tmp_path).rename(source)
     with pytest.raises(ValueError, match=re.escape(f"(securite/{name})")):
-        module.grype_config(ROOT / "securite" / name, date(2030, 1, 1))
+        module.grype_config(source, date(2030, 1, 1))
 
 
 def test_inventaire_et_scan_apres_la_construction_en_ci_et_en_local():
