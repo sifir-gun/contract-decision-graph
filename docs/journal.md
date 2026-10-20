@@ -3420,3 +3420,63 @@ Les quatre exceptions de `libssl3t64` 3.5.7-1~deb13u2 (CVE-2026-54873, CVE-2026-
 ### Nombre de tests
 
 - La suite principale passe de 2 391 à 2 392 (passage d'une exception à Grype, sur un fichier construit) ; le total, de 2 573 à 2 574.
+
+## 2026-10-16 · Versions successives du corpus : L441-10 au 01/01/2027 (ADR 009)
+
+À partir du 02/11/2026, le contrôle des échéances de la CI échouait à chaque pull request : la version indexée de L441-10 cesse d'être en vigueur le 01/01/2027. Spec `docs/spec-versions-corpus.md`, plan `docs/plan-versions-corpus.md`.
+
+### Constat sur Légifrance (16/10, dans un navigateur, page par page)
+
+- Version suivante publiée : LEGIARTI000054567689, « Version en vigueur à partir du 01 janvier 2027 », « Modifié par Ordonnance n°2026-671 du 27 juillet 2026 - art. 2 », marquée « À VENIR ».
+- Comparaison officielle des deux versions : une seule modification, au 4e alinéa du I (facture périodique : du code général des impôts au code des impositions sur les biens et services). Délais inchangés : ni `payment_delay_*` ni la règle financière ne bougent.
+- Une version intermédiaire (ordonnance n° 2025-1247), remplacée avant d'entrer en vigueur, hors du corpus.
+- La page de l'ordonnance a déclenché la vérification anti-robots : non contournée, non lue.
+
+### Décisions du propriétaire (16/10)
+
+- Garder les deux versions ; la date d'analyse choisit (option A, de préférence au remplacement du fichier, avec ou sans contrôle du début de validité).
+- Même référence pour les deux versions ; une seule fiche, qui déclare les versions relues ; fichier brut d'abord prévu copié à la main par le propriétaire, puis, à sa demande, transcrit par l'agent (voir « Écarts »).
+- Recherche datée, même règle en SQL et dans le CRAG (approche 1) ; contrôle du début de validité pour tout le corpus.
+
+### Tests d'abord, réalisation
+
+- Règle pure `in_force`, `drop_superseded` ; `later_versions` au manifeste et `check_chain` ; parseur « à partir du » et étiquette « NOTA : » ; corpus synthétique des tests (`tests/corpus_de_test.py`, fixture `corpus_synthetique`).
+- Migration `009` : clé d'unicité avec `valid_from`, en `NULLS NOT DISTINCT` ; le rôle d'arbitre de `ON CONFLICT` d'un tel index, que la documentation de PostgreSQL 16 ne décrit pas, est prouvé par un test.
+- Recherche datée (port `Retriever`, recherche sans filtre, mesure) ; test de parité SQL/Python sur deux domaines et quatre dates ; `check_index` compare aussi la version (mutation : sans elle, une version manquante passait).
+- CRAG : constat « pas encore en vigueur », constat de clôture « hors de leur période de vigueur » ; rien d'ajouté au résumé scellé.
+- Fiches : `versions_verifiees`, fenêtre de validité par intersection ; échéances par référence ; texte daté des références dans le dossier ; jeu d'évaluation figé vérifié au 01/10/2026.
+
+### Écarts et décisions d'exécution
+
+- Ordre : le texte daté des références et les analyses antidatées passent de la tâche 8 et de la tâche 5 à la tâche 6 (sinon le jeu d'évaluation figé cassait dès le fichier 2027, et une fiche sans début de validité restait retenue) ; la documentation, avancée avant le fichier du propriétaire.
+- Recherche sans filtre : dédoublonnage laissé à (référence, empreinte du texte) ; le filtre de date ne laisse qu'une version par référence quand l'une est en vigueur.
+- Une déclaration `versions_verifiees` vide est refusée explicitement.
+- Les tests `pg` ont appliqué la migration `009` à la base locale du poste : un `ingest` lancé depuis `main` y échoue jusqu'à la fusion.
+- Fichier `L441-10_2027-01-01.txt` transcrit par l'agent, à la demande du propriétaire : page lue dans un navigateur, sans contourner la vérification anti-robots, texte reconstruit des éléments affichés du bloc de l'article ; empreinte SHA-256 du fichier identique à celle calculée dans la page ; relecture du propriétaire contre Légifrance demandée.
+
+### Relecture de toute la branche (sous-agent, 16/10)
+
+- Verdict « avec corrections », aucun défaut critique. Corrigés, chacun par un test d'abord en échec :
+  - en mode réel, la recherche groupée par référence (`DISTINCT ON (reference)`) pouvait rendre la version la plus éloignée d'une référence sans version en vigueur, et le constat scellé citer une date fausse : la règle ne garde plus que la version la plus proche de la date (la première à venir, sinon la dernière expirée), en Python comme en SQL (spec et ADR 009 mis à jour) ;
+  - l'étiquette « NOTA : » : espaces insécables et note sur la même ligne reconnues ; une note annoncée mais non reconnue est une erreur qui nomme le fichier, jamais du texte indexé en silence ;
+  - provenance du fichier transcrit, ici, et procédure de retour arrière (relancer `ingest` avec l'image antérieure).
+- Mineurs laissés : cache de `reference_texts` par date, commentaire périmé de la règle financière, forme générale du `DELETE` du retour arrière, dictionnaire par (source, article) d'un test payant, `valid_until` absent de `check_index`, messages d'erreur du manifeste et des fiches, lignes de docstrings.
+
+### Constat en passant
+
+- `tests/test_cli_traces.py::test_destination_sans_cle_refusee` dépend de l'environnement du poste : avec les clés Langfuse du `.env` (ajoutées le 15/10 pour l'observabilité locale), la commande trouve ses clés et le test échoue. La CI, sans `.env`, ne le voit pas. Hors de ce chantier : à corriger dans le test (CLAUDE.md : « on corrige le test, on ne l'exclut pas »). Ce chantier a tourné avec un `.env` réduit aux variables de la base, comme la CI. Corrigé à part par la PR #55 (fixture `no_keys` : les deux clés posées vides), fusionnée dans `main`, puis dans cette branche le 20/10.
+
+### Pistes
+
+- Veille des versions à venir des autres articles : la CI ne connaît que les fins déjà annoncées.
+- `mesure-recherche` est désormais datée : ne comparer deux mesures qu'à date égale de part et d'autre d'un changement de version.
+
+### Vérifications
+
+- `./scripts/check.sh --sans-cluster` (a66fd05, 16/10) : lint, types, audit, échéances du corpus (aucune au 16/10), 2 449 tests passés, PostgreSQL compris, 2 sautés, couverture de 98,60 % ; 119 tests du rendu des charts ; 20 sur l'image ; puis échec au scan de l'image, l'exception CVE-2026-54873 ayant expiré le 15/10/2026 (hors de ce chantier, réglé par la PR #56).
+- Après la fusion de `main` (PR #55 et #56, conflit du journal résolu en gardant les deux entrées du 16/10), `./scripts/check.sh --sans-cluster` (a3dfc1e, 20/10), avec le `.env` complet du poste, clés de Langfuse comprises : « check.sh : SUCCÈS » ; 2 450 tests passés, 2 sautés, couverture de 98,60 % ; 119 tests du rendu des charts, 20 sur l'image ; trois scans sans faille critique ou haute corrigeable, 0 exception.
+- Cluster : sauté en local (profil à 7 Go sur 8, pile Langfuse en marche) ; job `cluster` de la CI.
+
+### Nombre de tests
+
+- La suite principale passe de 2 389 à 2 449 tests passés (60 de plus : règle des versions, manifeste, migration, recherche datée et parité, CRAG, fiches, échéances, texte daté, étiquette NOTA, version 2027) ; 2 450 après la fusion de `main` (un test de la PR #56). Décompte de `pytest` (« passed ») : les entrées précédentes en comptent 2 de plus pour la même suite.

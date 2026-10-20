@@ -7,6 +7,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 
+import corpus_de_test
 import psycopg
 import pytest
 from doubles import CONTRACT_TEXT, TEMPLATE, FakeCrag, FixedExtractor, clauses
@@ -18,6 +19,7 @@ from cdg.adapters.langgraph import checkpointer
 from cdg.adapters.llm import API_KEY_VARS
 from cdg.adapters.postgres import conninfo, migrations, rag_store
 from cdg.adapters.postgres.audit_store import PostgresAuditStore
+from cdg.application import ingestion
 from cdg.application.deps import Deps
 from cdg.domain.config import load_config
 
@@ -268,6 +270,19 @@ def audit_journal(pg, journal, monkeypatch) -> PostgresAuditStore:
 
 
 # --- CLI : contrat synthétique et doublures des dépendances réelles -------------------
+
+
+@pytest.fixture
+def corpus_synthetique(tmp_path, monkeypatch):
+    """Corpus de test (`corpus_de_test.py`) à la place des fichiers du dépôt : un article
+    fictif à deux versions et une fiche ; rend sa racine, modifiable par le test."""
+    root = corpus_de_test.write(tmp_path / "corpus")
+    monkeypatch.setattr(ingestion, "RAW", root / "raw")
+    monkeypatch.setattr(ingestion, "FICHES", root / "fiches")
+    monkeypatch.setattr(ingestion, "MANIFEST", root / "manifest.yaml")
+    ingestion.reference_texts.cache_clear()
+    yield root
+    ingestion.reference_texts.cache_clear()
 
 
 @pytest.fixture

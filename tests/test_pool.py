@@ -3,6 +3,8 @@ app_role, partagé par le checkpointer, le journal d'audit, la recherche et les 
 contrat. Le verrou compte dans sa taille ; un verrou de session ne suit jamais une
 connexion rendue ; pool épuisé : erreur explicite, 503 dans l'interface."""
 
+from datetime import date
+
 import psycopg
 import pytest
 from doubles import (
@@ -93,7 +95,10 @@ def test_journal_d_audit_par_le_pool(pool, journal):
 def test_recherche_par_le_pool(pool):
     retriever = rag_store.PgvectorRetriever(pool, HashEmbedder(), CONFIG.crag.search)
     assert isinstance(
-        retriever.search("financier", "délai", kind="delai_paiement", k=1), list
+        retriever.search(
+            "financier", "délai", kind="delai_paiement", k=1, on=date(2026, 9, 25)
+        ),
+        list,
     )
 
 

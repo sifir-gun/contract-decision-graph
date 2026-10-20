@@ -9,8 +9,9 @@ from doubles import HashEmbedder
 from pydantic import ValidationError
 
 from cdg.adapters.postgres import rag_store
+from cdg.application import ingestion
 from cdg.domain import corpus as corpus_text
-from cdg.domain.config import SearchConfig
+from cdg.domain.config import SearchConfig, load_config
 from cdg.domain.corpus import ChunkRow
 
 pytestmark = pytest.mark.pg
@@ -57,6 +58,7 @@ CHUNKS = [
 ]
 
 VALID_UNTIL = date(2027, 1, 1)
+ON = date(2026, 9, 25)  # date d'analyse des tests
 NOTE = "Conformément à l'article 3 de la loi de test."
 
 
@@ -96,15 +98,37 @@ def corpus(pg):
         conn.execute("DELETE FROM rag_chunks WHERE source_id = %s", (SOURCE,))
 
 
-def search(pg, domain, text, kind, k=5, model=EMBEDDER.model, settings=VECTOR):
+def search(pg, domain, text, kind, k=5, model=EMBEDDER.model, settings=VECTOR, on=ON):
     query = EMBEDDER.embed_query(text)
     return rag_store.search(
-        pg.app, domain, query, kind=kind, k=k, model=model, settings=settings
+        pg.app, domain, query, kind=kind, k=k, model=model, settings=settings, on=on
     )
 
 
 def test_insertion_idempotente(pg, corpus):
     assert corpus == len(CHUNKS) and rag_store.insert(pg.admin, rows()) == 0
+
+
+@pytest.fixture
+def l441_row(pg):
+    """La ligne de L441-10 de CHUNKS, seule, nettoyée après le test."""
+    yield rows()[3]
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute("DELETE FROM rag_chunks WHERE source_id = %s", (SOURCE,))
+
+
+def test_meme_texte_deux_debuts_deux_lignes(pg, l441_row):
+    """Migration 009 : un paragraphe commun à deux versions a une ligne par version."""
+    old = l441_row.model_copy(update={"valid_from": date(2019, 4, 26)})
+    new = l441_row.model_copy(update={"valid_from": date(2027, 1, 1)})
+    assert rag_store.insert(pg.admin, [old]) == 1
+    assert rag_store.insert(pg.admin, [new]) == 1
+
+
+def test_insertion_sans_debut_deja_presente_ignoree(pg, l441_row):
+    """NULLS NOT DISTINCT : un extrait sans début de validité reste dédoublonné."""
+    assert rag_store.insert(pg.admin, [l441_row]) == 1
+    assert rag_store.insert(pg.admin, [l441_row]) == 0
 
 
 def test_filtre_par_domaine_et_clause_avant_la_recherche(pg, corpus):
@@ -183,7 +207,7 @@ def test_adaptateur_du_port_retriever_requete_en_texte(pg, corpus):
     embedder = HashEmbedder()
     retriever = rag_store.PgvectorRetriever(pg.app, embedder, VECTOR)
     found = retriever.search(
-        "conformite", "sous-traitant instruction documentée", kind=ACCORD, k=5
+        "conformite", "sous-traitant instruction documentée", kind=ACCORD, k=5, on=ON
     )
     assert [p.reference for p in found] == ["RGPD, art. 28", "RGPD, art. 32"]
     assert embedder.calls == [
@@ -196,7 +220,9 @@ def test_adaptateur_du_port_filtre_sur_son_modele(pg, corpus):
         model = "autre-modele"
 
     retriever = rag_store.PgvectorRetriever(pg.app, OtherModel(), VECTOR)
-    assert retriever.search("conformite", "sous-traitant", kind=ACCORD, k=5) == []
+    assert (
+        retriever.search("conformite", "sous-traitant", kind=ACCORD, k=5, on=ON) == []
+    )
 
 
 # --- recherche sans filtre (mesure de la recherche seule, ADR 006) ----------------------
@@ -231,7 +257,9 @@ def duplicated(pg, corpus):
 
 def test_sans_filtre_tout_le_corpus_du_modele_chaque_extrait_une_fois(pg, duplicated):
     retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), VECTOR)
-    found = retriever.search_unfiltered("sous-traitant instruction documentée", k=50)
+    found = retriever.search_unfiltered(
+        "sous-traitant instruction documentée", k=50, on=ON
+    )
     # autres domaines et autres clauses compris ; l'extrait des deux domaines, une fois
     assert sorted(p.reference for p in found) == sorted(
         [r for _, r, _, _ in CHUNKS] + ["C. com., art. L442-1"]
@@ -243,21 +271,21 @@ def test_sans_filtre_tout_le_corpus_du_modele_chaque_extrait_une_fois(pg, duplic
 
 def test_sans_filtre_k_resultats_au_plus_et_modele_courant_seul(pg, corpus):
     retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), VECTOR)
-    assert len(retriever.search_unfiltered("sécurité", k=2)) == 2
+    assert len(retriever.search_unfiltered("sécurité", k=2, on=ON)) == 2
 
     class OtherModel(HashEmbedder):
         model = "autre-modele"
 
     other = rag_store.PgvectorRetriever(pg.app, OtherModel(), VECTOR)
-    assert other.search_unfiltered("sous-traitant", k=50) == []
+    assert other.search_unfiltered("sous-traitant", k=50, on=ON) == []
 
 
 def test_lecture_des_extraits_indexes_chacun_une_fois(pg, duplicated):
-    """Extraits indexés du modèle (référence, texte, empreinte du texte embarqué),
-    chacun une fois, quel que soit le réglage de la recherche : la mesure les compare
-    aux fichiers du corpus."""
+    """Extraits indexés du modèle (référence, début de validité, texte, empreinte du
+    texte embarqué), chacun une fois, quel que soit le réglage de la recherche : la
+    mesure les compare aux fichiers du corpus."""
     expected = sorted(
-        (r, t, embedded(r, t)["embedded_hash"])
+        (r, None, t, embedded(r, t)["embedded_hash"])
         for r, t in [(r, t) for _, r, t, _ in CHUNKS]
         + [("C. com., art. L442-1", DUPLICATED)]
     )
@@ -305,14 +333,125 @@ def test_un_extrait_par_reference_le_plus_proche(pg, long_article):
     assert found[0].id == closest.id  # l'extrait gardé est le plus proche
     retriever = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), DISTINCT)
     assert [
-        p.reference for p in retriever.search("conformite", QUERY, kind=ACCORD, k=5)
+        p.reference
+        for p in retriever.search("conformite", QUERY, kind=ACCORD, k=5, on=ON)
     ] == ["RGPD, art. 28", "RGPD, art. 32"]
 
 
 def test_sans_filtre_un_extrait_par_reference(pg, long_article, duplicated):
     vector = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), VECTOR)
     distinct = rag_store.PgvectorRetriever(pg.app, HashEmbedder(), DISTINCT)
-    every = [p.reference for p in vector.search_unfiltered(QUERY, k=50)]
-    once = [p.reference for p in distinct.search_unfiltered(QUERY, k=50)]
+    every = [p.reference for p in vector.search_unfiltered(QUERY, k=50, on=ON)]
+    once = [p.reference for p in distinct.search_unfiltered(QUERY, k=50, on=ON)]
     assert every.count("RGPD, art. 28") == 2
     assert once == list(dict.fromkeys(every))
+
+
+# --- versions successives : la date d'analyse choisit (docs/spec-versions-corpus.md) ----
+
+SYNTHETIQUES = ["code-test", "fiche-test"]
+MAX_WORDS = load_config().corpus.chunk_max_words
+
+
+@pytest.fixture
+def synthetique(pg, corpus_synthetique):
+    """Corpus synthétique indexé : un article à deux versions, dans deux domaines."""
+    lignes = ingestion.rows(EMBEDDER, MAX_WORDS, "")
+    assert rag_store.insert(pg.admin, lignes) == len(lignes)
+    yield lignes
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute(
+            "DELETE FROM rag_chunks WHERE source_id = ANY(%s)", (SYNTHETIQUES,)
+        )
+
+
+@pytest.mark.parametrize(
+    "on", [date(2019, 1, 1), date(2026, 8, 19), date(2026, 12, 31), date(2027, 1, 1)]
+)
+@pytest.mark.parametrize(
+    "domain,kind", [("financier", DELAI), ("operationnel", "preavis_resiliation")]
+)
+def test_parite_sql_python_corpus_synthetique(pg, synthetique, on, domain, kind):
+    """Le filtre SQL garde exactement ce que garde la règle pure `drop_superseded`."""
+    found = search(pg, domain, "alinéa des deux versions", kind, k=100, on=on)
+    rendus = {(p.reference, p.valid_from) for p in found if p.source_id in SYNTHETIQUES}
+    lignes = [r for r in synthetique if r.domain == domain and kind in r.kinds]
+    attendus = {
+        (r.reference, r.valid_from) for r in corpus_text.drop_superseded(lignes, on)
+    }
+    assert rendus == attendus and rendus
+
+
+@pytest.fixture
+def reel(pg):
+    """Corpus réel indexé (embedding de test) : L441-10 et ses deux versions."""
+    lignes = ingestion.rows(EMBEDDER, MAX_WORDS, "")
+    sources = sorted({r.source_id for r in lignes})
+    assert rag_store.insert(pg.admin, lignes) == len(lignes)
+    yield lignes, sources
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute(
+            "DELETE FROM rag_chunks WHERE embedding_model = %s AND source_id = ANY(%s)",
+            (EMBEDDER.model, sources),
+        )
+
+
+@pytest.mark.parametrize(
+    "on", [date(2026, 8, 19), date(2026, 12, 31), date(2027, 1, 1)]
+)
+def test_parite_sql_python_corpus_reel(pg, reel, on):
+    lignes, sources = reel
+    found = search(pg, "financier", "délai de paiement", DELAI, k=1000, on=on)
+    rendus = {(p.reference, p.valid_from) for p in found if p.source_id in sources}
+    candidates = [r for r in lignes if r.domain == "financier" and DELAI in r.kinds]
+    attendus = {
+        (r.reference, r.valid_from) for r in corpus_text.drop_superseded(candidates, on)
+    }
+    assert rendus == attendus
+    l441 = {start for ref, start in rendus if ref == "C. com., art. L441-10"}
+    assert l441 == {date(2027, 1, 1) if on >= date(2027, 1, 1) else date(2019, 4, 26)}
+
+
+def test_recherche_groupee_sans_version_en_vigueur_rend_la_plus_proche(pg, synthetique):
+    """Un extrait par référence (réglage de production) : avant ses deux versions,
+    l'extrait rendu pour T1 est celui de la première, jamais celui de la seconde, même
+    plus proche de la requête ; le constat « pas encore en vigueur » cite sa date."""
+    for query in ("Alinéa propre à la seconde version", "Alinéa propre à la première"):
+        found = search(
+            pg, "financier", query, DELAI, k=10, settings=DISTINCT, on=date(2019, 1, 1)
+        )
+        [t1] = [p for p in found if p.source_id == "code-test"]
+        assert t1.valid_from == date(2019, 4, 26)
+
+
+@pytest.fixture
+def expirees(pg):
+    """Une référence à deux versions, toutes deux expirées au 01/03/2027."""
+    lignes = [
+        rows()[3].model_copy(
+            update={
+                "reference": "X",
+                "valid_from": start,
+                "valid_until": end,
+                "text": t,
+            }
+        )
+        for start, end, t in [
+            (date(2015, 1, 1), date(2019, 4, 26), "Ancienne rédaction."),
+            (date(2019, 4, 26), date(2027, 1, 1), "Rédaction suivante."),
+        ]
+    ]
+    assert rag_store.insert(pg.admin, lignes) == 2
+    yield lignes
+    with psycopg.connect(pg.admin) as conn:
+        conn.execute("DELETE FROM rag_chunks WHERE source_id = %s", (SOURCE,))
+
+
+def test_parite_toutes_expirees_la_derniere(pg, expirees):
+    on = date(2027, 3, 1)
+    found = search(pg, "financier", "rédaction", DELAI, k=10, on=on)
+    rendus = {(p.reference, p.valid_from) for p in found if p.reference == "X"}
+    attendus = {
+        (r.reference, r.valid_from) for r in corpus_text.drop_superseded(expirees, on)
+    }
+    assert rendus == attendus == {("X", date(2019, 4, 26))}

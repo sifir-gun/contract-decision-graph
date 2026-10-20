@@ -3,7 +3,7 @@ analyse, revue humaine, liste, dossier, expiration, journal, vérification et re
 vrai graphe avec un checkpointer en mémoire, doublures à la place du LLM et du CRAG."""
 
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from doubles import (
@@ -273,7 +273,7 @@ def test_dossier_references_retenues_avec_leur_texte():
 
 
 def test_textes_du_corpus_par_reference():
-    texts = ingestion.reference_texts()
+    texts = ingestion.reference_texts(date(2026, 9, 25))
     article, _ = next(ingestion.articles())
     assert texts[article.reference] == {
         "source": article.source_id,

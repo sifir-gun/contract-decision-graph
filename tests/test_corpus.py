@@ -80,6 +80,31 @@ def test_note_conformement_sortie_du_texte():
 # --- 4. Validité à la date d'analyse -------------------------------------------------
 
 
+def test_l441_10_seul_le_quatrieme_alinea_change():
+    """Version en vigueur au 01/01/2027 (ordonnance n° 2026-671, art. 2) : la
+    comparaison officielle de Légifrance ne relève qu'une modification, au 4e alinéa du I
+    (fondement de la facture périodique)."""
+    old = corpus.parse_legifrance(real("code-commerce/L441-10.txt"))
+    new = corpus.parse_legifrance(real("code-commerce/L441-10_2027-01-01.txt"))
+    assert (new.valid_from, new.valid_until) == (date(2027, 1, 1), None)
+    assert new.amendment == (
+        "modification",
+        "Ordonnance n°2026-671 du 27 juillet 2026 - art. 2",
+    )
+    assert new.note.startswith(
+        "Conformément à l'article 49 de l'ordonnance n° 2025-1247"
+    )
+    before, after = old.text.split("\n\n"), new.text.split("\n\n")
+    assert len(before) == len(after) == 6
+    changed = [(b, a) for b, a in zip(before, after, strict=True) if b != a]
+    assert len(changed) == 1 and changed[0][0] == before[3]
+    assert "article 289 du code général des impôts" in changed[0][0]
+    assert (
+        "article L. 216-34 du code des impositions sur les biens et services"
+        in changed[0][1]
+    )
+
+
 def test_validite_a_la_date_d_analyse():
     article = corpus.parse_legifrance(real("code-commerce/L441-10.txt"))
     assert not corpus.expired(article.valid_until, date(2026, 12, 31))
@@ -238,16 +263,19 @@ def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     rows = ingestion.rows(
         HashEmbedder(), CONFIG.corpus.chunk_max_words, CONFIG.embedding.passage_prefix
     )
-    validity = {}
+    validity, window = {}, {}
     for row in rows:
         validity.setdefault(row.source_id, set()).add(row.valid_until)
-    assert validity["fiche-delais-paiement"] == {date(2027, 1, 1)}
-    assert validity["fiche-penalites-execution"] == {
-        None
-    }  # C. civ. 1231-5, version ouverte
-    assert validity["fiche-sous-traitance-rgpd"] == {
-        None
-    }  # articles sans fin de validité
+        window.setdefault(row.source_id, set()).add((row.valid_from, row.valid_until))
+    # relue contre les deux versions de L441-10 (versions_verifiees)
+    assert window["fiche-delais-paiement"] == {(date(2019, 4, 26), None)}
+    # C. civ. 1231-5, version ouverte, en vigueur depuis le 01/10/2016
+    assert window["fiche-penalites-execution"] == {(date(2016, 10, 1), None)}
+    # articles sans dates (EUR-Lex)
+    assert window["fiche-sous-traitance-rgpd"] == {(None, None)}
+    # la plus tardive des versions citées : C. com. L442-1, en vigueur depuis le
+    # 20/08/2026
+    assert window["fiche-responsabilite-plafonds"] == {(date(2026, 8, 20), None)}
     assert validity["code-commerce"] >= {date(2027, 1, 1)}
 
 
