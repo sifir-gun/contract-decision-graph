@@ -535,14 +535,6 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
         ),
         (
             "protection_design",
-            (
-                "Le sous-traitant ne peut pas réutiliser les dessins remis : ils sont "
-                "confidentiels et servent exclusivement pour la commande."
-            ),
-            "usage_limite_au_projet",
-        ),
-        (
-            "protection_design",
             "Le sous-traitant s'engage à garder confidentiels les dessins remis.",
             "confidentialite_seule",
         ),
@@ -558,6 +550,20 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
             "obligation_certification",
             "Les pièces sont conformes aux normes en vigueur.",
             "conformite_generale",
+        ),
+        (
+            # « certification » n'est pas un certificat remis : pas une preuve
+            "obligation_certification",
+            (
+                "Le sous-traitant, titulaire de la certification ISO 9001, livre des "
+                "pièces conformes aux normes en vigueur."
+            ),
+            "conformite_generale",
+        ),
+        (
+            "obligation_certification",
+            "Chaque lot est livré avec un certificat de conformité.",
+            "norme_et_preuves",
         ),
         (
             "obligation_certification",
@@ -675,6 +681,23 @@ def test_absence_sous_traitance_evoquee_par_le_texte(kind, text):
                 "trois fois le taux d'intérêt légal."
             ),
         ),
+        # pénalités de retard de paiement, sans « retard de » : toujours pas d'exécution
+        (
+            "penalites_retard_execution",
+            (
+                "Tout retard de paiement donne lieu à des pénalités égales à trois fois "
+                "le taux d'intérêt légal."
+            ),
+        ),
+        (
+            "penalites_retard_execution",
+            "Le donneur d'ordre est redevable de pénalités en cas de retard de paiement.",
+        ),
+        # procès-verbal de réception : pas des preuves de conformité à une norme
+        (
+            "obligation_certification",
+            "Un procès-verbal de réception est signé des deux parties à la livraison.",
+        ),
         # assurance qualité : pas une assurance
         (
             "assurance_sous_traitant",
@@ -704,3 +727,88 @@ def test_absence_sous_traitance_non_evoquee_par_un_texte_voisin(kind, text):
     assert section is not None
     absent = Clause(kind=kind, present=False, quote="", value=None)
     assert verification.mentioned_absences(text, [absent], section.absence_terms) == []
+
+
+# --- réutilisation des dessins : lue dans le sens prudent (blocage dur) ------------------
+# « réutiliser » et « librement » évoquent `reutilisation_autorisee`, la première
+# catégorie : une citation qui l'évoque n'est jamais lue `confidentialite_seule` ni
+# `usage_limite_au_projet`, au prix d'une redemande quand le texte nie la réutilisation.
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "Le sous-traitant peut réutiliser les dessins remis, qui restent confidentiels.",
+        "Le sous-traitant peut les réutiliser pour d'autres clients.",
+        (
+            "Le sous-traitant est autorisé à les réutiliser, les dessins restant "
+            "confidentiels."
+        ),
+        "Les dessins remis, confidentiels, sont à réutiliser selon son besoin.",
+        (
+            "Le sous-traitant utilise librement les dessins remis, qui restent "
+            "confidentiels."
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "rendered", ["confidentialite_seule", "usage_limite_au_projet"]
+)
+def test_reutilisation_evoquee_contredit_une_categorie_prudente(quote, rendered):
+    section = load_config().sous_traitance
+    assert section is not None
+    problems = verification.category_mismatches(
+        [_clause("protection_design", quote, rendered)], section.category_terms
+    )
+    assert len(problems) == 1 and "reutilisation_autorisee" in problems[0], problems
+    assert (
+        verification.category_mismatches(
+            [_clause("protection_design", quote, "reutilisation_autorisee")],
+            section.category_terms,
+        )
+        == []
+    )
+
+
+def test_negation_de_la_reutilisation_redemandee_sens_prudent():
+    """Voulu : « n'est autorisé à réutiliser que pour » contient « réutiliser ». Une
+    nouvelle extraction, puis la revue humaine, valent mieux qu'une autorisation de
+    réutilisation lue comme un usage limité."""
+    section = load_config().sous_traitance
+    assert section is not None
+    quote = (
+        "Le sous-traitant n'est autorisé à réutiliser les dessins remis que pour la "
+        "commande."
+    )
+    problems = verification.category_mismatches(
+        [_clause("protection_design", quote, "usage_limite_au_projet")],
+        section.category_terms,
+    )
+    assert len(problems) == 1 and "reutilisation_autorisee" in problems[0], problems
+
+
+@pytest.mark.parametrize(
+    ("kind", "quote"),
+    [
+        # aucune norme nommée n'est évoquée : `conformite_generale` ou `norme_sans_preuves`
+        # se juge ailleurs que sur ces mots (spec : conformité générale = sans norme nommée)
+        (
+            "obligation_certification",
+            "Les pièces sont conformes aux normes du secteur.",
+        ),
+        (
+            "obligation_certification",
+            "Le sous-traitant respecte les normes du secteur.",
+        ),
+    ],
+)
+def test_citation_sans_terme_de_categorie_non_controlee(kind, quote):
+    section = load_config().sous_traitance
+    assert section is not None
+    for category in profiles.SOUS_TRAITANCE.kind_categories[kind]:
+        assert (
+            verification.category_mismatches(
+                [_clause(kind, quote, category)], section.category_terms
+            )
+            == []
+        ), category
