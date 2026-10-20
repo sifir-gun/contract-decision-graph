@@ -133,17 +133,17 @@ Règle actuelle, inchangée : une clause dont le constat bloque ou pénalise exi
 
 ### Nouvelles sources Légifrance
 
-Existence et version vérifiées sur la page officielle le 16/10/2026, à relire au plan de la PR 2 ; texte copié dans `raw/` tel qu'affiché.
+Existence et version vérifiées sur la page officielle le 16/10/2026, puis le 20/10/2026 par l'API Légifrance de production (`/consult/getArticleWithIdAndNum`, versions de chaque article : une seule en vigueur, début de validité de ce tableau, aucune version à venir ; identifiants des versions en vigueur : L111-1 `LEGIARTI000042814694`, L112-2 `LEGIARTI000006278875`, L122-4 `LEGIARTI000006278911`, L131-3 `LEGIARTI000006278958`, 1231 `LEGIARTI000032041443`, 1231-1 `LEGIARTI000032010123`, L124-3 `LEGIARTI000017735449`) ; texte copié dans `raw/` tel qu'affiché par la page.
 
 | Source (`source_id`, citation) | Article | Version en vigueur | Versions suivantes | Clause | Ce qu'il apporte |
 | --- | --- | --- | --- | --- | --- |
-| `code-propriete-intellectuelle`, CPI | L111-1 | depuis le 27/12/2020 | aucune au 16/10/2026 | `protection_design` | droit exclusif de l'auteur du seul fait de la création ; un contrat de louage d'ouvrage n'y déroge pas |
-| `code-propriete-intellectuelle`, CPI | L112-2 | depuis le 11/05/1994 | aucune au 16/10/2026 | `protection_design` | œuvres de l'esprit : dessin, architecture, arts appliqués, plans relatifs à l'architecture |
-| `code-propriete-intellectuelle`, CPI | L122-4 | depuis le 03/07/1992 | aucune au 16/10/2026 | `protection_design` | reproduction ou adaptation sans consentement de l'auteur : illicite |
-| `code-propriete-intellectuelle`, CPI | L131-3 | depuis le 03/07/1992 | aucune au 16/10/2026 | `protection_design` | cession : chaque droit mentionné, domaine d'exploitation délimité (étendue, destination, lieu, durée) |
-| `code-civil`, C. civ. | 1231 | depuis le 01/10/2016 | aucune au 16/10/2026 | `delai_execution` | dommages et intérêts après mise en demeure, sauf inexécution définitive |
-| `code-civil`, C. civ. | 1231-1 | depuis le 01/10/2016 | aucune au 16/10/2026 | `delai_execution` | dommages et intérêts à raison du retard dans l'exécution |
-| `code-assurances`, C. assur. | L124-3 | depuis le 19/12/2007 | aucune au 16/10/2026 | `assurance_sous_traitant` | action directe du tiers lésé contre l'assureur de responsabilité civile du responsable |
+| `code-propriete-intellectuelle`, CPI | L111-1 | depuis le 27/12/2020 | aucune au 20/10/2026 (API) | `protection_design` | droit exclusif de l'auteur du seul fait de la création ; un contrat de louage d'ouvrage n'y déroge pas |
+| `code-propriete-intellectuelle`, CPI | L112-2 | depuis le 11/05/1994 | aucune au 20/10/2026 (API) | `protection_design` | œuvres de l'esprit : dessin, architecture, arts appliqués, plans relatifs à l'architecture |
+| `code-propriete-intellectuelle`, CPI | L122-4 | depuis le 03/07/1992 | aucune au 20/10/2026 (API) | `protection_design` | reproduction ou adaptation sans consentement de l'auteur : illicite |
+| `code-propriete-intellectuelle`, CPI | L131-3 | depuis le 03/07/1992 | aucune au 20/10/2026 (API) | `protection_design` | cession : chaque droit mentionné, domaine d'exploitation délimité (étendue, destination, lieu, durée) |
+| `code-civil`, C. civ. | 1231 | depuis le 01/10/2016 | aucune au 20/10/2026 (API) | `delai_execution` | dommages et intérêts après mise en demeure, sauf inexécution définitive |
+| `code-civil`, C. civ. | 1231-1 | depuis le 01/10/2016 | aucune au 20/10/2026 (API) | `delai_execution` | dommages et intérêts à raison du retard dans l'exécution |
+| `code-assurances`, C. assur. | L124-3 | depuis le 19/12/2007 | aucune au 20/10/2026 (API) | `assurance_sous_traitant` | action directe du tiers lésé contre l'assureur de responsabilité civile du responsable |
 
 Ce que les règles exigent de chacun :
 
