@@ -207,6 +207,190 @@ rules:
     notice_max_months: 6
     notice_score_penalty: 0.3
 
+# Profil sous_traitance (ADR 010, PR 2) : ses réglages, validés contre ses neuf types de
+# clauses. Les sections `extraction` et `rules` ci-dessus sont celles du profil fournisseur ;
+# poids, seuils, marge, politique d'arbitrage, contrôle de l'entrée, CRAG et explication
+# sont communs aux deux profils. Valeurs de démonstration, à valider avec le cabinet
+# (spec des profils, « Questions »).
+sous_traitance:
+  # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
+  rules:
+    juridique:
+      subcontractor_cap_min_pct: 100          # plafond du sous-traitant, % du montant du contrat
+      subcontractor_cap_score_penalty: 0.5
+      # protection des dessins et documents remis : chaque catégorie dans une seule liste
+      design_accepted: [usage_limite_au_projet]
+      design_penalized: [confidentialite_seule]
+      design_blocking: [reutilisation_autorisee]
+      design_score_penalty: 0.3               # confidentialité seule, ou clause absente
+    financier:
+      # pénalités de retard d'exécution dues par le sous-traitant (C. civ., art. 1231-5)
+      execution_delay_penalties_min_cap_pct: 5        # plafond minimal, % du montant du contrat
+      execution_delay_penalties_score_penalty: 0.4    # sous le minimum, ou clause absente
+      # délai de paiement par le donneur d'ordre (C. com., art. L441-10)
+      payment_delay_max_days_invoice: 60              # jours à compter de la date de facture
+      payment_delay_max_days_end_of_month: 45         # jours fin de mois
+      payment_delay_max_days_periodic_invoice: 45     # jours après une facture périodique
+      payment_delay_score_penalty: 0.2                # au-delà, ou délai présent mais non chiffré
+    conformite:
+      # obligation de certification : la clause absente est un blocage, sans réglage
+      certification_accepted: [norme_et_preuves]
+      certification_penalized: [norme_sans_preuves, conformite_generale]
+      certification_score_penalty: 0.3
+      # assurance du sous-traitant
+      insurance_min_eur: 2000000              # montant garanti par sinistre, en euros
+      insurance_score_penalty: 0.3            # sous le minimum, non chiffrée, ou absente
+    operationnel:
+      # délai d'exécution : la clause absente est pénalisée comme un délai indicatif
+      schedule_accepted: [date_contractuelle]
+      schedule_penalized: [delai_indicatif]
+      schedule_score_penalty: 0.4
+  # Vérification des absences (comme `extraction.absence_terms`) : un terme qui évoque la
+  # clause, dans le texte masqué, interdit de la déclarer absente. Termes ancrés, pour ne
+  # pas redemander une clause bien extraite : « pénalités de retard » seul n'y figure pas
+  # (en droit commercial, les pénalités de retard de paiement, C. com., art. L441-10, II,
+  # ne sont pas celles du sous-traitant), ni « assurance » seul (assurance qualité), ni
+  # « certificat » seul (certificat d'assurance), ni « par sinistre » (plafond de
+  # responsabilité). Listes imparfaites : une couche de défense parmi d'autres.
+  absence_terms:
+    responsabilite_donneur_ordre:
+      - responsabilité du donneur d'ordre
+      - responsabilité de l'entrepreneur principal
+      - le donneur d'ordre répond de
+      - le donneur d'ordre répond du
+      - le donneur d'ordre ne répond
+      - l'entrepreneur principal répond de
+      - l'entrepreneur principal ne répond
+    responsabilite_sous_traitant:
+      - responsabilité du sous-traitant
+      - le sous-traitant répond de
+      - le sous-traitant répond du
+      - le sous-traitant ne répond
+    protection_design:
+      - dessins
+      - plans
+      - propriété intellectuelle
+      - documents remis
+    revision_prix:
+      - révision des prix
+      - révision du prix
+      - révision des tarifs
+      - prix sont révisés
+      - prix peuvent être révisés
+      - peut être révisé
+      - peuvent être révisés
+      - indexation
+      - prix sont indexés
+      - tarifs sont indexés
+      - prix indexés
+    delai_paiement:
+      - payables à
+      - payable à
+      - payables dans
+      - payable dans
+      - délai de paiement
+      - délai de règlement
+    penalites_retard_execution:
+      - pénalités de retard d'exécution
+      - pénalité de retard d'exécution
+      - pénalités de retard de livraison
+      - pénalité de retard de livraison
+      - pénalités d'exécution
+      - clause pénale
+      - redevable de pénalités
+      - donne lieu à des pénalités
+    obligation_certification:
+      - certificat de conformité
+      - certificats de conformité
+      - certification
+      - procès-verbal
+      - procès-verbaux
+      - rapport d'essai
+      - rapports d'essais
+      - norme
+    assurance_sous_traitant:
+      - attestation d'assurance
+      - certificat d'assurance
+      - police d'assurance
+      - assurance responsabilité civile
+      - assurance couvrant
+      - souscrit une assurance
+      - souscrire une assurance
+      - assuré auprès
+      - assurée auprès
+    delai_execution:
+      - délai d'exécution
+      - délais d'exécution
+      - délai de livraison
+      - délais de livraison
+      - date de livraison
+      - planning
+  # Cohérence entre catégorie et citation (comme `extraction.category_terms`) : parmi les
+  # catégories dont un terme figure dans la citation, la première l'emporte, d'où l'ordre,
+  # du plus spécifique au moins spécifique. « confidentiel » vient après les termes de
+  # limite d'usage : une citation qui limite l'usage dit aussi la confidentialité. Les
+  # termes de réutilisation sont ancrés (« est libre de réutiliser » et non « réutiliser »),
+  # pour qu'un « ne peut pas réutiliser » ne soit pas lu comme une autorisation.
+  category_terms:
+    protection_design:
+      reutilisation_autorisee:
+        - est libre de réutiliser
+        - reste libre de réutiliser
+        - est autorisé à réutiliser
+        - réutiliser librement
+        - réutilisation libre
+      usage_limite_au_projet:
+        - seules fins
+        - seule fin
+        - exclusivement pour
+        - uniquement pour
+        - seul projet
+      confidentialite_seule:
+        - confidentiel
+        - confidentialité
+    obligation_certification:
+      norme_et_preuves:
+        - procès-verbal
+        - procès-verbaux
+        - certificat
+        - rapport d'essai
+        - rapports d'essais
+      conformite_generale:
+        - normes en vigueur
+        - normes applicables
+      norme_sans_preuves:
+        - conforme à la norme
+        - conformes à la norme
+        - conformément à la norme
+        - conforme aux normes
+        - conformes aux normes
+        - conformément aux normes
+    delai_execution:
+      delai_indicatif:
+        - indicatif   # couvre « à titre indicatif »
+        - indicative
+      date_contractuelle:
+        - au plus tard le
+        - planning contractuel
+        - calendrier contractuel
+        - date contractuelle
+    # même type que dans le profil fournisseur, mêmes termes
+    delai_paiement:
+      facture_periodique:
+        - factures périodiques
+        - facture périodique
+        - factures récapitulatives
+        - facture récapitulative
+        - facturation périodique
+      fin_de_mois:
+        - jours fin de mois
+        - jours fin du mois
+      date_facture:
+        - date d'émission
+        - date de facture
+        - date de la facture
+        - date de facturation
+
 # Politique d'arbitrage humain, appliquée par cdg.policy à chaque reprise.
 # Relecteur et motif sont toujours exigés ; une réponse refusée est redemandée.
 human_policy:

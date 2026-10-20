@@ -7,12 +7,14 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from cdg.domain import profiles, verification
 from cdg.domain.config import (
     DEFAULT_CONFIG_PATH,
     ConfigError,
     DecisionConfig,
     load_config,
 )
+from cdg.domain.models import Clause
 
 
 @pytest.fixture
@@ -205,6 +207,29 @@ _DELETE = object()
         ("analyst_retry.jitter", "non"),
         ("extraction_retry", _DELETE),
         ("extraction_retry.max_attempts", 0),
+        # section du profil sous_traitance (PR 2)
+        ("sous_traitance.regle_secrete", 1),  # clé inconnue
+        ("sous_traitance.rules", _DELETE),
+        ("sous_traitance.absence_terms", _DELETE),
+        ("sous_traitance.category_terms", _DELETE),
+        ("sous_traitance.rules.conformite", _DELETE),
+        ("sous_traitance.rules.conformite.insurance_min_eur", _DELETE),
+        ("sous_traitance.rules.conformite.insurance_min_eur", -1),
+        ("sous_traitance.rules.conformite.insurance_min_eur", "2000000"),  # strict
+        ("sous_traitance.rules.conformite.insurance_score_penalty", 1.5),
+        ("sous_traitance.rules.juridique.design_score_penalty", -0.1),
+        ("sous_traitance.rules.juridique.design_blocking", _DELETE),
+        ("sous_traitance.rules.juridique.design_blocking", ["reutilisation"]),
+        ("sous_traitance.rules.juridique.subcontractor_cap_min_pct", -1),
+        # un réglage du profil fournisseur n'est pas un réglage de la sous-traitance
+        ("sous_traitance.rules.financier.execution_penalties_min_cap_pct", 5),
+        (
+            "sous_traitance.rules.financier.payment_delay_max_days_periodic_invoice",
+            _DELETE,
+        ),
+        ("sous_traitance.rules.financier.payment_delay_score_penalty", 1.5),
+        ("sous_traitance.rules.operationnel.schedule_accepted", ["indicatif"]),
+        ("sous_traitance.rules.operationnel.schedule_score_penalty", _DELETE),
     ],
 )
 def test_configuration_invalide_refusee(tmp_path, raw, path, value):
@@ -252,3 +277,430 @@ def test_yaml_qui_n_est_pas_un_dictionnaire(tmp_path):
 def test_config_modifiee_valide_directement(raw):
     data = _mutate(raw, "conflict_gap", 1.0)
     assert DecisionConfig.model_validate(data).conflict_gap == 1.0
+
+
+# --- section sous_traitance (PR 2, spec « Configuration », ADR 006) --------------------
+
+
+def test_section_sous_traitance_exigee_dans_le_fichier(tmp_path, raw):
+    """Absente du fichier du projet, la section arrête le programme : seul le modèle la
+    laisse absente par défaut, pour relire les configurations archivées."""
+    with pytest.raises(ConfigError, match="réglages absents.*sous_traitance"):
+        load_config(_write(tmp_path, _mutate(raw, "sous_traitance", _DELETE)))
+
+
+def test_section_sous_traitance_nulle_refusee_dans_le_fichier(tmp_path, raw):
+    # `null` n'est que la valeur par défaut du modèle : le fichier règle la section
+    with pytest.raises(ConfigError, match="réglages absents.*sous_traitance"):
+        load_config(_write(tmp_path, _mutate(raw, "sous_traitance", None)))
+
+
+def test_configuration_archivee_sans_section_relue(raw):
+    """Une configuration d'avant la PR 2 n'a pas la section : elle se relit telle quelle,
+    sans profil sous_traitance (aucune analyse sous ce profil n'était possible)."""
+    old = _mutate(raw, "sous_traitance", _DELETE)
+    assert DecisionConfig.model_validate(old).sous_traitance is None
+
+
+def _sous_traitance(change) -> dict:
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    change(data["sous_traitance"])
+    return data
+
+
+@pytest.mark.parametrize(
+    ("type_", "path", "value", "reason"),
+    [
+        # une catégorie dans deux listes
+        (
+            "protection_design",
+            "juridique.design_penalized",
+            ["confidentialite_seule", "reutilisation_autorisee"],
+            "plus d'une fois",
+        ),
+        (
+            "protection_design",
+            "juridique.design_accepted",
+            ["usage_limite_au_projet", "confidentialite_seule"],
+            "plus d'une fois",
+        ),
+        (
+            "obligation_certification",
+            "conformite.certification_accepted",
+            ["norme_et_preuves", "conformite_generale"],
+            "plus d'une fois",
+        ),
+        (
+            "delai_execution",
+            "operationnel.schedule_penalized",
+            ["delai_indicatif", "date_contractuelle"],
+            "plus d'une fois",
+        ),
+        # deux fois dans la même liste
+        (
+            "delai_execution",
+            "operationnel.schedule_penalized",
+            ["delai_indicatif", "delai_indicatif"],
+            "plus d'une fois",
+        ),
+        # dans aucune liste
+        ("protection_design", "juridique.design_blocking", [], "aucune liste"),
+        (
+            "obligation_certification",
+            "conformite.certification_penalized",
+            ["norme_sans_preuves"],
+            "aucune liste",
+        ),
+        ("delai_execution", "operationnel.schedule_penalized", [], "aucune liste"),
+    ],
+)
+def test_categories_reparties_une_fois(raw, type_, path, value, reason):
+    """Chaque catégorie d'un type est dans exactement une liste ; l'erreur nomme le
+    type."""
+    data = _mutate(raw, f"sous_traitance.rules.{path}", value)
+    with pytest.raises(ValidationError, match=f"{type_} : .*{reason}"):
+        DecisionConfig.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            lambda s: s["absence_terms"].pop("assurance_sous_traitant"),
+            r"absence_terms : types manquants \['assurance_sous_traitant'\]",
+        ),
+        (
+            # un type du profil fournisseur n'est pas un type de la sous-traitance
+            lambda s: s["absence_terms"].update({"penalites_execution": ["x"]}),
+            r"absence_terms : .*types inconnus \['penalites_execution'\]",
+        ),
+        (
+            lambda s: s["absence_terms"]["revision_prix"].append("Indexation"),
+            "absence_terms : terme répété pour revision_prix",
+        ),
+        (
+            lambda s: s["category_terms"].pop("delai_paiement"),
+            r"category_terms : types manquants \['delai_paiement'\]",
+        ),
+        (
+            lambda s: s["category_terms"].update(
+                {"transfert_hors_ue": {"decision_adequation": ["x"]}}
+            ),
+            r"category_terms : .*types inconnus \['transfert_hors_ue'\]",
+        ),
+        (
+            lambda s: s["category_terms"]["delai_execution"].update(
+                {"date_facture": ["x"]}
+            ),
+            "category_terms : catégorie inconnue pour delai_execution : date_facture",
+        ),
+        (
+            lambda s: s["category_terms"]["protection_design"].update(
+                {"norme_et_preuves": ["x"]}
+            ),
+            "catégorie inconnue pour protection_design : norme_et_preuves",
+        ),
+        (
+            lambda s: s["category_terms"]["protection_design"][
+                "confidentialite_seule"
+            ].append("Seules fins"),
+            "category_terms : terme répété pour protection_design",
+        ),
+    ],
+)
+def test_termes_sous_traitance_valides_contre_le_profil(change, message):
+    """Les termes de la section sont validés contre les types du profil sous_traitance,
+    non contre ceux du fournisseur."""
+    with pytest.raises(ValidationError, match=message):
+        DecisionConfig.model_validate(_sous_traitance(change))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda s: s["absence_terms"].update({"delai_execution": []}),
+        lambda s: s["category_terms"]["delai_execution"].update(
+            {"delai_indicatif": []}
+        ),
+        lambda s: s["absence_terms"]["delai_execution"].append(""),
+    ],
+)
+def test_termes_sous_traitance_jamais_vides(change):
+    with pytest.raises(ValidationError):
+        DecisionConfig.model_validate(_sous_traitance(change))
+
+
+def test_termes_fournisseur_toujours_valides_contre_le_profil_fournisseur(raw):
+    # la validation partagée garde ses messages : les types de la sous-traitance sont
+    # inconnus de la section du fournisseur
+    data = copy.deepcopy(raw)
+    data["extraction"]["absence_terms"]["delai_execution"] = ["x"]
+    with pytest.raises(ValidationError, match=r"types inconnus \['delai_execution'\]"):
+        DecisionConfig.model_validate(data)
+
+
+def test_valeurs_de_demonstration():
+    """Valeurs de départ de la sous-traitance, à valider avec le cabinet (spec,
+    « Questions »), lues dans le fichier du projet."""
+    section = load_config().sous_traitance
+    assert section is not None
+    r = section.rules
+    j, f, c, o = r.juridique, r.financier, r.conformite, r.operationnel
+    assert (j.subcontractor_cap_min_pct, j.subcontractor_cap_score_penalty) == (
+        100,
+        0.5,
+    )
+    assert (j.design_accepted, j.design_penalized, j.design_blocking) == (
+        ["usage_limite_au_projet"],
+        ["confidentialite_seule"],
+        ["reutilisation_autorisee"],
+    )
+    assert j.design_score_penalty == 0.3
+    assert (
+        f.execution_delay_penalties_min_cap_pct,
+        f.execution_delay_penalties_score_penalty,
+    ) == (5, 0.4)
+    assert (
+        f.payment_delay_max_days_invoice,
+        f.payment_delay_max_days_end_of_month,
+        f.payment_delay_max_days_periodic_invoice,
+        f.payment_delay_score_penalty,
+    ) == (60, 45, 45, 0.2)
+    assert (c.certification_accepted, c.certification_penalized) == (
+        ["norme_et_preuves"],
+        ["norme_sans_preuves", "conformite_generale"],
+    )
+    assert c.certification_score_penalty == 0.3
+    assert (c.insurance_min_eur, c.insurance_score_penalty) == (2_000_000, 0.3)
+    assert (o.schedule_accepted, o.schedule_penalized) == (
+        ["date_contractuelle"],
+        ["delai_indicatif"],
+    )
+    assert o.schedule_score_penalty == 0.4
+
+
+def test_termes_de_paiement_de_la_sous_traitance_ceux_du_fournisseur():
+    cfg = load_config()
+    assert cfg.sous_traitance is not None
+    assert (
+        cfg.sous_traitance.category_terms["delai_paiement"]
+        == cfg.extraction.category_terms["delai_paiement"]
+    )
+    assert (
+        cfg.sous_traitance.absence_terms["delai_paiement"]
+        == cfg.extraction.absence_terms["delai_paiement"]
+    )
+
+
+def test_section_sous_traitance_couvre_les_types_du_profil():
+    section = load_config().sous_traitance
+    assert section is not None
+    spec = profiles.SOUS_TRAITANCE
+    assert set(section.absence_terms) == set(spec.kinds)
+    assert set(section.category_terms) == set(spec.kind_categories)
+    for kind, terms in section.absence_terms.items():
+        assert len(terms) >= 2, kind
+    for kind, by_category in section.category_terms.items():
+        assert set(by_category) == set(spec.kind_categories[kind]), kind
+
+
+# --- termes de la sous-traitance, sur des citations types -------------------------------
+# Les contrôles de l'extraction (`domain/verification.py`) lisent ces termes : une liste
+# trop large redemande à tort une clause bien extraite, une liste trop étroite laisse
+# passer une catégorie contredite par la citation.
+
+
+def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
+    return Clause(kind=kind, present=True, quote=quote, value=None, category=category)
+
+
+@pytest.mark.parametrize(
+    ("kind", "quote", "expected"),
+    [
+        (
+            "protection_design",
+            (
+                "Le sous-traitant est libre de réutiliser les dessins remis pour d'autres "
+                "clients."
+            ),
+            "reutilisation_autorisee",
+        ),
+        (
+            "protection_design",
+            (
+                "Les dessins et plans remis ne sont utilisés qu'aux seules fins de la "
+                "commande et restent confidentiels."
+            ),
+            "usage_limite_au_projet",
+        ),
+        (
+            "protection_design",
+            (
+                "Le sous-traitant ne peut pas réutiliser les dessins remis : ils sont "
+                "confidentiels et servent exclusivement pour la commande."
+            ),
+            "usage_limite_au_projet",
+        ),
+        (
+            "protection_design",
+            "Le sous-traitant s'engage à garder confidentiels les dessins remis.",
+            "confidentialite_seule",
+        ),
+        (
+            "obligation_certification",
+            (
+                "Chaque lot est livré avec un procès-verbal d'essai et un certificat de "
+                "conformité à la norme applicable."
+            ),
+            "norme_et_preuves",
+        ),
+        (
+            "obligation_certification",
+            "Les pièces sont conformes aux normes en vigueur.",
+            "conformite_generale",
+        ),
+        (
+            "obligation_certification",
+            "Les pièces sont conformes à la norme applicable à leur famille.",
+            "norme_sans_preuves",
+        ),
+        (
+            "delai_execution",
+            (
+                "Le sous-traitant livre au plus tard le 15 mars, selon le planning "
+                "contractuel."
+            ),
+            "date_contractuelle",
+        ),
+        (
+            "delai_execution",
+            "La livraison est prévue au plus tard le 15 mars, à titre indicatif.",
+            "delai_indicatif",
+        ),
+        (
+            "delai_execution",
+            "Le délai d'exécution est indicatif.",
+            "delai_indicatif",
+        ),
+        (
+            "delai_paiement",
+            "Les factures sont payables à 45 jours fin de mois.",
+            "fin_de_mois",
+        ),
+        (
+            "delai_paiement",
+            "Les factures sont payables à 60 jours à compter de la date de facture.",
+            "date_facture",
+        ),
+        (
+            "delai_paiement",
+            "Les factures périodiques sont payables à 45 jours.",
+            "facture_periodique",
+        ),
+    ],
+)
+def test_citation_sous_traitance_evoque_sa_categorie(kind, quote, expected):
+    """Une seule catégorie est acceptée pour la citation : celle que ses termes évoquent
+    (la première, de la plus spécifique à la moins spécifique)."""
+    section = load_config().sous_traitance
+    assert section is not None
+    for category in profiles.SOUS_TRAITANCE.kind_categories[kind]:
+        problems = verification.category_mismatches(
+            [_clause(kind, quote, category)], section.category_terms
+        )
+        assert (problems == []) == (category == expected), (category, problems)
+
+
+@pytest.mark.parametrize(
+    ("kind", "text"),
+    [
+        (
+            "responsabilite_donneur_ordre",
+            "La responsabilité du donneur d'ordre est limitée à 150 % du montant.",
+        ),
+        (
+            "responsabilite_sous_traitant",
+            "Le sous-traitant répond de tout dommage causé aux pièces confiées.",
+        ),
+        (
+            "protection_design",
+            "Les dessins remis restent la propriété du donneur d'ordre.",
+        ),
+        (
+            "revision_prix",
+            "Les prix sont révisés chaque année selon l'indice du secteur.",
+        ),
+        ("delai_paiement", "Les factures sont payables à 45 jours fin de mois."),
+        (
+            "penalites_retard_execution",
+            "Tout retard d'exécution donne lieu à des pénalités de retard d'exécution.",
+        ),
+        (
+            "obligation_certification",
+            "Le sous-traitant remet un certificat de conformité avec chaque lot.",
+        ),
+        (
+            "assurance_sous_traitant",
+            "Le sous-traitant remet une attestation d'assurance avant le démarrage.",
+        ),
+        (
+            "assurance_sous_traitant",
+            "Le sous-traitant est assuré auprès d'un assureur notoirement solvable.",
+        ),
+        (
+            "obligation_certification",
+            "Chaque lot est livré avec son procès-verbal d'essai.",
+        ),
+        ("delai_execution", "Le délai d'exécution court à compter de la commande."),
+        ("delai_execution", "Le planning de fabrication est annexé au contrat."),
+    ],
+)
+def test_absence_sous_traitance_evoquee_par_le_texte(kind, text):
+    section = load_config().sous_traitance
+    assert section is not None
+    absent = Clause(kind=kind, present=False, quote="", value=None)
+    problems = verification.mentioned_absences(text, [absent], section.absence_terms)
+    assert len(problems) == 1 and problems[0].endswith(kind)
+
+
+@pytest.mark.parametrize(
+    ("kind", "text"),
+    [
+        # pénalités de retard de paiement du donneur d'ordre : pas des pénalités
+        # d'exécution du sous-traitant (C. com., art. L441-10, II)
+        (
+            "penalites_retard_execution",
+            (
+                "Tout retard de paiement rend exigibles des pénalités de retard égales à "
+                "trois fois le taux d'intérêt légal."
+            ),
+        ),
+        # assurance qualité : pas une assurance
+        (
+            "assurance_sous_traitant",
+            "Le sous-traitant applique un plan d'assurance qualité conforme à son manuel.",
+        ),
+        (
+            "assurance_sous_traitant",
+            "La responsabilité du sous-traitant est plafonnée à 150 000 € par sinistre.",
+        ),
+        # certificat d'assurance : pas une obligation de certification
+        (
+            "obligation_certification",
+            "Le sous-traitant remet un certificat d'assurance avant le démarrage.",
+        ),
+        (
+            "responsabilite_sous_traitant",
+            "Le sous-traitant répond aux demandes du donneur d'ordre sous 48 heures.",
+        ),
+        (
+            "delai_execution",
+            "Les factures sont payables à 45 jours fin de mois.",
+        ),
+    ],
+)
+def test_absence_sous_traitance_non_evoquee_par_un_texte_voisin(kind, text):
+    section = load_config().sous_traitance
+    assert section is not None
+    absent = Clause(kind=kind, present=False, quote="", value=None)
+    assert verification.mentioned_absences(text, [absent], section.absence_terms) == []
