@@ -571,6 +571,32 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
             "norme_sans_preuves",
         ),
         (
+            # aucune norme nommée, même avec des preuves : la conformité générale (pénalisée)
+            # l'emporte sur `norme_et_preuves` (acceptée), dans le sens prudent
+            "obligation_certification",
+            (
+                "Les pièces sont conformes aux normes en vigueur ; le sous-traitant remet "
+                "les procès-verbaux d'essais."
+            ),
+            "conformite_generale",
+        ),
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000, procès-verbaux d'essais "
+                "remis à la livraison."
+            ),
+            "norme_et_preuves",
+        ),
+        (
+            "protection_design",
+            (
+                "Les dessins remis sont confidentiels et ne peuvent être utilisés que pour "
+                "le présent projet."
+            ),
+            "usage_limite_au_projet",
+        ),
+        (
             "delai_execution",
             (
                 "Le sous-traitant livre au plus tard le 15 mars, selon le planning "

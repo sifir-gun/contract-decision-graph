@@ -47,7 +47,7 @@ CLAUSE_CATEGORIES: tuple[str, ...] = get_args(ClauseCategory)
 
 # Protection des dessins et documents remis au sous-traitant (`protection_design`).
 DesignProtection = Literal[
-    "usage_limite_au_projet",  # utilisés pour le seul projet, et confidentiels
+    "usage_limite_au_projet",  # usage limité au projet, confidentialité stipulée ou non
     "confidentialite_seule",  # confidentialité, sans limite d'usage
     "reutilisation_autorisee",  # le sous-traitant peut les réutiliser
 ]
@@ -63,7 +63,7 @@ CERTIFICATION_REQUIREMENTS: tuple[str, ...] = get_args(CertificationRequirement)
 
 # Délai d'exécution (`delai_execution`).
 ExecutionSchedule = Literal[
-    "date_contractuelle",  # date ou planning qui engage le sous-traitant
+    "date_contractuelle",  # date, planning ou délai ferme qui engage le sous-traitant
     "delai_indicatif",
 ]
 EXECUTION_SCHEDULES: tuple[str, ...] = get_args(ExecutionSchedule)

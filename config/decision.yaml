@@ -336,7 +336,9 @@ sous_traitance:
   # Une négation (« n'est autorisé à réutiliser … que pour … ») est donc redemandée, puis
   # revue par un humain : voulu. Les autres types sont ancrés (« certificat » seul est dans
   # « certification » ; « conformes aux normes » seul dit « sans norme nommée », ce qui
-  # est la conformité générale, non « norme sans preuves »).
+  # est la conformité générale, non « norme sans preuves »). La conformité générale vient
+  # avant les preuves : des procès-verbaux remis ne nomment pas de norme, et une citation
+  # qui renvoie aux normes en vigueur n'est jamais lue `norme_et_preuves` (acceptée).
   category_terms:
     protection_design:
       reutilisation_autorisee:
@@ -348,10 +350,16 @@ sous_traitance:
         - exclusivement pour
         - uniquement pour
         - seul projet
+        - que pour le présent projet
+        - que pour le projet
+        - utilisés que pour
       confidentialite_seule:
         - confidentiel
         - confidentialité
     obligation_certification:
+      conformite_generale:
+        - normes en vigueur
+        - normes applicables
       norme_et_preuves:
         - procès-verbal
         - procès-verbaux
@@ -361,9 +369,6 @@ sous_traitance:
         - certificats d'essai
         - rapport d'essai
         - rapports d'essais
-      conformite_generale:
-        - normes en vigueur
-        - normes applicables
       norme_sans_preuves:
         - conforme à la norme
         - conformes à la norme

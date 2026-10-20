@@ -313,7 +313,11 @@ def test_prompt_sous_traitance():
     assert "pour chacun des 9 types de clause" in prompt
     lines = kind_lines(prompt)
     assert list(lines) == list(SOUS_TRAITANCE.kinds)  # chacun une fois, dans l'ordre
-    assert "donneur d'ordre" in prompt.split("\n\n", 1)[0]  # point de vue, en tête
+    head = prompt.split("\n\n", 1)[0]  # point de vue, en tête
+    assert "du point de vue du donneur d'ordre" in head
+    # le maître de l'ouvrage peut payer directement le sous-traitant
+    assert "la partie qui confie l'exécution de travaux au sous-traitant." in head
+    assert "paie" not in head
     for unit, wording in (("%", "en pourcentage"), ("jours", "en jours")):
         for kind in (k for k, u in SOUS_TRAITANCE.value_units.items() if u == unit):
             assert wording in lines[kind], kind
@@ -372,7 +376,12 @@ def test_prompt_sous_traitance_montant_en_lettres_delai_ferme_et_limite_d_usage(
         "« 1 500 000 € » comme « un million cinq cent mille euros » donnent 1500000"
         in insurance
     )
-    assert "null seulement si le contrat ne fixe aucun montant" in insurance
+    # un montant fixé seulement par année n'est pas un montant par sinistre
+    assert (
+        "null seulement si le contrat ne fixe aucun montant garanti par sinistre ; un "
+        "montant fixé seulement par année n'est pas un montant par sinistre."
+        in insurance
+    )
     assert "La citation contient ce montant tel qu'il est écrit dans le contrat." in (
         insurance
     )
