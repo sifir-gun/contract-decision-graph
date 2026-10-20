@@ -14,6 +14,7 @@ contrat rédigé de façon réaliste (J5).
 import itertools
 import json
 from collections import Counter
+from pathlib import Path
 
 import pytest
 import yaml
@@ -39,6 +40,7 @@ from cdg.domain import input_checks, masking, profiles, verification
 from cdg.domain.config import load_config
 from cdg.domain.decision import decide
 from cdg.domain.models import DOMAINS, Clause, category_required
+from cdg.domain.numeric import rounded
 from cdg.domain.rules import RULES
 
 CONFIG = load_config()
@@ -318,6 +320,62 @@ def variants():
                 clause, FOURNISSEUR.category_kinds
             )
             yield found
+
+
+# Constats du profil fournisseur, figés (tâche 5 de la PR 2 des profils) : le refactoring
+# des règles communes ne change pas un caractère de leur texte. Le fichier a été produit
+# avant ce refactoring, par le code du commit a96dce7 ; il ne se régénère pas pour faire
+# passer un test : une différence est un défaut du code, sauf changement voulu d'un texte
+# ou d'un réglage de la configuration.
+CONSTATS_FIGES = Path(__file__).parent / "fixtures" / "constats-fournisseur.json"
+
+
+def sans_point_de_depart():
+    """Délais de paiement chiffrés sans point de départ connu : la vérification de
+    l'extraction ne les laisse pas passer, mais la règle les lit au seuil le plus strict."""
+    for value, category in itertools.product((30.0, 50.0, 90.0), (None, "inconnu")):
+        yield favorable(delai_paiement=value, categories={"delai_paiement": category})
+
+
+def constats_figes(found) -> dict:
+    """Ce que le fichier figé garde d'une variante : ses écarts avec le contrat favorable
+    (pour la lire) et les constats des quatre domaines, flottants arrondis."""
+    reference = {c.kind: c for c in favorable()}
+    return {
+        "ecarts": [
+            {
+                "kind": c.kind,
+                "present": c.present,
+                "value": None if c.value is None else rounded(c.value),
+                "category": c.category,
+            }
+            for c in found
+            if c != reference[c.kind]
+        ],
+        "constats": [
+            {
+                "kind": f.kind,
+                "effect": f.effect,
+                "text": f.text,
+                "penalty": None if f.penalty is None else rounded(f.penalty),
+            }
+            for f in findings_of(found)
+        ],
+    }
+
+
+def test_textes_des_constats_fournisseur_inchanges():
+    figes = json.loads(CONSTATS_FIGES.read_text(encoding="utf-8"))["variantes"]
+    courants = [
+        constats_figes(found) for found in (*variants(), *sans_point_de_depart())
+    ]
+    assert len(courants) == len(figes)
+    differences = [
+        (i, fige, courant)
+        for i, (fige, courant) in enumerate(zip(figes, courants, strict=True))
+        if fige != courant
+    ]
+    assert not differences, differences[:3]
 
 
 def test_catalogue_des_regles_complet():
