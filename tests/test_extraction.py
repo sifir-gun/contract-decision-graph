@@ -346,10 +346,6 @@ def test_prompt_sous_traitance_categories_assurance_et_penalites():
         assert "present = true dès que" in lines[kind], kind
     for kind in set(SOUS_TRAITANCE.kinds) - set(SOUS_TRAITANCE.value_units):
         assert "value : toujours null" in lines[kind], kind
-    insurance = lines["assurance_sous_traitant"]
-    assert "par sinistre, en euros, rendu en chiffres seulement" in insurance
-    assert "« 1 500 000 € » donne 1500000" in insurance
-    assert "null si ce montant n'est pas chiffré" in insurance
     penalties = lines["penalites_retard_execution"]
     assert "dues par le sous-traitant lorsqu'il exécute ou livre en retard" in penalties
     assert "jamais les pénalités de retard de paiement" in penalties
@@ -361,6 +357,47 @@ def test_prompt_sous_traitance_categories_assurance_et_penalites():
         "« le sous-traitant ne peut réutiliser les dessins que pour ce projet » "
         "est un usage limité au projet (usage_limite_au_projet)" in prompt
     )
+
+
+def test_prompt_sous_traitance_montant_en_lettres_delai_ferme_et_limite_d_usage():
+    lines = kind_lines(prompt_sous_traitance())
+    # montant en lettres : rendu en nombre, que la vérification ne lit pas (nouvel essai,
+    # puis revue humaine), jamais null ; null seulement sans aucun montant
+    insurance = lines["assurance_sous_traitant"]
+    assert "par sinistre, en euros, quelle que soit son écriture dans le contrat" in (
+        insurance
+    )
+    assert "(chiffres ou lettres)" in insurance
+    assert (
+        "« 1 500 000 € » comme « un million cinq cent mille euros » donnent 1500000"
+        in insurance
+    )
+    assert "null seulement si le contrat ne fixe aucun montant" in insurance
+    assert "La citation contient ce montant tel qu'il est écrit dans le contrat." in (
+        insurance
+    )
+    assert "en chiffres seulement" not in insurance
+    assert "n'est pas chiffré" not in insurance
+    # délai ferme exprimé en durée : une date contractuelle
+    schedule = lines["delai_execution"]
+    assert (
+        "date_contractuelle (date, planning ou délai ferme qui engage le sous-traitant, "
+        "par exemple « dans un délai de huit semaines à compter de la commande »)"
+        in schedule
+    )
+    assert "delai_indicatif (délai donné à titre indicatif, ou sans engagement)" in (
+        schedule
+    )
+    # limite d'usage, que la confidentialité soit stipulée ou non
+    design = lines["protection_design"]
+    assert (
+        "usage_limite_au_projet (usage des dessins et documents remis limité au projet, "
+        "que leur confidentialité soit stipulée ou non)" in design
+    )
+    assert "confidentialite_seule (confidentialité stipulée, sans limite d'usage)" in (
+        design
+    )
+    assert "reutilisation_autorisee (le sous-traitant peut les réutiliser)" in design
 
 
 def test_prompt_sous_traitance_sans_regle_de_decision_ni_type_du_fournisseur():
