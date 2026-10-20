@@ -330,17 +330,17 @@ sous_traitance:
   # catégories dont un terme figure dans la citation, la première l'emporte, d'où l'ordre,
   # du plus spécifique au moins spécifique. « confidentiel » vient après les termes de
   # limite d'usage : une citation qui limite l'usage dit aussi la confidentialité. Les
-  # termes de réutilisation sont larges (« réutiliser » couvre « peut réutiliser », « peut
-  # les réutiliser », « les réutiliser »), dans le sens prudent : c'est la catégorie qui
-  # bloque, et une citation qui l'évoque n'est jamais lue autrement. Une négation
-  # (« n'est autorisé à réutiliser … que pour … ») est donc redemandée, puis revue par un
-  # humain : voulu. Les autres types sont ancrés (« certificat » seul est dans
+  # termes de réutilisation sont larges (la racine « réutilis » couvre réutiliser, « peut
+  # les réutiliser », réutilise, réutilisation, réutilisable), dans le sens prudent :
+  # c'est la catégorie qui bloque, et une citation qui l'évoque n'est jamais lue autrement.
+  # Une négation (« n'est autorisé à réutiliser … que pour … ») est donc redemandée, puis
+  # revue par un humain : voulu. Les autres types sont ancrés (« certificat » seul est dans
   # « certification » ; « conformes aux normes » seul dit « sans norme nommée », ce qui
   # est la conformité générale, non « norme sans preuves »).
   category_terms:
     protection_design:
       reutilisation_autorisee:
-        - réutiliser
+        - réutilis   # racine : réutiliser, réutilise, réutilisation, réutilisable
         - librement
       usage_limite_au_projet:
         - seules fins

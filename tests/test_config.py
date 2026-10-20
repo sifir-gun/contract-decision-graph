@@ -749,6 +749,11 @@ def test_absence_sous_traitance_non_evoquee_par_un_texte_voisin(kind, text):
             "Le sous-traitant utilise librement les dessins remis, qui restent "
             "confidentiels."
         ),
+        # autres formes du verbe et du nom (2e passe de correction)
+        "Réutilisation libre des dessins remis, qui restent confidentiels.",
+        "La libre réutilisation des dessins remis, confidentiels, est admise.",
+        "Le sous-traitant réutilise les dessins remis pour d'autres clients.",
+        "Les dessins remis, confidentiels, sont réutilisables par le sous-traitant.",
     ],
 )
 @pytest.mark.parametrize(
