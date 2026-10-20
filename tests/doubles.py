@@ -10,6 +10,7 @@ from cdg.domain import audit, profiles
 from cdg.domain.authorization import Actor, interface_actor
 from cdg.domain.config import load_config
 from cdg.domain.corpus import drop_superseded
+from cdg.domain.explanation import Draft, ExplainedFinding, ExplanationRequest
 from cdg.domain.identity import Identity
 from cdg.domain.models import (
     DOMAINS,
@@ -263,6 +264,26 @@ class FixedExtractor:
         return ExtractionResult(
             clauses=self.clauses, usage=[usage(*self.tokens, node="extract_clauses")]
         )
+
+
+class FaithfulExplainer:
+    """Doublure de l'explicateur LLM : une explication fidèle (le texte et les références
+    du constat, recopiés), sans appel de LLM ; garde le profil reçu à chaque appel."""
+
+    def __init__(self):
+        self.profiles: list[Profile] = []  # profil reçu à chaque appel
+
+    def __call__(
+        self, request: ExplanationRequest, feedback: list[str], *, profile: Profile
+    ) -> tuple[Draft, Usage]:
+        self.profiles.append(profile)
+        findings = [
+            ExplainedFinding(
+                id=f.id, kind=f.kind, references=list(f.references), text=f.text
+            )
+            for f in request.findings
+        ]
+        return Draft(findings=findings), usage(node="explain")
 
 
 class FakeCrag:

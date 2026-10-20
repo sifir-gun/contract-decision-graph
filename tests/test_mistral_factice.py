@@ -154,7 +154,7 @@ def test_explication_acceptee_par_les_controles_du_domaine(factice):
             ),
         ],
     )
-    draft, _ = LLMExplainer(provider(factice))(request, [])
+    draft, _ = LLMExplainer(provider(factice))(request, [], profile="fournisseur")
     assert refusals(draft, request) == []
 
 

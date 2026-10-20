@@ -7,12 +7,13 @@ Python pur et doublures : aucun appel réseau. Le graphe complet est testé dans
 """
 
 import pytest
-from doubles import ABSENT, CONTRACT_TEXT, FakeLLM, clauses
+from doubles import ABSENT, CONTRACT_TEXT, FaithfulExplainer, FakeLLM, clauses
 
+from cdg.application import explanation as application_explanation
 from cdg.application.deps import TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.nodes.explain import explain
-from cdg.domain import explanation
+from cdg.domain import explanation, profiles
 from cdg.domain.config import load_config
 from cdg.domain.explanation import Draft, ExplainedFinding
 from cdg.domain.justification import justify
@@ -377,7 +378,7 @@ def llm_answer(d: Draft):
 
 def test_explicateur_recoit_le_verdict_fige_jamais_le_texte_du_contrat():
     llm = FakeLLM({"explain": llm_answer(draft())})
-    result, usage = LLMExplainer(llm)(REQUEST, [])
+    result, usage = LLMExplainer(llm)(REQUEST, [], profile="fournisseur")
     [call] = llm.calls
     assert (call["tier"], call["node"], call["schema"]) == ("main", "explain", Draft)
     assert (result, usage.node) == (draft(), "explain")
@@ -392,7 +393,11 @@ def test_explicateur_recoit_le_verdict_fige_jamais_le_texte_du_contrat():
 
 def test_explicateur_retour_de_refus_hors_des_donnees():
     llm = FakeLLM({"explain": llm_answer(draft())})
-    LLMExplainer(llm)(REQUEST, ["essai 1 : conformite-1 : nomme une autre décision"])
+    LLMExplainer(llm)(
+        REQUEST,
+        ["essai 1 : conformite-1 : nomme une autre décision"],
+        profile="fournisseur",
+    )
     user = llm.calls[0]["user"]
     data, feedback = user.split("Essai précédent refusé", 1)
     assert "essai 1 : conformite-1 : nomme une autre décision" in feedback
@@ -402,9 +407,97 @@ def test_explicateur_retour_de_refus_hors_des_donnees():
 def test_explicateur_motif_humain_transmis_releveur_non():
     llm = FakeLLM({"explain": llm_answer(draft())})
     request = explanation.request(state(final_decision="GO", human=HUMAN))
-    LLMExplainer(llm)(request, [])
+    LLMExplainer(llm)(request, [], profile="fournisseur")
     user = llm.calls[0]["user"]
     assert "risque accepté, pas un NO_GO" in user and "relecteur-synth" not in user
+
+
+# --- Explicateur LLM : prompt de chaque profil ---------------------------------------------------
+
+PROMPTS = application_explanation.PROMPTS
+RULES_HEADER = "Règles, sans exception :"
+
+
+def prompt_named(name: str) -> str:
+    return (PROMPTS / name).read_text(encoding="utf-8")
+
+
+def rules_of(prompt: str) -> list[str]:
+    """Lignes du bloc « Règles, sans exception », jusqu'à la première ligne vide."""
+    lines = prompt.splitlines()
+    start = lines.index(RULES_HEADER)
+    end = lines.index("", start) if "" in lines[start:] else len(lines)
+    return lines[start:end]
+
+
+def test_prompt_du_profil_fournisseur_inchange():
+    assert application_explanation.PROMPT_FILES["fournisseur"] == "explain_system.md"
+    assert prompt_named("explain_system.md").startswith(
+        "Tu expliques les constats d'une analyse de contrat fournisseur."
+    )
+
+
+def test_un_prompt_d_explication_pour_chaque_profil_et_seulement_eux():
+    assert set(application_explanation.PROMPT_FILES) == set(profiles.PROFILES)
+    for profile in profiles.PROFILES:
+        assert (PROMPTS / application_explanation.PROMPT_FILES[profile]).is_file()
+
+
+def test_explicateur_passe_le_prompt_du_profil():
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    LLMExplainer(llm)(REQUEST, [], profile="fournisseur")
+    [call] = llm.calls
+    assert call["system"] == prompt_named("explain_system.md")
+
+
+def test_explicateur_lit_le_prompt_du_profil_demande(monkeypatch):
+    monkeypatch.setattr(profiles, "PROFILES", ("fournisseur", "autre"))
+    monkeypatch.setattr(
+        application_explanation,
+        "PROMPT_FILES",
+        {"fournisseur": "explain_system.md", "autre": "crag_grade_system.md"},
+    )
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    explainer = LLMExplainer(llm)
+    explainer(REQUEST, [], profile="autre")
+    explainer(REQUEST, [], profile="fournisseur")
+    autre, fournisseur = llm.calls
+    assert autre["system"] == prompt_named("crag_grade_system.md")
+    assert fournisseur["system"] == prompt_named("explain_system.md")
+
+
+def test_explicateur_lit_les_prompts_de_tous_les_profils_a_la_construction(monkeypatch):
+    monkeypatch.setattr(profiles, "PROFILES", ("fournisseur", "autre"))
+    monkeypatch.setattr(
+        application_explanation,
+        "PROMPT_FILES",
+        {"fournisseur": "explain_system.md", "autre": "absent.md"},
+    )
+    with pytest.raises(FileNotFoundError, match="absent.md"):
+        LLMExplainer(FakeLLM())
+
+
+def test_explicateur_refuse_un_profil_inconnu_sans_appeler_le_llm():
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    with pytest.raises(ValueError, match="profil inconnu"):
+        LLMExplainer(llm)(REQUEST, [], profile="inexistant")
+    assert llm.calls == []
+
+
+# Le profil `sous_traitance` n'est pas encore enregistré (ni `Profile`, ni `PROMPT_FILES`) :
+# son prompt est testé par son nom de fichier.
+
+
+def test_prompts_d_explication_memes_regles():
+    fournisseur = prompt_named("explain_system.md")
+    sous_traitance = prompt_named("explain_sous_traitance_system.md")
+    assert rules_of(sous_traitance) == rules_of(fournisseur)
+    assert len(rules_of(fournisseur)) == 6  # l'en-tête et cinq règles
+    # le sujet et les parties changent, pas les règles
+    assert "contrat de sous-traitance" in sous_traitance
+    assert "donneur d'ordre" in sous_traitance
+    assert "contrat fournisseur" not in sous_traitance
+    assert "contrat de sous-traitance" not in fournisseur
 
 
 # --- Nœud explain --------------------------------------------------------------------------------
@@ -471,11 +564,37 @@ def test_nombre_d_essais_lu_dans_la_configuration():
     assert (out["explanation"].source, len(llm.calls)) == ("gabarit", 1)
 
 
+def test_explication_recoit_le_profil_de_l_etat():
+    # état sans clé `profile` (d'avant les profils) : le seul profil possible alors
+    without, with_profile = FaithfulExplainer(), FaithfulExplainer()
+    run_explain(without)
+    run_explain(with_profile, profile="fournisseur")
+    assert without.profiles == with_profile.profiles == ["fournisseur"]
+
+
+def test_explication_recoit_le_profil_par_mot_cle():
+    seen = {}
+
+    def explainer(request, feedback, *, profile):
+        seen["profile"] = profile
+        return FaithfulExplainer()(request, feedback, profile=profile)
+
+    run_explain(explainer, profile="fournisseur")
+    assert seen == {"profile": "fournisseur"}
+
+
+def test_explication_refuse_un_profil_inconnu_sans_gabarit_de_repli():
+    explainer = FaithfulExplainer()
+    with pytest.raises(ValueError, match="profil inconnu"):
+        run_explain(explainer, profile="inexistant")
+    assert explainer.profiles == []
+
+
 class Failing:
     def __init__(self, exc):
         self.exc, self.calls = exc, 0
 
-    def __call__(self, request, feedback):
+    def __call__(self, request, feedback, *, profile):
         self.calls += 1
         raise self.exc
 

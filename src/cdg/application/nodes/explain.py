@@ -12,7 +12,7 @@ from typing import Any
 
 from cdg.application.deps import Explainer, TemplateOnly
 from cdg.application.state import ContractState
-from cdg.domain import explanation
+from cdg.domain import explanation, profiles
 from cdg.domain.config import DecisionConfig
 from cdg.domain.models import Usage
 
@@ -36,13 +36,16 @@ def explain(
         return {
             "explanation": explanation.template(request, reasons=[NOTHING_TO_EXPLAIN])
         }
+    # `of_state` : un état d'avant les profils n'a pas la clé `profile` ; lu avant la boucle,
+    # un profil inconnu est une erreur, jamais un repli sur le gabarit
+    profile = profiles.of_state(state)
     reasons: list[str] = []
     usage: list[Usage] = []
     result = None
     attempts = decision_config.explain.max_attempts
     for attempt in range(1, attempts + 1):
         try:
-            draft, spent = explainer(request, list(reasons))
+            draft, spent = explainer(request, list(reasons), profile=profile)
         except Exception as exc:
             if retrying(exc):  # erreur passagère : le nœud est repris
                 raise

@@ -5,6 +5,7 @@ l'explication ne bloque jamais le scellement. Doublures, journal en mémoire."""
 from doubles import (
     ANALYSIS_DATE,
     CONTRACT_TEXT,
+    FaithfulExplainer,
     FakeLLM,
     FixedExtractor,
     MemoryAuditStore,
@@ -40,7 +41,7 @@ def transient(user: str) -> dict:
     raise LLMTransientError("503 : service indisponible")
 
 
-def run(explainer, config=CONFIG, cid="c-explain"):
+def run(explainer, config=CONFIG, cid="c-explain", **initial):
     store = MemoryAuditStore()
     deps = make_deps(FixedExtractor(FOUND), audit_store=store, explainer=explainer)
     graph = orchestrator.build_graph(config, deps).compile(
@@ -52,6 +53,7 @@ def run(explainer, config=CONFIG, cid="c-explain"):
             "raw_text": CONTRACT_TEXT,
             "analysis_date": ANALYSIS_DATE,
             **context(config),
+            **initial,
         },
         {"configurable": {"thread_id": cid}},
     )
@@ -124,3 +126,12 @@ def test_explication_scellee_relue_par_le_modele():
     _, entry = run(TemplateOnly("doublure : gabarit"))
     sealed = explanation.Explanation.model_validate(entry.record["explanation"])
     assert sealed.reasons == ["doublure : gabarit"]
+
+
+def test_explication_recoit_le_profil_de_l_etat_dans_le_graphe():
+    # état sans clé `profile` (d'avant les profils) : le seul profil possible alors
+    without, with_profile = FaithfulExplainer(), FaithfulExplainer()
+    _, entry = run(without, cid="c-sans-profil")
+    run(with_profile, cid="c-profil", profile="fournisseur")
+    assert without.profiles == with_profile.profiles == ["fournisseur"]
+    assert entry.record["explanation"]["source"] == "llm"
