@@ -200,7 +200,10 @@ class Processes:
 def interrupted(processes, contract_id="c-coupe", config=CONFIG):
     with pytest.raises(Death):
         processes.service(config).analyse(
-            CONTRACT_TEXT, contract_id=contract_id, actor=ACTEUR_ANALYSTE
+            CONTRACT_TEXT,
+            contract_id=contract_id,
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
         )
 
 
@@ -304,7 +307,10 @@ def test_resume_refuse_toujours_un_contrat_non_escalade_sous_une_autre_configura
 
     processes = Processes()
     processes.service(CONFIG).analyse(
-        PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
     )
     with pytest.raises(ThreadError, match="configuration modifiée"):
         processes.service(NEW).decide("c-attente", answer("NO_GO", reason="revu"))
@@ -427,7 +433,12 @@ def test_relance_refusee_hors_d_une_escalade_pour_changement_de_configuration():
     from test_service import PENDING_TEXT
 
     service = make_service()
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     with pytest.raises(ThreadError, match="changement de configuration"):
         service.relaunch("c-attente", actor=ACTEUR_RELECTEUR)
 

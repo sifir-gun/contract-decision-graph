@@ -7,13 +7,8 @@ from typing import Annotated, Literal, cast
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from cdg.domain.models import (
-    KIND_CATEGORIES,
-    REQUIRED_KINDS,
-    Decision,
-    Domain,
-    TransferCategory,
-)
+from cdg.domain import profiles
+from cdg.domain.models import Decision, Domain, TransferCategory
 from cdg.domain.numeric import rounded
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "decision.yaml"
@@ -76,10 +71,12 @@ class Extraction(_Strict):
 
     @model_validator(mode="after")
     def _un_jeu_de_termes_par_type(self) -> "Extraction":
+        # ces sections sont celles du profil fournisseur, le seul profil (ADR 010)
+        profile_kinds = set(profiles.spec("fournisseur").kinds)
         kinds = set(self.absence_terms)
-        if kinds != set(REQUIRED_KINDS):
-            missing = sorted(set(REQUIRED_KINDS) - kinds)
-            unknown = sorted(kinds - set(REQUIRED_KINDS))
+        if kinds != profile_kinds:
+            missing = sorted(profile_kinds - kinds)
+            unknown = sorted(kinds - profile_kinds)
             raise ValueError(
                 f"absence_terms : types manquants {missing}, types inconnus {unknown}"
             )
@@ -90,16 +87,17 @@ class Extraction(_Strict):
 
     @model_validator(mode="after")
     def _termes_par_categorie(self) -> "Extraction":
+        kind_categories = profiles.spec("fournisseur").kind_categories
         kinds = set(self.category_terms)
-        if kinds != set(KIND_CATEGORIES):
-            missing = sorted(set(KIND_CATEGORIES) - kinds)
-            unknown = sorted(kinds - set(KIND_CATEGORIES))
+        if kinds != set(kind_categories):
+            missing = sorted(set(kind_categories) - kinds)
+            unknown = sorted(kinds - set(kind_categories))
             raise ValueError(
                 f"category_terms : types manquants {missing}, types inconnus {unknown}"
             )
         for kind, by_category in self.category_terms.items():
             for category in by_category:
-                if category not in KIND_CATEGORIES[kind]:
+                if category not in kind_categories[kind]:
                     raise ValueError(
                         f"category_terms : catégorie inconnue pour {kind} : {category}"
                     )

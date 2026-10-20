@@ -15,6 +15,8 @@ def test_list_et_filtre_en_attente(pg, thread_id, contract, analysis, capsys):
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -38,6 +40,8 @@ def test_show_dossier_d_un_contrat(pg, thread_id, contract, analysis, capsys):
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -79,6 +83,8 @@ def test_journal_puis_replay(
     _, run = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,

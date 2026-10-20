@@ -49,7 +49,7 @@ class FlakyCrag(FakeCrag):
         super().__init__()
         self.errors = {d: list(e) for d, e in errors.items()}
 
-    def __call__(self, domain, clauses, analysis_date):
+    def __call__(self, domain, clauses, analysis_date, profile):
         pending = self.errors.get(domain, [])
         if pending:
             error = (
@@ -58,7 +58,7 @@ class FlakyCrag(FakeCrag):
             if error is not None:
                 self.calls.append(domain)
                 raise error
-        return super().__call__(domain, clauses, analysis_date)
+        return super().__call__(domain, clauses, analysis_date, profile)
 
 
 def run(deps, config=FAST, contract_id="c-garde"):
@@ -168,7 +168,7 @@ def test_blocage_dur_etabli_malgre_un_analyste_en_panne():
 
 
 class BrokenExtractor(FixedExtractor):
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         self.calls.append((raw_text, list(feedback)))
         raise LLMOutputError("mistral-small-2603 : réponse vide ou non structurée")
 
@@ -268,6 +268,7 @@ def test_statut_expose_les_echecs():
         config=FAST,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     assert status["statut"] == "suspendu"
     assert status["failures"] == [
@@ -291,13 +292,13 @@ class FlakyExtractor(FixedExtractor):
         super().__init__(clauses())
         self.errors = list(errors)
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         if self.errors:
             error = self.errors.pop(0) if len(self.errors) > 1 else self.errors[0]
             if error is not None:
                 self.calls.append((raw_text, list(feedback)))
                 raise error
-        return super().__call__(raw_text, feedback)
+        return super().__call__(raw_text, feedback, profile)
 
 
 def test_extraction_erreur_passagere_reprise_avant_la_garde():

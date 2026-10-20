@@ -37,12 +37,23 @@ def test_liste_les_contrats_en_attente_sous_une_autre_configuration():
     from doubles import CONTRACT_TEXT
 
     old, new = old_and_new()
-    old.analyse(PENDING_TEXT, contract_id="c-ancienne", actor=ACTEUR_ANALYSTE)
     old.analyse(
-        CONTRACT_TEXT, contract_id="c-finie", actor=ACTEUR_ANALYSTE
+        PENDING_TEXT,
+        contract_id="c-ancienne",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
+    old.analyse(
+        CONTRACT_TEXT,
+        contract_id="c-finie",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
     )  # terminé : rien à trancher
     new.analyse(
-        PENDING_TEXT, contract_id="c-courante", actor=ACTEUR_ANALYSTE
+        PENDING_TEXT,
+        contract_id="c-courante",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
     )  # même configuration
     check = new.config_check()
     assert check["configuration"] == audit.config_hash(CONFIG)
@@ -69,7 +80,12 @@ def test_commande_reussit_sans_contrat_a_trancher(monkeypatch, capsys):
 
 def test_commande_echoue_avec_les_contrats_a_trancher(monkeypatch, capsys):
     old, new = old_and_new()
-    old.analyse(PENDING_TEXT, contract_id="c-ancienne", actor=ACTEUR_ANALYSTE)
+    old.analyse(
+        PENDING_TEXT,
+        contract_id="c-ancienne",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     monkeypatch.setattr(cli, "build_service", lambda config: new)
     assert cli.main(["config-check"]) == 1
     err = json.loads(capsys.readouterr().err)
@@ -84,7 +100,12 @@ def test_administration_montre_les_contrats_a_trancher():
     from cdg.adapters.web.app import create_app
 
     old, new = old_and_new()
-    old.analyse(PENDING_TEXT, contract_id="c-ancienne", actor=ACTEUR_ANALYSTE)
+    old.analyse(
+        PENDING_TEXT,
+        contract_id="c-ancienne",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     page = TestClient(create_app(new), base_url=BASE_URL).get("/administration")
     assert page.status_code == 200
     assert 'href="/contrats/c-ancienne"' in page.text

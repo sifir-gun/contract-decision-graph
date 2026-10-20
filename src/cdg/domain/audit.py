@@ -5,20 +5,23 @@ chaîne et insère ; l'horodatage vient de l'appelant.
 
 - `decision_hash` : empreinte de la seule partie décision de l'enregistrement (clauses,
   verdicts avec les résumés du CRAG, décisions proposée et finale, décision humaine,
-  rapport d'échec, motif de rejet, date d'analyse, `config_hash`, constats du contrat). Sans identifiants de
-  contrat ni de thread, horodatage, consommation, explication ni modèles : mêmes clauses,
-  mêmes références et même configuration donnent la même empreinte (critère 6). Le
-  rapport d'échec y porte le fait (budget dépassé), pas la mesure (tokens), et ses
-  échecs de nœuds y sont rangés par domaine, comme les verdicts.
+  rapport d'échec, motif de rejet, date d'analyse, `config_hash`, constats du contrat,
+  profil depuis le v3). Sans identifiants de contrat ni de thread, horodatage,
+  consommation, explication ni modèles : mêmes clauses, mêmes références, même profil et
+  même configuration donnent la même empreinte (critère 6). Le rapport d'échec y porte
+  le fait (budget dépassé), pas la mesure (tokens), et ses échecs de nœuds y sont rangés
+  par domaine, comme les verdicts.
 - `chain_hash` : SHA-256 de `prev_hash` puis de l'enregistrement complet ; le premier
   maillon part de `GENESIS`.
 - `replay` : recalcule règles, justification et décision à partir de l'enregistrement
-  scellé et des références figées, sans LLM ni CRAG.
-- Formats : v2 (PR D2) porte sa version, l'acteur de l'analyse et celui de la décision
-  humaine (jamais de nom ni d'e-mail), la version du code de l'analyse et celle du
-  scellement (hors de `decision_hash`, chaînées) ; v1, sans version, relecteur nommé,
-  reste vérifiable (tout est recalculé sur le JSON stocké) et rejouable par ses modèles,
-  figés.
+  scellé et des références figées, sans LLM ni CRAG, sous le profil de l'enregistrement.
+- Formats : v3 (profils, ADR 010) scelle le profil de contrat dans la partie décision,
+  donc dans `decision_hash` ; v2 (PR D2) porte sa version, l'acteur de l'analyse et celui
+  de la décision humaine (jamais de nom ni d'e-mail), la version du code de l'analyse et
+  celle du scellement (hors de `decision_hash`, chaînées), que le v3 garde ; v1, sans
+  version, relecteur nommé. v1 et v2 restent vérifiables (tout est recalculé sur le JSON
+  stocké) et rejouables par leurs modèles, figés, comme profil `fournisseur`, le seul
+  qui existait alors (`record_profile`).
 """
 
 import hashlib
@@ -31,6 +34,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
+from cdg.domain import profiles
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig
 from cdg.domain.decision import decide
@@ -47,6 +51,7 @@ from cdg.domain.models import (
     Usage,
 )
 from cdg.domain.numeric import rounded
+from cdg.domain.profiles import LEGACY_PROFILE, Profile
 from cdg.domain.resumption import RESUME_ERRORS, ResumeEscalation, escalation_fault
 from cdg.domain.rules import RULES
 from cdg.domain.version import UNKNOWN as UNKNOWN_COMMIT
@@ -203,7 +208,9 @@ def decision_report(report: Mapping[str, Any] | None) -> dict[str, Any] | None:
 
 class _DecisionPart(BaseModel):
     """Partie décision de l'enregistrement, seule hachée par `decision_hash` ; commune
-    aux deux formats, qui ne diffèrent que par la décision humaine."""
+    aux trois formats, qui ne diffèrent que par la décision humaine (relecteur nommé en
+    v1, acteur ensuite) et le profil (v3). Un champ ajouté ici changerait la relecture
+    des v1 et v2 scellés : jamais."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -237,14 +244,23 @@ class DecisionRecordV1(_DecisionPart):
     human: HumanDecision | None
 
 
-class DecisionRecord(_DecisionPart):
-    """Format v2 : l'acteur de la décision humaine."""
+class DecisionRecordV2(_DecisionPart):
+    """Format v2, figé : l'acteur de la décision humaine, sans profil."""
 
     human: HumanReview | None
 
 
+class DecisionRecord(_DecisionPart):
+    """Format v3 (profils, ADR 010) : l'acteur de la décision humaine et le profil du
+    contrat, obligatoire, sans valeur par défaut."""
+
+    human: HumanReview | None
+    profile: Profile
+
+
 class _RecordPart(BaseModel):
-    """Enregistrement complet, haché par `chain_hash` ; commun aux deux formats."""
+    """Enregistrement complet, haché par `chain_hash` ; commun aux trois formats. Un
+    champ ajouté ici changerait la relecture des v1 et v2 scellés : jamais."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -273,11 +289,26 @@ class AuditRecordV1(_RecordPart):
     decision: DecisionRecordV1  # config_hash : celui de l'analyse
 
 
-class AuditRecord(_RecordPart):
-    """Format v2 (PR D2) : version, acteur de l'analyse, acteur de la décision, version
-    du code de l'analyse et du scellement."""
+class AuditRecordV2(_RecordPart):
+    """Format v2 (PR D2), figé : version, acteur de l'analyse, acteur de la décision,
+    version du code de l'analyse et du scellement ; sans profil."""
 
     version: Literal[2] = 2
+    analyse_par: Actor | None  # None : analyse antérieure aux rôles
+    # None : analyse antérieure au scellement de la version du code
+    code_version: CodeVersion | None
+    sealing_code_version: CodeVersion  # processus qui scelle
+    # cause d'une escalade écrite par la reprise (le gate n'a pas tourné), vérifiée par
+    # le rejeu ; None : décision du gate, ou d'avant l'enregistrement de cette cause
+    resume_escalation: ResumeEscalation | None = None
+    decision: DecisionRecordV2  # config_hash : celui de l'analyse
+
+
+class AuditRecord(_RecordPart):
+    """Format v3 (profils, ADR 010) : le v2, avec le profil du contrat dans la partie
+    décision."""
+
+    version: Literal[3] = 3
     analyse_par: Actor | None  # None : analyse antérieure aux rôles
     # None : analyse antérieure au scellement de la version du code
     code_version: CodeVersion | None
@@ -288,10 +319,13 @@ class AuditRecord(_RecordPart):
     decision: DecisionRecord  # config_hash : celui de l'analyse
 
 
+SealedDecision = DecisionRecordV1 | DecisionRecordV2 | DecisionRecord
+
 # modèles de la partie décision, par version d'enregistrement ; sans version : v1
-FORMATS: dict[int, type[DecisionRecordV1] | type[DecisionRecord]] = {
+FORMATS: dict[int, type[SealedDecision]] = {
     1: DecisionRecordV1,
-    2: DecisionRecord,
+    2: DecisionRecordV2,
+    3: DecisionRecord,
 }
 
 
@@ -307,7 +341,8 @@ def build_record(
     (rejet, escalade avant les analystes) est scellée vide ou nulle ; le contexte
     d'analyse (config_hash, modèles), lui, est exigé. Une configuration ou un code de
     scellement différents de ceux de l'analyse sont scellés aussi, chacun avec un
-    constat."""
+    constat. Le profil est celui de l'état (`profiles.of_state`) : sans profil, état
+    d'avant les profils, `fournisseur` ; inconnu, une erreur."""
     missing = [k for k in ("config_hash", "models") if k not in state]
     if missing:
         raise ValueError(
@@ -318,9 +353,10 @@ def build_record(
     human = state.get("human")
     if isinstance(human, HumanDecision):
         raise TypeError(
-            "décision humaine au format v1 (relecteur nommé) : le scellement v2 exige "
-            "l'acteur qui tranche"
+            "décision humaine au format v1 (relecteur nommé) : le scellement (v2 et "
+            "suivants) exige l'acteur qui tranche"
         )
+    profile = profiles.of_state(state)
     by_domain = {v.domain: v for v in state.get("verdicts", [])}
     analysed_by = state.get("code_version")
     code = None if analysed_by is None else CodeVersion.model_validate(analysed_by)
@@ -348,6 +384,7 @@ def build_record(
             reject_reason=state.get("reject_reason"),
             config_hash=analysed_with,
             input_findings=state.get("input_findings", []),
+            profile=profile,
         ),
         failure_report=state.get("failure_report"),
         sealing_config_hash=sealing_config_hash,
@@ -469,9 +506,9 @@ def verify_journal(
 ) -> ChainReport:
     """La chaîne (`verify_chain`), puis l'archive des configurations : chaque
     configuration archivée redonne son empreinte, recalculée par la forme canonique,
-    jamais sur le texte relu ; chaque enregistrement v2 a la configuration de sa décision.
-    Les v1, antérieurs à l'archive, en sont exemptés, et comptés : non rejouables par
-    elle."""
+    jamais sur le texte relu ; chaque enregistrement v2 ou v3 a la configuration de sa
+    décision. Les v1, antérieurs à l'archive, en sont exemptés, et comptés : non
+    rejouables par elle."""
     chain = verify_chain(entries, expect_head)
     if not chain.ok:
         return chain
@@ -520,6 +557,15 @@ def record_version(record: Mapping[str, Any]) -> int:
     return int(version)
 
 
+def record_profile(record: Mapping[str, Any]) -> Profile:
+    """Profil d'un enregistrement stocké : v1 et v2, d'avant les profils, `fournisseur`,
+    le seul qui existait alors ; à partir du v3, celui de la partie décision, absent ou
+    inconnu refusé (`profiles.parse`)."""
+    if record_version(record) in (1, 2):
+        return LEGACY_PROFILE
+    return profiles.parse(record["decision"].get("profile"))
+
+
 @dataclass(frozen=True)
 class ReplayReport:
     sealed_hash: str
@@ -538,16 +584,17 @@ def _after_gate(node: str) -> bool:
 
 def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> ReplayReport:
     """Recalcule la partie décision sur `configuration`, forme validée (JSON) de la
-    configuration de la décision, archivée : règles sur les clauses scellées,
-    justification sur les références figées (résumés du CRAG), puis décision du gate avec
-    la consommation et les échecs d'avant le gate. La décision humaine est reprise telle
-    quelle.
+    configuration de la décision, archivée : règles du profil de l'enregistrement
+    (`record_profile`) sur les clauses scellées, justification sur les références figées
+    (résumés du CRAG), puis décision du gate avec la consommation et les échecs d'avant le
+    gate. La décision humaine est reprise telle quelle.
 
     L'empreinte est contrôlée sur ce JSON, par la forme canonique, puis il est validé par
     le modèle courant, sans recalculer l'empreinte : un modèle qui a gagné des valeurs par
     défaut depuis le scellement ne rend pas la décision irrejouable. S'il ne sait plus le
     lire, le rejeu est impossible, et le dit."""
     sealed = FORMATS[record_version(record)].model_validate(record["decision"])
+    profile = record_profile(record)
     given = configuration_hash(configuration)
     if given != sealed.config_hash:
         raise ReplayError(
@@ -576,7 +623,9 @@ def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> Repla
             sealed.config_hash,
             config.interrupted.max_resumes,
         )
-        replayed = sealed.model_copy(update={"verdicts": _rejustified(sealed, config)})
+        replayed = sealed.model_copy(
+            update={"verdicts": _rejustified(sealed, config, profile)}
+        )
         return ReplayReport(
             sealed_hash=decision_hash(record),
             replayed_hash=_sha256(canonical(replayed.model_dump(mode="json"))),
@@ -597,7 +646,7 @@ def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> Repla
             for u in record["usage"]
             if not _after_gate(u["node"])
         ]
-        verdicts = _rejustified(sealed, config)
+        verdicts = _rejustified(sealed, config, profile)
         outcome = decide(
             verdicts, failures, usage, config, input_findings=sealed.input_findings
         )
@@ -620,15 +669,16 @@ def replay(record: Mapping[str, Any], configuration: Mapping[str, Any]) -> Repla
 
 
 def _rejustified(
-    sealed: DecisionRecordV1 | DecisionRecord, config: DecisionConfig
+    sealed: SealedDecision, config: DecisionConfig, profile: Profile
 ) -> list[AgentVerdict]:
-    """Verdicts recalculés : règles sur les clauses scellées, justification sur les
-    références figées (résumés du CRAG)."""
+    """Verdicts recalculés : règles du profil de l'enregistrement sur les clauses
+    scellées, justification sur les références figées (résumés du CRAG)."""
     verdicts = []
     for v in sealed.verdicts:
         if v.retrieval is None:
             raise ReplayError(f"verdict {v.domain} sans résumé du CRAG : non rejouable")
-        verdicts.append(justify(RULES[v.domain](sealed.clauses, config), v.retrieval))
+        rules = RULES[profile][v.domain]
+        verdicts.append(justify(rules(sealed.clauses, config), v.retrieval))
     return verdicts
 
 

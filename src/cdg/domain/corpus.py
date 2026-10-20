@@ -27,7 +27,8 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, model_validator
 
-from cdg.domain.models import DOMAIN_KINDS, DOMAINS, Domain
+from cdg.domain import profiles
+from cdg.domain.models import DOMAINS, Domain
 
 FICHE_DISCLAIMER = (
     "Fiche synthétique rédigée pour ce projet, non constitutive d'un avis juridique."
@@ -331,14 +332,13 @@ def by_domain(kinds: list[str]) -> list[tuple[Domain, list[str]]]:
     des domaines puis des types. Un type inconnu, ou aucun type, est une erreur."""
     if not kinds:
         raise ValueError("aucun type de clause déclaré")
-    known = {kind for domain_kinds in DOMAIN_KINDS.values() for kind in domain_kinds}
-    unknown = sorted(set(kinds) - known)
+    unknown = sorted(set(kinds) - set(profiles.KIND_DOMAIN))
     if unknown:
         raise ValueError(f"type de clause inconnu : {', '.join(unknown)}")
     return [
-        (domain, [k for k in DOMAIN_KINDS[domain] if k in kinds])
+        (domain, [k for k in profiles.kinds_of_domain(domain) if k in kinds])
         for domain in DOMAINS
-        if set(DOMAIN_KINDS[domain]) & set(kinds)
+        if set(profiles.kinds_of_domain(domain)) & set(kinds)
     ]
 
 
@@ -488,7 +488,8 @@ class ChunkRow(BaseModel):
     def _clauses_du_domaine(self) -> "ChunkRow":
         if not self.kinds:
             raise ValueError(f"{self.reference} : aucun type de clause déclaré")
-        foreign = [k for k in self.kinds if k not in DOMAIN_KINDS[self.domain]]
+        domain_kinds = profiles.kinds_of_domain(self.domain)
+        foreign = [k for k in self.kinds if k not in domain_kinds]
         if foreign:
             raise ValueError(
                 f"{self.reference} : types hors du domaine {self.domain} : "

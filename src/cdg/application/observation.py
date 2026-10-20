@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from cdg.domain.authorization import Actor
 from cdg.domain.config import LLMConfig
 from cdg.domain.models import Usage
+from cdg.domain.profiles import Profile
 from cdg.ports.llm import LLMProvider, SchemaT, Tier
 from cdg.ports.telemetry import Finish, LLMCall, Operation, Telemetry
 
@@ -126,7 +127,12 @@ class NoTelemetry:
 
     @contextmanager
     def operation(
-        self, name: Operation, *, contract_id: str | None, actor: Actor | None
+        self,
+        name: Operation,
+        *,
+        contract_id: str | None,
+        actor: Actor | None,
+        profile: Profile | None = None,
     ) -> Iterator[Finish]:
         yield _ignore
 

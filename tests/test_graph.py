@@ -111,14 +111,31 @@ def test_1_quatre_analystes_puis_un_seul_decision_gate():
     assert all(set(u) == {"verdicts", "usage"} for n, u in ups if n == "analyst")
 
 
+def base_state():
+    """État vérifié, route `analysts`, sans profil (état d'avant les profils)."""
+    return {"route": "analysts", "clauses": clauses(), "analysis_date": ANALYSIS_DATE}
+
+
 def test_route_apres_verification_construit_les_send():
-    state = {"route": "analysts", "clauses": clauses(), "analysis_date": ANALYSIS_DATE}
-    sends = route_after_verify(state)
+    sends = route_after_verify(base_state())
     assert all(isinstance(s, Send) and s.node == "analyst" for s in sends)
     assert [s.arg["domain"] for s in sends] == list(DOMAINS)
-    assert all(set(s.arg) == {"domain", "clauses", "analysis_date"} for s in sends)
+    assert all(
+        set(s.arg) == {"domain", "clauses", "analysis_date", "profile"} for s in sends
+    )
     assert all(s.arg["analysis_date"] == ANALYSIS_DATE for s in sends)
     assert route_after_verify({"route": "human_review"}) == "human_review"
+
+
+def test_send_porte_le_profil_de_l_etat_ou_fournisseur():
+    for state in (base_state(), {**base_state(), "profile": "fournisseur"}):
+        sends = route_after_verify({**state, "route": "analysts"})
+        assert {s.arg["profile"] for s in sends} == {"fournisseur"}
+
+
+def test_send_refuse_un_profil_inconnu():
+    with pytest.raises(ValueError, match="profil inconnu"):
+        route_after_verify({**base_state(), "profile": "inexistant"})
 
 
 # --- Critère d'acceptation n° 2, de bout en bout -----------------------------------
@@ -350,6 +367,7 @@ def test_run_contract_masque_avant_le_graphe():
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     assert status["masquage"] == {"EMAIL": 1, "TELEPHONE": 1, "PARTIE": 1}
     raw = graph.get_state({"configurable": {"thread_id": "c-pii"}}).values["raw_text"]
@@ -359,6 +377,60 @@ def test_run_contract_masque_avant_le_graphe():
     # l'extracteur ne reçoit que le texte masqué
     [(received, _)] = extractor.calls
     assert received == raw
+
+
+def run_contract_graph():
+    return build_graph(CONFIG, make_deps()).compile(
+        checkpointer=InMemorySaver(serde=strict_serializer())
+    )
+
+
+def test_run_contract_pose_le_profil_dans_l_etat_initial():
+    """Le profil donné est posé avant tout nœud ; le statut le rend sous `profil`."""
+    graph = run_contract_graph()
+    status = orchestrator.run_contract(
+        graph,
+        "c-profil",
+        CONTRACT_TEXT,
+        analysis_date=ANALYSIS_DATE,
+        config=CONFIG,
+        actor=ACTEUR_ANALYSTE,
+        code=CODE,
+        profile="fournisseur",
+    )
+    assert status["profil"] == "fournisseur"
+    state = graph.get_state({"configurable": {"thread_id": "c-profil"}}).values
+    assert state["profile"] == "fournisseur"
+
+
+def test_run_contract_exige_le_profil():
+    with pytest.raises(TypeError, match="profile"):
+        orchestrator.run_contract(  # type: ignore[call-arg]
+            run_contract_graph(),
+            "c-sans-profil",
+            CONTRACT_TEXT,
+            analysis_date=ANALYSIS_DATE,
+            config=CONFIG,
+            actor=ACTEUR_ANALYSTE,
+            code=CODE,
+        )
+
+
+@pytest.mark.parametrize("profile", ["sous_traitance", "", None])
+def test_run_contract_refuse_un_profil_inconnu_sans_rien_ecrire(profile):
+    graph = run_contract_graph()
+    with pytest.raises(ValueError, match="profil inconnu"):
+        orchestrator.run_contract(
+            graph,
+            "c-inconnu",
+            CONTRACT_TEXT,
+            analysis_date=ANALYSIS_DATE,
+            config=CONFIG,
+            actor=ACTEUR_ANALYSTE,
+            code=CODE,
+            profile=profile,
+        )
+    assert not graph.get_state({"configurable": {"thread_id": "c-inconnu"}}).values
 
 
 def test_texte_envoye_au_fournisseur_llm_est_masque():
@@ -377,6 +449,7 @@ def test_texte_envoye_au_fournisseur_llm_est_masque():
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     [call] = llm.calls
     assert "[EMAIL]" in call["user"] and "[PARTIE_1]" in call["user"]
@@ -416,6 +489,7 @@ def test_10_citation_inventee_reextraction_puis_escalade_apres_deux_essais():
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     assert (status["statut"], status["proposed_decision"]) == ("suspendu", "ESCALADE")
     assert status["failure_report"] == {
@@ -440,5 +514,6 @@ def test_10_citation_corrigee_au_second_essai():
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     assert len(llm.calls) == 2 and len(status["verdicts"]) == 4

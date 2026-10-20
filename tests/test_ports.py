@@ -19,7 +19,9 @@ from doubles import (
     make_deps,
 )
 
+from cdg.adapters.demo.extraction import ExpectedExtractor
 from cdg.adapters.demo.locks import LocalContractLocks
+from cdg.adapters.demo.references import DeclaredCrag
 from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.fastembed import FastembedEmbedder
 from cdg.adapters.langgraph import orchestrator
@@ -68,8 +70,10 @@ IMPLEMENTATIONS = [
     (CorpusSearch, FakeRetriever),
     (Extractor, lambda: LLMExtractor(FakeLLM())),
     (Extractor, lambda: FixedExtractor([])),
+    (Extractor, lambda: ExpectedExtractor([])),  # démonstration
     (Crag, FakeCrag),
     (Crag, lambda: orchestrator.crag_runner(FakeRetriever(), FakeLLM(), CONFIG)),
+    (Crag, lambda: DeclaredCrag(CONFIG.corpus.chunk_max_words)),  # démonstration
     (AuditStore, lambda: PostgresAuditStore("")),
     (AuditStore, MemoryAuditStore),
     (

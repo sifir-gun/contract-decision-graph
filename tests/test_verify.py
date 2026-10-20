@@ -46,6 +46,8 @@ def sealed(pg, audit_journal, tmp_path, monkeypatch, capsys):
             cli.main(
                 [
                     "run",
+                    "--profil",
+                    "fournisseur",
                     str(contract),
                     "--operateur",
                     "analyste-synth",

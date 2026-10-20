@@ -2,6 +2,7 @@
 analyse, revue humaine, liste, dossier, expiration, journal, vérification et rejeu, sur le
 vrai graphe avec un checkpointer en mémoire, doublures à la place du LLM et du CRAG."""
 
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
@@ -25,6 +26,7 @@ from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.resumes import LocalResumeCounter
 from cdg.adapters.langgraph.engine import EngineDeps, LangGraphEngine, memory_opener
 from cdg.application import ingestion
+from cdg.application.observation import NoTelemetry
 from cdg.application.service import (
     ContractService,
     FourEyesRefused,
@@ -81,7 +83,12 @@ def make_service(
 
 def pending_service():
     service = make_service()
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     return service
 
 
@@ -99,7 +106,9 @@ def answer(**overrides) -> dict:
 
 def test_analyse_termine_et_date_du_jour_par_defaut():
     service = make_service()
-    status = service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+    status = service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     assert (status["statut"], status["final_decision"]) == ("termine", "GO")
     assert status["analysis_date"] == ANALYSIS_DATE
     assert status["chain_hash"] is not None
@@ -112,6 +121,7 @@ def test_analyse_masque_les_parties_avant_le_graphe():
         contract_id="c1",
         parties=[PARTY],
         actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
     )
     assert status["masquage"] == {"PARTIE": 1}
     assert PARTY not in service.dossier("c1")["texte_masque"]
@@ -119,9 +129,171 @@ def test_analyse_masque_les_parties_avant_le_graphe():
 
 def test_analyse_refuse_un_thread_existant():
     service = make_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     with pytest.raises(ThreadError, match="existe déjà"):
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id="c1",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
+
+
+# --- profil de contrat ----------------------------------------------------------------------
+
+
+def test_analyse_sans_profil_refusee():
+    service = make_service()
+    with pytest.raises(TypeError, match="profile"):
         service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+    assert service.contracts() == []
+
+
+@pytest.mark.parametrize("profile", ["sous_traitance", "", None])
+def test_analyse_refuse_un_profil_inconnu_sans_rien_creer(profile):
+    service = make_service()
+    with pytest.raises(ValueError, match="profil inconnu"):
+        service.analyse(
+            CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile=profile
+        )
+    assert service.contracts() == [] and service.journal() == []
+
+
+def test_profil_dans_le_premier_checkpoint():
+    """Posé dans l'état initial, avant tout nœud : le premier état lisible, celui qui
+    attend `validate_input`, porte déjà le profil."""
+    opener = memory_opener(CONFIG)
+    service = make_service(opener=opener)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
+    with opener(make_deps()) as graph:
+        history = list(graph.get_state_history({"configurable": {"thread_id": "c1"}}))
+    [first] = [snapshot for snapshot in history if snapshot.next == ("validate_input",)]
+    assert first.values["profile"] == "fournisseur"
+
+
+def test_profil_dans_le_statut_la_liste_et_le_dossier():
+    service = make_service()
+    status = service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
+    assert status["profil"] == "fournisseur"
+    [row] = service.contracts()
+    assert row["profil"] == "fournisseur"
+    assert service.dossier("c1")["status"]["profil"] == "fournisseur"
+    assert service.engine.overview()[0]["profil"] == "fournisseur"
+
+
+class EscalatedEngine:
+    """Moteur factice : un contrat escaladé pour changement de configuration, dont l'état
+    est celui qu'on lui donne ; note ce que la relance passe à `run`."""
+
+    def __init__(self, values: dict):
+        self._values, self.ran = values, []
+
+    def status(self, thread_id):
+        return {
+            "thread_id": thread_id,
+            "configuration_changee": {"analyse": "a" * 64, "reprise": "b" * 64},
+            "demande": {"proposed_decision": "ESCALADE"},
+        }
+
+    def values(self, thread_id):
+        return dict(self._values)
+
+    def run(
+        self,
+        contract_id,
+        raw_text,
+        parties,
+        analysis_date,
+        actor,
+        profile,
+        relaunch_of=None,
+    ):
+        self.ran.append((contract_id, profile, relaunch_of))
+        return {"thread_id": contract_id, "statut": "suspendu"}
+
+
+def escalated_service(**values) -> tuple[ContractService, EscalatedEngine]:
+    engine = EscalatedEngine(
+        {"raw_text": CONTRACT_TEXT, "analysis_date": ANALYSIS_DATE, **values}
+    )
+    service = ContractService(
+        engine=engine,
+        audit_store=MemoryAuditStore,
+        config=CONFIG,
+        today=lambda: ANALYSIS_DATE,
+        now=lambda: FIXED_NOW,
+        code_version=CODE,
+    )
+    return service, engine
+
+
+def test_relance_reprend_le_profil_d_origine():
+    service, engine = escalated_service(profile="fournisseur")
+    service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert engine.ran == [("c-coupe-relance", "fournisseur", "c-coupe")]
+
+
+def test_relance_d_un_etat_sans_profil_en_fournisseur():
+    """Contrat analysé avant les profils : son état n'a pas la clé `profile`, le seul
+    profil possible alors était `fournisseur`, que la relance scelle explicitement."""
+    service, engine = escalated_service()
+    service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert engine.ran == [("c-coupe-relance", "fournisseur", "c-coupe")]
+
+
+class RecordingTelemetry(NoTelemetry):
+    """Note le profil que le service passe au port à l'ouverture de chaque opération."""
+
+    def __init__(self):
+        self.operations: list[tuple[str, str | None]] = []
+
+    @contextmanager
+    def operation(self, name, *, contract_id, actor, profile=None):
+        self.operations.append((name, profile))
+        yield lambda status: None
+
+
+def test_trace_de_l_analyse_porte_le_profil():
+    telemetry = RecordingTelemetry()
+    service = replace(make_service(), telemetry=telemetry)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
+    assert telemetry.operations == [("analyse", "fournisseur")]
+
+
+@pytest.mark.parametrize("values", [{"profile": "fournisseur"}, {}])
+def test_trace_de_la_relance_porte_le_profil_d_origine(values):
+    """Le profil de la trace est celui que la relance scelle : celui de l'état d'origine,
+    `fournisseur` pour un état d'avant les profils."""
+    service, engine = escalated_service(**values)
+    telemetry = RecordingTelemetry()
+    service = replace(service, telemetry=telemetry)
+    service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert telemetry.operations == [("relance", "fournisseur")]
+    assert engine.ran == [("c-coupe-relance", "fournisseur", "c-coupe")]
+
+
+def test_relance_d_un_profil_inconnu_refusee_sans_trace():
+    service, _ = escalated_service(profile="sous_traitance")
+    telemetry = RecordingTelemetry()
+    service = replace(service, telemetry=telemetry)
+    with pytest.raises(ValueError, match="profil inconnu"):
+        service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert telemetry.operations == []
+
+
+def test_relance_d_un_profil_inconnu_refusee_sans_rien_lancer():
+    service, engine = escalated_service(profile="sous_traitance")
+    with pytest.raises(ValueError, match="profil inconnu"):
+        service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert engine.ran == []
 
 
 # --- liste des contrats -------------------------------------------------------------------
@@ -129,7 +301,12 @@ def test_analyse_refuse_un_thread_existant():
 
 def test_liste_des_contrats_avec_etat_et_filtre_en_attente():
     service = pending_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c-termine", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT,
+        contract_id="c-termine",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     rows = {r["thread_id"]: r for r in service.contracts()}
     assert rows["c-attente"]["etat"] == "en_attente"
     assert rows["c-attente"]["proposed_decision"] == "GO"
@@ -145,7 +322,10 @@ def test_liste_des_contrats_avec_etat_et_filtre_en_attente():
 def test_contrat_rejete_dans_la_liste():
     service = make_service()
     service.analyse(
-        "Too short, in English.", contract_id="c-rejet", actor=ACTEUR_ANALYSTE
+        "Too short, in English.",
+        contract_id="c-rejet",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
     )
     (row,) = service.contracts()
     assert row["etat"] == "rejete"
@@ -165,7 +345,12 @@ def test_liste_des_contrats_en_une_seule_ouverture_du_graphe():
     service = make_service(opener=counting)
     openings = []
     for contract_id in ("c1", "c2", "c3"):
-        service.analyse(CONTRACT_TEXT, contract_id=contract_id, actor=ACTEUR_ANALYSTE)
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id=contract_id,
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
         opened.clear()
         rows = service.contracts()
         openings.append(len(opened))
@@ -179,7 +364,12 @@ def test_liste_des_contrats_en_une_seule_ouverture_du_graphe():
 def test_analyse_refuse_un_identifiant_invalide_sans_rien_creer():
     service = make_service()
     with pytest.raises(ContractIdError, match="identifiant de contrat invalide"):
-        service.analyse(CONTRACT_TEXT, contract_id="a b/../c", actor=ACTEUR_ANALYSTE)
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id="a b/../c",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
     assert service.contracts() == [] and service.journal() == []
 
 
@@ -188,7 +378,9 @@ def test_contrat_existant_d_identifiant_ancien_reste_lisible_et_tranchable():
     faisait la CLI) : listé, lu, tranché ; la règle ne vaut qu'à la création."""
     service = make_service()
     legacy = "revue 1#é"
-    service.engine.run(legacy, PENDING_TEXT, (), ANALYSIS_DATE, ACTEUR_ANALYSTE)
+    service.engine.run(
+        legacy, PENDING_TEXT, (), ANALYSIS_DATE, ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     [row] = service.contracts()
     assert (row["thread_id"], row["etat"]) == (legacy, "en_attente")
     assert service.dossier(legacy)["thread_id"] == legacy
@@ -233,7 +425,9 @@ def test_quatre_yeux_premier_controle_avant_le_graphe():
 
 def test_reprise_d_un_thread_inconnu_ou_termine_refusee():
     service = make_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     with pytest.raises(ThreadError, match="inconnu"):
         service.decide("absent", answer())
     with pytest.raises(ThreadError, match="pas en attente"):
@@ -266,7 +460,9 @@ def test_dossier_d_un_contrat_en_attente():
 
 def test_dossier_references_retenues_avec_leur_texte():
     service = make_service(FixedExtractor(clauses(penalites_execution=ABSENT)))
-    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     references = service.dossier("c1")["references"]
     # FakeCrag retient une référence fictive par domaine : absente du corpus, signalée
     assert references["financier-ref-1"] is None
@@ -288,7 +484,12 @@ def test_levee_de_blocage_possible_seulement_si_permise():
     config = CONFIG.model_copy(update={"human_policy": policy})
     blocked = FixedExtractor(clauses(responsabilite_acheteur=None))  # illimitée
     service = make_service(blocked, config=config)
-    service.analyse(CONTRACT_TEXT, contract_id="c-bloque", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT,
+        contract_id="c-bloque",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     assert service.dossier("c-bloque")["status"]["proposed_decision"] == "NO_GO"
     assert service.dossier("c-bloque")["levee_possible"] is True
     forbidden = policy.model_copy(update={"allow_block_override": False})
@@ -312,7 +513,9 @@ def test_dossier_extractions_refusees_puis_escalade():
         for c in clauses()
     ]
     service = make_service(FixedExtractor(wrong))
-    service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     dossier = service.dossier("c1")
     assert len(dossier["extractions_refusees"]) == CONFIG.extraction.max_attempts
     assert all(
@@ -363,7 +566,9 @@ def test_expiration_des_contrats_en_attente():
 
 def test_journal_verification_et_rejeu():
     service = pending_service()
-    service.analyse(CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     decided = service.decide("c-attente", answer())
     entries = service.journal()
     assert [(e["thread_id"], e["final_decision"]) for e in entries] == [

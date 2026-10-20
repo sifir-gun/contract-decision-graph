@@ -6,6 +6,7 @@ instructions, revue humaine, scellement et vérification tournent pour de vrai, 
 
 import html
 import json
+from dataclasses import replace
 from datetime import date
 
 import demo_set as expected_set
@@ -52,6 +53,7 @@ def analyse_demo(web, contract_id: str) -> str:
         "/analyse",
         data={
             "csrf": token,
+            "profil": "fournisseur",
             "source": "jeu",
             "contrat": contract_id,
             "identifiant": contract_id,
@@ -79,7 +81,12 @@ def test_formulaire_limite_aux_contrats_du_jeu(demo):
     token = csrf(web)
     response = web.post(
         "/analyse",
-        data={"csrf": token, "source": "texte", "texte": "Contrat collé."},
+        data={
+            "csrf": token,
+            "profil": "fournisseur",
+            "source": "texte",
+            "texte": "Contrat collé.",
+        },
     )
     assert response.status_code == 400
     assert "contrats du jeu" in response.text
@@ -160,17 +167,33 @@ def test_extraction_simulee_des_seuls_contrats_du_jeu():
     contract = contracts["demo-06-no-go-conseil"]
     extractor = ExpectedExtractor(contracts.values())
     masked = masking.mask(contract.text(), contract.parties).text
-    result = extractor(masked, [])
+    result = extractor(masked, [], contract.profile)
     assert result.clauses == list(contract.clauses)
     assert [u.model for u in result.usage] == ["simulation"]
     with pytest.raises(DemoExtractionError, match="contrats du jeu"):
-        extractor("Un contrat qui n'est pas dans le jeu.", [])
+        extractor("Un contrat qui n'est pas dans le jeu.", [], "fournisseur")
+
+
+def test_extraction_simulee_refuse_un_autre_profil():
+    """Chaque texte masqué est indexé avec le profil de son contrat : le profil que passe
+    le port doit être le sien, sans quoi les clauses attendues ne seraient pas celles du
+    genre de contrat analysé."""
+    _, contracts = demo_set.load()
+    contract = replace(
+        contracts["demo-06-no-go-conseil"], profile="autre"
+    )  # hors typage
+    masked = masking.mask(contract.text(), contract.parties).text
+    extractor = ExpectedExtractor([contract])
+    with pytest.raises(DemoExtractionError, match="profil") as raised:
+        extractor(masked, [], "fournisseur")
+    assert "autre" in str(raised.value) and "fournisseur" in str(raised.value)
+    assert extractor(masked, [], "autre").clauses == list(contract.clauses)
 
 
 def test_references_par_rattachement_declare():
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
-    result = crag("financier", [clause], date(2026, 9, 25))
+    result = crag("financier", [clause], date(2026, 9, 25), "fournisseur")
     [trace] = result.trace.clauses
     declared = {
         meta["reference"]
@@ -193,7 +216,7 @@ def test_reference_expiree_signalee_jamais_retenue(corpus_synthetique):
     )
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
-    result = crag("financier", [clause], date(2027, 3, 1))
+    result = crag("financier", [clause], date(2027, 3, 1), "fournisseur")
     [trace] = result.trace.clauses
     assert T1 in trace.expired and T1 not in trace.retained
     assert any("expirée" in f and T1 in f for f in result.trace.findings)
@@ -230,9 +253,11 @@ def test_demo_version_a_venir_signalee(corpus_synthetique):
     référence est signalée « pas encore en vigueur » et jamais retenue."""
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
-    [trace] = crag("financier", [clause], date(2026, 12, 31)).trace.clauses
+    [trace] = crag(
+        "financier", [clause], date(2026, 12, 31), "fournisseur"
+    ).trace.clauses
     assert T1 in trace.retained
-    result = crag("financier", [clause], date(2019, 1, 1))
+    result = crag("financier", [clause], date(2019, 1, 1), "fournisseur")
     [trace] = result.trace.clauses
     assert T1 not in trace.retained and T1 not in trace.expired
     assert any(
@@ -249,7 +274,7 @@ def test_demo_responsabilite_avant_l442_1():
     clause = Clause(
         kind="responsabilite_fournisseur", present=True, quote="x", value=50
     )
-    result = crag("juridique", [clause], date(2026, 6, 1))
+    result = crag("juridique", [clause], date(2026, 6, 1), "fournisseur")
     [trace] = result.trace.clauses
     assert {"C. civ., art. 1170", "C. civ., art. 1171", "C. civ., art. 1231-3"} <= set(
         trace.retained
@@ -267,6 +292,7 @@ def test_demo_delai_avant_2019_insuffisant(demo):
         "/analyse",
         data={
             "csrf": csrf(web),
+            "profil": "fournisseur",
             "source": "jeu",
             "contrat": "demo-06-no-go-conseil",
             "identifiant": "demo-06-antidate",
@@ -299,7 +325,7 @@ FICHE_DELAIS = "Fiche projet : Délais de paiement entre professionnels"
 def test_demo_l441_10_selon_la_date(on, start):
     crag = DeclaredCrag(CONFIG.corpus.chunk_max_words)
     clause = Clause(kind="delai_paiement", present=True, quote="x", value=90)
-    result = crag("financier", [clause], on)
+    result = crag("financier", [clause], on, "fournisseur")
     [trace] = result.trace.clauses
     assert trace.retained == [L441, FICHE_DELAIS] and trace.expired == []
     assert result.trace.findings == []
@@ -317,6 +343,7 @@ def test_dossier_texte_de_la_version_de_sa_date(demo):
             "/analyse",
             data={
                 "csrf": csrf(web),
+                "profil": "fournisseur",
                 "source": "jeu",
                 "contrat": "demo-06-no-go-conseil",
                 "identifiant": identifier,

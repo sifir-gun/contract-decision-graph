@@ -10,12 +10,8 @@ from pydantic import ValidationError
 
 from cdg.application.state import AnalystInput, ContractState, Route
 from cdg.domain.models import (
-    CATEGORY_KINDS,
     CLAUSE_CATEGORIES,
-    DOMAIN_KINDS,
     DOMAINS,
-    KIND_CATEGORIES,
-    REQUIRED_KINDS,
     TRANSFER_CATEGORIES,
     AgentVerdict,
     Clause,
@@ -28,6 +24,7 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.profiles import Profile
 
 # --- Clause -------------------------------------------------------------------
 
@@ -120,25 +117,7 @@ def test_usage_refuse_les_valeurs_negatives(field):
 def test_domaines_et_types_de_clauses():
     assert DOMAINS == ("juridique", "financier", "conformite", "operationnel")
     assert set(DOMAINS) == set(get_args(Domain))
-    assert REQUIRED_KINDS == (
-        "responsabilite_acheteur",
-        "responsabilite_fournisseur",
-        "revision_prix",
-        "penalites_execution",
-        "delai_paiement",
-        "duree_engagement",
-        "preavis_resiliation",
-        "donnees_personnelles",
-        "accord_traitement_donnees",
-        "transfert_hors_ue",
-    )
-    assert CATEGORY_KINDS == {"transfert_hors_ue", "delai_paiement"}
-    assert KIND_CATEGORIES["delai_paiement"] == (
-        "date_facture",
-        "fin_de_mois",
-        "facture_periodique",
-    )
-    assert KIND_CATEGORIES["transfert_hors_ue"] == TRANSFER_CATEGORIES
+    # types, partition, unités et catégories par type : tests/test_profiles.py
     assert CLAUSE_CATEGORIES == TRANSFER_CATEGORIES + (
         "date_facture",
         "fin_de_mois",
@@ -168,9 +147,19 @@ def test_seuls_verdicts_usage_et_failures_ont_un_reducteur():
 
 
 def test_etat_prive_des_analystes():
-    assert set(get_type_hints(AnalystInput)) == {"domain", "clauses", "analysis_date"}
+    assert set(get_type_hints(AnalystInput)) == {
+        "domain",
+        "clauses",
+        "analysis_date",
+        "profile",
+    }
     assert get_type_hints(AnalystInput)["analysis_date"] is date
     assert get_type_hints(ContractState)["analysis_date"] is date
+
+
+def test_le_profil_est_dans_l_etat_et_dans_l_entree_des_analystes():
+    assert get_type_hints(ContractState)["profile"] == Profile
+    assert get_type_hints(AnalystInput)["profile"] == Profile
 
 
 # --- HumanDecision (format v1, figé : anciens états) ; source humaine ou système --------
@@ -237,12 +226,6 @@ def test_revue_v2_systeme_ne_peut_etre_que_no_go(decision):
 
 
 # --- Clauses par domaine, résumé du CRAG ----------------------------------------------
-
-
-def test_chaque_type_de_clause_releve_d_un_seul_domaine():
-    assert set(DOMAIN_KINDS) == set(DOMAINS)
-    kinds = [k for d in DOMAINS for k in DOMAIN_KINDS[d]]
-    assert sorted(kinds) == sorted(REQUIRED_KINDS)  # partition : ni oubli, ni doublon
 
 
 def test_verdict_sans_resume_du_crag_par_defaut():

@@ -16,6 +16,7 @@ from doubles import (
     make_deps,
 )
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.resumes import LocalResumeCounter
@@ -85,15 +86,25 @@ def csrf(web: TestClient, page: str = "/analyse") -> str:
     return match.group(1)
 
 
-def analyse(web: TestClient, text: str = CONTRACT_TEXT, **fields) -> str:
-    """Analyse d'un texte collé par le formulaire ; rend l'identifiant du thread."""
+def post_analyse(
+    web: TestClient, text: str = CONTRACT_TEXT, *, profil="fournisseur", **fields
+) -> Response:
+    """Formulaire d'analyse d'un texte collé, posté ; rend la réponse telle quelle.
+    `profil` : champ du formulaire, `fournisseur` par défaut ; `None` l'omet (formulaire
+    d'avant les profils)."""
     data = {
         "csrf": csrf(web),
         "source": "texte",
         "texte": text,
         "identifiant": fields.pop("identifiant", "c-web"),
+        **({} if profil is None else {"profil": profil}),
         **fields,
     }
-    response = web.post("/analyse", data=data)
+    return web.post("/analyse", data=data)
+
+
+def analyse(web: TestClient, text: str = CONTRACT_TEXT, **fields) -> str:
+    """Analyse d'un texte collé par le formulaire ; rend l'identifiant du thread."""
+    response = post_analyse(web, text, **fields)
     assert response.status_code == 303, response.text
     return response.headers["location"].rsplit("/", 1)[-1]

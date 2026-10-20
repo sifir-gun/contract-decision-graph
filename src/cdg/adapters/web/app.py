@@ -43,6 +43,7 @@ from cdg.application.service import ContractService, FourEyesRefused
 from cdg.domain import audit, authorization
 from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import ContractIdError
+from cdg.domain.profiles import PROFILES
 from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
 from cdg.ports.identity import IdentityRejected, IdentityVerifier, ProviderUnavailable
@@ -481,7 +482,11 @@ def create_app(
         return page(
             request,
             "analyse.html",
-            {"contracts": list(contracts.values()), "error": error},
+            {
+                "contracts": list(contracts.values()),
+                "profiles": PROFILES,
+                "error": error,
+            },
             status,
         )
 
@@ -492,6 +497,7 @@ def create_app(
     @app.post("/analyse")
     def analyse(request: Request, form: CheckedForm) -> Response:
         try:
+            profile = saisie.profile(_text(form, "profil"))
             entry = _contract_input(form, demo)
             contract_id = saisie.contract_id(
                 _text(form, "identifiant"), entry.base, service.now()
@@ -504,6 +510,7 @@ def create_app(
                 entry.text,
                 contract_id=contract_id,
                 actor=actor(request),
+                profile=profile,
                 parties=entry.parties,
                 analysis_date=on,
             )

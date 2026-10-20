@@ -6,14 +6,16 @@ ne contient aucune règle de décision : le verdict reste au code (rules, gate).
 """
 
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
 
 from cdg.application.deps import ExtractionResult
+from cdg.domain import profiles
 from cdg.domain.models import Clause, ClauseCategory
+from cdg.domain.profiles import Profile
 from cdg.ports.llm import LLMProvider
 
 PROMPTS = Path(__file__).parent / "prompts"
@@ -43,6 +45,12 @@ class ExtractionOutput(BaseModel):
     clauses: list[ExtractedClause]
 
 
+# schéma de sortie et prompt système de chaque profil (ADR 010) : le profil `fournisseur`
+# garde `ExtractionOutput` (son nom est celui que le faux Mistral reconnaît) et son prompt
+SCHEMAS: Mapping[Profile, type[BaseModel]] = {"fournisseur": ExtractionOutput}
+PROMPT_FILES: Mapping[Profile, str] = {"fournisseur": "extraction_system.md"}
+
+
 def _boundary() -> str:
     return secrets.token_hex(8)
 
@@ -51,7 +59,11 @@ class LLMExtractor:
     def __init__(self, provider: LLMProvider, boundary: Callable[[], str] = _boundary):
         self._provider = provider
         self._boundary = boundary
-        self._system = (PROMPTS / "extraction_system.md").read_text(encoding="utf-8")
+        # prompts de tous les profils, lus une fois : un fichier manquant échoue au départ
+        self._systems = {
+            profile: (PROMPTS / PROMPT_FILES[profile]).read_text(encoding="utf-8")
+            for profile in profiles.PROFILES
+        }
 
     def _token(self, raw_text: str) -> str:
         token = self._boundary()
@@ -73,13 +85,18 @@ class LLMExtractor:
             )
         return "\n\n".join(parts)
 
-    def __call__(self, raw_text: str, feedback: list[str]) -> ExtractionResult:
+    def __call__(
+        self, raw_text: str, feedback: list[str], profile: Profile
+    ) -> ExtractionResult:
+        profile = profiles.parse(profile)  # profil inconnu : erreur, avant tout appel
         output, usage = self._provider.structured(
             tier="main",
-            system=self._system,
+            system=self._systems[profile],
             user=self._user_message(raw_text, feedback),
-            schema=ExtractionOutput,
+            schema=SCHEMAS[profile],
             node="extract_clauses",
         )
-        clauses = [Clause.model_validate(item.model_dump()) for item in output.clauses]
+        clauses = [
+            Clause.model_validate(item) for item in output.model_dump()["clauses"]
+        ]
         return ExtractionResult(clauses=clauses, usage=[usage])

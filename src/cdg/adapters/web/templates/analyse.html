@@ -8,6 +8,14 @@
 <form method="post" action="/analyse" enctype="multipart/form-data"
       hx-indicator="#analyse-en-cours" hx-disabled-elt="find button[type='submit']">
   <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="profil">Profil du contrat</label>
+  <select id="profil" name="profil" required aria-describedby="profil-aide">
+    <option value="" disabled selected>Choisir un profil</option>
+    {% for p in profiles %}
+    <option value="{{ p }}">{{ p }}</option>
+    {% endfor %}
+  </select>
+  <p id="profil-aide" class="hint">Genre de contrat analysé : jamais déduit du texte, à choisir à chaque analyse.</p>
   <fieldset>
     <legend>Contrat à analyser</legend>
     <div class="choice">

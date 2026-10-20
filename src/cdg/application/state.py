@@ -19,12 +19,16 @@ from cdg.domain.models import (
     NodeFailure,
     Usage,
 )
+from cdg.domain.profiles import Profile
 
 Route = Literal["extract_clauses", "reject", "analysts", "human_review", "explain"]
 
 
 class ContractState(TypedDict, total=False):
     contract_id: str
+    # profil du contrat, posé par run_contract ; absent des états d'avant les profils, lu
+    # alors par `profiles.of_state`. Sans réducteur : fixé pour toute l'analyse
+    profile: Profile
     raw_text: str
     analysis_date: (
         date  # versions des textes jugées à cette date ; fixée par run_contract
@@ -70,3 +74,4 @@ class AnalystInput(TypedDict):  # état privé reçu via Send
     domain: Domain
     clauses: list[Clause]
     analysis_date: date
+    profile: Profile

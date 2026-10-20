@@ -25,11 +25,11 @@ class GatedExtractor:
         self.inner = FixedExtractor(clauses())
         self.started, self.release = started, release
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         self.started.set()
         if not self.release.wait(WAIT):
             raise TimeoutError("extraction jamais libérée")
-        return self.inner(raw_text, feedback)
+        return self.inner(raw_text, feedback, profile)
 
 
 def engine(conninfo: str, journal: str, extractor) -> LangGraphEngine:
@@ -58,7 +58,12 @@ def analyse(conninfo, journal, thread_id, text, started, release, results) -> No
     try:
         extractor = GatedExtractor(started, release)
         status = engine(conninfo, journal, extractor).run(
-            thread_id, text, (), date(2026, 9, 25), ACTEUR_ANALYSTE
+            thread_id,
+            text,
+            (),
+            date(2026, 9, 25),
+            ACTEUR_ANALYSTE,
+            profile="fournisseur",
         )
         results.put(("ok", status["statut"]))
     except Exception as exc:  # noqa: BLE001 : rendue au test par la file
@@ -69,7 +74,7 @@ class Suicide:
     """Extraction qui tue son propre processus (SIGKILL) : un contrat qui fait planter le
     processus à chaque reprise, sans rien laisser intercepter."""
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         import os
         import signal
 

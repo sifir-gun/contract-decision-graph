@@ -20,15 +20,10 @@ from cdg.application.nodes.audit_seal import audit_seal
 from cdg.application.nodes.extract_clauses import extract_clauses
 from cdg.application.nodes.reject import reject
 from cdg.application.nodes.validate_input import validate_input
-from cdg.domain import audit
+from cdg.domain import audit, profiles
 from cdg.domain.config import load_config
 from cdg.domain.input_checks import rejection
-from cdg.domain.models import (
-    REQUIRED_KINDS,
-    AgentVerdict,
-    ClauseRetrieval,
-    RetrievalTrace,
-)
+from cdg.domain.models import AgentVerdict, ClauseRetrieval, RetrievalTrace
 
 CONFIG = load_config()
 
@@ -105,10 +100,32 @@ def test_extract_clauses_incremente_les_essais_et_transmet_le_retour():
     )
     assert set(out) == {"clauses", "extraction_attempts", "usage"}
     assert out["extraction_attempts"] == 2 and len(out["clauses"]) == len(
-        REQUIRED_KINDS
+        profiles.spec("fournisseur").kinds
     )
     assert out["usage"][0].tokens_in == 100
     assert extractor.calls == [("Contrat.", ["citation introuvable: revision_prix"])]
+    # état sans clé `profile` (d'avant les profils) : le seul profil possible alors
+    assert extractor.profiles == ["fournisseur"]
+
+
+def test_extract_clauses_passe_le_profil_de_l_etat_par_mot_cle():
+    seen = {}
+
+    def extractor(raw_text, feedback, *, profile):
+        seen["profile"] = profile
+        return FixedExtractor(clauses())(raw_text, feedback, profile)
+
+    state = {"raw_text": "Contrat.", "extraction_attempts": 0, "profile": "fournisseur"}
+    extract_clauses(state, extractor=extractor)
+    assert seen == {"profile": "fournisseur"}
+
+
+def test_extract_clauses_refuse_un_profil_inconnu_sans_extraire():
+    extractor = FixedExtractor(clauses())
+    state = {"raw_text": "Contrat.", "extraction_attempts": 0, "profile": "inexistant"}
+    with pytest.raises(ValueError, match="profil inconnu"):
+        extract_clauses(state, extractor=extractor)
+    assert extractor.calls == []
 
 
 def test_extract_clauses_premier_essai_sans_retour():
@@ -127,8 +144,50 @@ def analyse(domain, crag, **overrides):
         "domain": domain,
         "clauses": clauses(**overrides),
         "analysis_date": ANALYSIS_DATE,
+        "profile": "fournisseur",
     }
     return analyst(inp, crag=crag, decision_config=CONFIG)
+
+
+def test_analyst_lit_le_profil_de_son_entree():
+    # le `Send` d'une analyse interrompue avant les profils n'a pas la clé `profile` :
+    # il est lu comme `fournisseur` (`profiles.of_state`), seul profil possible alors
+    inp = {
+        "domain": "financier",
+        "clauses": clauses(penalites_execution=ABSENT),
+        "analysis_date": ANALYSIS_DATE,
+    }
+    expected = analyse("financier", FakeCrag(), penalites_execution=ABSENT)
+    without, with_profile = FakeCrag(), FakeCrag()
+    assert analyst(inp, crag=without, decision_config=CONFIG) == expected
+    inp["profile"] = "fournisseur"
+    assert analyst(inp, crag=with_profile, decision_config=CONFIG) == expected
+    # le CRAG reçoit le profil lu par `of_state`, même quand l'entrée n'en a pas
+    assert without.profiles == with_profile.profiles == ["fournisseur"]
+
+
+def test_analyst_passe_le_profil_au_crag_par_mot_cle():
+    seen = {}
+
+    def crag(domain, clauses, analysis_date, *, profile):
+        seen["profile"] = profile
+        return RetrievalResult(trace=RetrievalTrace(clauses=[]), usage=[])
+
+    analyse("financier", crag, penalites_execution=ABSENT)
+    assert seen == {"profile": "fournisseur"}
+
+
+def test_analyst_refuse_un_profil_inconnu_sans_rien_chercher():
+    crag = FakeCrag()
+    inp = {
+        "domain": "financier",
+        "clauses": clauses(penalites_execution=ABSENT),
+        "analysis_date": ANALYSIS_DATE,
+        "profile": "inexistant",
+    }
+    with pytest.raises(ValueError, match="profil inconnu"):
+        analyst(inp, crag=crag, decision_config=CONFIG)
+    assert crag.calls == []
 
 
 def test_analyst_ne_renvoie_que_verdicts_et_usage():
@@ -199,7 +258,7 @@ def test_analyst_ajoute_les_constats_et_le_resume_du_crag():
     )
     received = []
 
-    def crag(domain, clauses, analysis_date):
+    def crag(domain, clauses, analysis_date, profile):
         assert analysis_date == ANALYSIS_DATE
         received.extend(c.kind for c in clauses)
         return RetrievalResult(trace=trace, usage=[])

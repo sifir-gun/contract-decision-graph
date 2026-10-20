@@ -109,6 +109,7 @@ def analyse(llm, crag, store, contract, thread):
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     outcome, human = outcome_of(status), None
     if status["statut"] == "suspendu":

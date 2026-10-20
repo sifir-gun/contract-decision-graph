@@ -1,10 +1,11 @@
 """Évaluation de la recherche seule, sans LLM (chantier « qualité de la recherche »).
 
-Jeu d'évaluation (`data/evaluation/recherche.yaml`) : une entrée par requête du CRAG que
-donnent les constats du jeu de démonstration, avec les références qui justifient vraiment
-le constat. Elles sont choisies à la lecture du texte de chaque article ou fiche, jamais
-d'après le rattachement déclaré (manifeste, en-tête des fiches), que la recherche filtrée
-utilise déjà : sinon la mesure avec filtre serait circulaire.
+Jeu d'évaluation (`data/evaluation/recherche.yaml`, un jeu par profil : `EVALUATION_SETS`) :
+une entrée par requête du CRAG que donnent les constats des contrats du profil dans le jeu
+de démonstration, avec les références qui justifient vraiment le constat. Elles sont
+choisies à la lecture du texte de chaque article ou fiche, jamais d'après le rattachement
+déclaré (manifeste, en-tête des fiches), que la recherche filtrée utilise déjà : sinon la
+mesure avec filtre serait circulaire.
 
 Seule la première requête d'une clause est mesurée : elle est écrite par le code
 (`crag.clause_query`) ; la réécriture appelle le LLM. Deux modes : avec le filtre du CRAG
@@ -13,7 +14,7 @@ Seule la première requête d'une clause est mesurée : elle est écrite par le 
 Les métriques sont des fonctions pures de `domain/evaluation.py`.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -24,17 +25,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from cdg.application import demo_set, ingestion
 from cdg.application.crag import clause_query
+from cdg.domain import profiles
 from cdg.domain.config import DecisionConfig
 from cdg.domain.corpus import embedded_hash
 from cdg.domain.evaluation import first_ranks, mean, scores, top_references
 from cdg.domain.models import DOMAINS, Clause, Domain
 from cdg.domain.numeric import rounded
+from cdg.domain.profiles import Profile
 from cdg.domain.rules import RULES
 from cdg.ports.retriever import CorpusSearch, Retriever
 
 EVALUATION = (
     Path(__file__).resolve().parents[3] / "data" / "evaluation" / "recherche.yaml"
 )
+# jeu d'évaluation de chaque profil
+EVALUATION_SETS: Mapping[Profile, Path] = {"fournisseur": EVALUATION}
 
 
 class _Strict(BaseModel):
@@ -85,21 +90,24 @@ def demo_clause(contract_id: str, kind: str) -> Clause:
     return next(c for c in contracts[contract_id].clauses if c.kind == kind)
 
 
-def demo_queries(config: DecisionConfig) -> list[DemoQuery]:
-    """Requêtes du CRAG pour les constats du jeu de démonstration, comme dans l'analyste :
-    règles du domaine sur toutes les clauses attendues, puis une requête par clause qui
-    porte un constat. Une requête donnée par plusieurs contrats est comptée une fois ; un
-    contrat rejeté à l'entrée n'atteint pas les analystes."""
+def demo_queries(config: DecisionConfig, profile: Profile) -> list[DemoQuery]:
+    """Requêtes du CRAG pour les constats des contrats du jeu de démonstration qui sont de
+    ce profil, comme dans l'analyste : règles du profil sur toutes les clauses attendues du
+    domaine, puis une requête par clause qui porte un constat. Une requête donnée par
+    plusieurs contrats est comptée une fois ; un contrat rejeté à l'entrée n'atteint pas
+    les analystes."""
+    profile = profiles.parse(profile)
     _, contracts = demo_set.load()
     found: dict[tuple[Domain, str, str], list[str]] = {}
     for contract in contracts.values():
         clauses = list(contract.clauses)
-        if not clauses:
+        if contract.profile != profile or not clauses:
             continue
         for domain in DOMAINS:
-            for kind in RULES[domain](clauses, config).kinds_to_justify():
+            rules = RULES[profile][domain]
+            for kind in rules(clauses, config).kinds_to_justify():
                 clause = next(c for c in clauses if c.kind == kind)
-                key = (domain, kind, clause_query(domain, clause))
+                key = (domain, kind, clause_query(domain, clause, profile))
                 found.setdefault(key, []).append(contract.id)
     return [
         DemoQuery(domain, kind, query, tuple(ids))
@@ -151,16 +159,20 @@ def check_index(corpus: CorpusSearch, max_words: int, passage_prefix: str) -> in
     return len(wanted)
 
 
-def _check_set(queries: Sequence[EvaluationQuery], config: DecisionConfig) -> None:
+def _check_set(
+    queries: Sequence[EvaluationQuery], config: DecisionConfig, profile: Profile
+) -> None:
     def key(q: EvaluationQuery | DemoQuery) -> tuple[str, str, str, tuple[str, ...]]:
         return q.domain, q.kind, q.query, q.contracts
 
-    demo, jeu = {key(q) for q in demo_queries(config)}, {key(q) for q in queries}
+    demo = {key(q) for q in demo_queries(config, profile)}
+    jeu = {key(q) for q in queries}
     if demo != jeu:
         missing = sorted(q[2] for q in demo - jeu)
         extra = sorted(q[2] for q in jeu - demo)
         raise EvaluationSetOutdated(
-            "jeu d'évaluation à mettre à jour (data/evaluation/recherche.yaml) : "
+            "jeu d'évaluation à mettre à jour (data/evaluation/"
+            f"{EVALUATION_SETS[profile].name}) : "
             f"requêtes des constats absentes du jeu {missing} ; requêtes du jeu sans "
             f"constat {extra}"
         )
@@ -244,14 +256,17 @@ def run(
     corpus: CorpusSearch,
     ks: Sequence[int] = DEFAULT_KS,
     *,
+    profile: Profile,
     on: date,
 ) -> dict[str, Any]:
     """Mesure de la recherche seule (commande `mesure-recherche`), avec les réglages de
-    recherche que l'appelant a donnés à l'adaptateur, ceux de la configuration : le jeu
-    couvre-t-il exactement les constats du jeu de démonstration, le corpus indexé est-il
-    celui des fichiers, puis la mesure. Tout écart est une erreur explicite."""
-    queries = load_queries()
-    _check_set(queries, config)
+    recherche que l'appelant a donnés à l'adaptateur, ceux de la configuration : le jeu du
+    profil couvre-t-il exactement les constats des contrats de ce profil dans le jeu de
+    démonstration, le corpus indexé est-il celui des fichiers, puis la mesure. Tout écart
+    est une erreur explicite."""
+    profile = profiles.parse(profile)
+    queries = load_queries(EVALUATION_SETS[profile])
+    _check_set(queries, config, profile)
     chunks = check_index(
         corpus, config.corpus.chunk_max_words, config.embedding.passage_prefix
     )

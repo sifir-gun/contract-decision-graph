@@ -12,6 +12,7 @@
   <thead>
     <tr>
       <th scope="col">Contrat</th>
+      <th scope="col">Profil</th>
       <th scope="col">Date d'analyse</th>
       <th scope="col">Dernière étape</th>
       <th scope="col">État</th>
@@ -22,6 +23,7 @@
     {% for r in rows %}
     <tr>
       <td><a href="{{ contract_path(r.thread_id) }}">{{ r.thread_id }}</a></td>
+      <td>{{ r.profil }}</td>
       <td>{{ r.analysis_date or "—" }}</td>
       <td><time datetime="{{ r.updated_at }}">{{ r.updated_at[:16]|replace("T", " ") }}</time></td>
       <td><span class="state state-{{ r.etat }}">{{ states[r.etat] }}</span></td>

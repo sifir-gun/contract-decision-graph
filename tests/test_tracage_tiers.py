@@ -146,7 +146,9 @@ def test_le_client_mistral_coupe_sa_telemetrie_meme_sous_variable_hostile(monkey
         llm = MistralProvider(load_config().llm, api_key="cle-factice", server_url=url)
         _, contracts = demo_set.load()
         contract = contracts["demo-01-go-maintenance"]
-        LLMExtractor(llm)(masking.mask(contract.text(), contract.parties).text, [])
+        LLMExtractor(llm)(
+            masking.mask(contract.text(), contract.parties).text, [], contract.profile
+        )
     finally:
         server.shutdown()
         server.server_close()

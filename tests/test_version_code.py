@@ -164,7 +164,11 @@ def test_demonstration_scelle_la_version_lue_au_lancement(hors_cluster, monkeypa
     _, contracts = demo_set.load()
     go = contracts["demo-01-go-maintenance"]
     service.analyse(
-        go.text(), contract_id=go.id, actor=ACTEUR_ANALYSTE, parties=go.parties
+        go.text(),
+        contract_id=go.id,
+        actor=ACTEUR_ANALYSTE,
+        parties=go.parties,
+        profile="fournisseur",
     )
     [entry] = service.audit_store().entries()
     assert entry.record["code_version"] == {"commit": COMMIT, "image": None}
@@ -175,7 +179,9 @@ def test_demonstration_scelle_la_version_lue_au_lancement(hors_cluster, monkeypa
 
 def test_contrat_scelle_avec_la_version_de_son_analyse_et_de_son_scellement():
     service = memory_service()  # dépendances de test : version CODE
-    service.analyse(CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        CONTRACT_TEXT, contract_id="c-go", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+    )
     [entry] = service.audit_store().entries()
     expected = CODE.model_dump(mode="json")
     assert (
@@ -188,7 +194,12 @@ def test_mise_a_jour_entre_l_analyse_et_la_revue_constat_au_scellement():
     """Analysé par une version, tranché après une mise à jour : les deux sont scellées,
     avec le constat ; le rejeu saura que l'enregistrement couvre deux versions."""
     service = memory_service(run=lambda: make_deps(code_version=AUTRE_CODE))
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     service.decide("c-attente", answer())
     [entry] = service.audit_store().entries()
     assert entry.record["code_version"] == AUTRE_CODE.model_dump(mode="json")
@@ -203,7 +214,16 @@ def test_run_par_la_cli_scelle_la_version_lue_au_lancement(
     monkeypatch.setenv(cli.COMMIT_VAR, COMMIT)
     analysis()
     thread = f"version-{uuid.uuid4().hex[:8]}"
-    argv = ["run", contract, "--contract-id", thread, "--operateur", "lot-version"]
+    argv = [
+        "run",
+        "--profil",
+        "fournisseur",
+        contract,
+        "--contract-id",
+        thread,
+        "--operateur",
+        "lot-version",
+    ]
     assert cli.main(argv) == 0
     [entry] = [e for e in audit_journal.entries() if e.thread_id == thread]
     expected = {"commit": COMMIT, "image": None}
@@ -220,7 +240,12 @@ def test_constat_de_code_modifie_dans_la_sortie_de_resume(
     """Analysé par une version, tranché par la CLI sous une autre : la sortie de la
     commande montre le constat au réviseur, pas seulement l'enregistrement."""
     service = memory_service(run=lambda: make_deps(code_version=AUTRE_CODE))
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     monkeypatch.setattr(cli, "build_service", lambda config: service)
     argv = ["resume", "c-attente", "--decision", "NO_GO", "--reason", "revu"]
     assert cli.main([*argv, "--operateur", "relecteur-poste"]) == 0
@@ -232,7 +257,12 @@ def test_meme_code_aucun_constat_dans_la_sortie_de_resume(
     hors_cluster, monkeypatch, capsys
 ):
     service = memory_service()
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     monkeypatch.setattr(cli, "build_service", lambda config: service)
     argv = ["resume", "c-attente", "--decision", "NO_GO", "--reason", "revu"]
     assert cli.main([*argv, "--operateur", "relecteur-poste"]) == 0

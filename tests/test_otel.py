@@ -90,8 +90,17 @@ def dumped(exporter, reader=None) -> str:
     return json.dumps(spans, ensure_ascii=False) + data
 
 
-def analyse(telemetry, actor=CLI, contract_id="c-1", calls=1, status=DONE):
-    with telemetry.operation("analyse", contract_id=contract_id, actor=actor) as finish:
+def analyse(
+    telemetry,
+    actor=CLI,
+    contract_id="c-1",
+    calls=1,
+    status=DONE,
+    profile="fournisseur",
+):
+    with telemetry.operation(
+        "analyse", contract_id=contract_id, actor=actor, profile=profile
+    ) as finish:
         with telemetry.step("extract_clauses", attempt=1, domain=None):
             for _ in range(calls):
                 with telemetry.llm_call(
@@ -119,6 +128,7 @@ def test_trace_d_une_operation_et_de_ses_appels():
         "langfuse.session.id": "c-1",
         "cdg.operation": "analyse",
         "cdg.canal": "cli",
+        "cdg.profil": "fournisseur",
         "cdg.etat": "termine",
         "cdg.decision.proposee": "GO",
         "cdg.decision.finale": "GO",

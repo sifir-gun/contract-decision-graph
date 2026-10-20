@@ -188,6 +188,7 @@ def test_serveur_reel_journaux_json_sans_texte_du_contrat_ni_message(capsys):
             text = f"{CONTRACT_TEXT}\n{CANARY}\n"
             data = {
                 "csrf": token,
+                "profil": "fournisseur",
                 "source": "texte",
                 "texte": text,
                 "identifiant": "c1",

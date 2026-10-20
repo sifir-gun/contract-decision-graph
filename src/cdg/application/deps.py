@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from cdg.application.observation import NoTelemetry
 from cdg.domain.explanation import Draft, ExplanationRequest
 from cdg.domain.models import Clause, Domain, RetrievalTrace, Usage
+from cdg.domain.profiles import Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.audit_store import AuditStore
 from cdg.ports.telemetry import Telemetry
@@ -36,14 +37,24 @@ class RetrievalResult(BaseModel):
 
 
 class Extractor(Protocol):
-    def __call__(self, raw_text: str, feedback: list[str]) -> ExtractionResult: ...
+    """Extraction des clauses du genre de contrat que nomme `profile` (schéma et prompt
+    du profil)."""
+
+    def __call__(
+        self, raw_text: str, feedback: list[str], profile: Profile
+    ) -> ExtractionResult: ...
 
 
 class Crag(Protocol):
-    """Une recherche par clause reçue : celles du domaine qui portent un constat."""
+    """Une recherche par clause reçue : celles du domaine qui portent un constat. Le profil
+    donne les types de clauses du domaine et les libellés des requêtes."""
 
     def __call__(
-        self, domain: Domain, clauses: list[Clause], analysis_date: date
+        self,
+        domain: Domain,
+        clauses: list[Clause],
+        analysis_date: date,
+        profile: Profile,
     ) -> RetrievalResult: ...
 
 

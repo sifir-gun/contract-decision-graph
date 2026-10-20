@@ -166,7 +166,12 @@ def submit(source: TestClient, target: TestClient):
     cookie = source.cookies.get(security.Csrf.COOKIE)
     return target.post(
         "/analyse",
-        data={"csrf": token, "source": "texte", "texte": CONTRACT_TEXT},
+        data={
+            "csrf": token,
+            "profil": "fournisseur",
+            "source": "texte",
+            "texte": CONTRACT_TEXT,
+        },
         headers={**ORIGIN, "cookie": f"{security.Csrf.COOKIE}={cookie}"},
     )
 

@@ -96,7 +96,11 @@ def analysed_by_mcp(monkeypatch):
 
     def run(server):
         seen["telemetry"] = cli.TELEMETRY["processus"]
-        seen["result"] = call(server, "analyser_contrat", {"contrat_du_jeu": PIEGE})
+        seen["result"] = call(
+            server,
+            "analyser_contrat",
+            {"profil": "fournisseur", "contrat_du_jeu": PIEGE},
+        )
 
     monkeypatch.setattr(mcp_server, "run_stdio", run)
     return seen

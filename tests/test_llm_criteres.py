@@ -180,6 +180,7 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     failures = values.get("failures", [])
@@ -207,6 +208,7 @@ def test_10_vrai_modele_aucune_citation_non_verifiee(
             problems_of(
                 values["raw_text"],
                 values["clauses"],
+                profile="fournisseur",
                 absence_terms=CONFIG.extraction.absence_terms,
                 category_terms=CONFIG.extraction.category_terms,
                 instruction_patterns=CONFIG.input.instruction_patterns,
@@ -293,9 +295,9 @@ class ByDomain:
     def __init__(self, real: dict):
         self.real, self.fake = real, FakeCrag()
 
-    def __call__(self, domain, clauses, analysis_date):
+    def __call__(self, domain, clauses, analysis_date, profile):
         crag = self.real.get(domain, self.fake)
-        return crag(domain, clauses, analysis_date)
+        return crag(domain, clauses, analysis_date, profile)
 
 
 # Règles d'abord : le CRAG ne cherche que pour les clauses qui portent un constat. Financier :
@@ -341,6 +343,7 @@ def test_3_vrai_juge_hors_corpus_insuffisant_puis_escalade(llm, run):
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     by_domain = {v.domain: v for v in values["verdicts"]}
@@ -447,6 +450,7 @@ def analyse_p1(llm, text: str, thread: str) -> dict:
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     values = graph.get_state({"configurable": {"thread_id": thread}}).values
     found = {c.kind: c for c in values.get("clauses", [])}
@@ -566,6 +570,7 @@ def test_explication_reelle_sur_le_jeu(llm, real_crag, series_explain, pace, con
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     if contract.human:
         orchestrator.resume_thread(graph, thread, contract.human, config=CONFIG)

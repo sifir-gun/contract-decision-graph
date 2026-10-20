@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
 from cdg.domain.authorization import Actor
+from cdg.domain.profiles import Profile
 
 
 class ThreadError(Exception):
@@ -24,12 +25,14 @@ class ContractEngine(Protocol):
         parties: Sequence[str],
         analysis_date: date,
         actor: Actor,
+        profile: Profile,
         relaunch_of: str | None = None,
     ) -> dict[str, Any]:
         """Analyse un contrat, masqué avant le graphe ; statut du thread et masquage.
         `actor` : qui lance l'analyse, posé dans l'état et scellé (quatre yeux) ;
-        `relaunch_of` : contrat escaladé pour changement de configuration dont c'est la
-        relance, sous la configuration actuelle."""
+        `profile` : profil du contrat, obligatoire, posé dans l'état avant tout nœud et
+        scellé avec la décision ; `relaunch_of` : contrat escaladé pour changement de
+        configuration dont c'est la relance, sous la configuration actuelle."""
         ...
 
     def resume(self, thread_id: str, answer: dict[str, Any]) -> dict[str, Any]:

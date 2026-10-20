@@ -143,7 +143,14 @@ def test_analyse_complete_par_le_pool_de_taille_par_defaut(pool, thread_id, jour
         PostgresContractLocks(lambda: pool),
         PostgresResumeCounter(lambda: pool),
     )
-    status = engine.run(thread_id, CONTRACT_TEXT, (), ANALYSIS_DATE, ACTEUR_ANALYSTE)
+    status = engine.run(
+        thread_id,
+        CONTRACT_TEXT,
+        (),
+        ANALYSIS_DATE,
+        ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     assert status["statut"] == "termine" and status["chain_hash"]
     assert engine.status(thread_id)["final_decision"] == status["final_decision"]
 

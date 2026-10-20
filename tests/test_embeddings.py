@@ -295,7 +295,9 @@ service = make_service()
 if sys.argv[2:] == ["temoin"]:  # contourne la défense du moteur : le test verrait l'envoi
     import langsmith
     langsmith.configure(enabled=True)
-service.analyse(CONTRACT_TEXT, contract_id="c-reseau", actor=ACTEUR_ANALYSTE)
+service.analyse(
+    CONTRACT_TEXT, contract_id="c-reseau", actor=ACTEUR_ANALYSTE, profile="fournisseur"
+)
 from langchain_core.tracers.langchain import wait_for_all_tracers
 wait_for_all_tracers()  # envoie ce qui attendrait encore, si un client existait
 print(json.dumps({"tentatives": attempts}))

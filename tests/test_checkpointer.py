@@ -158,6 +158,7 @@ def test_texte_original_jamais_ecrit_en_base(pg, thread_id):
             config=CONFIG,
             actor=ACTEUR_ANALYSTE,
             code=CODE,
+            profile="fournisseur",
         )
     # colonnes binaires des writes et des blobs, JSON des checkpoints
     columns = {

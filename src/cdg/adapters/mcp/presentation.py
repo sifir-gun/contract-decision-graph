@@ -24,10 +24,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from cdg.application.service import state_label
-from cdg.domain import instructions
+from cdg.domain import instructions, profiles
 from cdg.domain.audit import ChainReport
 from cdg.domain.authorization import Actor
-from cdg.domain.models import REQUIRED_KINDS, Decision, Domain, RetrievalStatus
+from cdg.domain.models import Decision, Domain, RetrievalStatus
+from cdg.domain.profiles import Profile
 
 # journal : motif d'une vérification, qui peut reprendre des valeurs stockées en base
 Origin = Literal["contrat", "llm", "relecteur", "journal"]
@@ -127,6 +128,7 @@ class Summary(_View):
     """Fiche d'un contrat : statut, décision, constats, références, explication."""
 
     thread_id: str
+    profil: Profile
     etat: State
     date_analyse: date | None
     decision_proposee: Decision | None
@@ -163,6 +165,7 @@ class DossierView(Summary):
 
 class ContractRow(_View):
     thread_id: str
+    profil: Profile
     etat: State
     date_analyse: date | None
     decision_proposee: Decision | None
@@ -265,7 +268,7 @@ def _failure(failure: Mapping[str, Any]) -> FailureView:
 
 
 def _known_kind(kind: object) -> bool:
-    return kind in REQUIRED_KINDS
+    return kind in profiles.ALL_KINDS
 
 
 def _problem(problem: str) -> str:
@@ -291,6 +294,7 @@ def _summary_fields(status: Mapping[str, Any]) -> dict[str, Any]:
     pending = status.get("demande")
     return {
         "thread_id": status["thread_id"],
+        "profil": status["profil"],
         "etat": state_label(status),
         "date_analyse": status["analysis_date"],
         "decision_proposee": status["proposed_decision"],
@@ -408,6 +412,7 @@ def contracts(rows: Sequence[Mapping[str, Any]]) -> ContractList:
         contrats=[
             ContractRow(
                 thread_id=r["thread_id"],
+                profil=r["profil"],
                 etat=r["etat"],
                 date_analyse=r["analysis_date"],
                 decision_proposee=r["proposed_decision"],

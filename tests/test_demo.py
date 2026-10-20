@@ -16,7 +16,8 @@ import json
 from collections import Counter
 
 import pytest
-from demo_set import DEMO, files, load
+import yaml
+from demo_set import DEMO, EXPECTED, files, load
 from doubles import (
     ABSENT,
     ACTEUR_ANALYSTE,
@@ -33,19 +34,15 @@ from langgraph.checkpoint.memory import InMemorySaver
 from cdg import cli
 from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.checkpointer import strict_serializer
-from cdg.domain import input_checks, masking, verification
+from cdg.application import demo_set
+from cdg.domain import input_checks, masking, profiles, verification
 from cdg.domain.config import load_config
 from cdg.domain.decision import decide
-from cdg.domain.models import (
-    DOMAINS,
-    KIND_CATEGORIES,
-    REQUIRED_KINDS,
-    Clause,
-    category_required,
-)
+from cdg.domain.models import DOMAINS, Clause, category_required
 from cdg.domain.rules import RULES
 
 CONFIG = load_config()
+FOURNISSEUR = profiles.spec("fournisseur")
 ANALYSIS_DATE, CONTRACTS = load()
 BY_ID = {c.id: c for c in CONTRACTS}
 ANALYSED = [c for c in CONTRACTS if not c.rejected]
@@ -61,6 +58,7 @@ def ids(contracts):
 
 def test_composition_du_jeu():
     assert len(CONTRACTS) == 13
+    assert {c.profile for c in CONTRACTS} == {"fournisseur"}
     assert set(files().values()) == {p.name for p in DEMO.glob("*.txt")}
     proposed = Counter(c.expected.get("proposed_decision", "rejet") for c in CONTRACTS)
     # GO dont un à marge faible et un piégé ; NO_GO dont le piégé à injection ;
@@ -85,6 +83,46 @@ def test_composition_du_jeu():
     ]
 
 
+# --- Profil de chaque contrat : champ obligatoire des attendus ------------------------------
+
+
+def expected_without(tmp_path, change):
+    """Copie des attendus, dont `change(contrats)` modifie les contrats."""
+    data = yaml.safe_load(EXPECTED.read_text(encoding="utf-8"))
+    change(data["contracts"])
+    path = tmp_path / "attendus.yaml"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+def test_chaque_contrat_du_jeu_declare_son_profil():
+    data = yaml.safe_load(EXPECTED.read_text(encoding="utf-8"))
+    assert [c["profile"] for c in data["contracts"].values()] == ["fournisseur"] * 13
+    _, contracts = demo_set.load()
+    assert {c.profile for c in contracts.values()} == {"fournisseur"}
+
+
+def test_contrat_du_jeu_sans_profil_refuse(tmp_path):
+    path = expected_without(
+        tmp_path,
+        lambda contracts: contracts["demo-04-go-reserves-transport"].pop("profile"),
+    )
+    with pytest.raises(
+        ValueError, match="profil absent du contrat demo-04.*attendus.yaml"
+    ):
+        demo_set.load(path)
+
+
+@pytest.mark.parametrize("value", ["inexistant", "", None])
+def test_contrat_du_jeu_de_profil_inconnu_refuse(tmp_path, value):
+    path = expected_without(
+        tmp_path,
+        lambda contracts: contracts["demo-01-go-maintenance"].update(profile=value),
+    )
+    with pytest.raises(ValueError, match="profil inconnu"):
+        demo_set.load(path)
+
+
 # --- Citations attendues : dans le texte masqué, vérifiées ------------------------------------
 
 
@@ -97,6 +135,7 @@ def test_citations_attendues_dans_le_texte_masque(contract):
         verification.problems_of(
             masked,
             contract.clauses,
+            profile="fournisseur",
             absence_terms=CONFIG.extraction.absence_terms,
             category_terms=CONFIG.extraction.category_terms,
             instruction_patterns=CONFIG.input.instruction_patterns,
@@ -131,6 +170,7 @@ def run(contract, store):
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     if contract.human:
         # suspendu : rien de scellé pour ce contrat (le journal peut être partagé)
@@ -259,7 +299,7 @@ def rules_of(finding) -> list[str]:
 
 
 def findings_of(found):
-    return [f for d in DOMAINS for f in RULES[d](found, CONFIG).findings]
+    return [f for d in DOMAINS for f in RULES["fournisseur"][d](found, CONFIG).findings]
 
 
 def variants():
@@ -267,14 +307,16 @@ def variants():
     d'essai (non chiffrée comprise) avec chaque catégorie admise pour son type. Une
     catégorie est toujours donnée quand la vérification de l'extraction l'exige."""
     values = [None, 0.0, 2.0, 5.0, 30.0, 45.0, 46.0, 60.0, 61.0, 90.0, 100.0, 150.0]
-    for kind in REQUIRED_KINDS:
+    for kind in FOURNISSEUR.kinds:
         yield favorable(**{kind: ABSENT})
         for value, category in itertools.product(
-            values, KIND_CATEGORIES.get(kind, (None,))
+            values, FOURNISSEUR.kind_categories.get(kind, (None,))
         ):
             found = favorable(**{kind: value}, categories={kind: category})
             [clause] = [c for c in found if c.kind == kind]
-            assert clause.category is not None or not category_required(clause)
+            assert clause.category is not None or not category_required(
+                clause, FOURNISSEUR.category_kinds
+            )
             yield found
 
 
@@ -316,6 +358,7 @@ def test_p1_paragraphe_injecte_et_version_propre():
         verification.problems_of(
             masked,
             contract.clauses,
+            profile="fournisseur",
             absence_terms=CONFIG.extraction.absence_terms,
             category_terms=CONFIG.extraction.category_terms,
             instruction_patterns=CONFIG.input.instruction_patterns,
@@ -354,7 +397,7 @@ def by_kind(contract):
 
 def gate(found):
     """Décision du gate sur les seules règles (CRAG supposé fournir les références)."""
-    assessed = [RULES[d](found, CONFIG) for d in DOMAINS]
+    assessed = [RULES["fournisseur"][d](found, CONFIG) for d in DOMAINS]
     return decide(
         [verdict(a.domain, score=a.score, hard_block=a.hard_block) for a in assessed],
         [],
@@ -400,7 +443,9 @@ def test_contrat_realiste_plafond_du_fournisseur_defini_dans_un_autre_article():
 def test_contrat_realiste_escalade_par_prudence_sur_les_quantites_non_fixees():
     fired = sorted(name for f in findings_of(REALISTIC.clauses) for name in rules_of(f))
     assert fired == ["engagement non chiffré", "préavis non chiffré"]
-    scores = {d: RULES[d](REALISTIC.clauses, CONFIG).score for d in DOMAINS}
+    scores = {
+        d: RULES["fournisseur"][d](REALISTIC.clauses, CONFIG).score for d in DOMAINS
+    }
     assert scores == {
         "juridique": 1.0,
         "financier": 1.0,
@@ -432,7 +477,7 @@ def test_contrat_realiste_une_seule_quantite_non_fixee_ne_suffit_pas_a_escalader
     )
 
 
-@pytest.mark.parametrize("kind", REQUIRED_KINDS)
+@pytest.mark.parametrize("kind", FOURNISSEUR.kinds)
 def test_contrat_realiste_chaque_clause_declaree_absente_est_redemandee(kind):
     # formulations indirectes (« réfaction », « annuaire des collaborateurs », « prix
     # sont indexés », « le Client ne répond que ») : une omission ne passe pas en silence
@@ -444,6 +489,7 @@ def test_contrat_realiste_chaque_clause_declaree_absente_est_redemandee(kind):
     problems = verification.problems_of(
         masked,
         dropped,
+        profile="fournisseur",
         absence_terms=CONFIG.extraction.absence_terms,
         category_terms=CONFIG.extraction.category_terms,
         instruction_patterns=CONFIG.input.instruction_patterns,

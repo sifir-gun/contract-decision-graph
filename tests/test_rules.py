@@ -11,13 +11,14 @@ from doubles import ABSENT, clauses
 
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.models import DOMAINS, Clause
+from cdg.domain.profiles import PROFILES
 from cdg.domain.rules import RULES, Assessment, RuleFinding
 
 CONFIG = load_config()
 
 
 def run(domain, config=CONFIG, **overrides) -> Assessment:
-    return RULES[domain](clauses(**overrides), config)
+    return RULES["fournisseur"][domain](clauses(**overrides), config)
 
 
 def texts(a: Assessment) -> list[str]:
@@ -30,8 +31,9 @@ def config_with(section: str, key: str, value) -> DecisionConfig:
     return DecisionConfig.model_validate(data)
 
 
-def test_registre_couvre_les_quatre_domaines():
-    assert set(RULES) == set(DOMAINS)
+def test_registre_un_jeu_de_regles_par_profil():
+    assert set(RULES) == set(PROFILES)
+    assert set(RULES["fournisseur"]) == set(DOMAINS)
 
 
 @pytest.mark.parametrize("domain", DOMAINS)
@@ -243,7 +245,7 @@ def test_score_borne_a_zero():
 def test_clause_attendue_manquante_leve_une_erreur(domain):
     incomplete = [c for c in clauses() if c.kind != _kind_read_by(domain)]
     with pytest.raises(ValueError, match="clause"):
-        RULES[domain](incomplete, CONFIG)
+        RULES["fournisseur"][domain](incomplete, CONFIG)
 
 
 def test_clause_en_double_leve_une_erreur():
@@ -251,7 +253,7 @@ def test_clause_en_double_leve_une_erreur():
         Clause(kind="revision_prix", present=True, quote="bis", value=1.0)
     ]
     with pytest.raises(ValueError, match="revision_prix"):
-        RULES["financier"](doubled, CONFIG)
+        RULES["fournisseur"]["financier"](doubled, CONFIG)
 
 
 def _kind_read_by(domain: str) -> str:

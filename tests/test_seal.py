@@ -294,6 +294,7 @@ def test_run_contract_pose_l_empreinte_d_analyse_scellee():
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     [entry] = store.entries()
     assert status["config_hash"] == entry.config_hash == audit.config_hash(CONFIG)
@@ -313,6 +314,7 @@ def test_resume_refuse_si_la_configuration_a_change_avant_toute_reprise():
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     with pytest.raises(orchestrator.ThreadError) as refused:
         orchestrator.resume_thread(graph, "c-conf", HUMAN, config=changed_config())
@@ -338,6 +340,7 @@ def test_expire_continue_et_scelle_les_deux_empreintes_avec_le_constat():
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
+        profile="fournisseur",
     )
     # expire lancé par un processus dont la configuration a changé depuis l'analyse
     other = changed_config()

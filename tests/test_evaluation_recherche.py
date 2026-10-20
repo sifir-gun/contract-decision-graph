@@ -13,18 +13,20 @@ seuls, requête par requête et en moyenne ; sans LLM.
 """
 
 import re
+from dataclasses import replace
 from datetime import date
 
 import psycopg
 import pytest
+import yaml
 from cli_helpers import run_cli
 from doubles import FakeRetriever, HashEmbedder
 
 from cdg import cli
 from cdg.adapters.postgres import rag_store
-from cdg.application import evaluation, ingestion
+from cdg.application import demo_set, evaluation, ingestion
 from cdg.application.crag import clause_query
-from cdg.domain import corpus
+from cdg.domain import corpus, profiles
 from cdg.domain.config import load_config
 from cdg.domain.corpus import by_domain
 from cdg.domain.evaluation import Scores, first_ranks, mean, scores, top_references
@@ -47,16 +49,51 @@ def _key(item) -> tuple[str, str, str]:
 def test_le_jeu_couvre_exactement_les_requetes_des_constats_du_jeu_de_demonstration():
     """Une entrée par requête distincte, avec les contrats dont un constat la donne :
     un constat ajouté au jeu de démonstration sans référence attendue fait échouer."""
-    demo = {_key(q): q.contracts for q in evaluation.demo_queries(CONFIG)}
+    demo = {
+        _key(q): q.contracts for q in evaluation.demo_queries(CONFIG, "fournisseur")
+    }
     jeu = {_key(q): q.contracts for q in QUERIES}
     assert jeu == demo
     assert len(QUERIES) == len(demo) == 21
 
 
+def test_un_jeu_d_evaluation_par_profil():
+    assert evaluation.EVALUATION_SETS == {"fournisseur": evaluation.EVALUATION}
+    assert set(evaluation.EVALUATION_SETS) == set(profiles.PROFILES)
+    assert evaluation.EVALUATION.name == "recherche.yaml"
+
+
+def test_demo_queries_ne_prend_que_les_contrats_du_profil(monkeypatch):
+    """Les requêtes sont celles des contrats du profil demandé, calculées avec ses
+    règles : un contrat d'un autre profil n'y entre pas, ses règles ne sont pas lues."""
+    real = evaluation.demo_queries(CONFIG, "fournisseur")
+    expected_on, contracts = demo_set.load()
+    stranger = replace(
+        contracts["demo-01-go-maintenance"], id="etranger", profile="autre"
+    )
+    monkeypatch.setattr(
+        evaluation.demo_set,
+        "load",
+        lambda: (expected_on, {**contracts, "etranger": stranger}),
+    )
+    assert evaluation.demo_queries(CONFIG, "fournisseur") == real
+    assert "etranger" not in {c for q in real for c in q.contracts}
+
+
+def test_demo_queries_exige_le_profil():
+    with pytest.raises(TypeError):
+        evaluation.demo_queries(CONFIG)  # type: ignore[call-arg]
+
+
+def test_demo_queries_refuse_un_profil_inconnu():
+    with pytest.raises(ValueError, match="profil inconnu"):
+        evaluation.demo_queries(CONFIG, "inexistant")  # type: ignore[arg-type]
+
+
 def test_chaque_requete_est_celle_du_crag_pour_la_clause():
     for q in QUERIES:
         clause = evaluation.demo_clause(q.contracts[0], q.kind)
-        assert q.query == clause_query(q.domain, clause)
+        assert q.query == clause_query(q.domain, clause, "fournisseur")
 
 
 def test_references_attendues_du_corpus_typees_et_justifiees_mot_pour_mot():
@@ -314,18 +351,40 @@ def test_corpus_indexe_sans_une_version_erreur_explicite(corpus_synthetique):
 
 
 def test_jeu_en_retard_sur_le_jeu_de_demonstration_erreur_explicite(monkeypatch):
-    real = evaluation.demo_queries(CONFIG)
+    real = evaluation.demo_queries(CONFIG, "fournisseur")
     added = evaluation.DemoQuery("financier", "delai_paiement", "requête neuve", ("x",))
-    monkeypatch.setattr(evaluation, "demo_queries", lambda config: [*real[1:], added])
+    monkeypatch.setattr(
+        evaluation, "demo_queries", lambda config, profile: [*real[1:], added]
+    )
     double = corpus_double()
     with pytest.raises(evaluation.EvaluationSetOutdated) as exc:
-        evaluation.run(CONFIG, double, double, ks=(4,), on=ON)
+        evaluation.run(CONFIG, double, double, ks=(4,), profile="fournisseur", on=ON)
     assert "requête neuve" in str(exc.value) and real[0].query in str(exc.value)
+
+
+def test_run_compare_au_jeu_du_profil(monkeypatch, tmp_path):
+    """Le jeu comparé aux constats est celui que `EVALUATION_SETS` désigne pour le profil."""
+    data = yaml.safe_load(evaluation.EVALUATION.read_text(encoding="utf-8"))
+    data["queries"] = data["queries"][1:]  # une requête de moins que les constats
+    reduced = tmp_path / "recherche-reduit.yaml"
+    reduced.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    monkeypatch.setitem(evaluation.EVALUATION_SETS, "fournisseur", reduced)
+    double = corpus_double()
+    with pytest.raises(evaluation.EvaluationSetOutdated, match="requêtes des constats"):
+        evaluation.run(CONFIG, double, double, ks=(4,), profile="fournisseur", on=ON)
+
+
+def test_run_exige_le_profil():
+    double = corpus_double()
+    with pytest.raises(TypeError, match="profile"):
+        evaluation.run(CONFIG, double, double, ks=(4,))  # type: ignore[call-arg]
 
 
 def test_run_verifie_puis_mesure():
     double = corpus_double()
-    report = evaluation.run(CONFIG, double, double, ks=(1, 4), on=ON)
+    report = evaluation.run(
+        CONFIG, double, double, ks=(1, 4), profile="fournisseur", on=ON
+    )
     assert report["requetes"] == 21 and report["k"] == [1, 4]
     assert report["date"] == "2026-10-01"  # date à laquelle les versions sont jugées
     # réglages de la recherche mesurée, ceux de la configuration
@@ -340,8 +399,55 @@ def test_run_verifie_puis_mesure():
 @pytest.mark.parametrize("value", ["0", "-1", "a", "4,,8", ""])
 def test_mesure_rangs_invalides_refuses(value, capsys):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["mesure-recherche", "--k", value])
+        cli.main(["mesure-recherche", "--profil", "fournisseur", "--k", value])
     assert exc.value.code == 2
+
+
+def test_mesure_recherche_sans_profil_refusee(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["mesure-recherche", "--k", "4"])
+    assert exc.value.code == 2
+    assert "--profil" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("profil", ["sous_traitance", "", "Fournisseur"])
+def test_mesure_recherche_profil_inconnu_refuse(capsys, profil):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["mesure-recherche", "--profil", profil])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--profil" in err and "fournisseur" in err  # le profil admis est cité
+
+
+def test_commande_mesure_recherche_mesure_le_profil_demande(
+    capsys, monkeypatch, tmp_path
+):
+    seen = {}
+    monkeypatch.setenv("EMBEDDING_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        cli.fastembed,
+        "FastembedEmbedder",
+        lambda config, cache_dir, **kw: HashEmbedder(),
+    )
+    monkeypatch.setattr(cli, "app_pool", lambda: "pool")
+    monkeypatch.setattr(
+        cli.rag_store, "PgvectorRetriever", lambda pool, embedder, search: "retriever"
+    )
+
+    def run(config, retriever, corpus, ks, **kwargs):
+        seen.update(retriever=retriever, kwargs=kwargs)
+        return {"requetes": 0}
+
+    monkeypatch.setattr(cli.evaluation, "run", run)
+    monkeypatch.setattr(cli, "today", lambda: ON)
+    code, out = run_cli(
+        capsys, "mesure-recherche", "--profil", "fournisseur", "--k", "4"
+    )
+    assert code == 0 and out["mesure_recherche"] == "ok"
+    assert seen == {
+        "retriever": "retriever",
+        "kwargs": {"profile": "fournisseur", "on": ON},
+    }
 
 
 @pytest.mark.pg
@@ -362,7 +468,9 @@ def test_commande_mesure_recherche_sur_le_corpus_indexe(
         embedder.model,
     )
     try:
-        code, out = run_cli(capsys, "mesure-recherche", "--k", "60,1,4,4")
+        code, out = run_cli(
+            capsys, "mesure-recherche", "--profil", "fournisseur", "--k", "60,1,4,4"
+        )
         assert code == 0 and out["mesure_recherche"] == "ok"
         assert out["modele"] == "hash-test" and out["k"] == [1, 4, 60]
         assert out["recherche"] == CONFIG.crag.search.model_dump()
@@ -391,6 +499,6 @@ def test_commande_mesure_recherche_corpus_absent_erreur_explicite(
     monkeypatch.setattr(
         cli.fastembed, "FastembedEmbedder", lambda config, cache_dir, **kw: Absent()
     )
-    code, err = run_cli(capsys, "mesure-recherche")
+    code, err = run_cli(capsys, "mesure-recherche", "--profil", "fournisseur")
     assert code == 1 and err["erreur"] == "IndexMismatch"
     assert "relancer ingest" in err["detail"]

@@ -11,7 +11,9 @@ from typing import Any
 import yaml
 from doubles import ACTEUR_RELECTEUR
 
+from cdg.domain import profiles
 from cdg.domain.models import Clause
+from cdg.domain.profiles import Profile
 
 DEMO = Path(__file__).resolve().parents[1] / "data" / "contracts"
 EXPECTED = DEMO / "attendus.yaml"
@@ -20,6 +22,7 @@ EXPECTED = DEMO / "attendus.yaml"
 @dataclass(frozen=True)
 class DemoContract:
     id: str
+    profile: Profile  # profil du contrat, champ obligatoire des attendus
     text: str
     parties: list[str]
     clauses: list[Clause]
@@ -64,6 +67,7 @@ def load() -> tuple[date, list[DemoContract]]:
     contracts = [
         DemoContract(
             id=cid,
+            profile=profiles.parse(spec["profile"]),
             text=(DEMO / spec["file"]).read_text(encoding="utf-8"),
             parties=list(spec["parties"]),
             clauses=[_clause(item) for item in spec["clauses"]],

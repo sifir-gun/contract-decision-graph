@@ -59,14 +59,14 @@ def test_extraction_attendue_pour_chaque_contrat_du_jeu(factice):
     assert len(analysed) >= 10
     for contract in analysed:
         masked = masking.mask(contract.text(), contract.parties).text
-        result = extractor(masked, [])
+        result = extractor(masked, [], contract.profile)
         assert result.clauses == list(contract.clauses), contract.id
         assert result.usage[0].tokens_in > 0
 
 
 def test_texte_hors_du_jeu_refuse_explicitement(factice):
     with pytest.raises(Exception) as raised:
-        LLMExtractor(provider(factice))("Contrat inconnu du jeu.", [])
+        LLMExtractor(provider(factice))("Contrat inconnu du jeu.", [], "fournisseur")
     assert "422" in str(raised.value) or "hors du jeu" in str(raised.value)
     assert control(factice)["refus"] == 1
 

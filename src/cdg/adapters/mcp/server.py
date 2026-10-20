@@ -19,7 +19,11 @@ journalisé par son type, jamais leur message, qui pourrait citer une donnée re
 ne voit ainsi aucune exception imprévue (il en journaliserait toute la trace).
 
 Un argument inconnu d'un outil est refusé, nommé : le SDK l'ignorerait sans rien dire,
-et une faute de frappe (`citation` pour `citations`) changerait la réponse en silence.
+et une faute de frappe (`citation` pour `citations`) changerait la réponse en silence. Un
+argument obligatoire manquant (`profil`) l'est aussi, nommé par un message écrit par le
+code : celui de la validation du SDK reprendrait le début et la fin des arguments reçus,
+dont le texte du contrat. Un profil présent mais inconnu l'est encore, avec le message de
+la saisie commune : celui du SDK, une exception de pydantic, citerait la valeur reçue.
 
 Les outils sont des fonctions ordinaires : le SDK les exécute dans un fil à part, et le
 service fait passer les modifications l'une après l'autre.
@@ -44,6 +48,7 @@ from cdg.application.service import ContractService
 from cdg.domain import audit
 from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import ContractIdError
+from cdg.domain.profiles import PROFILES
 from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
 from cdg.ports.locks import ContractBusy
@@ -122,16 +127,33 @@ def _guarded[T](tool: str, call: Callable[[], T]) -> T:
         raise ToolError(f"erreur inattendue : {type(exc).__name__}") from None
 
 
-def _known_arguments(parameters: Mapping[str, frozenset[str]]) -> Any:
+def _known_arguments(
+    parameters: Mapping[str, frozenset[str]], required: Mapping[str, frozenset[str]]
+) -> Any:
     """Middleware du SDK (API provisoire en 2.x : un changement fait échouer les tests) :
-    un appel d'outil avec un argument inconnu rend une erreur qui le nomme, avant toute
-    validation ; les autres messages passent tels quels."""
+    un appel d'outil avec un argument inconnu, ou sans un argument obligatoire, rend une
+    erreur qui le nomme, avant toute validation ; un `profil` présent qui n'est pas un
+    profil connu, l'erreur de la saisie commune (`saisie.profile`) ; les autres messages
+    passent tels quels.
 
-    async def refuse_unknown(
+    Le message est écrit par le code et ne reprend aucune valeur reçue : pour un argument
+    manquant, la validation du SDK répéterait le début et la fin de tous les arguments
+    reçus, dont le texte du contrat et les noms des parties ; pour un profil inconnu, elle
+    rendrait le message de pydantic, en anglais, avec la valeur reçue (spec des profils,
+    « Erreurs » : sans message d'exception)."""
+
+    def refused(message: str) -> CallToolResult:
+        return CallToolResult(
+            is_error=True, content=[TextContent(type="text", text=message)]
+        )
+
+    async def refuse_unknown_or_missing(
         ctx: ServerRequestContext[Any, Any], call_next: CallNext
     ) -> HandlerResult:
         params = ctx.params or {}
         tool, given = params.get("name"), params.get("arguments")
+        if given is None:  # requête sans `arguments` : aucun argument donné
+            given = {}
         if (
             ctx.method == "tools/call"
             and isinstance(tool, str)
@@ -140,13 +162,25 @@ def _known_arguments(parameters: Mapping[str, frozenset[str]]) -> Any:
         ):
             unknown = sorted(set(given) - parameters[tool])
             if unknown:
-                message = f"argument inconnu de l'outil {tool} : {', '.join(unknown)}"
-                return CallToolResult(
-                    is_error=True, content=[TextContent(type="text", text=message)]
+                return refused(
+                    f"argument inconnu de l'outil {tool} : {', '.join(unknown)}"
                 )
+            missing = sorted(required[tool] - set(given))
+            if missing:
+                return refused(
+                    f"argument obligatoire manquant de l'outil {tool} : "
+                    f"{', '.join(missing)}"
+                )
+            if "profil" in given:  # argument connu de l'outil : contrôlé plus haut
+                profile = given["profil"]
+                if not (isinstance(profile, str) and profile in PROFILES):
+                    try:
+                        saisie.profile(profile)  # refusé : message de la saisie commune
+                    except InputError as exc:
+                        return refused(str(exc))
         return await call_next(ctx)
 
-    return refuse_unknown
+    return refuse_unknown_or_missing
 
 
 def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPServer:
@@ -160,21 +194,25 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
     _, contracts = demo_set.load()
     # identifiants du jeu, énumérés dans le schéma de l'outil d'analyse
     DemoContract = Literal[tuple(sorted(contracts))]  # type: ignore[valid-type]
+    # profils connus, énumérés de même : obligatoire, sans défaut
+    ProfileChoice = Literal[PROFILES]  # type: ignore[valid-type]
     parameters: dict[str, frozenset[str]] = {}  # arguments de chaque outil
+    required: dict[str, frozenset[str]] = {}  # ceux qui n'ont pas de défaut
     server = MCPServer(
         name=NAME,
         instructions=INSTRUCTIONS + (DEMO_INSTRUCTIONS if demo else ""),
         # les bibliothèques ne passent qu'à partir des avertissements (ADR 005) ; le
         # SDK ne règle les journaux que si personne ne l'a fait (basicConfig)
         log_level="WARNING",
-        middleware=[_known_arguments(parameters)],
+        middleware=[_known_arguments(parameters, required)],
     )
 
     @server.tool(
         name="analyser_contrat",
         title="Analyser un contrat",
         description=(
-            "Lance l'analyse d'un contrat : un contrat du jeu de démonstration "
+            "Lance l'analyse d'un contrat sous le profil indiqué (profil, obligatoire : "
+            "jamais déduit du texte) : un contrat du jeu de démonstration "
             "(contrat_du_jeu) ou un texte fourni (texte), l'un ou l'autre. Le texte est "
             "masqué avant l'analyse (adresses, téléphones, IBAN, SIRET, parties "
             "déclarées), comme par l'interface et la CLI. Rend la fiche du contrat : "
@@ -194,6 +232,10 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         ),
     )
     def analyser_contrat(
+        profil: Annotated[
+            ProfileChoice,  # type: ignore[valid-type]
+            Field(description="profil du contrat : " + ", ".join(PROFILES)),
+        ],
         contrat_du_jeu: Annotated[
             DemoContract | None,  # type: ignore[valid-type]
             Field(description="identifiant d'un contrat du jeu de démonstration"),
@@ -221,6 +263,9 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         ] = None,
     ) -> presentation.Summary:
         def run() -> presentation.Summary:
+            # le middleware refuse déjà un profil inconnu (message de la saisie), et le
+            # schéma l'énumère ; la saisie commune le vérifie aussi, comme à l'interface
+            profile = saisie.profile(profil)
             if (contrat_du_jeu is None) == (texte is None):
                 raise InputError(
                     "un contrat du jeu (contrat_du_jeu) ou un texte (texte), l'un ou "
@@ -241,6 +286,7 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
                     entry.text,
                     contract_id=contract_id,
                     actor=actor,
+                    profile=profile,
                     parties=entry.parties,
                     analysis_date=on,
                 )
@@ -326,5 +372,11 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
         consulter_dossier,
         verifier_journal,
     ):
-        parameters[tool.__name__] = frozenset(inspect.signature(tool).parameters)
+        signature = inspect.signature(tool).parameters
+        parameters[tool.__name__] = frozenset(signature)
+        required[tool.__name__] = frozenset(
+            name
+            for name, parameter in signature.items()
+            if parameter.default is inspect.Parameter.empty
+        )
     return server

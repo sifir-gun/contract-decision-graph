@@ -9,8 +9,15 @@ aucun outil de décision : aucun de ses outils n'appelle decide, expire ni relau
 
 import pytest
 from cli_helpers import run_cli
-from mcp_helpers import MCP_ACTOR, session
-from web_helpers import PENDING_TEXT, analyse, client, csrf, memory_service
+from mcp_helpers import MCP_ACTOR, call, session
+from web_helpers import (
+    PENDING_TEXT,
+    analyse,
+    client,
+    csrf,
+    memory_service,
+    post_analyse,
+)
 
 from cdg import cli
 from cdg.adapters.mcp.server import create_server
@@ -52,10 +59,12 @@ DECISIONS = {"decide", "expire", "relaunch"}
 
 
 class Recorder:
-    """Service des contrats qui note chaque méthode appelée, puis délègue."""
+    """Service des contrats qui note chaque méthode appelée, avec ses arguments nommés,
+    puis délègue."""
 
     def __init__(self, service):
         self._service, self.calls = service, []
+        self.keywords: dict[str, list[dict]] = {}  # arguments nommés, par méthode
 
     def __getattr__(self, name):
         target = getattr(self._service, name)
@@ -64,6 +73,7 @@ class Recorder:
 
         def call(*args, **kwargs):
             self.calls.append(name)
+            self.keywords.setdefault(name, []).append(kwargs)
             return target(*args, **kwargs)
 
         return call
@@ -80,7 +90,14 @@ def cli_calls(tmp_path, monkeypatch, capsys) -> dict[str, set[str]]:
     pending = tmp_path / "c-attente.txt"
     pending.write_text(PENDING_TEXT, encoding="utf-8")
     commands = {
-        "run": ["run", str(pending), "--operateur", "lot-parite"],
+        "run": [
+            "run",
+            "--profil",
+            "fournisseur",
+            str(pending),
+            "--operateur",
+            "lot-parite",
+        ],
         "show": ["show", "c-attente"],
         "history": ["history", "c-attente"],
         "list": ["list"],
@@ -170,7 +187,11 @@ def mcp_calls() -> dict[str, set[str]]:
     recorder = Recorder(memory_service())
     server = create_server(recorder, actor=MCP_ACTOR, demo=False)
     arguments = {
-        "analyser_contrat": {"texte": PENDING_TEXT, "identifiant": "c-attente"},
+        "analyser_contrat": {
+            "profil": "fournisseur",
+            "texte": PENDING_TEXT,
+            "identifiant": "c-attente",
+        },
         "lister_contrats": {},
         "consulter_dossier": {"thread_id": "c-attente"},
         "verifier_journal": {},
@@ -195,3 +216,60 @@ def test_outil_mcp_et_sa_commande_appellent_la_meme_methode(tool, mcp_calls, cli
 
 def test_aucun_outil_mcp_n_appelle_une_methode_de_decision(mcp_calls):
     assert set().union(*mcp_calls.values()) & DECISIONS == set()
+
+
+# --- profil : choisi aux trois portes, jamais déduit ---------------------------------
+
+
+@pytest.fixture
+def portes(tmp_path, monkeypatch):
+    """Les trois portes sur un même service enregistré. Chacune rend si l'analyse a été
+    acceptée ; `profil=None` omet le champ (ancien formulaire, ancien assistant, commande
+    d'avant les profils)."""
+    recorder = Recorder(memory_service())
+    monkeypatch.setattr(cli, "build_service", lambda config: recorder)
+    contract = tmp_path / "c-cli.txt"
+    contract.write_text(PENDING_TEXT, encoding="utf-8")
+    web = client(recorder)
+    server = create_server(recorder, actor=MCP_ACTOR, demo=False)
+
+    def by_cli(profil) -> bool:
+        argv = ["run", str(contract), "--operateur", "lot-parite"]
+        if profil is not None:
+            argv += ["--profil", profil]
+        try:
+            return cli.main(argv) == 0
+        except SystemExit as refused:  # argparse : profil absent ou hors des choix
+            assert refused.code == 2
+            return False
+
+    def by_web(profil) -> bool:
+        response = post_analyse(web, PENDING_TEXT, profil=profil, identifiant="c-web")
+        assert response.status_code in (303, 400), response.text
+        return response.status_code == 303
+
+    def by_mcp(profil) -> bool:
+        arguments = {"texte": PENDING_TEXT, "identifiant": "c-mcp"}
+        if profil is not None:
+            arguments["profil"] = profil
+        return not call(server, "analyser_contrat", arguments).is_error
+
+    return recorder, {"cli": by_cli, "web": by_web, "mcp": by_mcp}
+
+
+def test_meme_profil_aux_trois_portes(portes):
+    recorder, doors = portes
+    for door in doors.values():
+        assert door("fournisseur")
+    assert [k["profile"] for k in recorder.keywords["analyse"]] == ["fournisseur"] * 3
+
+
+@pytest.mark.parametrize("profil", [None, "", "Fournisseur", "sous_traitance"])
+@pytest.mark.parametrize("door", ["cli", "web", "mcp"])
+def test_profil_absent_refuse_aux_trois_portes(portes, door, profil):
+    """Profil absent, vide ou inconnu : refusé à chaque porte, avant tout appel au
+    service : rien n'est analysé ni scellé."""
+    recorder, doors = portes
+    assert not doors[door](profil)
+    assert recorder.take() == set()
+    assert recorder.contracts() == []

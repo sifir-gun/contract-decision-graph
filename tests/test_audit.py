@@ -73,7 +73,7 @@ def test_canonique_type_inconnu_refuse_sans_conversion_silencieuse():
 
 def traced(domain, found, refs=("réf",), findings=()):
     """Verdict d'un domaine : règles, puis références figées pour chaque constat."""
-    assessment = RULES[domain](found, CONFIG)
+    assessment = RULES["fournisseur"][domain](found, CONFIG)
     trace = RetrievalTrace(
         clauses=[
             ClauseRetrieval(

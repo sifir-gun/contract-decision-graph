@@ -59,7 +59,12 @@ def test_cle_du_verrou_stable_sur_64_bits_et_distincte_du_journal():
 def test_revue_refusee_tant_que_le_contrat_est_verrouille():
     locks = LocalContractLocks()
     service = make_service(locks=locks)
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     with locks.hold("c-attente"), pytest.raises(ContractBusy):
         service.decide("c-attente", answer())
     assert service.decide("c-attente", answer())["statut"] == "termine"
@@ -69,7 +74,12 @@ def test_analyse_refusee_tant_que_le_contrat_est_verrouille():
     locks = LocalContractLocks()
     service = make_service(locks=locks)
     with locks.hold("c1"), pytest.raises(ContractBusy):
-        service.analyse(CONTRACT_TEXT, contract_id="c1", actor=ACTEUR_ANALYSTE)
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id="c1",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
     assert service.contracts() == []  # rien de créé
 
 
@@ -78,7 +88,12 @@ def test_expiration_laisse_un_contrat_verrouille_et_le_dit(caplog):
     locks = LocalContractLocks()
     later = datetime.now(UTC) + timedelta(days=3)
     service = make_service(locks=locks, now=lambda: later)
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     with locks.hold("c-attente"):
         _, expired = service.expire(timedelta(hours=24), ACTEUR_RELECTEUR)
     assert expired == []

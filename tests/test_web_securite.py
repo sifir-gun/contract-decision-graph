@@ -152,7 +152,10 @@ def test_cookie_csrf_strict_et_inaccessible_au_javascript():
 
 
 FORMS = [
-    ("/analyse", {"source": "texte", "texte": CONTRACT_TEXT}),
+    (
+        "/analyse",
+        {"profil": "fournisseur", "source": "texte", "texte": CONTRACT_TEXT},
+    ),
     ("/contrats/c-web/decision", {"decision": "GO", "motif": "y"}),
     ("/administration/expiration", {"heures": "24", "confirme": "oui"}),
 ]
@@ -189,7 +192,12 @@ def test_jeton_valide_et_meme_origine_acceptes():
     token = csrf(web)
     response = web.post(
         "/analyse",
-        data={"csrf": token, "source": "texte", "texte": CONTRACT_TEXT},
+        data={
+            "csrf": token,
+            "profil": "fournisseur",
+            "source": "texte",
+            "texte": CONTRACT_TEXT,
+        },
         headers={"origin": "http://127.0.0.1:8000"},
     )
     assert response.status_code == 303
@@ -295,6 +303,7 @@ def test_erreur_d_analyse_sans_renvoyer_le_texte():
         "/analyse",
         data={
             "csrf": token,
+            "profil": "fournisseur",
             "source": "texte",
             "texte": f"{CONTRACT_TEXT}\n{PARTY}\n",
             "identifiant": "c-double",
@@ -309,7 +318,13 @@ def test_envoi_trop_gros_refuse_avant_lecture():
     token = csrf(web)
     too_big = "a" * (security.max_body_bytes(CONFIG) + 1)
     response = web.post(
-        "/analyse", data={"csrf": token, "source": "texte", "texte": too_big}
+        "/analyse",
+        data={
+            "csrf": token,
+            "profil": "fournisseur",
+            "source": "texte",
+            "texte": too_big,
+        },
     )
     assert response.status_code == 413
 
@@ -336,7 +351,7 @@ def test_fichier_qui_n_est_pas_du_texte_refuse(content, kind, message):
     token = csrf(web)
     response = web.post(
         "/analyse",
-        data={"csrf": token, "source": "fichier"},
+        data={"csrf": token, "profil": "fournisseur", "source": "fichier"},
         files={"fichier": ("contrat.txt", content, kind)},
     )
     assert response.status_code == 400
@@ -348,7 +363,12 @@ def test_fichier_texte_accepte():
     token = csrf(web)
     response = web.post(
         "/analyse",
-        data={"csrf": token, "source": "fichier", "identifiant": "c-fichier"},
+        data={
+            "csrf": token,
+            "profil": "fournisseur",
+            "source": "fichier",
+            "identifiant": "c-fichier",
+        },
         files={"fichier": ("contrat.txt", CONTRACT_TEXT.encode(), "text/plain")},
     )
     assert response.status_code == 303
@@ -364,7 +384,13 @@ def test_cle_d_api_absente_message_clair():
     web = client(memory_service(run=missing))
     token = csrf(web)
     response = web.post(
-        "/analyse", data={"csrf": token, "source": "texte", "texte": CONTRACT_TEXT}
+        "/analyse",
+        data={
+            "csrf": token,
+            "profil": "fournisseur",
+            "source": "texte",
+            "texte": CONTRACT_TEXT,
+        },
     )
     assert response.status_code == 503
     assert "MISTRAL_API_KEY" in response.text and "démonstration" in response.text
@@ -413,7 +439,9 @@ def legacy_contract(service, thread: str) -> None:
     """Contrat d'identifiant ancien, créé par le moteur directement : la règle des
     identifiants ne vaut qu'à la création, les contrats existants restent lisibles."""
     local = Actor(canal="locale", authentifie=False)  # interface du poste
-    service.engine.run(thread, PENDING_TEXT, (), service.today(), local)
+    service.engine.run(
+        thread, PENDING_TEXT, (), service.today(), local, profile="fournisseur"
+    )
 
 
 def test_redirection_apres_revue_vers_le_dossier_quel_que_soit_l_identifiant():
@@ -438,6 +466,7 @@ def test_redirection_apres_analyse_vers_le_dossier():
         "/analyse",
         data={
             "csrf": csrf(web),
+            "profil": "fournisseur",
             "source": "texte",
             "texte": CONTRACT_TEXT,
             "identifiant": "c-2026.09_v1",

@@ -2,14 +2,15 @@
 
 Exclu par défaut et en CI (`--journal-reel` pour le lancer, avec PostgreSQL) : il lit la
 table `audit_decisions` du poste, sans rien écrire, et n'en copie aucune donnée dans le
-dépôt (le jeu v1 des tests automatiques est synthétique, `tests/test_audit_v2.py`).
+dépôt (les jeux v1 et v2 des tests automatiques sont synthétiques,
+`tests/test_audit_v2.py`).
 
-Il vérifie ce que promettent la PR D2 et l'archivage des configurations : la chaîne
-entière reste vérifiable, et l'archive conforme (aucun enregistrement v2 sans sa
-configuration archivée) ; chaque enregistrement est relu par les modèles de sa version et
-reproduit à l'identique ; le rejeu part de la configuration archivée, ou, à défaut, de la
-configuration courante de même empreinte (toujours une réévaluation pour un v1). Il
-n'affiche que des comptes.
+Il vérifie ce que promettent la PR D2, l'archivage des configurations et le format v3
+(profils) : la chaîne entière reste vérifiable, et l'archive conforme (aucun
+enregistrement v2 ou v3 sans sa configuration archivée) ; chaque enregistrement est relu
+par les modèles de sa version et reproduit à l'identique ; le rejeu part de la
+configuration archivée, ou, à défaut, de la configuration courante de même empreinte
+(toujours une réévaluation pour un v1). Il n'affiche que des comptes.
 """
 
 from collections import Counter
@@ -54,15 +55,16 @@ def test_vrai_journal_verifiable_relu_et_rejoue_a_l_identique(pg, capsys):
             continue
         assert replayed.identical, f"enregistrement {entry.id} : rejeu différent"
         replay[f"rejoué à l'identique (configuration {source})"] += 1
-    v2_without = sum(
+    # v2 et suivants : exigent la configuration archivée de leur décision
+    without = sum(
         1
         for e in entries
-        if audit.record_version(e.record) == 2 and e.config_hash not in archived
+        if audit.record_version(e.record) != 1 and e.config_hash not in archived
     )
-    assert v2_without == 0
+    assert without == 0
     with capsys.disabled():
         print(
             f"\nvrai journal : {len(entries)} enregistrements, versions "
-            f"{dict(versions)}, v2 sans configuration archivée : {v2_without}, "
+            f"{dict(versions)}, v2 ou v3 sans configuration archivée : {without}, "
             f"configurations archivées : {len(archived)}, rejeu {dict(replay)}"
         )

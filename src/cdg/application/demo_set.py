@@ -1,5 +1,6 @@
-"""Jeu de démonstration (`data/contracts/attendus.yaml`) : fichier, parties à masquer et
-clauses qu'une extraction correcte rend, pour chaque contrat synthétique. L'interface web
+"""Jeu de démonstration (`data/contracts/attendus.yaml`) : fichier, profil (obligatoire),
+parties à masquer et clauses qu'une extraction correcte rend, pour chaque contrat
+synthétique. L'interface web
 en propose le choix ; son mode démonstration en tire l'extraction simulée."""
 
 from dataclasses import dataclass
@@ -9,7 +10,9 @@ from typing import Any
 
 import yaml
 
+from cdg.domain import profiles
 from cdg.domain.models import Clause
+from cdg.domain.profiles import Profile
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "data" / "contracts"
 EXPECTED = CONTRACTS / "attendus.yaml"
@@ -18,6 +21,7 @@ EXPECTED = CONTRACTS / "attendus.yaml"
 @dataclass(frozen=True)
 class DemoContract:
     id: str
+    profile: Profile  # profil du contrat, obligatoire dans les attendus
     file: str
     parties: tuple[str, ...]
     clauses: tuple[Clause, ...]  # vide pour un contrat rejeté à l'entrée
@@ -37,12 +41,20 @@ def _clause(item: dict[str, Any]) -> Clause:
     )
 
 
+def _profile(cid: str, item: dict[str, Any], path: Path) -> Profile:
+    """Profil déclaré d'un contrat : obligatoire, jamais déduit ni par défaut."""
+    if "profile" not in item:
+        raise ValueError(f"profil absent du contrat {cid} dans {path.name}")
+    return profiles.parse(item["profile"])
+
+
 def load(path: Path = EXPECTED) -> tuple[date, dict[str, DemoContract]]:
     """Date d'analyse des attendus, puis les contrats par identifiant."""
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     contracts = {
         cid: DemoContract(
             id=cid,
+            profile=_profile(cid, item, path),
             file=item["file"],
             parties=tuple(item["parties"]),
             clauses=tuple(_clause(c) for c in item.get("clauses", [])),

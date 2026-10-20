@@ -18,11 +18,13 @@ from web_helpers import (
     client,
     csrf,
     memory_service,
+    post_analyse,
 )
 
 from cdg.adapters.web import app as web_app
 from cdg.adapters.web.presentation import DECISION_LABELS, STATE_LABELS
 from cdg.application import demo_set
+from cdg.domain import profiles
 
 
 def text_of(page: str) -> str:
@@ -104,6 +106,14 @@ def test_liste_etat_decision_et_filtre_en_attente():
     assert 'href="/contrats/c-go"' not in pending
 
 
+def test_liste_affiche_le_profil_de_chaque_contrat():
+    web = client()
+    analyse(web, identifiant="c-go")
+    page = web.get("/").text
+    assert '<th scope="col">Profil</th>' in page
+    assert re.search(r"<td>\s*fournisseur\s*</td>", page)
+
+
 def test_liste_contrat_rejete():
     web = client()
     analyse(web, "Too short, in English, for any analysis.", identifiant="c-rejet")
@@ -115,13 +125,65 @@ def test_liste_contrat_rejete():
 
 def test_formulaire_d_analyse_etiquete():
     page = client().get("/analyse").text
-    for field in ("contrat", "texte", "fichier", "parties", "date", "identifiant"):
+    for field in (
+        "profil",
+        "contrat",
+        "texte",
+        "fichier",
+        "parties",
+        "date",
+        "identifiant",
+    ):
         assert f'id="{field}"' in page and f'for="{field}"' in page
     _, contracts = demo_set.load()
     assert len(contracts) == 13
     for contract_id in contracts:
         assert f'value="{contract_id}"' in page
     assert "htmx-indicator" in page  # indicateur de chargement pendant l'analyse
+
+
+def test_formulaire_liste_les_profils_sans_preselection():
+    """Profil obligatoire, jamais déduit : une première option vide, désactivée et
+    sélectionnée, puis une option par profil, aucune présélectionnée."""
+    page = client().get("/analyse").text
+    opening = re.search(r'<select\b[^>]*\bid="profil"[^>]*>', page)
+    assert opening and 'name="profil"' in opening[0] and "required" in opening[0]
+    body = page[opening.end() : page.index("</select>", opening.end())]
+    options = re.findall(r"<option\b([^>]*)>([^<]*)</option>", body)
+    first, label = options[0]
+    assert 'value=""' in first and "disabled" in first and "selected" in first
+    assert label.strip() == "Choisir un profil"
+    values = [re.search(r'value="([^"]*)"', attrs)[1] for attrs, _ in options[1:]]
+    assert values == list(profiles.PROFILES)
+    assert all("selected" not in attrs for attrs, _ in options[1:])
+
+
+def test_analyse_sans_profil_refusee():
+    """Formulaire d'un onglet ouvert avant la mise à jour : 400, le message nomme le
+    profil, rien n'est analysé."""
+    service = memory_service()
+    web = client(service)
+    response = post_analyse(web, PENDING_TEXT, profil=None)
+    assert response.status_code == 400
+    assert "profil absent ou inconnu" in text_of(response.text)
+    assert service.contracts() == []
+
+
+@pytest.mark.parametrize("profil", ["", "Fournisseur", "sous_traitance"])
+def test_analyse_profil_inconnu_refuse(profil):
+    service = memory_service()
+    response = post_analyse(client(service), PENDING_TEXT, profil=profil)
+    assert response.status_code == 400
+    assert "profil absent ou inconnu" in text_of(response.text)
+    assert service.contracts() == []
+
+
+def test_analyse_passe_le_profil_saisi_au_service():
+    service = memory_service()
+    web = client(service)
+    thread = analyse(web, profil="fournisseur")
+    assert service.dossier(thread)["status"]["profil"] == "fournisseur"
+    assert service.engine.values(thread)["profile"] == "fournisseur"
 
 
 def test_analyse_d_un_contrat_du_jeu_avec_ses_parties():
@@ -132,6 +194,7 @@ def test_analyse_d_un_contrat_du_jeu_avec_ses_parties():
         "/analyse",
         data={
             "csrf": token,
+            "profil": "fournisseur",
             "source": "jeu",
             "contrat": "demo-06-no-go-conseil",
             "parties": "Lambda Conseil Synthétique\nMu Énergie Synthétique",
@@ -172,7 +235,9 @@ def test_analyse_identifiant_genere_et_date():
 def test_analyse_entree_invalide(fields, message):
     web = client()
     token = csrf(web)
-    response = web.post("/analyse", data={"csrf": token, **fields})
+    response = web.post(
+        "/analyse", data={"csrf": token, "profil": "fournisseur", **fields}
+    )
     assert response.status_code == 400
     assert message in response.text
 
@@ -211,6 +276,13 @@ def test_dossier_complet():
     for key in ("config_hash", "decision_hash", "chain_hash"):
         assert status[key] in page
     assert f'hx-get="/contrats/{thread}/rejeu"' in page
+
+
+def test_dossier_affiche_le_profil():
+    web = client()
+    thread = analyse(web)
+    visible = text_of(web.get(f"/contrats/{thread}").text)
+    assert "profil fournisseur" in visible
 
 
 def test_dossier_references_du_corpus_avec_leur_texte():

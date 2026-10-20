@@ -25,6 +25,7 @@ def check(items, attempts, text=CONTRACT_TEXT):
         items,
         attempts,
         2,
+        profile="fournisseur",
         absence_terms=CONFIG.extraction.absence_terms,
         category_terms=CONFIG.extraction.category_terms,
         instruction_patterns=CONFIG.input.instruction_patterns,
@@ -62,6 +63,49 @@ def test_normalisation_garde_la_casse():
 
 def test_extraction_conforme_route_vers_les_analystes():
     assert verify(clauses()) == {"route": "analysts"}
+
+
+def test_profil_de_l_etat_lu_par_la_verification():
+    state = {
+        "raw_text": CONTRACT_TEXT,
+        "clauses": clauses(),
+        "extraction_attempts": 1,
+        "profile": "fournisseur",
+    }
+    assert verify_extraction(state, decision_config=CONFIG) == {"route": "analysts"}
+
+
+def test_profil_inconnu_de_l_etat_refuse_sans_repli():
+    state = {
+        "raw_text": CONTRACT_TEXT,
+        "clauses": clauses(),
+        "extraction_attempts": 1,
+        "profile": "sous_traitance",
+    }
+    with pytest.raises(ValueError, match="profil inconnu"):
+        verify_extraction(state, decision_config=CONFIG)
+
+
+def test_verification_exige_un_profil_connu():
+    with pytest.raises(ValueError, match="profil inconnu"):
+        verification.problems_of(
+            CONTRACT_TEXT,
+            clauses(),
+            profile="sous_traitance",
+            absence_terms=CONFIG.extraction.absence_terms,
+            category_terms=CONFIG.extraction.category_terms,
+            instruction_patterns=CONFIG.input.instruction_patterns,
+        )
+
+
+def test_unites_de_valeur_fournies_par_l_appelant():
+    # l'unité d'un type est celle du profil : la même citation passe ou échoue selon elle
+    item = Clause(kind="delai_paiement", present=True, quote="45 jours", value=45.0)
+    assert verification.value_mismatches([item], {"delai_paiement": "jours"}) == []
+    assert verification.value_mismatches([item], {"delai_paiement": "mois"}) == [
+        "valeur absente de la citation (45 mois): delai_paiement"
+    ]
+    assert verification.value_mismatches([item], {}) == []  # type non chiffré
 
 
 def test_citation_typographique_differente_acceptee():

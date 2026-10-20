@@ -17,12 +17,14 @@ from doubles import (
     clauses,
     faithful_explanation,
 )
+from web_helpers import memory_service
 
 from cdg import cli
 from cdg.application.explanation import LLMExplainer
 from cdg.application.observation import ObservedProvider
+from cdg.domain import profiles
 from cdg.domain.config import load_config
-from cdg.domain.models import REQUIRED_KINDS, Clause
+from cdg.domain.models import Clause
 
 
 @pytest.mark.pg
@@ -75,12 +77,102 @@ def test_aide_de_run(capsys):
     assert "payant" in help_text  # l'appel au fournisseur LLM est annoncé
 
 
+# --- profil de contrat : obligatoire à l'entrée, refusé par argparse (code 2) ----------
+
+
+def test_run_sans_profil_refuse(capsys, contract):
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["run", contract, "--operateur", "lot-profil"])
+    assert exit_.value.code == 2
+    assert "--profil" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("profil", ["sous_traitance", "", "Fournisseur"])
+def test_run_profil_inconnu_refuse(capsys, contract, profil):
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["run", contract, "--profil", profil, "--operateur", "lot-profil"])
+    assert exit_.value.code == 2
+    err = capsys.readouterr().err
+    assert "--profil" in err and "fournisseur" in err  # le profil admis est cité
+
+
+def test_aide_de_run_annonce_les_profils(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["run", "--help"])
+    help_text = capsys.readouterr().out
+    assert "--profil" in help_text
+    assert all(profile in help_text for profile in profiles.PROFILES)
+
+
+def test_relaunch_n_a_pas_d_option_profil(capsys):
+    """La relance reprend le profil du contrat d'origine : rien à choisir."""
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(
+            ["relaunch", "c-1", "--profil", "fournisseur", "--operateur", "lot-profil"]
+        )
+    assert exit_.value.code == 2
+    assert "--profil" in capsys.readouterr().err
+
+
+def test_run_passe_le_profil_au_service(monkeypatch, capsys, contract):
+    seen = {}
+
+    class Service:
+        def analyse(self, raw_text, **kwargs):
+            seen.update(kwargs)
+            return {"statut": "termine"}
+
+    monkeypatch.setattr(cli, "build_service", lambda config: Service())
+    code, _ = run_cli(
+        capsys,
+        "run",
+        contract,
+        "--profil",
+        "fournisseur",
+        "--operateur",
+        "lot-profil",
+    )
+    assert code == 0 and seen["profile"] == "fournisseur"
+
+
+def test_run_profil_scelle_et_rejoue(monkeypatch, capsys, contract):
+    """Le profil donné à `run` traverse le moteur, est scellé dans la décision (v3), et
+    le rejeu fidèle le relit à l'identique."""
+    service = memory_service()
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    code, run = run_cli(
+        capsys,
+        "run",
+        contract,
+        "--profil",
+        "fournisseur",
+        "--contract-id",
+        "c-profil",
+        "--operateur",
+        "lot-profil",
+    )
+    assert (code, run["profil"]) == (0, "fournisseur")
+    assert service.engine.values("c-profil")["profile"] == "fournisseur"
+    [entry] = service.audit_store().entries()
+    assert entry.record["version"] == 3
+    assert entry.record["decision"]["profile"] == "fournisseur"
+    code, replay = run_cli(capsys, "replay", "c-profil")
+    assert code == 0
+    assert (replay["identique"], replay["sens"], replay["anomalie"]) == (
+        True,
+        "fidele",
+        False,
+    )
+
+
 @pytest.mark.pg
 def test_run_insuffisant_suspend_en_escalade(pg, thread_id, contract, analysis, capsys):
     analysis(*INSUFFICIENT)
     code, out = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -105,6 +197,8 @@ def test_run_favorable_termine_en_go(
     code, out = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -133,6 +227,8 @@ def test_run_blocage_dur_termine_en_no_go(pg, thread_id, contract, analysis, cap
     code, out = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -155,6 +251,8 @@ def test_run_masque_les_parties_declarees(pg, thread_id, tmp_path, analysis, cap
     code, out = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         str(path),
@@ -173,6 +271,8 @@ def test_run_date_d_analyse(pg, thread_id, contract, analysis, capsys):
     code, out = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -193,6 +293,8 @@ def test_run_date_d_analyse_par_defaut_aujourd_hui_a_paris(
     code, out = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -215,7 +317,14 @@ def test_run_refuse_un_identifiant_invalide_avant_toute_analyse(
     path = tmp_path / name
     path.write_text(CONTRACT_TEXT, encoding="utf-8")
     code, out = run_cli(
-        capsys, "run", "--operateur", "analyste-synth", str(path), *options
+        capsys,
+        "run",
+        "--profil",
+        "fournisseur",
+        "--operateur",
+        "analyste-synth",
+        str(path),
+        *options,
     )
     assert code == 1 and out["erreur"] == "ContractIdError"
     assert out["detail"].startswith("identifiant de contrat invalide")
@@ -226,6 +335,8 @@ def test_run_date_d_analyse_invalide(contract, capsys):
         cli.main(
             [
                 "run",
+                "--profil",
+                "fournisseur",
                 contract,
                 "--operateur",
                 "analyste-synth",
@@ -244,6 +355,8 @@ def test_resume_finalise_puis_history(
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -285,6 +398,8 @@ def test_resume_sans_cle_n_appelle_ni_llm_ni_corpus(
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -318,6 +433,8 @@ def test_resume_refuse_reste_suspendu_avec_le_motif(
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -374,6 +491,8 @@ def test_resume_thread_termine_refuse(pg, thread_id, contract, analysis, capsys)
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -400,6 +519,8 @@ def test_run_refuse_un_thread_existant(pg, thread_id, contract, analysis, capsys
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -409,6 +530,8 @@ def test_run_refuse_un_thread_existant(pg, thread_id, contract, analysis, capsys
     code, err = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -421,7 +544,13 @@ def test_run_refuse_un_thread_existant(pg, thread_id, contract, analysis, capsys
 def test_run_contrat_absent(tmp_path, analysis, capsys):
     analysis()
     code, err = run_cli(
-        capsys, "run", "--operateur", "analyste-synth", str(tmp_path / "absent.txt")
+        capsys,
+        "run",
+        "--profil",
+        "fournisseur",
+        "--operateur",
+        "analyste-synth",
+        str(tmp_path / "absent.txt"),
     )
     assert code == 1 and err["erreur"] == "FileNotFoundError"
 
@@ -435,6 +564,8 @@ def test_run_sans_cle_d_api_erreur_avant_tout_thread(
     code, err = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -456,9 +587,14 @@ def test_run_sans_cle_d_api_erreur_avant_tout_thread(
 class InvalidExtractor(FixedExtractor):
     """Extraction qui rend une clause présente sans citation : ValidationError."""
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         self.calls.append((raw_text, list(feedback)))
-        Clause(kind=REQUIRED_KINDS[0], present=True, quote="", value=None)
+        Clause(
+            kind=profiles.spec("fournisseur").kinds[0],
+            present=True,
+            quote="",
+            value=None,
+        )
         raise AssertionError("inatteignable")
 
 
@@ -470,6 +606,8 @@ def test_echec_de_noeud_escalade_avec_rapport_puis_resume(
     code, out = run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -542,6 +680,8 @@ def test_resume_refuse_si_la_configuration_a_change(
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -581,6 +721,8 @@ def test_resume_sans_cle_explication_par_le_gabarit_scellee(
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,
@@ -606,6 +748,8 @@ def test_resume_avec_cle_explication_par_le_llm(
     run_cli(
         capsys,
         "run",
+        "--profil",
+        "fournisseur",
         "--operateur",
         "analyste-synth",
         contract,

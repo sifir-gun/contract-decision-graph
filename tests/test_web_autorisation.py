@@ -85,6 +85,7 @@ def analyse(web: TestClient, who: str, identifier: str = "c-attente"):
         "/analyse",
         data={
             "csrf": form_token(web, who),
+            "profil": "fournisseur",
             "source": "texte",
             "texte": PENDING_TEXT,
             "identifiant": identifier,
@@ -304,7 +305,12 @@ def test_reponse_mal_formee_laissee_a_la_politique_du_graphe():
     """Le service ne tranche pas sur une réponse invalide : le graphe la refuse et la
     redemande, rien n'est scellé."""
     service = memory_service()
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     malformed = answer() | {"acteur": {"canal": "inconnu"}}
     assert service.decide("c-attente", malformed)["statut"] == "suspendu"
     assert service.audit_store().entries() == []
@@ -314,7 +320,12 @@ def test_decision_systeme_hors_quatre_yeux_toujours_no_go():
     """Une décision système (expiration) n'est soumise aux quatre yeux ni au service ni
     dans le graphe ; elle ne peut être qu'un NO_GO. Aucune porte n'envoie de source."""
     service = memory_service()
-    service.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    service.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     go = answer("GO", acteur=ACTEUR_ANALYSTE) | {"source": "systeme"}
     assert service.decide("c-attente", go)["statut"] == "suspendu"  # refusée
     no_go = answer("NO_GO", acteur=ACTEUR_ANALYSTE) | {"source": "systeme"}

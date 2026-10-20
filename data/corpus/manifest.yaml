@@ -1,6 +1,6 @@
 # Ce qui est ingéré dans rag_chunks, et à quels types de clause chaque article est
 # rattaché (J4) : les seules clauses qu'il peut justifier. Les domaines d'indexation s'en
-# déduisent (DOMAIN_KINDS) ; la recherche filtre par domaine ET par clause.
+# déduisent (`profiles.KIND_DOMAIN`) ; la recherche filtre par domaine ET par clause.
 # Règle de périmètre et de rattachement, justification de chaque article : SOURCES.md.
 # Tout fichier de raw/ doit figurer ici, ingéré ou exclu (vérifié par les tests).
 # Versions successives d'un article (ADR 009) : `file` est la première ; `later_versions`

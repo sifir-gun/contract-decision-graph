@@ -11,7 +11,8 @@ les résultats.
 - La requête d'une clause est construite à partir de son seul type, de sa valeur et de sa
   catégorie, jamais de sa citation : aucun texte du contrat n'atteint le CRAG. Le domaine y
   est nommé par ce qu'il couvre (`DOMAIN_LABELS`), comme dans les messages du juge et de la
-  réécriture.
+  réécriture. Les libellés, les sujets des clauses et les libellés des catégories sont
+  une table par profil (ADR 010) : un type commun à deux profils n'a pas le même sujet.
 - generate n'appelle aucun LLM : il rassemble les références retenues pour la clause.
   La date d'analyse choisit la version (docs/spec-versions-corpus.md) : une référence
   sans version en vigueur, expirée ou pas encore en vigueur, est signalée et jamais
@@ -20,7 +21,7 @@ les résultats.
   constats des règles et des références retenues pour chaque clause.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
@@ -28,16 +29,17 @@ from typing import Annotated, Any, Literal, TypedDict
 from pydantic import BaseModel, StringConstraints
 
 from cdg.application.deps import RetrievalResult
+from cdg.domain import profiles
 from cdg.domain.corpus import drop_superseded, expired, in_force
 from cdg.domain.models import (
     CLAUSE_CATEGORIES,
-    DOMAIN_KINDS,
     Clause,
     ClauseRetrieval,
     Domain,
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.profiles import Profile
 from cdg.ports.llm import LLMOutputError, LLMProvider
 from cdg.ports.retriever import Passage, Retriever
 
@@ -48,57 +50,70 @@ _REWRITE_SYSTEM = (PROMPTS / "crag_rewrite_system.md").read_text(encoding="utf-8
 # Domaines nommés par ce qu'ils couvrent, dans la requête et pour le juge et la réécriture :
 # le nom seul est ambigu (« financier » lu comme « services financiers », série 2 du
 # 25/09/2026 ; « juridique », « conformité » et « opérationnel » ne disent rien du sujet dans
-# un corpus juridique).
-DOMAIN_LABELS: dict[Domain, str] = {
-    "juridique": "responsabilité contractuelle des parties : plafonds de responsabilité",
-    "financier": "conditions financières du contrat : prix, paiement, pénalités",
-    "conformite": (
-        "protection des données personnelles : sous-traitance, transferts hors de l'Union "
-        "européenne"
-    ),
-    "operationnel": "durée et fin du contrat : engagement, préavis de résiliation",
+# un corpus juridique). Une table par profil.
+DOMAIN_LABELS: Mapping[Profile, Mapping[Domain, str]] = {
+    "fournisseur": {
+        "juridique": (
+            "responsabilité contractuelle des parties : plafonds de responsabilité"
+        ),
+        "financier": "conditions financières du contrat : prix, paiement, pénalités",
+        "conformite": (
+            "protection des données personnelles : sous-traitance, transferts hors de "
+            "l'Union européenne"
+        ),
+        "operationnel": "durée et fin du contrat : engagement, préavis de résiliation",
+    },
 }
 
 # type de clause -> (sujet, unité de `value`, sens d'une valeur nulle) ; voir la spec,
-# « Règles par domaine »
-_SUBJECTS = {
-    "responsabilite_acheteur": (
-        "plafond de responsabilité de l'acheteur",
-        "% du montant annuel",
-        "illimitée",
-    ),
-    "responsabilite_fournisseur": (
-        "plafond de responsabilité du fournisseur",
-        "% du montant annuel",
-        "illimitée",
-    ),
-    "revision_prix": ("révision du prix", "%", "non plafonnée"),
-    "penalites_execution": (
-        "pénalités d'exécution à la charge du fournisseur",
-        "% du montant du contrat",
-        "non plafonnées",
-    ),
-    "delai_paiement": ("délai de paiement par l'acheteur", "jours", "non chiffré"),
-    "duree_engagement": ("durée d'engagement", "mois", "non chiffrée"),
-    "preavis_resiliation": ("préavis de résiliation", "mois", "non chiffré"),
-    "donnees_personnelles": ("traitement de données à caractère personnel", None, None),
-    "accord_traitement_donnees": (
-        "accord de sous-traitance des données personnelles",
-        None,
-        None,
-    ),
-    "transfert_hors_ue": (
-        "transfert de données personnelles hors de l'Union européenne",
-        None,
-        None,
-    ),
+# « Règles par domaine ». Une table par profil.
+_SUBJECTS: Mapping[Profile, Mapping[str, tuple[str, str | None, str | None]]] = {
+    "fournisseur": {
+        "responsabilite_acheteur": (
+            "plafond de responsabilité de l'acheteur",
+            "% du montant annuel",
+            "illimitée",
+        ),
+        "responsabilite_fournisseur": (
+            "plafond de responsabilité du fournisseur",
+            "% du montant annuel",
+            "illimitée",
+        ),
+        "revision_prix": ("révision du prix", "%", "non plafonnée"),
+        "penalites_execution": (
+            "pénalités d'exécution à la charge du fournisseur",
+            "% du montant du contrat",
+            "non plafonnées",
+        ),
+        "delai_paiement": ("délai de paiement par l'acheteur", "jours", "non chiffré"),
+        "duree_engagement": ("durée d'engagement", "mois", "non chiffrée"),
+        "preavis_resiliation": ("préavis de résiliation", "mois", "non chiffré"),
+        "donnees_personnelles": (
+            "traitement de données à caractère personnel",
+            None,
+            None,
+        ),
+        "accord_traitement_donnees": (
+            "accord de sous-traitance des données personnelles",
+            None,
+            None,
+        ),
+        "transfert_hors_ue": (
+            "transfert de données personnelles hors de l'Union européenne",
+            None,
+            None,
+        ),
+    },
 }
 
 
-# libellés des catégories dans les requêtes ; par défaut, le nom sans soulignés
-_CATEGORY_LABELS = {c: c.replace("_", " ") for c in CLAUSE_CATEGORIES} | {
-    "date_facture": "date de facture",
-    "facture_periodique": "après une facture périodique",
+# libellés des catégories dans les requêtes, par profil ; par défaut, le nom sans soulignés
+_CATEGORY_LABELS: Mapping[Profile, Mapping[str, str]] = {
+    "fournisseur": {c: c.replace("_", " ") for c in CLAUSE_CATEGORIES}
+    | {
+        "date_facture": "date de facture",
+        "facture_periodique": "après une facture périodique",
+    },
 }
 
 
@@ -111,6 +126,7 @@ class ClauseResult(BaseModel):
 
 
 class CragState(TypedDict, total=False):
+    profile: Profile  # tables des libellés et des sujets de la requête et des messages
     domain: Domain
     clause: Clause  # la clause recherchée : une requête par type de clause
     analysis_date: date
@@ -132,37 +148,39 @@ class RewriteOutput(BaseModel):
     query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-def _describe(clause: Clause) -> str:
-    subject, unit, none_label = _SUBJECTS[clause.kind]
+def _describe(clause: Clause, profile: Profile) -> str:
+    subject, unit, none_label = _SUBJECTS[profile][clause.kind]
+    categories = _CATEGORY_LABELS[profile]
     if not clause.present:
         detail = "clause absente"
     elif clause.value is None:
         # catégorie seule (transfert), sinon sens d'une valeur nulle
         category = (
-            _CATEGORY_LABELS.get(clause.category)
-            if clause.category is not None
-            else None
+            categories.get(clause.category) if clause.category is not None else None
         )
         detail = category or none_label or "clause présente"
     else:
         detail = f"{clause.value:g} {unit}"
         if clause.category is not None:  # point de départ d'un délai de paiement
-            detail += f" {_CATEGORY_LABELS[clause.category]}"
+            detail += f" {categories[clause.category]}"
     return f"{subject} : {detail}"
 
 
-def clause_query(domain: Domain, clause: Clause) -> str:
+def clause_query(domain: Domain, clause: Clause, profile: Profile) -> str:
     """Requête d'une clause : son domaine, son type, sa valeur et sa catégorie, jamais sa
-    citation."""
-    return f"{DOMAIN_LABELS[domain]} ; {_describe(clause)}"
+    citation, nommés par les tables du profil."""
+    return f"{DOMAIN_LABELS[profile][domain]} ; {_describe(clause, profile)}"
 
 
-def start(domain: Domain, clause: Clause, analysis_date: date) -> CragState:
+def start(
+    domain: Domain, clause: Clause, analysis_date: date, profile: Profile
+) -> CragState:
     return {
+        "profile": profile,
         "domain": domain,
         "clause": clause,
         "analysis_date": analysis_date,
-        "query": clause_query(domain, clause),
+        "query": clause_query(domain, clause, profile),
         "queries": [],
         "attempts": 0,
         "usage": [],
@@ -194,8 +212,8 @@ def _grade_message(state: CragState) -> str:
         f"<<<EXTRAIT {n}>>>\n{p.reference}\n{p.text}\n<<<FIN EXTRAIT {n}>>>"
         for n, p in enumerate(state["docs"], start=1)
     ]
-    subject = _SUBJECTS[state["clause"].kind][0]
-    label = DOMAIN_LABELS[state["domain"]]
+    subject = _SUBJECTS[state["profile"]][state["clause"].kind][0]
+    label = DOMAIN_LABELS[state["profile"]][state["domain"]]
     header = f"Domaine : {label}\nClause : {subject}\nRecherche : {state['query']}"
     return header + "\n\n" + "\n\n".join(blocks)
 
@@ -233,7 +251,9 @@ def grade(state: CragState, llm: LLMProvider, max_passes: int) -> dict[str, Any]
 def rewrite(state: CragState, llm: LLMProvider) -> dict[str, Any]:
     """Nouvelle requête (modèle léger), à partir des seules requêtes déjà essayées."""
     tried = "\n".join(f"- {q}" for q in state["queries"])
-    subject, label = _SUBJECTS[state["clause"].kind][0], DOMAIN_LABELS[state["domain"]]
+    profile = state["profile"]
+    subject = _SUBJECTS[profile][state["clause"].kind][0]
+    label = DOMAIN_LABELS[profile][state["domain"]]
     output, used = llm.structured(
         tier="light",
         system=_REWRITE_SYSTEM,
@@ -309,12 +329,17 @@ def per_clause(
     clauses: list[Clause],
     analysis_date: date,
     run_clause: Callable[[CragState], ClauseResult],
+    profile: Profile,
 ) -> RetrievalResult:
     """Une recherche par clause reçue, dans l'ordre reçu ; aucune clause, aucune recherche.
-    Une clause hors du domaine ou répétée est une erreur explicite."""
+    Une clause hors du domaine pour le profil, ou répétée, est une erreur explicite ; un
+    profil inconnu aussi."""
+    allowed = profiles.spec(profile).domain_kinds.get(domain, ())
     kinds = [c.kind for c in clauses]
-    if len(set(kinds)) != len(kinds) or not set(kinds) <= set(DOMAIN_KINDS[domain]):
+    if len(set(kinds)) != len(kinds) or not set(kinds) <= set(allowed):
         raise ValueError(
             f"CRAG {domain} : clauses hors du domaine ou répétées : {kinds}"
         )
-    return combine([run_clause(start(domain, c, analysis_date)) for c in clauses])
+    return combine(
+        [run_clause(start(domain, c, analysis_date, profile)) for c in clauses]
+    )

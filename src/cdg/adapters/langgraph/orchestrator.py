@@ -41,10 +41,11 @@ from cdg.application.nodes.validate_input import validate_input
 from cdg.application.nodes.verify_extraction import verify_extraction
 from cdg.application.observation import NoTelemetry
 from cdg.application.state import AnalystInput, ContractState
-from cdg.domain import audit, expiry, masking, policy, resumption
+from cdg.domain import audit, expiry, masking, policy, profiles, resumption
 from cdg.domain.authorization import Actor
 from cdg.domain.config import DecisionConfig, RetrySettings
 from cdg.domain.models import DOMAINS, Clause, Domain, NodeFailure
+from cdg.domain.profiles import Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.engine import ThreadError
 from cdg.ports.llm import LLMProvider, LLMQuotaError, LLMTransientError
@@ -74,9 +75,11 @@ def read_crag_route(state: crag.CragState) -> str:
 
 
 def route_after_verify(state: ContractState) -> str | list[Send]:
-    """Route `analysts` : un `Send` par domaine ;
-    sinon la route telle quelle."""
+    """Route `analysts` : un `Send` par domaine, qui porte le profil du contrat (état
+    d'avant les profils : `fournisseur`, voir `profiles.of_state`) ; sinon la route telle
+    quelle."""
     if state["route"] == "analysts":  # décision lue dans l'état
+        profile = profiles.of_state(state)
         return [
             Send(
                 "analyst",
@@ -84,6 +87,7 @@ def route_after_verify(state: ContractState) -> str | list[Send]:
                     "domain": d,
                     "clauses": state["clauses"],
                     "analysis_date": state["analysis_date"],
+                    "profile": profile,
                 },
             )
             for d in DOMAINS
@@ -158,13 +162,14 @@ def crag_runner(retriever: Retriever, llm: LLMProvider, config: DecisionConfig) 
     graph = build_crag_graph(retriever, llm, config)
 
     def run(
-        domain: Domain, clauses: list[Clause], analysis_date: date
+        domain: Domain, clauses: list[Clause], analysis_date: date, profile: Profile
     ) -> RetrievalResult:
         return crag.per_clause(
             domain,
             clauses,
             analysis_date,
             lambda state: graph.invoke(state, CRAG_ROOT)["result"],
+            profile,
         )
 
     return run
@@ -488,6 +493,8 @@ def thread_status(graph: CompiledStateGraph, thread_id: str) -> dict:
     pending = [i.value for i in snapshot.interrupts]
     return {
         "thread_id": thread_id,
+        # état d'avant les profils : le seul profil qui existait alors (`of_state`)
+        "profil": profiles.of_state(values),
         "analysis_date": values.get("analysis_date"),
         "statut": (
             "suspendu" if pending else "en_cours" if snapshot.next else "termine"
@@ -530,6 +537,7 @@ def run_contract(
     config: DecisionConfig,
     actor: Actor,
     code: CodeVersion,
+    profile: Profile,
     relaunch_of: str | None = None,
 ) -> dict:
     """Un contrat = un thread ; refuse un thread existant plutôt que d'y cumuler.
@@ -540,9 +548,12 @@ def run_contract(
     écrite dans l'état, donc rejouable. Le contexte d'analyse (empreinte de `config`, qui
     produit la décision, modèles et version du code) est posé dans l'état initial, avant
     tout nœud : c'est lui qui est scellé, comme l'acteur qui lance l'analyse (quatre
-    yeux). `relaunch_of` : contrat escaladé pour changement de configuration dont
-    celui-ci est la relance, sous la configuration actuelle.
+    yeux). `profile` : profil du contrat, obligatoire, posé dans l'état initial avant tout
+    nœud ; un profil inconnu est refusé avant d'écrire quoi que ce soit. `relaunch_of` :
+    contrat escaladé pour changement de configuration dont celui-ci est la relance, sous
+    la configuration actuelle.
     """
+    profiles.parse(profile)  # jamais de profil par défaut : refusé avant tout thread
     if graph.get_state(_thread(contract_id)).values:
         raise ThreadError(
             f"le thread {contract_id} existe déjà : utiliser "
@@ -552,6 +563,7 @@ def run_contract(
     graph.invoke(
         {
             "contract_id": contract_id,
+            "profile": profile,
             "raw_text": masked.text,
             "analysis_date": analysis_date,
             **audit.analysis_context(config, code),

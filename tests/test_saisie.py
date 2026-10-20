@@ -9,6 +9,7 @@ import pytest
 
 from cdg.application import demo_set, saisie
 from cdg.application.saisie import InputError
+from cdg.domain import profiles
 
 PIEGE = "demo-11-piege-injection"
 DECLAREES = ["Phi Restauration Synthétique", "Chi Collectivités Synthétiques"]
@@ -113,3 +114,21 @@ def test_date_d_analyse_facultative_et_verifiee():
     assert saisie.analysis_date(" 2026-09-25 ") == date(2026, 9, 25)
     with pytest.raises(InputError, match="^date invalide : AAAA-MM-JJ attendu$"):
         saisie.analysis_date("25/09/2026")
+
+
+# --- profil ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("profile", profiles.PROFILES)
+def test_profil_connu_admis(profile):
+    assert saisie.profile(profile) == profile
+
+
+@pytest.mark.parametrize("raw", ["", "Fournisseur", "sous_traitance", " fournisseur"])
+def test_profil_absent_ou_inconnu_refuse(raw):
+    """Jamais de profil par défaut ni de correction silencieuse (casse, espaces) ; le
+    message cite les profils admis, pas la valeur reçue."""
+    message = f"profil absent ou inconnu ; profils : {', '.join(profiles.PROFILES)}"
+    assert message == "profil absent ou inconnu ; profils : fournisseur"
+    with pytest.raises(InputError, match=f"^{re.escape(message)}$"):
+        saisie.profile(raw)

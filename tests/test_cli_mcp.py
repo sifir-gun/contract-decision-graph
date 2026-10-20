@@ -74,7 +74,11 @@ def test_commande_mcp_demo(served, sans_llm_ni_base, capsys):
         "consulter_dossier",
         "verifier_journal",
     }
-    result = call(server, "analyser_contrat", {"contrat_du_jeu": PIEGE})
+    result = call(
+        server,
+        "analyser_contrat",
+        {"profil": "fournisseur", "contrat_du_jeu": PIEGE},
+    )
     assert not result.is_error
     assert result.structured_content["analyse_par"] == {
         "canal": "mcp",
@@ -257,7 +261,11 @@ def test_commande_mcp_bout_en_bout_en_stdio():
                 "method": "tools/call",
                 "params": {
                     "name": "analyser_contrat",
-                    "arguments": {"contrat_du_jeu": PIEGE, "identifiant": "piege"},
+                    "arguments": {
+                        "profil": "fournisseur",
+                        "contrat_du_jeu": PIEGE,
+                        "identifiant": "piege",
+                    },
                 },
             }
         )

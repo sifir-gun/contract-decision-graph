@@ -14,18 +14,30 @@ from concurrent.futures import ThreadPoolExecutor
 import psycopg
 import pytest
 import yaml
-from doubles import ACTEUR_ANALYSTE, CONTRACT_TEXT, FakeCrag
+from doubles import (
+    ACTEUR_ANALYSTE,
+    ANALYSIS_DATE,
+    CODE,
+    CONTRACT_TEXT,
+    FakeCrag,
+    MemoryAuditStore,
+    make_deps,
+)
+from langgraph.types import Send
 from pydantic import ValidationError
 from test_arret import Death, DyingOnce
 from test_service import answer, make_service
 
 from cdg.adapters.demo.locks import LocalContractLocks
 from cdg.adapters.demo.resumes import LocalResumeCounter
+from cdg.adapters.langgraph import orchestrator
 from cdg.adapters.langgraph.engine import memory_opener
 from cdg.adapters.postgres import connexions, migrations
 from cdg.adapters.postgres.resumes import PostgresResumeCounter
-from cdg.domain import resumption
+from cdg.application.state import ContractState
+from cdg.domain import audit, masking, resumption
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
+from cdg.domain.models import DOMAINS
 
 CONFIG = load_config()
 LIMIT = CONFIG.interrupted.max_resumes
@@ -94,7 +106,7 @@ class AlwaysDying:
     def __init__(self):
         self.calls = 0
 
-    def __call__(self, raw_text, feedback):
+    def __call__(self, raw_text, feedback, profile):
         self.calls += 1
         raise Death()
 
@@ -118,7 +130,10 @@ def test_contrat_qui_plante_a_chaque_reprise_part_en_escalade(caplog):
     replicas = Restarts(extractor)
     with pytest.raises(Death):
         replicas.service().analyse(
-            CONTRACT_TEXT, contract_id="c-boucle", actor=ACTEUR_ANALYSTE
+            CONTRACT_TEXT,
+            contract_id="c-boucle",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
         )
     for _ in range(LIMIT):  # chaque redémarrage reprend, et meurt de nouveau
         with pytest.raises(Death):
@@ -149,12 +164,12 @@ class CrashingAnalysts(FakeCrag):
     """CRAG qui fait mourir le processus pour deux domaines, à chaque fois, après avoir
     laissé les deux autres analystes (instantanés) rendre leur verdict."""
 
-    def __call__(self, domain, clauses, analysis_date):
+    def __call__(self, domain, clauses, analysis_date, profile):
         if domain in {"conformite", "operationnel"}:
             self.calls.append(domain)
             threading.Event().wait(0.2)
             raise Death()
-        return super().__call__(domain, clauses, analysis_date)
+        return super().__call__(domain, clauses, analysis_date, profile)
 
 
 def test_plantage_pendant_les_analystes_verdicts_rendus_gardes():
@@ -166,7 +181,10 @@ def test_plantage_pendant_les_analystes_verdicts_rendus_gardes():
 
     with pytest.raises(Death):
         service().analyse(
-            CONTRACT_TEXT, contract_id="c-analystes", actor=ACTEUR_ANALYSTE
+            CONTRACT_TEXT,
+            contract_id="c-analystes",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
         )
     for _ in range(LIMIT):
         with pytest.raises(Death):
@@ -181,11 +199,100 @@ def test_plantage_pendant_les_analystes_verdicts_rendus_gardes():
     assert failure["node"] == "analyst"
 
 
+# --- analyse interrompue avant les profils, reprise après ------------------------------------
+
+
+def route_after_verify_before_profiles(state: ContractState) -> str | list[Send]:
+    """`route_after_verify` d'avant les profils : des `Send` sans la clé `profile`."""
+    if state["route"] == "analysts":
+        return [
+            Send(
+                "analyst",
+                {
+                    "domain": d,
+                    "clauses": state["clauses"],
+                    "analysis_date": state["analysis_date"],
+                },
+            )
+            for d in DOMAINS
+        ]
+    return state["route"]
+
+
+class CrashingThenFine(CrashingAnalysts):
+    """CRAG qui fait mourir deux analystes tant que `dying`, puis répond normalement."""
+
+    dying = True
+
+    def __call__(self, domain, clauses, analysis_date, profile):
+        if self.dying:
+            return super().__call__(domain, clauses, analysis_date, profile)
+        return FakeCrag.__call__(self, domain, clauses, analysis_date, profile)
+
+
+def test_analyse_interrompue_sans_profil_reprise_en_fournisseur_sans_escalade(
+    monkeypatch,
+):
+    """Analyse lancée avant les profils (état initial sans clé `profile`, `Send` en
+    attente sans profil), tuée pendant le fan-out des analystes : reprise après la mise à
+    jour, elle se poursuit comme `fournisseur`, sans escalade, et se scelle en v3."""
+    crag, store = CrashingThenFine(), MemoryAuditStore()
+    opener, counter = memory_opener(CONFIG), LocalResumeCounter()
+    service = make_service(opener=opener, resumes=counter, crag=crag, store=store)
+    thread = {"configurable": {"thread_id": "c-ancien"}}
+    before_profiles = {  # ce que posait `run_contract` avant les profils
+        "contract_id": "c-ancien",
+        "raw_text": masking.mask(CONTRACT_TEXT, ()).text,
+        "analysis_date": ANALYSIS_DATE,
+        **audit.analysis_context(CONFIG, CODE),
+        "analyse_par": ACTEUR_ANALYSTE,
+    }
+    with monkeypatch.context() as old_code:
+        old_code.setattr(
+            orchestrator, "route_after_verify", route_after_verify_before_profiles
+        )
+        with (
+            opener(make_deps(crag=crag, audit_store=store)) as graph,
+            pytest.raises(Death),
+        ):
+            graph.invoke(before_profiles, thread, durability=orchestrator.DURABILITY)
+    values = service.engine.values("c-ancien")
+    assert "profile" not in values  # l'état d'avant les profils, tel quel
+    # les analystes qui avaient rendu leur verdict le gardent ; deux restent à reprendre
+    assert sorted(v.domain for v in values["verdicts"]) == ["financier", "juridique"]
+    assert sorted(crag.profiles) == ["fournisseur", "fournisseur"]
+
+    crag.dying = False  # le code d'après la mise à jour reprend l'analyse
+    [resumed] = service.resume_interrupted()
+
+    assert (resumed["statut"], resumed["final_decision"]) == ("termine", "GO")
+    assert resumed["profil"] == "fournisseur"
+    # aucune escalade de reprise : ni échec, ni cause, ni configuration changée
+    assert (
+        resumed["failure_report"] is None and resumed["configuration_changee"] is None
+    )
+    assert "escalade_reprise" not in service.engine.values("c-ancien")
+    assert counter.record("c-ancien") == 2  # une seule reprise comptée avant celle-ci
+    # les deux analystes interrompus ont été refaits sous `fournisseur`
+    assert sorted(crag.profiles) == ["fournisseur"] * 4
+    # scellé en v3, profil `fournisseur`, rejouable et vérifiable
+    [entry] = store.entries()
+    assert entry.record["version"] == 3
+    assert entry.record["decision"]["profile"] == "fournisseur"
+    assert service.verify().ok
+    assert service.replay("c-ancien")["identique"]
+
+
 def test_une_reprise_qui_aboutit_est_comptee_une_fois():
     counter = LocalResumeCounter()
     service = make_service(DyingOnce(), resumes=counter)
     with pytest.raises(Death):
-        service.analyse(CONTRACT_TEXT, contract_id="c-une", actor=ACTEUR_ANALYSTE)
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id="c-une",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
     [resumed] = service.resume_interrupted()
     assert resumed["statut"] == "termine"
     assert counter.record("c-une") == 2  # une seule reprise comptée avant celle-ci
@@ -207,10 +314,25 @@ def test_rien_n_est_compte_sans_reprise():
     spy, locks = Spy(), LocalContractLocks()
     service = make_service(DyingOnce(), resumes=spy, locks=locks)
     with pytest.raises(Death):
-        service.analyse(CONTRACT_TEXT, contract_id="c-ailleurs", actor=ACTEUR_ANALYSTE)
+        service.analyse(
+            CONTRACT_TEXT,
+            contract_id="c-ailleurs",
+            actor=ACTEUR_ANALYSTE,
+            profile="fournisseur",
+        )
     other = make_service(resumes=spy)
-    other.analyse(CONTRACT_TEXT, contract_id="c-fini", actor=ACTEUR_ANALYSTE)
-    other.analyse(PENDING_TEXT, contract_id="c-attente", actor=ACTEUR_ANALYSTE)
+    other.analyse(
+        CONTRACT_TEXT,
+        contract_id="c-fini",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
+    other.analyse(
+        PENDING_TEXT,
+        contract_id="c-attente",
+        actor=ACTEUR_ANALYSTE,
+        profile="fournisseur",
+    )
     assert other.resume_interrupted() == [] and spy.seen == []
     with locks.hold(
         "c-ailleurs"
