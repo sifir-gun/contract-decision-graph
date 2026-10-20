@@ -11,8 +11,8 @@ from doubles import ABSENT, clauses
 
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.models import DOMAINS, Clause
-from cdg.domain.profiles import PROFILES
-from cdg.domain.rules import RULES, Assessment, RuleFinding
+from cdg.domain.profiles import PROFILES, SOUS_TRAITANCE
+from cdg.domain.rules import RULES, Assessment, RuleFinding, _common
 
 CONFIG = load_config()
 
@@ -461,3 +461,222 @@ def test_clause_a_justifier_une_seule_fois():
 def test_constat_incoherent_refuse(fields):
     with pytest.raises(ValueError, match="pénalité"):
         RuleFinding(kind="duree_engagement", text="t", **fields)
+
+
+# --- règles communes, partagées entre profils (tâche 5 de la PR 2 des profils) ----------------
+# Les aides de `_common` prennent les libellés de leurs textes en paramètre : ces tests leur
+# donnent ceux du profil de la sous-traitance, pas ceux du fournisseur, que le test des
+# constats figés (tests/test_demo.py) garde déjà.
+
+PARTIES = SOUS_TRAITANCE.parties  # « du donneur d'ordre », « du sous-traitant »
+
+
+def stipulated(kind, value, present=True, category=None) -> Clause:
+    quote = "Article synthétique." if present else ""
+    return Clause(
+        kind=kind, present=present, quote=quote, value=value, category=category
+    )
+
+
+def finding(kind, effect, text, penalty=None) -> RuleFinding:
+    return RuleFinding(kind=kind, effect=effect, text=text, penalty=penalty)
+
+
+def test_commun_responsabilite_illimitee_bloque_avec_la_partie_nommee():
+    c = stipulated("responsabilite_donneur_ordre", None)
+    assert _common.uncapped_liability(c, PARTIES.client_of) == [
+        finding(
+            "responsabilite_donneur_ordre",
+            "blocage",
+            "blocage : responsabilité du donneur d'ordre illimitée",
+        )
+    ]
+
+
+@pytest.mark.parametrize("value", [100.0, 0.0])
+def test_commun_responsabilite_plafonnee_sans_constat(value):
+    c = stipulated("responsabilite_donneur_ordre", value)
+    assert _common.uncapped_liability(c, PARTIES.client_of) == []
+
+
+def test_commun_responsabilite_absente_sans_constat():
+    c = stipulated("responsabilite_donneur_ordre", None, present=False)
+    assert _common.uncapped_liability(c, PARTIES.client_of) == []
+
+
+def cap(c, minimum=100.0, penalty=0.3):
+    return _common.cap_below_minimum(
+        c, PARTIES.contractor_of, "du montant du contrat", minimum, penalty
+    )
+
+
+def test_commun_plafond_sous_le_minimum_penalise_avec_les_libelles_donnes():
+    c = stipulated("responsabilite_sous_traitant", 50.0)
+    assert cap(c) == [
+        finding(
+            "responsabilite_sous_traitant",
+            "penalite",
+            "plafond de responsabilité du sous-traitant à 50 % du montant du contrat, "
+            "sous le minimum de 100 %",
+            penalty=0.3,
+        )
+    ]
+
+
+def test_commun_plafond_ecrit_avec_la_forme_g_et_la_penalite_donnee():
+    c = stipulated("responsabilite_sous_traitant", 99.9)
+    [found] = cap(c, minimum=250.5, penalty=0.45)
+    assert found.penalty == 0.45
+    assert found.text.endswith(
+        "à 99.9 % du montant du contrat, sous le minimum de 250.5 %"
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        100.0,  # au minimum
+        99.9999999,  # arrondi avant comparaison
+        150.0,
+        None,  # illimitée : favorable (le blocage est celui de l'autre partie)
+    ],
+)
+def test_commun_plafond_au_minimum_ou_illimite_sans_constat(value):
+    assert cap(stipulated("responsabilite_sous_traitant", value)) == []
+
+
+def test_commun_plafond_absent_sans_constat():
+    assert cap(stipulated("responsabilite_sous_traitant", None, present=False)) == []
+
+
+def test_commun_revision_non_plafonnee_bloque():
+    c = stipulated("revision_prix", None)
+    assert _common.uncapped_revision(c) == [
+        finding("revision_prix", "blocage", "blocage : révision de prix non plafonnée")
+    ]
+
+
+@pytest.mark.parametrize(
+    "c",
+    [
+        stipulated("revision_prix", 3.0),
+        stipulated("revision_prix", None, present=False),
+    ],
+)
+def test_commun_revision_plafonnee_ou_absente_sans_constat(c):
+    assert _common.uncapped_revision(c) == []
+
+
+LABEL = "pénalités de retard d'exécution"
+
+
+def capped(c, minimum=5.0, penalty=0.4):
+    return _common.capped_penalties(c, LABEL, minimum, penalty)
+
+
+def test_commun_penalites_absentes_penalisees_avec_le_libelle_donne():
+    c = stipulated("penalites_retard_execution", None, present=False)
+    assert capped(c) == [
+        finding(
+            "penalites_retard_execution",
+            "penalite",
+            "pénalités de retard d'exécution absentes",
+            penalty=0.4,
+        )
+    ]
+
+
+def test_commun_penalites_sous_le_minimum_penalisees():
+    c = stipulated("penalites_retard_execution", 2.0)
+    assert capped(c, penalty=0.35) == [
+        finding(
+            "penalites_retard_execution",
+            "penalite",
+            "pénalités de retard d'exécution plafonnées à 2 % du montant du contrat, "
+            "sous le minimum de 5 %",
+            penalty=0.35,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        5.0,  # au minimum
+        4.9999999,  # arrondi avant comparaison
+        10.0,
+        None,  # non plafonnées : favorable
+    ],
+)
+def test_commun_penalites_au_minimum_ou_non_plafonnees_sans_constat(value):
+    assert capped(stipulated("penalites_retard_execution", value)) == []
+
+
+# seuils distincts de ceux du fournisseur, et de ceux du plan : l'aide lit ce qu'on lui donne
+LIMITS = {"date_facture": 70.0, "fin_de_mois": 50.0, "facture_periodique": 40.0}
+
+
+def paid_within(value, basis=None, present=True) -> list[RuleFinding]:
+    c = stipulated("delai_paiement", value, present=present, category=basis)
+    return _common.payment_delay(c, LIMITS, 0.25)
+
+
+def test_commun_delai_absent_informe_avec_le_delai_supplétif():
+    [found] = paid_within(None, present=False)
+    assert (found.kind, found.effect, found.penalty) == (
+        "delai_paiement",
+        "information",
+        None,
+    )
+    assert "trente jours après la date de réception des marchandises" in found.text
+    assert "C. com., art. L441-10, I" in found.text
+
+
+def test_commun_delai_non_chiffre_penalise_par_prudence():
+    assert paid_within(None) == [
+        finding(
+            "delai_paiement",
+            "penalite",
+            "délai de paiement non chiffré : pénalité par prudence, délai non conforme, "
+            "à renégocier",
+            penalty=0.25,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "basis", "label", "limit"),
+    [
+        (71.0, "date_facture", "date de facture", 70),
+        (51.0, "fin_de_mois", "fin de mois", 50),
+        (41.0, "facture_periodique", "après une facture périodique", 40),
+        (41.0, None, "point de départ non précisé", 40),  # le seuil le plus strict
+        (41.0, "autre", "point de départ non précisé", 40),
+    ],
+)
+def test_commun_delai_au_dela_du_seuil_de_son_point_de_depart(
+    value, basis, label, limit
+):
+    assert paid_within(value, basis) == [
+        finding(
+            "delai_paiement",
+            "penalite",
+            f"délai non conforme, à renégocier : {value:g} jours {label}, "
+            f"au-delà de {limit} jours",
+            penalty=0.25,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "basis"),
+    [
+        (70.0, "date_facture"),
+        (50.0, "fin_de_mois"),
+        (40.0, "facture_periodique"),
+        (40.0, None),
+        (40.0000001, "facture_periodique"),  # arrondi avant comparaison
+    ],
+)
+def test_commun_delai_dans_le_seuil_sans_constat(value, basis):
+    assert paid_within(value, basis) == []
