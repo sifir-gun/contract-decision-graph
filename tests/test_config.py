@@ -541,8 +541,8 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
         (
             "obligation_certification",
             (
-                "Chaque lot est livré avec un procès-verbal d'essai et un certificat de "
-                "conformité à la norme applicable."
+                "Le sous-traitant joint le procès-verbal d'essai et le certificat de "
+                "conformité à la norme applicable à chaque lot."
             ),
             "norme_et_preuves",
         ),
@@ -562,7 +562,7 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
         ),
         (
             "obligation_certification",
-            "Chaque lot est livré avec un certificat de conformité.",
+            "Le sous-traitant fournit le certificat de conformité de chaque lot.",
             "norme_et_preuves",
         ),
         (
@@ -581,10 +581,12 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
             "conformite_generale",
         ),
         (
+            # st-01 : une forme verbale active, où une négation s'insérerait entre le verbe
+            # et son objet
             "obligation_certification",
             (
-                "Les pièces sont conformes à la norme NF X 00-000, procès-verbaux d'essais "
-                "remis à la livraison."
+                "Les pièces sont conformes à la norme NF X 00-000 ; le sous-traitant remet "
+                "les procès-verbaux d'essais à la livraison."
             ),
             "norme_et_preuves",
         ),
@@ -596,20 +598,20 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
             ),
             "norme_sans_preuves",
         ),
-        # preuves remises : formes positives ancrées de `norme_et_preuves`
+        # preuves remises : formes verbales actives suivies d'un article défini
         (
             "obligation_certification",
             (
                 "Les pièces sont conformes à la norme NF X 00-000 ; le sous-traitant "
-                "remet les procès-verbaux d'essais avant la livraison."
+                "remettra le procès-verbal d'essai avant la livraison."
             ),
             "norme_et_preuves",
         ),
         (
             "obligation_certification",
             (
-                "Les pièces sont conformes à la norme NF X 00-000 et accompagnées des "
-                "certificats de conformité."
+                "Les pièces sont conformes à la norme NF X 00-000 ; le sous-traitant "
+                "joint les certificats de conformité à chaque lot."
             ),
             "norme_et_preuves",
         ),
@@ -620,6 +622,51 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
                 "fournit les rapports d'essais."
             ),
             "norme_et_preuves",
+        ),
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 ; le sous-traitant "
+                "fournira le rapport d'essai de chaque lot."
+            ),
+            "norme_et_preuves",
+        ),
+        # participe, « accompagné(e)(s) des … », « livré avec un … » : une négation les
+        # contient aussi (« aucun … remis », « ne sont pas accompagnées des … »), ils
+        # n'évoquent donc plus l'acceptation ; la norme nommée les fait lire sans preuves,
+        # dans le sens prudent
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000, procès-verbaux d'essais "
+                "remis à la livraison."
+            ),
+            "norme_sans_preuves",
+        ),
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 et accompagnées des "
+                "certificats de conformité."
+            ),
+            "norme_sans_preuves",
+        ),
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 ; chaque lot est livré "
+                "avec un rapport d'essai."
+            ),
+            "norme_sans_preuves",
+        ),
+        (
+            # procès-verbal de réception : pas une preuve d'essai
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 ; le sous-traitant "
+                "remet les procès-verbaux de réception signés."
+            ),
+            "norme_sans_preuves",
         ),
         (
             "protection_design",
@@ -826,11 +873,13 @@ def test_absence_sous_traitance_non_evoquee_par_un_texte_voisin(kind, text):
 
 
 # --- preuves de conformité : la catégorie acceptée n'est évoquée que par une preuve remise
-# Les termes de `norme_et_preuves` (acceptée) sont des formes positives ancrées : une
-# négation des preuves n'évoque jamais l'acceptation, et un retour de vérification ne
-# pousse donc jamais le modèle vers elle. Les termes des catégories pénalisées restent larges.
-# Limite connue : une négation devant un participe postposé (« sans procès-verbaux d'essais
-# remis ») contient le terme positif « procès-verbaux d'essais remis », gardé pour st-01.
+# Les termes de `norme_et_preuves` (acceptée) sont des formes verbales actives suivies d'un
+# article défini (« remet les procès-verbaux d'essais ») : une négation s'insère entre le
+# verbe et son objet (« ne remet pas les »), si bien qu'une négation des preuves n'évoque
+# jamais l'acceptation, et qu'un retour de vérification ne pousse jamais le modèle vers
+# elle. Ni participe (« aucun … remis »), ni « accompagné(e)(s) des … » (« ne sont pas
+# accompagnées des … »), ni « livré avec un … » (« n'est pas livré avec un … »), qu'une
+# négation contient aussi. Les termes des catégories pénalisées restent larges.
 
 PROOFS_SINGULAR = (
     "procès-verbal d'essai",
@@ -860,7 +909,8 @@ NEGATIONS = [
         for proof in PROOFS_PLURAL
         for form in ("sans {}", "{} non exigés")
     ),
-    # « … à remettre » après une négation : jamais un terme de la catégorie acceptée
+    # « … à remettre » et « … remis » après une négation : jamais un terme de la catégorie
+    # acceptée
     *(
         form.format(proof)
         for proof in PROOFS_SINGULAR + PROOFS_PLURAL
@@ -868,6 +918,48 @@ NEGATIONS = [
             "aucun {} à remettre",
             "sans {} à remettre",
             "pas de {} à remettre",
+            "aucun {} remis",
+            "sans {} remis",
+            "pas de {} remis",
+        )
+    ),
+    # négation de la phrase entière
+    *(
+        form.format(proof)
+        for proof in PROOFS_PLURAL
+        for form in ("mais ne sont pas accompagnées des {}",)
+    ),
+    *(
+        form.format(proof)
+        for proof in PROOFS_SINGULAR
+        for form in (
+            "le lot n'est pas livré avec un {}",
+            "le lot n'est pas accompagné d'un {}",
+        )
+    ),
+    # négation du verbe actif : elle s'insère entre le verbe et son objet
+    *(
+        form.format(proof)
+        for proof in PROOFS_PLURAL
+        for form in (
+            "le sous-traitant ne remet pas les {}",
+            "le sous-traitant ne remettra pas les {}",
+            "sans remettre les {}",
+            "le sous-traitant n'est pas tenu de remettre les {}",
+            "le sous-traitant ne fournit pas les {}",
+            "le sous-traitant ne fournira pas les {}",
+            "le sous-traitant ne joint pas les {}",
+        )
+    ),
+    *(
+        form.format(proof)
+        for proof in PROOFS_SINGULAR
+        for form in (
+            "le sous-traitant ne remet pas le {}",
+            "le sous-traitant ne remet aucun {}",
+            "aucun {} n'est joint",
+            "le sous-traitant ne fournit pas le {}",
+            "le sous-traitant ne joint pas le {}",
         )
     ),
 ]
