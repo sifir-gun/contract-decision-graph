@@ -51,7 +51,10 @@ CERTIFICATION_LABELS = {
     "conformite_generale": "conformité générale aux normes, sans norme nommée",
 }
 SCHEDULE_LABELS = {
-    "date_contractuelle": "délai d'exécution fixé par une date qui engage le sous-traitant",
+    "date_contractuelle": (
+        "délai d'exécution fixé par une date, un planning ou un délai ferme qui engage "
+        "le sous-traitant"
+    ),
     "delai_indicatif": "délai d'exécution indicatif, sans date qui engage le sous-traitant",
 }
 

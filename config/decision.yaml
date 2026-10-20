@@ -338,7 +338,11 @@ sous_traitance:
   # « certification » ; « conformes aux normes » seul dit « sans norme nommée », ce qui
   # est la conformité générale, non « norme sans preuves »). La conformité générale vient
   # avant les preuves : des procès-verbaux remis ne nomment pas de norme, et une citation
-  # qui renvoie aux normes en vigueur n'est jamais lue `norme_et_preuves` (acceptée).
+  # qui renvoie aux normes en vigueur n'est jamais lue `norme_et_preuves` (acceptée). Les
+  # termes de la catégorie acceptée sont des formes positives ancrées (preuves remises) :
+  # un terme qui manque ne peut que pousser le modèle vers une pénalité, sens prudent, alors
+  # qu'un terme large y pousserait une négation (« aucun procès-verbal d'essai n'est
+  # exigé »). Ceux des catégories pénalisées restent larges.
   category_terms:
     protection_design:
       reutilisation_autorisee:
@@ -352,7 +356,10 @@ sous_traitance:
         - seul projet
         - que pour le présent projet
         - que pour le projet
+        - utilisé que pour
+        - utilisée que pour
         - utilisés que pour
+        - utilisées que pour
       confidentialite_seule:
         - confidentiel
         - confidentialité
@@ -361,14 +368,90 @@ sous_traitance:
         - normes en vigueur
         - normes applicables
       norme_et_preuves:
-        - procès-verbal
-        - procès-verbaux
-        - certificat de conformité
-        - certificats de conformité
-        - certificat d'essai
-        - certificats d'essai
-        - rapport d'essai
-        - rapports d'essais
+        # formes positives ancrées : jamais un nom de preuve seul, qu'une négation
+        # (« aucun procès-verbal », « sans certificat de conformité ») contient aussi
+        # procès-verbaux d'essais
+        - procès-verbaux d'essais remis
+        - procès-verbaux d'essai remis
+        - procès-verbal d'essai remis
+        - procès-verbaux d'essais à remettre
+        - procès-verbal d'essai à remettre
+        - remet les procès-verbaux
+        - remettra les procès-verbaux
+        - remet un procès-verbal
+        - remettra un procès-verbal
+        - fournit les procès-verbaux
+        - fournira les procès-verbaux
+        - joint les procès-verbaux
+        - accompagné des procès-verbaux
+        - accompagnée des procès-verbaux
+        - accompagnés des procès-verbaux
+        - accompagnées des procès-verbaux
+        - accompagné d'un procès-verbal
+        - accompagnée d'un procès-verbal
+        - livré avec un procès-verbal
+        - livrés avec un procès-verbal
+        - livré avec son procès-verbal
+        - livrés avec leurs procès-verbaux
+        # certificats de conformité ou d'essai
+        - certificats de conformité remis
+        - certificat de conformité remis
+        - certificats de conformité à remettre
+        - certificat de conformité à remettre
+        - remet les certificats de conformité
+        - remettra les certificats de conformité
+        - remet un certificat de conformité
+        - remettra un certificat de conformité
+        - fournit les certificats de conformité
+        - fournira les certificats de conformité
+        - joint les certificats de conformité
+        - accompagné des certificats de conformité
+        - accompagnée des certificats de conformité
+        - accompagnés des certificats de conformité
+        - accompagnées des certificats de conformité
+        - accompagné d'un certificat de conformité
+        - accompagnée d'un certificat de conformité
+        - livré avec un certificat de conformité
+        - livrés avec un certificat de conformité
+        - certificats d'essai remis
+        - certificat d'essai remis
+        - certificats d'essai à remettre
+        - certificat d'essai à remettre
+        - remet les certificats d'essai
+        - remettra les certificats d'essai
+        - remet un certificat d'essai
+        - remettra un certificat d'essai
+        - fournit les certificats d'essai
+        - fournira les certificats d'essai
+        - joint les certificats d'essai
+        - accompagné des certificats d'essai
+        - accompagnée des certificats d'essai
+        - accompagnés des certificats d'essai
+        - accompagnées des certificats d'essai
+        - accompagné d'un certificat d'essai
+        - accompagnée d'un certificat d'essai
+        - livré avec un certificat d'essai
+        - livrés avec un certificat d'essai
+        # rapports d'essais
+        - rapports d'essais remis
+        - rapport d'essai remis
+        - rapports d'essais à remettre
+        - rapport d'essai à remettre
+        - remet les rapports d'essais
+        - remettra les rapports d'essais
+        - remet un rapport d'essai
+        - remettra un rapport d'essai
+        - fournit les rapports d'essais
+        - fournira les rapports d'essais
+        - joint les rapports d'essais
+        - accompagné des rapports d'essais
+        - accompagnée des rapports d'essais
+        - accompagnés des rapports d'essais
+        - accompagnées des rapports d'essais
+        - accompagné d'un rapport d'essai
+        - accompagnée d'un rapport d'essai
+        - livré avec un rapport d'essai
+        - livrés avec un rapport d'essai
       norme_sans_preuves:
         - conforme à la norme
         - conformes à la norme

@@ -589,10 +589,67 @@ def _clause(kind: str, quote: str, category: str | None = None) -> Clause:
             "norme_et_preuves",
         ),
         (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 ; aucun procès-verbal "
+                "d'essai n'est exigé."
+            ),
+            "norme_sans_preuves",
+        ),
+        # preuves remises : formes positives ancrées de `norme_et_preuves`
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 ; le sous-traitant "
+                "remet les procès-verbaux d'essais avant la livraison."
+            ),
+            "norme_et_preuves",
+        ),
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 et accompagnées des "
+                "certificats de conformité."
+            ),
+            "norme_et_preuves",
+        ),
+        (
+            "obligation_certification",
+            (
+                "Les pièces sont conformes à la norme NF X 00-000 ; le sous-traitant "
+                "fournit les rapports d'essais."
+            ),
+            "norme_et_preuves",
+        ),
+        (
             "protection_design",
             (
                 "Les dessins remis sont confidentiels et ne peuvent être utilisés que pour "
                 "le présent projet."
+            ),
+            "usage_limite_au_projet",
+        ),
+        (
+            "protection_design",
+            (
+                "Les pièces dessinées remises sont confidentielles et ne peuvent être "
+                "utilisées que pour la commande."
+            ),
+            "usage_limite_au_projet",
+        ),
+        (
+            "protection_design",
+            (
+                "Le dossier remis est confidentiel et ne peut être utilisé que pour la "
+                "commande."
+            ),
+            "usage_limite_au_projet",
+        ),
+        (
+            "protection_design",
+            (
+                "La documentation remise est confidentielle et ne peut être utilisée que "
+                "pour la commande."
             ),
             "usage_limite_au_projet",
         ),
@@ -753,6 +810,60 @@ def test_absence_sous_traitance_non_evoquee_par_un_texte_voisin(kind, text):
     assert section is not None
     absent = Clause(kind=kind, present=False, quote="", value=None)
     assert verification.mentioned_absences(text, [absent], section.absence_terms) == []
+
+
+# --- preuves de conformité : la catégorie acceptée n'est évoquée que par une preuve remise
+# Les termes de `norme_et_preuves` (acceptée) sont des formes positives ancrées : une
+# négation des preuves n'évoque jamais l'acceptation, et un retour de vérification ne
+# pousse donc jamais le modèle vers elle. Les termes des catégories pénalisées restent larges.
+# Limite connue : une négation devant un participe postposé (« sans procès-verbaux d'essais
+# remis ») contient le terme positif « procès-verbaux d'essais remis », gardé pour st-01.
+
+PROOFS_SINGULAR = (
+    "procès-verbal d'essai",
+    "certificat de conformité",
+    "certificat d'essai",
+    "rapport d'essai",
+)
+PROOFS_PLURAL = (
+    "procès-verbaux d'essais",
+    "certificats de conformité",
+    "certificats d'essai",
+    "rapports d'essais",
+)
+NEGATIONS = [
+    *(
+        form.format(proof)
+        for proof in PROOFS_SINGULAR
+        for form in (
+            "aucun {} n'est exigé",
+            "aucun {} n'est remis",
+            "aucun {} n'est à remettre",
+            "sans {}",
+        )
+    ),
+    *(
+        form.format(proof)
+        for proof in PROOFS_PLURAL
+        for form in ("sans {}", "{} non exigés")
+    ),
+]
+
+
+@pytest.mark.parametrize("negation", NEGATIONS)
+def test_negation_des_preuves_n_evoque_jamais_norme_et_preuves(negation):
+    section = load_config().sous_traitance
+    assert section is not None
+    quote = f"Les pièces sont conformes à la norme NF X 00-000, {negation}."
+    sans_preuves = [_clause("obligation_certification", quote, "norme_sans_preuves")]
+    assert verification.category_mismatches(sans_preuves, section.category_terms) == []
+    problems = verification.category_mismatches(
+        [_clause("obligation_certification", quote, "norme_et_preuves")],
+        section.category_terms,
+    )
+    assert len(problems) == 1, problems
+    assert problems[0].startswith("catégorie contredite par la citation"), problems
+    assert "norme_sans_preuves" in problems[0], problems
 
 
 # --- réutilisation des dessins : lue dans le sens prudent (blocage dur) ------------------
