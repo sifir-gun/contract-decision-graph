@@ -38,8 +38,25 @@ from cdg.ports.retriever import CorpusSearch, Retriever
 EVALUATION = (
     Path(__file__).resolve().parents[3] / "data" / "evaluation" / "recherche.yaml"
 )
-# jeu d'évaluation de chaque profil
+# jeu d'évaluation de chaque profil ; celui de la sous-traitance vient avec la PR 3 (spec,
+# « Mesure de la recherche ») : d'ici là, `evaluation_set` refuse le profil
 EVALUATION_SETS: Mapping[Profile, Path] = {"fournisseur": EVALUATION}
+
+
+class EvaluationSetMissing(Exception):
+    """Profil sans jeu d'évaluation de la recherche : rien à mesurer, refus explicite."""
+
+
+def evaluation_set(profile: Profile) -> Path:
+    """Jeu d'évaluation du profil ; un profil connu sans jeu est refusé en le nommant,
+    jamais par une `KeyError` qui ne dirait pas la cause."""
+    profile = profiles.parse(profile)
+    path = EVALUATION_SETS.get(profile)
+    if path is None:
+        raise EvaluationSetMissing(
+            f"aucun jeu d'évaluation de la recherche pour le profil {profile}"
+        )
+    return path
 
 
 class _Strict(BaseModel):
@@ -172,7 +189,7 @@ def _check_set(
         extra = sorted(q[2] for q in jeu - demo)
         raise EvaluationSetOutdated(
             "jeu d'évaluation à mettre à jour (data/evaluation/"
-            f"{EVALUATION_SETS[profile].name}) : "
+            f"{evaluation_set(profile).name}) : "
             f"requêtes des constats absentes du jeu {missing} ; requêtes du jeu sans "
             f"constat {extra}"
         )
@@ -265,7 +282,7 @@ def run(
     démonstration, le corpus indexé est-il celui des fichiers, puis la mesure. Tout écart
     est une erreur explicite."""
     profile = profiles.parse(profile)
-    queries = load_queries(EVALUATION_SETS[profile])
+    queries = load_queries(evaluation_set(profile))  # profil sans jeu : refus d'abord
     _check_set(queries, config, profile)
     chunks = check_index(
         corpus, config.corpus.chunk_max_words, config.embedding.passage_prefix

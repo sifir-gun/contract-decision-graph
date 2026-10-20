@@ -92,9 +92,12 @@ class Clause(BaseModel):
 
 
 def category_required(clause: Clause, category_kinds: Collection[str]) -> bool:
-    """Catégorie exigée : transfert présent ; délai de paiement présent et chiffré (un délai
-    non chiffré peut ne pas dire son point de départ). `category_kinds` : les types à
-    catégorie du profil (`ProfileSpec.category_kinds`)."""
+    """Catégorie exigée : clause présente d'un type à catégorie du profil, sauf le délai de
+    paiement non chiffré (un délai non chiffré peut ne pas dire son point de départ ; même
+    sens dans les deux profils). Les types à catégorie sans valeur l'exigent donc dès
+    qu'ils sont présents : transfert hors de l'UE (fournisseur), protection des dessins,
+    obligation de certification et délai d'exécution (sous-traitance). `category_kinds` :
+    les types à catégorie du profil (`ProfileSpec.category_kinds`)."""
     if clause.kind not in category_kinds or not clause.present:
         return False
     return clause.kind != "delai_paiement" or clause.value is not None

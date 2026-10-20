@@ -6,8 +6,7 @@ d'exécution, délai de paiement) sont les aides de `_common`, appelées avec le
 profil. Les autres lisent leurs catégories dans les listes de la configuration, jamais en
 dur : le texte d'un constat dit la catégorie, l'effet vient de la liste qui la porte.
 
-Le profil n'est pas encore enregistré (`profiles.SPECS`, `rules.RULES`) : ce module nomme
-`profiles.SOUS_TRAITANCE`, et `RULES_SOUS_TRAITANCE` attend son enregistrement.
+`RULES_SOUS_TRAITANCE` est enregistré dans `rules.RULES["sous_traitance"]`.
 """
 
 from collections.abc import Mapping, Sequence

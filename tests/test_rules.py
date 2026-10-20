@@ -49,7 +49,17 @@ def config_with(section: str, key: str, value) -> DecisionConfig:
 
 def test_registre_un_jeu_de_regles_par_profil():
     assert set(RULES) == set(PROFILES)
-    assert set(RULES["fournisseur"]) == set(DOMAINS)
+    for profile in PROFILES:
+        assert set(RULES[profile]) == set(DOMAINS)
+    # le profil sous_traitance est enregistré avec les règles de son module
+    assert RULES["sous_traitance"] is RULES_SOUS_TRAITANCE
+
+
+def test_registre_en_lecture_seule():
+    with pytest.raises(TypeError):
+        RULES["autre"] = RULES["fournisseur"]
+    with pytest.raises(TypeError):
+        RULES["sous_traitance"]["juridique"] = RULES["fournisseur"]["juridique"]
 
 
 @pytest.mark.parametrize("domain", DOMAINS)
@@ -746,7 +756,7 @@ def test_commun_delai_accepte_les_trois_points_de_depart_dans_un_autre_ordre():
 
 
 # --- profil sous_traitance (tâche 6 de la PR 2 des profils) --------------------------------
-# Les règles du profil, pas encore enregistrées dans `RULES` : le profil ne l'est pas. Les
+# Les règles du profil, enregistrées dans `RULES["sous_traitance"]` (tâche 9). Les
 # valeurs attendues sont celles de la section `sous_traitance.rules` de `config/decision.yaml`
 # (valeurs de démonstration) ; `WIRED` donne à chaque réglage une valeur distincte, pour
 # prouver que chaque constat lit son propre réglage.

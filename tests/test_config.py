@@ -12,6 +12,7 @@ from cdg.domain.config import (
     DEFAULT_CONFIG_PATH,
     ConfigError,
     DecisionConfig,
+    ProfileTerms,
     load_config,
 )
 from cdg.domain.models import Clause
@@ -502,6 +503,48 @@ def test_section_sous_traitance_couvre_les_types_du_profil():
         assert len(terms) >= 2, kind
     for kind, by_category in section.category_terms.items():
         assert set(by_category) == set(spec.kind_categories[kind]), kind
+
+
+# --- termes du profil d'une analyse : `DecisionConfig.terms` ----------------------------
+
+
+def test_termes_du_fournisseur_lus_dans_la_section_extraction():
+    """Les sections `extraction.absence_terms` et `extraction.category_terms` restent le
+    profil fournisseur : une configuration archivée se relit sans changement."""
+    cfg = load_config()
+    terms = cfg.terms("fournisseur")
+    assert isinstance(terms, ProfileTerms)
+    assert terms.absence_terms is cfg.extraction.absence_terms
+    assert terms.category_terms is cfg.extraction.category_terms
+
+
+def test_termes_de_la_sous_traitance_lus_dans_sa_section():
+    cfg = load_config()
+    assert cfg.sous_traitance is not None
+    terms = cfg.terms("sous_traitance")
+    assert terms.absence_terms is cfg.sous_traitance.absence_terms
+    assert terms.category_terms is cfg.sous_traitance.category_terms
+    assert set(terms.absence_terms) == set(profiles.SOUS_TRAITANCE.kinds)
+
+
+def test_termes_nommes_par_champ():
+    # les deux champs se passent tels quels aux contrôles de l'extraction
+    assert ProfileTerms._fields == ("absence_terms", "category_terms")
+
+
+def test_termes_de_la_sous_traitance_sans_section_refuses(raw):
+    """Configuration archivée d'avant la section : aucun terme pour le profil, erreur qui
+    nomme la section, jamais les termes du fournisseur à la place."""
+    old = DecisionConfig.model_validate(_mutate(raw, "sous_traitance", _DELETE))
+    with pytest.raises(ValueError, match="section sous_traitance"):
+        old.terms("sous_traitance")
+    assert old.terms("fournisseur").absence_terms == old.extraction.absence_terms
+
+
+@pytest.mark.parametrize("profile", ["inexistant", "", None])
+def test_termes_d_un_profil_inconnu_refuses(profile):
+    with pytest.raises(ValueError, match="profil inconnu"):
+        load_config().terms(profile)
 
 
 # --- termes de la sous-traitance, sur des citations types -------------------------------

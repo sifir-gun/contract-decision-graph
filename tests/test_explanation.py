@@ -484,13 +484,26 @@ def test_explicateur_refuse_un_profil_inconnu_sans_appeler_le_llm():
     assert llm.calls == []
 
 
-# Le profil `sous_traitance` n'est pas encore enregistré (ni `Profile`, ni `PROMPT_FILES`) :
-# son prompt est testé par son nom de fichier.
+def test_prompt_du_profil_sous_traitance_enregistre():
+    files = application_explanation.PROMPT_FILES
+    assert files["sous_traitance"] == "explain_sous_traitance_system.md"
+
+
+def test_explicateur_passe_le_prompt_de_la_sous_traitance():
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    LLMExplainer(llm)(REQUEST, [], profile="sous_traitance")
+    [call] = llm.calls
+    assert call["system"] == prompt_named("explain_sous_traitance_system.md")
+
+
+# Prompts des deux profils, lus par leur entrée de `PROMPT_FILES` : mêmes règles, sujet et
+# parties propres au profil.
 
 
 def test_prompts_d_explication_memes_regles():
-    fournisseur = prompt_named("explain_system.md")
-    sous_traitance = prompt_named("explain_sous_traitance_system.md")
+    files = application_explanation.PROMPT_FILES
+    fournisseur = prompt_named(files["fournisseur"])
+    sous_traitance = prompt_named(files["sous_traitance"])
     assert rules_of(sous_traitance) == rules_of(fournisseur)
     assert len(rules_of(fournisseur)) == 6  # l'en-tête et cinq règles
     # le sujet et les parties changent, pas les règles

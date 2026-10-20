@@ -3,10 +3,9 @@
 Un profil nomme un genre de contrat analysable. Il porte les constantes du domaine qui
 dépendent du genre : ses types de clauses, leur partition entre les quatre domaines, l'unité
 de la valeur de chaque type chiffré, les catégories admises de chaque type catégoriel et les
-noms des parties dans les constats. Seul le profil `fournisseur` est enregistré : il reprend
-à l'identique les constantes qui étaient globales, sans changer aucun comportement.
-`SOUS_TRAITANCE` est construit mais pas encore enregistré (ni dans `SPECS`, ni dans
-`Profile`) : aucune analyse ne peut le nommer.
+noms des parties dans les constats. Deux profils sont enregistrés : `fournisseur`, qui reprend
+à l'identique les constantes qui étaient globales, sans changer aucun comportement, et
+`sous_traitance` (`SOUS_TRAITANCE`, spec-profils-sous-traitance.md).
 
 Ce module n'importe que `domain/models.py` (ni `domain/config.py`, ni `domain/rules/` :
 pas de cycle configuration -> profils -> règles -> configuration).
@@ -30,7 +29,7 @@ from cdg.domain.models import (
     Domain,
 )
 
-Profile = Literal["fournisseur"]
+Profile = Literal["fournisseur", "sous_traitance"]
 PROFILES: tuple[Profile, ...] = get_args(Profile)
 
 # profil des états d'avant les profils : le seul possible alors (`of_state`)
@@ -68,6 +67,51 @@ class ProfileSpec:
     @property
     def category_kinds(self) -> frozenset[str]:
         return frozenset(self.kind_categories)
+
+
+# Profil de la sous-traitance industrielle (spec-profils-sous-traitance.md), enregistré dans
+# `SPECS` sous ce nom : la configuration valide ses termes contre lui. Les types qu'il
+# partage avec `fournisseur` y ont le même domaine.
+SOUS_TRAITANCE = ProfileSpec(
+    kinds=(
+        "responsabilite_donneur_ordre",
+        "responsabilite_sous_traitant",
+        "protection_design",
+        "revision_prix",
+        "delai_paiement",
+        "penalites_retard_execution",
+        "obligation_certification",
+        "assurance_sous_traitant",
+        "delai_execution",
+    ),
+    domain_kinds={
+        "juridique": (
+            "responsabilite_donneur_ordre",
+            "responsabilite_sous_traitant",
+            "protection_design",
+        ),
+        "financier": ("revision_prix", "delai_paiement", "penalites_retard_execution"),
+        "conformite": ("obligation_certification", "assurance_sous_traitant"),
+        "operationnel": ("delai_execution",),
+    },
+    value_units={
+        "responsabilite_donneur_ordre": "%",
+        "responsabilite_sous_traitant": "%",
+        "revision_prix": "%",
+        "delai_paiement": "jours",
+        "penalites_retard_execution": "%",
+        "assurance_sous_traitant": "€",
+    },
+    kind_categories={
+        "protection_design": DESIGN_PROTECTIONS,
+        "obligation_certification": CERTIFICATION_REQUIREMENTS,
+        "delai_execution": EXECUTION_SCHEDULES,
+        "delai_paiement": PAYMENT_BASES,
+    },
+    parties=Parties(
+        "donneur d'ordre", "du donneur d'ordre", "sous-traitant", "du sous-traitant"
+    ),
+)
 
 
 SPECS: Mapping[Profile, ProfileSpec] = MappingProxyType(
@@ -112,51 +156,8 @@ SPECS: Mapping[Profile, ProfileSpec] = MappingProxyType(
                 "acheteur", "de l'acheteur", "fournisseur", "du fournisseur"
             ),
         ),
+        "sous_traitance": SOUS_TRAITANCE,
     }
-)
-
-# Profil de la sous-traitance industrielle (spec-profils-sous-traitance.md). Construit, pas
-# encore enregistré : absent de `Profile`, de `PROFILES` et de `SPECS` jusqu'à son
-# enregistrement ; les types qu'il partage avec `fournisseur` y ont le même domaine.
-SOUS_TRAITANCE = ProfileSpec(
-    kinds=(
-        "responsabilite_donneur_ordre",
-        "responsabilite_sous_traitant",
-        "protection_design",
-        "revision_prix",
-        "delai_paiement",
-        "penalites_retard_execution",
-        "obligation_certification",
-        "assurance_sous_traitant",
-        "delai_execution",
-    ),
-    domain_kinds={
-        "juridique": (
-            "responsabilite_donneur_ordre",
-            "responsabilite_sous_traitant",
-            "protection_design",
-        ),
-        "financier": ("revision_prix", "delai_paiement", "penalites_retard_execution"),
-        "conformite": ("obligation_certification", "assurance_sous_traitant"),
-        "operationnel": ("delai_execution",),
-    },
-    value_units={
-        "responsabilite_donneur_ordre": "%",
-        "responsabilite_sous_traitant": "%",
-        "revision_prix": "%",
-        "delai_paiement": "jours",
-        "penalites_retard_execution": "%",
-        "assurance_sous_traitant": "€",
-    },
-    kind_categories={
-        "protection_design": DESIGN_PROTECTIONS,
-        "obligation_certification": CERTIFICATION_REQUIREMENTS,
-        "delai_execution": EXECUTION_SCHEDULES,
-        "delai_paiement": PAYMENT_BASES,
-    },
-    parties=Parties(
-        "donneur d'ordre", "du donneur d'ordre", "sous-traitant", "du sous-traitant"
-    ),
 )
 
 

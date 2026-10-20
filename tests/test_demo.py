@@ -132,14 +132,14 @@ def test_contrat_du_jeu_de_profil_inconnu_refuse(tmp_path, value):
 def test_citations_attendues_dans_le_texte_masque(contract):
     masked = masking.mask(contract.text, contract.parties).text
     assert input_checks.rejection(masked, ANALYSIS_DATE, CONFIG.input) is None
-    # mêmes contrôles que verify_extraction : 10 types, catégories, citations exactes
+    # mêmes contrôles que verify_extraction : types, catégories et termes du profil du
+    # contrat, citations exactes
     assert (
         verification.problems_of(
             masked,
             contract.clauses,
-            profile="fournisseur",
-            absence_terms=CONFIG.extraction.absence_terms,
-            category_terms=CONFIG.extraction.category_terms,
+            profile=contract.profile,
+            **CONFIG.terms(contract.profile)._asdict(),
             instruction_patterns=CONFIG.input.instruction_patterns,
         )
         == []
@@ -416,9 +416,8 @@ def test_p1_paragraphe_injecte_et_version_propre():
         verification.problems_of(
             masked,
             contract.clauses,
-            profile="fournisseur",
-            absence_terms=CONFIG.extraction.absence_terms,
-            category_terms=CONFIG.extraction.category_terms,
+            profile=contract.profile,
+            **CONFIG.terms(contract.profile)._asdict(),
             instruction_patterns=CONFIG.input.instruction_patterns,
         )
         == []
@@ -547,9 +546,8 @@ def test_contrat_realiste_chaque_clause_declaree_absente_est_redemandee(kind):
     problems = verification.problems_of(
         masked,
         dropped,
-        profile="fournisseur",
-        absence_terms=CONFIG.extraction.absence_terms,
-        category_terms=CONFIG.extraction.category_terms,
+        profile=REALISTIC.profile,
+        **CONFIG.terms(REALISTIC.profile)._asdict(),
         instruction_patterns=CONFIG.input.instruction_patterns,
     )
     assert [p for p in problems if p.startswith("clause déclarée absente")] == [

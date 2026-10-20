@@ -395,12 +395,12 @@ def test_liste_des_contrats(service, piege):
 def test_profil_inconnu_jamais_rendu(service, piege):
     """Le profil rendu est l'un des profils connus : un autre est refusé par la vue, pas
     transmis à l'assistant."""
-    status = {**piege["status"], "profil": "sous_traitance"}
+    status = {**piege["status"], "profil": "inexistant"}
     with pytest.raises(ValidationError):
         presentation.summary(status)
     [row] = [r for r in service.contracts() if r["thread_id"] == "piege"]
     with pytest.raises(ValidationError):
-        presentation.contracts([{**row, "profil": "sous_traitance"}])
+        presentation.contracts([{**row, "profil": "inexistant"}])
 
 
 def test_citation_non_verifiee_attribuee_au_llm(piege):

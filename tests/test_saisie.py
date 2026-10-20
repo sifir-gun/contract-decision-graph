@@ -124,11 +124,11 @@ def test_profil_connu_admis(profile):
     assert saisie.profile(profile) == profile
 
 
-@pytest.mark.parametrize("raw", ["", "Fournisseur", "sous_traitance", " fournisseur"])
+@pytest.mark.parametrize("raw", ["", "Fournisseur", "inexistant", " fournisseur"])
 def test_profil_absent_ou_inconnu_refuse(raw):
     """Jamais de profil par défaut ni de correction silencieuse (casse, espaces) ; le
     message cite les profils admis, pas la valeur reçue."""
     message = f"profil absent ou inconnu ; profils : {', '.join(profiles.PROFILES)}"
-    assert message == "profil absent ou inconnu ; profils : fournisseur"
+    assert message == "profil absent ou inconnu ; profils : fournisseur, sous_traitance"
     with pytest.raises(InputError, match=f"^{re.escape(message)}$"):
         saisie.profile(raw)

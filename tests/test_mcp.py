@@ -555,7 +555,7 @@ def test_analyser_contrat_sans_profil_refuse(real, given):
     assert service.contracts() == []
 
 
-PROFIL_REFUSE = "profil absent ou inconnu ; profils : fournisseur"
+PROFIL_REFUSE = "profil absent ou inconnu ; profils : fournisseur, sous_traitance"
 PYDANTIC_TEXTS = ("validation error", "errors.pydantic.dev", "input_value")
 
 
@@ -567,7 +567,7 @@ def test_message_du_profil_refuse_est_celui_de_la_saisie():
 
 
 @pytest.mark.parametrize(
-    "profil", ["", "Fournisseur", "sous_traitance", None, 3, ["fournisseur"]]
+    "profil", ["", "Fournisseur", "inexistant", None, 3, ["fournisseur"]]
 )
 def test_analyser_contrat_profil_inconnu_refuse(real, profil):
     """Profil présent mais invalide (inconnu, vide, d'une autre casse, `None`, d'un autre

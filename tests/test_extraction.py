@@ -235,10 +235,38 @@ def test_prompt_durees_en_mois_annees_converties():
     assert "avec son unité (%, jours, mois, ou années" in PROMPT
 
 
-# --- Profil sous_traitance : schéma et prompt, testés par leur nom ------------------------
-# Le profil n'est pas encore enregistré (ni `Profile`, ni `SCHEMAS`, ni `PROMPT_FILES`).
+# --- Profil sous_traitance : schéma et prompt -------------------------------------------
 
 SOUS_TRAITANCE = profiles.SOUS_TRAITANCE
+
+
+def test_schema_et_prompt_du_profil_sous_traitance_enregistres():
+    assert (
+        extraction.SCHEMAS["sous_traitance"] is extraction.ExtractionOutputSousTraitance
+    )
+    assert (
+        extraction.PROMPT_FILES["sous_traitance"]
+        == "extraction_sous_traitance_system.md"
+    )
+
+
+def test_extracteur_passe_le_schema_et_le_prompt_de_la_sous_traitance():
+    llm = FakeLLM({"extract_clauses": output_of(clauses_sous_traitance())})
+    result = LLMExtractor(llm, boundary=lambda: "a1b2c3d4")(
+        CONTRACT_TEXT, [], "sous_traitance"
+    )
+    [call] = llm.calls
+    assert call["schema"] is extraction.ExtractionOutputSousTraitance
+    assert call["system"] == prompt_sous_traitance()
+    assert result.clauses == clauses_sous_traitance()
+
+
+def test_extracteur_sous_traitance_refuse_un_type_du_fournisseur():
+    """Sous le profil sous_traitance, l'extracteur passe son schéma : un type du
+    fournisseur rendu par le modèle y échoue à la validation (spec, « Erreurs »)."""
+    llm = FakeLLM({"extract_clauses": output_of(clauses())})
+    with pytest.raises(ValidationError, match="kind"):
+        LLMExtractor(llm)(CONTRACT_TEXT, [], "sous_traitance")
 
 
 def prompt_sous_traitance() -> str:

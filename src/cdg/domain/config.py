@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal, NamedTuple, assert_never, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -22,6 +22,7 @@ from cdg.domain.models import (
     TransferCategory,
 )
 from cdg.domain.numeric import rounded
+from cdg.domain.profiles import Profile
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "decision.yaml"
 
@@ -447,6 +448,14 @@ class LLMConfig(_Strict):
         return models.main if tier == "main" else models.light
 
 
+class ProfileTerms(NamedTuple):
+    """Termes de la vérification de l'extraction pour un profil : ceux qui évoquent
+    chaque type de clause (absences), et chaque catégorie (`verification.problems_of`)."""
+
+    absence_terms: Mapping[str, Sequence[str]]
+    category_terms: Mapping[str, Mapping[str, Sequence[str]]]
+
+
 class DecisionConfig(_Strict):
     weights: Weights
     thresholds: Thresholds
@@ -473,6 +482,25 @@ class DecisionConfig(_Strict):
     def weight(self, domain: Domain) -> float:
         weight: float = getattr(self.weights, domain)
         return weight
+
+    def terms(self, profile: Profile) -> ProfileTerms:
+        """Termes d'absence et de catégorie du profil : la section `extraction` pour le
+        fournisseur (celle d'avant les profils), la section `sous_traitance` pour la
+        sous-traitance. Sans cette section (configuration archivée d'avant elle), erreur
+        qui la nomme : jamais les termes d'un autre profil."""
+        profile = profiles.parse(profile)
+        if profile == "fournisseur":
+            section = self.extraction
+            return ProfileTerms(section.absence_terms, section.category_terms)
+        if profile == "sous_traitance":
+            if self.sous_traitance is None:
+                raise ValueError(
+                    "configuration sans section sous_traitance : profil sous_traitance "
+                    "non analysable"
+                )
+            st = self.sous_traitance
+            return ProfileTerms(st.absence_terms, st.category_terms)
+        assert_never(profile)
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> DecisionConfig:

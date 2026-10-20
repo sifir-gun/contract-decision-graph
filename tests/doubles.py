@@ -26,7 +26,7 @@ from cdg.domain.version import CodeVersion
 from cdg.ports.identity import IdentityRejected, ProviderUnavailable
 from cdg.ports.retriever import Passage
 
-# profil des contrats synthétiques des tests : le seul qui existe
+# profil des contrats synthétiques des tests, sauf ceux de la sous-traitance (plus bas)
 FOURNISSEUR = profiles.spec("fournisseur")
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
@@ -130,8 +130,8 @@ def clauses(categories: dict | None = None, **overrides) -> list[Clause]:
 
 # --- Profil sous_traitance ---------------------------------------------------------------------
 # Mêmes conventions que le fournisseur : contrat synthétique favorable (aucune règle déclenchée),
-# `ABSENT`, citations qui portent la valeur et son unité. Le profil n'est pas enregistré
-# (`profiles.SPECS`) : les doublures nomment `profiles.SOUS_TRAITANCE`.
+# `ABSENT`, citations qui portent la valeur et son unité. Les doublures nomment
+# `profiles.SOUS_TRAITANCE`, enregistré sous `sous_traitance`.
 
 FAVORABLE_SOUS_TRAITANCE = {
     "responsabilite_donneur_ordre": 100.0,  # plafonnée à 100 % du montant du contrat

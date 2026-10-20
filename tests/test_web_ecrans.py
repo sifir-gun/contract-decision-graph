@@ -169,7 +169,7 @@ def test_analyse_sans_profil_refusee():
     assert service.contracts() == []
 
 
-@pytest.mark.parametrize("profil", ["", "Fournisseur", "sous_traitance"])
+@pytest.mark.parametrize("profil", ["", "Fournisseur", "inexistant"])
 def test_analyse_profil_inconnu_refuse(profil):
     service = memory_service()
     response = post_analyse(client(service), PENDING_TEXT, profil=profil)

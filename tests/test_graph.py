@@ -416,7 +416,7 @@ def test_run_contract_exige_le_profil():
         )
 
 
-@pytest.mark.parametrize("profile", ["sous_traitance", "", None])
+@pytest.mark.parametrize("profile", ["inexistant", "", None])
 def test_run_contract_refuse_un_profil_inconnu_sans_rien_ecrire(profile):
     graph = run_contract_graph()
     with pytest.raises(ValueError, match="profil inconnu"):

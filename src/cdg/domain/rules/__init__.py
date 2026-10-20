@@ -11,6 +11,7 @@ from cdg.domain.rules.conformite import conformite
 from cdg.domain.rules.financier import financier
 from cdg.domain.rules.juridique import juridique
 from cdg.domain.rules.operationnel import operationnel
+from cdg.domain.rules.sous_traitance import RULES_SOUS_TRAITANCE
 
 # règles de chaque profil, par domaine : un jeu complet de quatre fonctions par profil
 RULES: Mapping[Profile, Mapping[Domain, RuleFn]] = MappingProxyType(
@@ -23,6 +24,7 @@ RULES: Mapping[Profile, Mapping[Domain, RuleFn]] = MappingProxyType(
                 "operationnel": operationnel,
             }
         ),
+        "sous_traitance": RULES_SOUS_TRAITANCE,
     }
 )
 
