@@ -3473,9 +3473,10 @@ Les quatre exceptions de `libssl3t64` 3.5.7-1~deb13u2 (CVE-2026-54873, CVE-2026-
 
 ### Vérifications
 
-- `./scripts/check.sh --sans-cluster` (a66fd05) : lint, types, audit, échéances du corpus (aucune au 16/10), 2 449 tests passés, PostgreSQL compris, 2 sautés, couverture de 98,60 % ; 119 tests du rendu des charts ; 20 sur l'image. Puis **échec au scan de l'image** : l'exception CVE-2026-54873 (`securite/exceptions-vulnerabilites.yaml`) a expiré le 15/10/2026, hors de ce chantier : à revoir par le propriétaire avant toute fusion (le job `image` de la CI échoue de même).
+- `./scripts/check.sh --sans-cluster` (a66fd05, 16/10) : lint, types, audit, échéances du corpus (aucune au 16/10), 2 449 tests passés, PostgreSQL compris, 2 sautés, couverture de 98,60 % ; 119 tests du rendu des charts ; 20 sur l'image ; puis échec au scan de l'image, l'exception CVE-2026-54873 ayant expiré le 15/10/2026 (hors de ce chantier, réglé par la PR #56).
+- Après la fusion de `main` (PR #55 et #56, conflit du journal résolu en gardant les deux entrées du 16/10), `./scripts/check.sh --sans-cluster` (a3dfc1e, 20/10), avec le `.env` complet du poste, clés de Langfuse comprises : « check.sh : SUCCÈS » ; 2 450 tests passés, 2 sautés, couverture de 98,60 % ; 119 tests du rendu des charts, 20 sur l'image ; trois scans sans faille critique ou haute corrigeable, 0 exception.
 - Cluster : sauté en local (profil à 7 Go sur 8, pile Langfuse en marche) ; job `cluster` de la CI.
 
 ### Nombre de tests
 
-- La suite principale passe de 2 389 à 2 449 tests passés (60 de plus : règle des versions, manifeste, migration, recherche datée et parité, CRAG, fiches, échéances, texte daté, étiquette NOTA, version 2027).
+- La suite principale passe de 2 389 à 2 449 tests passés (60 de plus : règle des versions, manifeste, migration, recherche datée et parité, CRAG, fiches, échéances, texte daté, étiquette NOTA, version 2027) ; 2 450 après la fusion de `main` (un test de la PR #56). Décompte de `pytest` (« passed ») : les entrées précédentes en comptent 2 de plus pour la même suite.
