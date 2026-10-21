@@ -1,0 +1,55 @@
+CONTRAT DE SOUS-TRAITANCE POUR L'AMÉNAGEMENT DES ESPACES PUBLICS D'UN NAVIRE
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle. Rédaction volontairement proche d'un contrat réel : renvois entre articles, formulations indirectes, informations dispersées.
+
+Entre la société Fomalhaut Navale Synthétique, ci-après le Donneur d'ordre,
+et la société Achernar Aménagements Synthétique, ci-après le Sous-traitant,
+ensemble les Parties.
+
+Préambule
+Le Donneur d'ordre a la charge de l'aménagement intérieur d'un navire à passagers en cours de construction. Il confie au Sous-traitant, qui l'accepte, la réalisation d'une partie de cet aménagement, dans les conditions du présent contrat et de la Commande qui en découle.
+
+Article 1 - Définitions
+Calendrier d'exécution : les dates de livraison de chaque lot, fixées à l'annexe 2 ; elles engagent le Sous-traitant et ne sont modifiées que par avenant.
+Commande : le bon de commande émis par le Donneur d'ordre en application du présent contrat, qui en précise le prix.
+Documents techniques : les plans, gabarits, maquettes et notes de calcul remis par le Donneur d'ordre.
+Plafond de responsabilité du Sous-traitant : 150 % du prix de la Commande.
+
+Article 2 - Objet
+Le Sous-traitant réalise le mobilier, les cloisons décoratives et les faux plafonds des salons et de la salle de restaurant, conformément aux Documents techniques.
+
+Article 3 - Exécution
+Le Sous-traitant livre chaque lot à la date fixée par le Calendrier d'exécution. Il informe sans attendre le Donneur d'ordre de toute difficulté de nature à compromettre une date de livraison.
+
+Article 4 - Prix
+Les prestations sont rémunérées au prix de la Commande, ferme pour la première année.
+Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 3 ; la hausse qui en résulte ne peut excéder trois pour cent sur une année.
+
+Article 5 - Facturation et délai de règlement
+Le Sous-traitant facture chaque lot à sa réception par le Donneur d'ordre.
+Les sommes dues sont réglées par virement à quarante-cinq (45) jours fin de mois.
+
+Article 6 - Retards
+Tout retard sur une date du Calendrier d'exécution donne lieu à une pénalité de retard de livraison de 0,2 % du prix de la Commande par jour calendaire, dans la limite de huit pour cent (8 %) du prix de la Commande.
+
+Article 7 - Documents techniques
+Les Documents techniques restent la propriété du Donneur d'ordre ; le Sous-traitant ne s'en sert qu'aux seules fins de la Commande et les tient pour confidentiels.
+
+Article 8 - Qualité des ouvrages
+Les ouvrages livrés sont conformes aux normes en vigueur à la date de leur livraison ; le Sous-traitant en tient les justificatifs à la disposition du Donneur d'ordre.
+Le Sous-traitant met en place un contrôle de ses fabrications, qu'il décrit dans son plan d'assurance qualité.
+
+Article 9 - Responsabilité
+Le Sous-traitant répond des dommages causés par ses ouvrages dans la limite du Plafond de responsabilité du Sous-traitant.
+Le Donneur d'ordre ne répond que des dommages directs résultant d'une faute prouvée, dans la limite de 100 % du prix de la Commande.
+
+Article 10 - Réception
+Chaque lot fait l'objet d'une réception contradictoire à bord ; les réserves éventuelles sont levées par le Sous-traitant dans les quinze jours.
+
+Article 11 - Résiliation
+En cas de manquement grave, la Partie lésée peut mettre fin au contrat quinze jours après une mise en demeure restée sans effet.
+
+Article 12 - Droit applicable et litiges
+Le contrat est soumis au droit français. Tout litige relève des tribunaux compétents du ressort du siège du Donneur d'ordre.
+
+Article 13 - Annexes
+Annexe 1 : cahier des charges. Annexe 2 : Calendrier d'exécution. Annexe 3 : indice de référence et formule d'indexation.

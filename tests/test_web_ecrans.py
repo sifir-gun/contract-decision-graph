@@ -136,7 +136,7 @@ def test_formulaire_d_analyse_etiquete():
     ):
         assert f'id="{field}"' in page and f'for="{field}"' in page
     _, contracts = demo_set.load()
-    assert len(contracts) == 13
+    assert len(contracts) == 20  # 13 du fournisseur, 7 de la sous-traitance
     for contract_id in contracts:
         assert f'value="{contract_id}"' in page
     assert "htmx-indicator" in page  # indicateur de chargement pendant l'analyse

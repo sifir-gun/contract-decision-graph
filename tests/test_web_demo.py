@@ -31,6 +31,7 @@ BANNER = (
 )
 _, EXPECTED = expected_set.load()
 EXPECTED = {c.id: c for c in EXPECTED}
+FOURNISSEUR = [cid for cid, c in EXPECTED.items() if c.profile == "fournisseur"]
 
 
 def forbidden(*args, **kwargs):
@@ -92,7 +93,10 @@ def test_formulaire_limite_aux_contrats_du_jeu(demo):
     assert "contrats du jeu" in response.text
 
 
-@pytest.mark.parametrize("contract_id", sorted(EXPECTED))
+# Contrats du profil fournisseur seulement, jusqu'à la tâche 14 du plan de la PR 2 des
+# profils (mode démonstration des deux profils) : le test analyse chaque contrat sous
+# « fournisseur ».
+@pytest.mark.parametrize("contract_id", sorted(FOURNISSEUR))
 def test_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
     web, service = demo
     contract = EXPECTED[contract_id]

@@ -1,0 +1,34 @@
+CONTRAT DE SOUS-TRAITANCE : ÉBÉNISTERIE D'UN NAVIRE
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Aldébaran Armement Synthétique, ci-après dénommée le Donneur d'ordre,
+et la société Procyon Ébénisterie Synthétique, ci-après dénommée le Sous-traitant,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Donneur d'ordre confie au Sous-traitant la fabrication et la pose des boiseries, des portes et des meubles des cabines d'un navire à passagers, selon le cahier des charges annexé.
+
+Article 2 - Prix et révision
+Le prix de la commande est fixé dans l'annexe financière. Les prix sont révisés chaque année selon l'évolution du coût des bois précieux, sans plafond.
+
+Article 3 - Conditions de paiement
+Les factures sont payables à 30 jours à compter de leur date d'émission.
+
+Article 4 - Délai d'exécution
+Le Sous-traitant livre les ouvrages au plus tard le 30 juin 2027, selon le planning contractuel annexé.
+
+Article 5 - Dessins et documents remis
+Les dessins et plans remis par le Donneur d'ordre ne peuvent être utilisés par le Sous-traitant que pour le présent projet.
+
+Article 6 - Conformité et preuves
+Les ouvrages sont conformes à la norme de réaction au feu désignée au cahier des charges ; le Sous-traitant remet les rapports d'essais avant la pose à bord.
+
+Article 7 - Assurance
+Le Sous-traitant justifie d'une assurance responsabilité civile couvrant ses activités à hauteur de 2 500 000 € par sinistre.
+
+Article 8 - Responsabilité
+La responsabilité du Donneur d'ordre au titre du présent contrat est illimitée.
+La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 150 % du montant du contrat.
+
+Article 9 - Droit applicable
+Le présent contrat est soumis au droit français. Tout différend relatif à son exécution sera porté devant les juridictions compétentes, après une tentative de règlement amiable.

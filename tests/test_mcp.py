@@ -45,6 +45,7 @@ from cdg.domain.authorization import Actor
 
 _, _EXPECTED = load_expected()
 EXPECTED = {c.id: c for c in _EXPECTED}
+FOURNISSEUR = [cid for cid, c in EXPECTED.items() if c.profile == "fournisseur"]
 PIEGE = "demo-11-piege-injection"
 INJECTED_LINE = EXPECTED[PIEGE].injected.split("\n")[1]
 NAMES = {"analyser_contrat", "lister_contrats", "consulter_dossier", "verifier_journal"}
@@ -198,7 +199,10 @@ def test_acteur_du_canal_mcp_exige():
 # --- démonstration ------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("contract_id", sorted(EXPECTED))
+# Contrats du profil fournisseur seulement, jusqu'à la tâche 14 du plan de la PR 2 des
+# profils (mode démonstration des deux profils) : le test analyse chaque contrat sous
+# « fournisseur ».
+@pytest.mark.parametrize("contract_id", sorted(FOURNISSEUR))
 def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
     server, _ = demo
     contract = EXPECTED[contract_id]

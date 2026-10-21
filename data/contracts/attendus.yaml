@@ -8,6 +8,7 @@
 #
 # Chaque règle du projet se déclenche dans au moins un contrat (test_demo.py).
 # Chaque contrat déclare son profil (`profile`, obligatoire, sans valeur par défaut : ADR 010).
+# PR 2 des profils : sept contrats du profil `sous_traitance` (`st-*`), dont un réaliste.
 
 analysis_date: 2026-09-25
 
@@ -605,3 +606,334 @@ contracts:
         present: true
         category: sans_transfert
         quote: "Les données sont hébergées exclusivement dans des centres situés en France et ne sont accessibles depuis aucun pays tiers."
+
+  # --- Profil sous_traitance (PR 2 des profils) : sept contrats, un par ligne du tableau
+  # « Décisions des sept contrats » du plan ; chaque branche des règles des cinq types
+  # propres au profil se déclenche dans au moins un, chaque règle reprise au moins une fois.
+
+  st-01-go-cabine:
+    file: st-01-go-cabine.txt
+    profile: sous_traitance
+    parties: [Deneb Aviation Synthétique, Mira Agencement Synthétique]
+    expected:
+      proposed_decision: GO  # aucun constat : 1,0 partout, marge 0,25
+      final_decision: GO
+    clauses:
+      - kind: responsabilite_donneur_ordre
+        present: true
+        value: 100
+        quote: "La responsabilité du Donneur d'ordre au titre du présent contrat est plafonnée à 100 % du montant du contrat."
+      - kind: responsabilite_sous_traitant
+        present: true
+        value: 150
+        quote: "La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 150 % du montant du contrat."
+      - kind: protection_design
+        present: true
+        category: usage_limite_au_projet
+        quote: "Les dessins, plans et documents remis par le Donneur d'ordre ne peuvent être utilisés par le Sous-traitant que pour le présent projet ; ils restent confidentiels."
+      - kind: revision_prix
+        present: true
+        value: 3
+        quote: "Le prix est révisable une fois par an, dans la limite de 3 % par an."
+      - kind: delai_paiement
+        present: true
+        value: 30
+        category: date_facture
+        quote: "Les factures sont payables à 30 jours à compter de leur date d'émission."
+      - kind: penalites_retard_execution
+        present: true
+        value: 10
+        quote: "En cas de retard de livraison imputable au Sous-traitant, celui-ci est redevable de pénalités de retard d'exécution de 1 % du montant du contrat par semaine de retard, dans la limite de 10 % du montant du contrat."
+      - kind: obligation_certification
+        present: true
+        category: norme_et_preuves
+        quote: "Le mobilier est conforme à la norme de réaction au feu désignée au cahier des charges, et le Sous-traitant remet les procès-verbaux d'essais à la livraison."
+      - kind: assurance_sous_traitant
+        present: true
+        value: 3000000
+        quote: "Le Sous-traitant justifie d'une assurance responsabilité civile couvrant ses activités à hauteur de 3 000 000 € par sinistre."
+      - kind: delai_execution
+        present: true
+        category: date_contractuelle
+        quote: "Le Sous-traitant livre le mobilier au plus tard le 15 mars 2027, selon le planning contractuel annexé."
+
+  st-02-reserves-marqueterie:
+    file: st-02-reserves-marqueterie.txt
+    profile: sous_traitance
+    parties: [Rigel Ferroviaire Synthétique, Vega Marqueterie Synthétique]
+    expected:
+      # confidentialité seule, pénalités à 2 %, assurance non chiffrée, délai indicatif :
+      # 0,7 / 0,6 / 0,7 / 0,6, agrégat 0,655, marge 0,095
+      proposed_decision: GO_RESERVES
+      final_decision: GO_RESERVES
+    clauses:
+      - kind: responsabilite_donneur_ordre
+        present: true
+        value: 100
+        quote: "La responsabilité du Donneur d'ordre au titre du présent contrat est plafonnée à 100 % du montant du contrat."
+      - kind: responsabilite_sous_traitant
+        present: true
+        value: 120
+        quote: "La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 120 % du montant du contrat."
+      - kind: protection_design  # confidentialité stipulée, sans limite d'usage
+        present: true
+        category: confidentialite_seule
+        quote: "Les dessins et documents remis par le Donneur d'ordre sont confidentiels ; le Sous-traitant ne les communique à aucun tiers."
+      - kind: revision_prix
+        present: true
+        value: 2
+        quote: "Le prix est révisable une fois par an, dans la limite de 2 % par an."
+      - kind: delai_paiement
+        present: true
+        value: 45
+        category: fin_de_mois
+        quote: "Les factures sont payables à 45 jours fin de mois."
+      - kind: penalites_retard_execution  # plafonnées sous le minimum de 5 %
+        present: true
+        value: 2
+        quote: "En cas de retard de livraison imputable au Sous-traitant, celui-ci est redevable de pénalités de retard d'exécution de 0,5 % du montant du contrat par semaine de retard, dans la limite de 2 % du montant du contrat."
+      - kind: obligation_certification
+        present: true
+        category: norme_et_preuves
+        quote: "Les panneaux sont conformes à la norme EN 45545-2 ; le Sous-traitant remet les procès-verbaux d'essais de réaction au feu avant la pose."
+      - kind: assurance_sous_traitant  # aucun montant par sinistre : non chiffrée
+        present: true
+        value: null
+        quote: "Le Sous-traitant justifie d'une assurance responsabilité civile couvrant les dommages causés au matériel du Donneur d'ordre."
+      - kind: delai_execution
+        present: true
+        category: delai_indicatif
+        quote: "Les panneaux sont livrés dans un délai de douze semaines à compter de la commande, donné à titre indicatif."
+
+  st-03-no-go-ferronnerie:
+    file: st-03-no-go-ferronnerie.txt
+    profile: sous_traitance
+    parties: [Pollux Yachting Synthétique, Castor Ferronnerie Synthétique]
+    expected:
+      proposed_decision: NO_GO  # blocage dur : réutilisation des dessins autorisée
+      final_decision: NO_GO
+    clauses:
+      - kind: responsabilite_donneur_ordre
+        present: true
+        value: 100
+        quote: "La responsabilité du Donneur d'ordre au titre du présent contrat est plafonnée à 100 % du montant du contrat."
+      - kind: responsabilite_sous_traitant
+        present: true
+        value: 150
+        quote: "La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 150 % du montant du contrat."
+      - kind: protection_design
+        present: true
+        category: reutilisation_autorisee
+        quote: "Le Sous-traitant peut réutiliser les dessins et documents remis par le Donneur d'ordre pour d'autres commandes."
+      - kind: revision_prix
+        present: true
+        value: 3
+        quote: "Le prix est révisable une fois par an, dans la limite de 3 % par an."
+      - kind: delai_paiement
+        present: true
+        value: 30
+        category: date_facture
+        quote: "Les factures sont payables à 30 jours à compter de leur date d'émission."
+      - kind: penalites_retard_execution
+        present: true
+        value: 10
+        quote: "En cas de retard imputable au Sous-traitant, celui-ci est redevable de pénalités de retard d'exécution de 1 % du montant du contrat par semaine de retard, dans la limite de 10 % du montant du contrat."
+      - kind: obligation_certification
+        present: true
+        category: norme_et_preuves
+        quote: "Les ouvrages sont conformes à la norme désignée au cahier des charges ; le Sous-traitant remet les certificats de conformité à la réception des ouvrages."
+      - kind: assurance_sous_traitant
+        present: true
+        value: 2500000
+        quote: "Le Sous-traitant justifie d'une assurance responsabilité civile couvrant ses activités à hauteur de 2 500 000 € par sinistre."
+      - kind: delai_execution  # aucune date, aucun délai : absent
+        present: false
+
+  st-04-no-go-sellerie:
+    file: st-04-no-go-sellerie.txt
+    profile: sous_traitance
+    parties: [Sirius Matériel Roulant Synthétique, Capella Sellerie Synthétique]
+    expected:
+      proposed_decision: NO_GO  # blocage dur : aucune obligation de certification
+      final_decision: NO_GO
+    clauses:
+      - kind: responsabilite_donneur_ordre
+        present: true
+        value: 100
+        quote: "La responsabilité du Donneur d'ordre au titre du présent contrat est plafonnée à 100 % du montant du contrat."
+      - kind: responsabilite_sous_traitant
+        present: true
+        value: 150
+        quote: "La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 150 % du montant du contrat."
+      - kind: protection_design  # rien sur les dessins ni les documents remis
+        present: false
+      - kind: revision_prix
+        present: true
+        value: 2
+        quote: "Le prix est révisable une fois par an, dans la limite de 2 % par an."
+      - kind: delai_paiement
+        present: true
+        value: 30
+        category: date_facture
+        quote: "Les factures sont payables à 30 jours à compter de leur date d'émission."
+      - kind: penalites_retard_execution
+        present: true
+        value: 10
+        quote: "En cas de retard de livraison imputable au Sous-traitant, celui-ci est redevable de pénalités de retard d'exécution de 1 % du montant du contrat par semaine de retard, dans la limite de 10 % du montant du contrat."
+      - kind: obligation_certification
+        present: false
+      - kind: assurance_sous_traitant  # au minimum, pas en dessous
+        present: true
+        value: 2000000
+        quote: "Le Sous-traitant justifie d'une assurance responsabilité civile couvrant ses activités à hauteur de 2 000 000 € par sinistre."
+      - kind: delai_execution
+        present: true
+        category: date_contractuelle
+        quote: "Le Sous-traitant livre les garnitures au plus tard le 30 avril 2027, selon le planning contractuel annexé."
+
+  st-05-reserves-revetements:
+    file: st-05-reserves-revetements.txt
+    profile: sous_traitance
+    parties: [Arcturus Aéronautique Synthétique, Spica Revêtements Synthétique]
+    expected:
+      # plafond du sous-traitant à 50 %, 90 jours date de facture, norme sans preuves,
+      # assurance de 1 000 000 €, délai indicatif : 0,5 / 0,8 / 0,4 / 0,6, agrégat 0,57,
+      # marge 0,07, écart 0,4
+      proposed_decision: GO_RESERVES
+      final_decision: GO_RESERVES
+    clauses:
+      - kind: responsabilite_donneur_ordre
+        present: true
+        value: 100
+        quote: "La responsabilité du Donneur d'ordre au titre du présent contrat est plafonnée à 100 % du montant du contrat."
+      - kind: responsabilite_sous_traitant
+        present: true
+        value: 50
+        quote: "La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 50 % du montant du contrat."
+      - kind: protection_design
+        present: true
+        category: usage_limite_au_projet
+        quote: "Les dessins et documents remis par le Donneur d'ordre ne sont utilisés par le Sous-traitant qu'aux seules fins de l'exécution du présent contrat."
+      - kind: revision_prix
+        present: true
+        value: 2
+        quote: "Le prix est révisable une fois par an, dans la limite de 2 % par an."
+      - kind: delai_paiement
+        present: true
+        value: 90
+        category: date_facture
+        quote: "Les factures sont payables à 90 jours à compter de la date de facture."
+      - kind: penalites_retard_execution
+        present: true
+        value: 10
+        quote: "En cas de retard de livraison imputable au Sous-traitant, celui-ci est redevable de pénalités de retard d'exécution de 1 % du montant du contrat par semaine de retard, dans la limite de 10 % du montant du contrat."
+      - kind: obligation_certification  # norme désignée, aucune preuve à remettre
+        present: true
+        category: norme_sans_preuves
+        quote: "Les revêtements sont conformes à la norme de réaction au feu désignée au cahier des charges."
+      - kind: assurance_sous_traitant
+        present: true
+        value: 1000000
+        quote: "Le Sous-traitant justifie d'une assurance responsabilité civile couvrant ses activités à hauteur de 1 000 000 € par sinistre."
+      - kind: delai_execution
+        present: true
+        category: delai_indicatif
+        quote: "Les revêtements sont livrés dans un délai de dix semaines à compter de la commande, donné à titre indicatif."
+
+  st-06-no-go-ebenisterie:
+    file: st-06-no-go-ebenisterie.txt
+    profile: sous_traitance
+    parties: [Aldébaran Armement Synthétique, Procyon Ébénisterie Synthétique]
+    expected:
+      # blocages durs : responsabilité du donneur d'ordre illimitée, révision non plafonnée
+      proposed_decision: NO_GO
+      final_decision: NO_GO
+    clauses:
+      - kind: responsabilite_donneur_ordre
+        present: true
+        value: null
+        quote: "La responsabilité du Donneur d'ordre au titre du présent contrat est illimitée."
+      - kind: responsabilite_sous_traitant
+        present: true
+        value: 150
+        quote: "La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 150 % du montant du contrat."
+      - kind: protection_design
+        present: true
+        category: usage_limite_au_projet
+        quote: "Les dessins et plans remis par le Donneur d'ordre ne peuvent être utilisés par le Sous-traitant que pour le présent projet."
+      - kind: revision_prix
+        present: true
+        value: null
+        quote: "Les prix sont révisés chaque année selon l'évolution du coût des bois précieux, sans plafond."
+      - kind: delai_paiement
+        present: true
+        value: 30
+        category: date_facture
+        quote: "Les factures sont payables à 30 jours à compter de leur date d'émission."
+      - kind: penalites_retard_execution  # aucune pénalité stipulée
+        present: false
+      - kind: obligation_certification
+        present: true
+        category: norme_et_preuves
+        quote: "Les ouvrages sont conformes à la norme de réaction au feu désignée au cahier des charges ; le Sous-traitant remet les rapports d'essais avant la pose à bord."
+      - kind: assurance_sous_traitant
+        present: true
+        value: 2500000
+        quote: "Le Sous-traitant justifie d'une assurance responsabilité civile couvrant ses activités à hauteur de 2 500 000 € par sinistre."
+      - kind: delai_execution
+        present: true
+        category: date_contractuelle
+        quote: "Le Sous-traitant livre les ouvrages au plus tard le 30 juin 2027, selon le planning contractuel annexé."
+
+  st-07-realiste-amenagement:
+    file: st-07-realiste-amenagement.txt
+    profile: sous_traitance
+    parties: [Fomalhaut Navale Synthétique, Achernar Aménagements Synthétique]
+    # rédigé de façon réaliste : définitions auxquelles renvoient les articles, quantités
+    # en lettres, conformité renvoyée aux normes en vigueur avec des justificatifs tenus à
+    # disposition (jamais remis), « plan d'assurance qualité » qui n'est pas une assurance
+    realistic: true
+    expected:
+      # conformité générale et assurance absente : conformité à 0,4, les autres domaines à
+      # 1,0, écart 0,6 au-delà de 0,5 : conflit
+      proposed_decision: ESCALADE
+      final_decision: GO_RESERVES
+      human:
+        decision: GO_RESERVES
+        reason: normes de réaction au feu à nommer, avec leurs procès-verbaux d'essais, et attestation d'assurance du sous-traitant à obtenir par avenant avant la Commande ; plafonds, calendrier et pénalités acceptables
+    clauses:
+      - kind: responsabilite_donneur_ordre
+        present: true
+        value: 100
+        quote: "Le Donneur d'ordre ne répond que des dommages directs résultant d'une faute prouvée, dans la limite de 100 % du prix de la Commande."
+      - kind: responsabilite_sous_traitant  # plafond défini à l'article 1, auquel renvoie l'article 9
+        present: true
+        value: 150
+        quote: "Plafond de responsabilité du Sous-traitant : 150 % du prix de la Commande."
+      - kind: protection_design  # usage limité, confidentialité en plus
+        present: true
+        category: usage_limite_au_projet
+        quote: "Les Documents techniques restent la propriété du Donneur d'ordre ; le Sous-traitant ne s'en sert qu'aux seules fins de la Commande et les tient pour confidentiels."
+      - kind: revision_prix
+        present: true
+        value: 3
+        quote: "Les prix sont indexés au 1er janvier de chaque année sur l'indice de référence désigné à l'annexe 3 ; la hausse qui en résulte ne peut excéder trois pour cent sur une année."
+      - kind: delai_paiement
+        present: true
+        value: 45
+        category: fin_de_mois
+        quote: "Les sommes dues sont réglées par virement à quarante-cinq (45) jours fin de mois."
+      - kind: penalites_retard_execution
+        present: true
+        value: 8
+        quote: "Tout retard sur une date du Calendrier d'exécution donne lieu à une pénalité de retard de livraison de 0,2 % du prix de la Commande par jour calendaire, dans la limite de huit pour cent (8 %) du prix de la Commande."
+      - kind: obligation_certification  # « conformes aux normes en vigueur » : aucune norme nommée
+        present: true
+        category: conformite_generale
+        quote: "Les ouvrages livrés sont conformes aux normes en vigueur à la date de leur livraison ; le Sous-traitant en tient les justificatifs à la disposition du Donneur d'ordre."
+      - kind: assurance_sous_traitant  # aucune assurance du sous-traitant
+        present: false
+      - kind: delai_execution  # dates du calendrier, définies à l'article 1
+        present: true
+        category: date_contractuelle
+        quote: "Calendrier d'exécution : les dates de livraison de chaque lot, fixées à l'annexe 2 ; elles engagent le Sous-traitant et ne sont modifiées que par avenant."

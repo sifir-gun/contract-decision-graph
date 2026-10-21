@@ -1,0 +1,37 @@
+CONTRAT DE SOUS-TRAITANCE : MARQUETERIE D'UNE VOITURE DE TRAIN HISTORIQUE
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Rigel Ferroviaire Synthétique, ci-après dénommée le Donneur d'ordre,
+et la société Vega Marqueterie Synthétique, ci-après dénommée le Sous-traitant,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Donneur d'ordre confie au Sous-traitant la restauration et la fabrication des panneaux de marqueterie du salon d'une voiture de train historique, selon le cahier des charges annexé.
+
+Article 2 - Prix et révision
+Le prix de la commande est fixé dans l'annexe financière. Le prix est révisable une fois par an, dans la limite de 2 % par an.
+
+Article 3 - Conditions de paiement
+Les factures sont payables à 45 jours fin de mois.
+
+Article 4 - Délai d'exécution
+Les panneaux sont livrés dans un délai de douze semaines à compter de la commande, donné à titre indicatif.
+
+Article 5 - Pénalités de retard d'exécution
+En cas de retard de livraison imputable au Sous-traitant, celui-ci est redevable de pénalités de retard d'exécution de 0,5 % du montant du contrat par semaine de retard, dans la limite de 2 % du montant du contrat.
+
+Article 6 - Dessins et documents remis
+Les dessins et documents remis par le Donneur d'ordre sont confidentiels ; le Sous-traitant ne les communique à aucun tiers.
+
+Article 7 - Conformité et preuves
+Les panneaux sont conformes à la norme EN 45545-2 ; le Sous-traitant remet les procès-verbaux d'essais de réaction au feu avant la pose.
+
+Article 8 - Assurance
+Le Sous-traitant justifie d'une assurance responsabilité civile couvrant les dommages causés au matériel du Donneur d'ordre.
+
+Article 9 - Responsabilité
+La responsabilité du Donneur d'ordre au titre du présent contrat est plafonnée à 100 % du montant du contrat.
+La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 120 % du montant du contrat.
+
+Article 10 - Droit applicable
+Le présent contrat est soumis au droit français. Tout différend relatif à son exécution sera porté devant les juridictions compétentes, après une tentative de règlement amiable.
