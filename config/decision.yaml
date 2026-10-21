@@ -340,11 +340,16 @@ sous_traitance:
   # avant les preuves : des procès-verbaux remis ne nomment pas de norme, et une citation
   # qui renvoie aux normes en vigueur n'est jamais lue `norme_et_preuves` (acceptée). Les
   # termes de la catégorie acceptée sont des formes verbales actives suivies d'un article
-  # défini (« remet les procès-verbaux d'essai ») : une négation s'insère entre le verbe et
-  # son objet (« ne remet pas les », « ne remet aucun », « sans remettre les », « n'est pas
-  # tenu de remettre les »), et n'en contient donc aucun. Ceux des catégories pénalisées
-  # restent larges. Une forme positive qui manque pousse le modèle vers une pénalité si la
-  # citation contient un terme d'une catégorie pénalisée (« conforme à la norme »…), sens
+  # défini (« remet les procès-verbaux d'essai ») : une négation du verbe s'insère entre le
+  # verbe et son objet (« ne remet pas les », « ne remet aucun », « sans remettre les »,
+  # « n'est pas tenu de remettre les »), et n'en contient donc aucun. Limite, les termes
+  # étant cherchés comme sous-chaînes de la citation : une négation portée par le sujet
+  # (« aucun sous-traitant ne remet les procès-verbaux d'essai ») ou une restriction
+  # (« ne remet les … que sur demande », « … s'il le juge utile ») contient le terme, et
+  # une extraction `norme_et_preuves` n'y est pas contredite (sens favorable). Ceux des
+  # catégories pénalisées restent larges. Une forme positive qui manque pousse le modèle
+  # vers une pénalité si la citation contient un terme d'une catégorie pénalisée
+  # (« conforme à la norme »…), sens
   # prudent ; sinon, la citation n'est pas contrôlée. Une forme qu'une négation contient,
   # au contraire, y pousserait la négation : ni nom de preuve seul (« aucun procès-verbal
   # d'essai n'est exigé »), ni participe (« aucun certificat de conformité remis », « sans
