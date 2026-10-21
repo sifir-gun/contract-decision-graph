@@ -28,11 +28,13 @@ PROXY = ROOT / "docker" / "proxy-sortie"
 # commit de master du 28/09/2026 : les correctifs de sécurité publiés après la v0.1.0
 # (#326 adresses NAT64 locales, #328 connexions vers soi, #329 validation des CRL)
 SMOKESCREEN_COMMIT = "6c44698887826662733b47bbdc461aabcbb365ee"
-# go.mod de Smokescreen : go 1.26.0 ; 1.26.9 (12/10/2026) : failles de net/http du 08/10
-GO = "1.26.9"
-GO_SHA256 = {  # https://go.dev/dl/?mode=json, relevé le 12/10/2026
-    "amd64": "42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d",
-    "arm64": "4a97373d49fcacdcf3694fea368a500b00ee3e963974f3e7514132717632f052",
+# go.mod de Smokescreen : go 1.26.0 ; 1.26.9 (12/10/2026) : failles de net/http du
+# 08/10 ; 1.26.10 (21/10/2026) : GO-2026-6809, intermédiaires compromis refusés par
+# crypto/x509
+GO = "1.26.10"
+GO_SHA256 = {  # https://go.dev/dl/?mode=json, relevé le 21/10/2026
+    "amd64": "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5",
+    "arm64": "3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797",
 }
 NONROOT = "65532:65532"
 
