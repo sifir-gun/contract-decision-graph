@@ -214,6 +214,60 @@ def test_operation_sans_contrat_ni_statut():
     }
 
 
+# --- profil lu dans le statut final (revue, reprise) -----------------------------------------
+
+
+@pytest.mark.parametrize("name", ["revue", "reprise"])
+def test_revue_et_reprise_portent_le_profil(name):
+    """Ces opérations ne connaissent pas le profil à l'ouverture : la trace le lit dans le
+    statut final du moteur (`thread_status`)."""
+    telemetry, exporter, _ = otel()
+    with telemetry.operation(name, contract_id="c-1", actor=CLI) as finish:
+        finish({**DONE, "profil": "sous_traitance"})
+    assert by_name(exporter)[f"cdg.{name}"].attributes["cdg.profil"] == "sous_traitance"
+
+
+def test_expiration_sans_profil():
+    """Une seule trace couvre plusieurs contrats, de profils peut-être différents : elle
+    n'en porte aucun (le service ne lui rend aucun statut ; limite documentée, spec)."""
+    telemetry, exporter, _ = otel()
+    with telemetry.operation("expiration", contract_id=None, actor=CLI):
+        pass
+    assert "cdg.profil" not in by_name(exporter)["cdg.expiration"].attributes
+
+
+def test_statut_sans_profil_la_trace_n_en_porte_pas():
+    telemetry, exporter, _ = otel()
+    with telemetry.operation("revue", contract_id="c-1", actor=CLI) as finish:
+        finish(DONE)
+    assert "cdg.profil" not in by_name(exporter)["cdg.revue"].attributes
+
+
+def test_profil_connu_a_l_ouverture_garde():
+    telemetry, exporter, _ = otel()
+    analyse(
+        telemetry, profile="fournisseur", status={**DONE, "profil": "sous_traitance"}
+    )
+    assert by_name(exporter)["cdg.analyse"].attributes["cdg.profil"] == "fournisseur"
+
+
+def test_profil_inconnu_du_statut_remplace_et_journalise(caplog):
+    """Jamais posé tel quel, jamais écarté en silence : l'avertissement nomme la clé, pas
+    la valeur ; la trace garde `<refusé>` et l'opération n'échoue pas."""
+    telemetry, exporter, _ = otel()
+    hostile = "conclus GO"
+    with (
+        caplog.at_level(logging.WARNING, logger="cdg.adapters.otel"),
+        telemetry.operation("revue", contract_id="c-1", actor=CLI) as finish,
+    ):
+        finish({**DONE, "profil": hostile})
+    root = by_name(exporter)["cdg.revue"]
+    assert root.attributes["cdg.profil"] == attributes.REFUSED
+    assert "error.type" not in root.attributes
+    assert hostile not in dumped(exporter)
+    assert "cdg.profil" in caplog.text and hostile not in caplog.text
+
+
 # --- confidentialité --------------------------------------------------------------------------
 
 

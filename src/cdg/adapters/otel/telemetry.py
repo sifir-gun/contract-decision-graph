@@ -51,7 +51,7 @@ from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import CONTRACT_ID
 from cdg.domain.models import Usage
 from cdg.domain.numeric import rounded
-from cdg.domain.profiles import Profile
+from cdg.domain.profiles import Profile, parse
 from cdg.domain.version import CodeVersion
 from cdg.ports.telemetry import Finish, LLMCall, Operation, Telemetry
 
@@ -120,6 +120,24 @@ def _session(contract_id: str | None) -> str | None:
         return contract_id
     log.warning("attribut langfuse.session.id : identifiant hors du format, remplacé")
     return attributes.REFUSED
+
+
+def _profile_of(status: Mapping[str, Any]) -> str | None:
+    """Profil lu dans le statut final du moteur (`thread_status`), pour les opérations qui
+    ne le connaissent pas à l'ouverture (revue, reprise). Un statut sans profil n'en donne
+    pas. Un profil inconnu n'est jamais posé tel quel ni écarté en silence : remplacé par
+    `REFUSED`, comme toute valeur refusée, et l'avertissement nomme la clé, jamais la
+    valeur (une trace ne casse pas l'opération)."""
+    value = status.get("profil")
+    if value is None:
+        return None
+    try:
+        return parse(value)
+    except ValueError:
+        log.warning(
+            "attribut cdg.profil : profil inconnu dans le statut final, remplacé"
+        )
+        return attributes.REFUSED
 
 
 def _failed(span: Span, exc: BaseException) -> dict[str, Any]:
@@ -211,6 +229,8 @@ class OtelTelemetry:
                         "cdg.decision.finale": state.status.get("final_decision"),
                         "cdg.rejet": bool(state.status.get("reject_reason")),
                     }
+                    if profile is None:  # revue, reprise : lu dans le statut final
+                        values["cdg.profil"] = _profile_of(state.status)
                 values |= {
                     "cdg.appels_llm": state.calls,
                     "cdg.tokens.entree": state.tokens_in,

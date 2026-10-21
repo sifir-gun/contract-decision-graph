@@ -132,6 +132,10 @@ def test_revue_et_expiration_ont_leur_trace_de_meme_session(otel):
         "termine",
         "NO_GO",
     )
+    # la revue porte le profil du contrat (lu dans le statut final) ; l'expiration, une
+    # trace pour plusieurs contrats, n'en porte aucun
+    assert revue.attributes["cdg.profil"] == "fournisseur"
+    assert "cdg.profil" not in roots[3].attributes
 
 
 def test_acteur_de_la_revue_sur_sa_trace():
@@ -215,8 +219,8 @@ def test_une_trace_par_analyse_reprise(otel):
         (r.name, r.attributes["langfuse.session.id"], r.attributes["cdg.etat"])
         for r in roots
     ] == [("cdg.reprise", "c-a", "termine"), ("cdg.reprise", "c-b", "termine")]
-    # le profil n'est lu qu'une fois la trace ouverte : la reprise n'en porte pas
-    assert all("cdg.profil" not in r.attributes for r in roots)
+    # le profil n'est connu qu'une fois la reprise faite : lu dans le statut final
+    assert [r.attributes["cdg.profil"] for r in roots] == ["fournisseur", "fournisseur"]
     # chaque contrat compte ses propres tentatives
     assert [
         s.attributes["cdg.tentative"]
@@ -348,6 +352,14 @@ def test_aucun_texte_des_contrats_du_jeu_dans_les_traces(otel):
         if call["node"] == "explain"
         for finding in faithful_explanation(call["user"])["findings"]
     ]
+    # chaque revue porte le profil de son contrat, la sous-traitance comprise
+    revues = {
+        s.attributes["langfuse.session.id"]: s.attributes.get("cdg.profil")
+        for s in exporter.get_finished_spans()
+        if s.name == "cdg.revue"
+    }
+    assert {contracts[i].profile for i in revues} == {"fournisseur", "sous_traitance"}
+    assert {i: contracts[i].profile for i in revues} == revues
     out = dumped(exporter, reader)
     assert exporter.get_finished_spans(), "aucune trace : le test passerait à vide"
     found = {window for source in sources for window in leaks(source, out)}
