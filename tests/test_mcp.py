@@ -117,6 +117,9 @@ def test_quatre_outils_et_leurs_annotations(mode, request):
     }
     assert all(tool.title and tool.description for tool in found.values())
     assert all(tool.output_schema for tool in found.values())
+    # en démonstration seulement, un contrat du jeu n'est admis que sous son profil
+    description = found["analyser_contrat"].description
+    assert ("sous son propre profil" in description) == (mode == "demo")
 
 
 def test_aucun_outil_de_decision(real):
@@ -186,6 +189,8 @@ def test_instructions_du_serveur(real, demo):
         assert "aucun outil de décision" in text
         assert "non fiable" in text
         assert "ni par la CLI" in text  # ni par un autre chemin de l'assistant
+        # les contrats de chaque profil, pas les seuls contrats fournisseurs
+        assert all(profile in text for profile in profiles.PROFILES)
     assert "démonstration" in demo[0].instructions
     assert "démonstration" not in real[0].instructions
 
