@@ -260,11 +260,12 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
         key=lambda item: item[0].start(),
     )
     found: set[Citation] = set()
-    # fin du dernier nom pris après une citation : il ne sert pas de nom avant à la
-    # suivante (« art. 1171 du Code civil, art. L442-1 du Code de commerce »)
+    # fin du dernier nom pris ou consommé après une citation : il ne sert pas de nom
+    # avant à la suivante (« art. 1171 du Code civil, art. L442-1 du Code de commerce »)
     taken = 0
-    # nom laissé par une énumération à la citation suivante, qu'il ouvre (`_opens`) : il
-    # en est le nom avant, même séparé d'elle par « l' » (« … C. com., l'article L442-1 »)
+    # nom laissé à la citation suivante, qu'il ouvre (`_opens`), par une citation qui a
+    # déjà un nom avant : il en est le nom avant, même séparé d'elle, après une
+    # énumération, par « l' » (« … et 1231-5 C. com., l'article L442-1 »)
     left: str | None = None
     for index, (match, number, form) in enumerate(matches):
         numbers = [form(n) for n in re.findall(number, match[1], re.IGNORECASE)]
@@ -281,39 +282,46 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
         if before is not None:
             sources[0] = before
         following = matches[index + 1][0].start() if index + 1 < len(matches) else None
-        # le nom qui suit est laissé à la citation suivante quand celle-ci a déjà un nom
-        # avant : pour une citation seule, toujours (« C. com., art. L441-10 C. civ.,
-        # art. 1231-5 ») ; pour une énumération, s'il ouvre la référence suivante
-        # (`_opens` : « C. civ., art. 1171 et 1231-5 C. com., art. L442-1 »)
         enumeration = len(numbers) > 1
-        if (
-            after is not None
-            and before is not None
-            and enumeration
-            and _opens(text, match.end(), after, following)
-        ):
-            left = after[0]
-        elif after is not None and (before is None or enumeration):
+        if after is not None and before is None:
             sources[-1] = after[0]
             taken = match.end() + after[1]
+        elif after is not None:
+            # la citation a un nom avant : le nom qui la suit ouvre la suivante (`_opens`)
+            # ou il est consommé, pris par le dernier numéro d'une énumération, ignoré par
+            # une citation seule, que le nom avant rattache (« C. com., art. L441-10 du
+            # Code civil » : Code de commerce)
+            if _opens(text, match.end(), after, following, enumeration=enumeration):
+                left = after[0]
+            else:
+                if enumeration:
+                    sources[-1] = after[0]
+                taken = match.end() + after[1]
         found |= set(zip(sources, numbers, strict=True))
     return found
 
 
 def _opens(
-    text: str, cited: int, after: tuple[str, int, bool], following: int | None
+    text: str,
+    cited: int,
+    after: tuple[str, int, bool],
+    following: int | None,
+    *,
+    enumeration: bool,
 ) -> bool:
-    """Le nom `after` (`_source_after`), qui suit l'énumération finie à `cited`, ouvre la
+    """Le nom `after` (`_source_after`), qui suit la citation finie à `cited`, ouvre la
     citation suivante, qui commence à `following` : il en est le nom avant (« C. com.,
-    art. L442-1 », « C. com., l'article L442-1 »). Seulement si aucune préposition ne le
-    précède (« … et L112-2 du code monétaire et financier, art. L441-10 » : il suit
-    L112-2), et si seuls des séparateurs, ou « l'article » ou « l'art. », le séparent de
-    la citation suivante (`_OPENING`)."""
+    art. L441-10 C. civ., art. 1231-5 », « … et 1231-5 C. com., l'article L442-1 »).
+    Seulement si aucune préposition ne le précède (« … et L112-2 du code monétaire et
+    financier, art. L441-10 » : il suit L112-2), et si seuls des séparateurs le séparent
+    de la citation suivante (`_BEFORE`), ou, après une énumération, « l'article » ou
+    « l'art. » (`_OPENING`). Limite : après une citation seule, « l' » ne l'ouvre pas."""
     _, length, preposition = after
+    gap = _OPENING if enumeration else _BEFORE
     return (
         following is not None
         and not preposition
-        and _OPENING.fullmatch(text[cited + length : following]) is not None
+        and gap.fullmatch(text[cited + length : following]) is not None
     )
 
 
@@ -324,22 +332,34 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     nom (`names` : citation et titre de chaque source du corpus) le touche, avant lui
     (« C. mon. fin., art. L112-2 ») ou après lui (« l'article L112-2 du code monétaire et
     financier »), casse ignorée, sur le texte normalisé ; sinon à aucune (None). Un nom
-    absent du corpus (« code de la consommation ») ne rattache rien. Un nom pris après
-    une citation ne sert pas de nom avant à la suivante. Dans une énumération, seul le
-    numéro que le nom touche lui est rattaché : le dernier pour un nom qui suit
-    (« articles 1171 et L442-1 du Code de commerce » : L442-1), le premier pour un nom qui
-    précède (« C. civ., art. 1171 et L442-1 » : 1171), les deux s'il y a un nom de chaque
-    côté (« C. civ., art. 1231-1 et L112-2 du code monétaire et financier »), sauf si le
-    nom qui suit ouvre la référence suivante : aucune préposition ne le précède, et seuls
-    des séparateurs, ou « l'article » ou « l'art. », le séparent d'elle (« C. civ., art.
-    1171 et 1231-5 C. com., art. L442-1 », « …, l'article L442-1 » : il est à L442-1). Un
-    nom précédé d'une préposition suit sa citation (« C. civ., art. 1171 et L112-2 du code
-    monétaire et financier, art. L441-10 » : il est à L112-2). Les autres numéros sont
-    sans source, comparés par leur seul numéro. Limite : un numéro d'une énumération qui
-    viserait l'homonyme d'un autre code passe, comme une citation sans nom ; elle vaut
-    aussi pour le texte du constat, écrit par le code et lu par la même fonction
-    (`_citable`) : « (art. 44 à 46 RGPD) » laisse 44 sans source, citable sous tout nom
-    (aucun homonyme de 44 au corpus)."""
+    absent du corpus (« code de la consommation ») ne rattache rien.
+
+    Un nom pris après une citation ne sert pas de nom avant à la suivante. Une citation
+    qui a un nom avant consomme aussi le nom qui la suit et la touche, avec ou sans
+    préposition : il ne sert à aucune autre citation (« C. com., art. L441-10 du Code de
+    commerce, art. 1231-5 du Code civil » : 1231-5 au Code civil). S'ils désignent deux
+    sources, le nom avant l'emporte (« C. com., art. L441-10 du Code civil » : Code de
+    commerce). Sauf si ce nom ouvre la citation suivante (`_opens`) : aucune préposition
+    ne le précède, et seuls des séparateurs le séparent d'elle (« C. com., art. L441-10
+    C. civ., art. 1231-5 » : C. civ. est à 1231-5), ou, après une énumération seulement,
+    « l'article » ou « l'art. ».
+
+    Dans une énumération, seul le numéro que le nom touche lui est rattaché : le dernier
+    pour un nom qui suit (« articles 1171 et L442-1 du Code de commerce » : L442-1), le
+    premier pour un nom qui précède (« C. civ., art. 1171 et L442-1 » : 1171), les deux
+    s'il y a un nom de chaque côté (« C. civ., art. 1231-1 et L112-2 du code monétaire et
+    financier »), sauf si le nom qui suit ouvre la citation suivante (« C. civ., art. 1171
+    et 1231-5 C. com., art. L442-1 », « …, l'article L442-1 » : il est à L442-1). Un nom
+    précédé d'une préposition n'ouvre jamais la suivante (« C. civ., art. 1171 et L112-2
+    du code monétaire et financier, art. L441-10 » : il est à L112-2). Les autres numéros
+    sont sans source, comparés par leur seul numéro.
+
+    Limites. Un numéro d'une énumération qui viserait l'homonyme d'un autre code passe,
+    comme une citation sans nom ; cela vaut aussi pour le texte du constat, écrit par le
+    code et lu par la même fonction (`_citable`) : « (art. 44 à 46 RGPD) » laisse 44 sans
+    source, citable sous tout nom (aucun homonyme de 44 au corpus). Après une citation
+    seule, « l'article » n'ouvre pas la suivante : « C. com., art. L441-10 C. civ.,
+    l'article 1231-5 » laisse 1231-5 sans source, comparé par son seul numéro."""
     return _citations(text, _lookup(names))
 
 

@@ -275,6 +275,23 @@ CMF = "code-monetaire-financier"
             "(art. 1171 C. civ., art. L442-1 C. com.)",
             {("code-civil", "1171"), ("code-commerce", "L442-1")},
         ),
+        # une citation qui a un nom avant consomme aussi le nom qui la suit et la
+        # touche : il ne sert pas de nom avant à la suivante
+        (
+            "C. com., art. L441-10 du Code de commerce, art. 1231-5 du Code civil",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        (
+            "C. civ., art. 1171 du Code civil, art. L442-1 du Code de commerce",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        # deux noms de sources différentes autour d'une citation : le nom avant l'emporte
+        ("C. com., art. L441-10 du Code civil", {("code-commerce", "L441-10")}),
+        # limite : « l'article » n'ouvre la citation suivante qu'après une énumération
+        (
+            "C. com., art. L441-10 C. civ., l'article 1231-5",
+            {("code-commerce", "L441-10"), (None, "1231-5")},
+        ),
         # une énumération : seul le numéro que le nom touche lui est rattaché, après
         # comme avant ; les autres, sans source, comparés par leur seul numéro
         (
@@ -421,6 +438,29 @@ def test_homonymes_compares_par_source():
     assert reasons("Voir l'article L1-1 du code B.", names={}) == []
 
 
+def test_citation_entre_deux_noms_le_nom_avant_l_emporte():
+    # deux noms de sources différentes touchent une même citation : elle est rattachée
+    # au nom avant ; le nom qui la suit, consommé, ne nomme pas la citation suivante
+    finding, req = homonym_request()
+
+    def reasons(text):
+        d = draft(entry(finding, text=text), entry(TRANSFERT))
+        return explanation.refusals(d, req, names=HOMONYM_NAMES)
+
+    assert reasons("Voir Code A, art. L1-1 du code B.") == []
+    assert reasons("Voir Code B, art. L1-1 du code A.") == [
+        (
+            "conformite-1 : article cité hors des références retenues pour la clause "
+            "accord_traitement_donnees : L1-1 (code-b)"
+        )
+    ]
+    text = "Voir Code A, art. 2 du code B, art. L1-1."
+    assert explanation.citations(text, HOMONYM_NAMES) == {
+        (CODE_A, "2"),
+        (None, "L1-1"),
+    }
+
+
 # Explications acceptées aujourd'hui (par le seul numéro, sans nom de source) : celles des
 # tests de ce fichier, celle de `faithful_explanation`, et des citations nommées justes.
 
@@ -466,6 +506,9 @@ TROIS_ARTICLES = retained_alone(
     "responsabilite_fournisseur",
     ["C. civ., art. 1171", "C. civ., art. 1231-5", "C. com., art. L442-1"],
     domain="juridique",
+)
+DELAI_PENALITES = retained_alone(
+    "delai_paiement", ["C. com., art. L441-10", "C. civ., art. 1231-5"]
 )
 TROIS_CODES = retained_alone(
     "responsabilite_fournisseur",
@@ -625,6 +668,22 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
                 "Au-delà du Code civil, l'article L442-1 sanctionne le déséquilibre.",
             ),
             id="nom-en-fin-de-phrase-puis-l-article",
+        ),
+        # acceptées sur main (7b4655b), vérifié le 21/10/2026 : le nom qui suit une
+        # citation déjà nommée avant elle ne nomme pas la citation suivante
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "C. com., art. L441-10 du Code de commerce, art. 1231-5 du Code civil.",
+            ),
+            id="citation-nommee-deux-fois-puis-reference",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "C. civ., art. 1171 du Code civil, art. L442-1 du Code de commerce.",
+            ),
+            id="deux-codes-nommes-deux-fois",
         ),
     ],
 )
