@@ -182,10 +182,14 @@ _LISTED = re.compile(
     r"[\s,]*\b(?:et|ou)\s+"
     r"(?:(?:le|la|les|du|des|au|aux|de\s+la|à\s+la)\s+|(?:de\s+|à\s+)?l')?\Z"
 )
-# Entre le nom qui suit une énumération et la citation suivante qu'il ouvre (`_opens`) :
-# les mêmes séparateurs, ou le « l' » de « l'article » et de « l'art. » (la citation
-# commence à « art »).
-_OPENING = re.compile(_SEPARATORS + r"(?:\bl')?")
+# Entre le nom qui suit une citation et la citation suivante qu'il ouvre (`_opens`) : les
+# mêmes séparateurs, puis, comme devant une citation (`_INTRODUCED`), une parenthèse
+# ouvrante, deux-points ou « en son » (« Code de commerce : article L441-10 Code civil :
+# article 1231-5 », une liste de références par ligne) ; après une énumération, aussi le
+# « l' » de « l'article » et de « l'art. » (la citation commence à « art »).
+_INTRODUCING = r"(?:(?:[(:]|\ben\s+s(?:on|es)\b)\s*)?"
+_NEXT = re.compile(_SEPARATORS + _INTRODUCING)
+_OPENING = re.compile(_SEPARATORS + _INTRODUCING + r"(?:\bl')?")
 _AFTER = re.compile(
     r"\A\s*(?:de\s+l'annexe(?:\s+[ivxlc]+\b)?\s+)?(?:de\s+l'|d'|(?:du|des|de\s+la|de)\s+)?"
 )
@@ -324,13 +328,22 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
         )
         left = None
         after = _source_after(text[match.end() :], lookup)
-        # un nom qui introduit la citation (parenthèse, deux-points, « en son ») cède au
-        # nom qui la suit (« Hors du Code civil : article L441-10 du Code de commerce »)
-        before = None if named is None or (named[1] and after is not None) else named[0]
-        if before is not None:
-            sources[0] = before
         following = matches[index + 1][0].start() if index + 1 < len(matches) else None
         enumeration = len(numbers) > 1
+        opens = after is not None and _opens(
+            text, match.end(), after, following, enumeration=enumeration
+        )
+        # un nom qui introduit la citation (parenthèse, deux-points, « en son ») cède au
+        # nom qui la suit (« Hors du Code civil : article L441-10 du Code de commerce »),
+        # sauf si ce nom ouvre la citation suivante (« Code civil : article 1171 Code de
+        # commerce : article L442-1 »)
+        before = (
+            None
+            if named is None or (named[1] and after is not None and not opens)
+            else named[0]
+        )
+        if before is not None:
+            sources[0] = before
         if after is not None and before is None:
             sources[-1] = after[0]
             taken = match.end() + after[1]
@@ -339,7 +352,7 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
             # ou il est consommé, pris par le dernier numéro d'une énumération, ignoré par
             # une citation seule, que le nom avant rattache (« C. com., art. L441-10 du
             # Code civil » : Code de commerce)
-            if _opens(text, match.end(), after, following, enumeration=enumeration):
+            if opens:
                 left = after[0]
             else:
                 if enumeration:
@@ -362,11 +375,12 @@ def _opens(
     art. L441-10 C. civ., art. 1231-5 », « … et 1231-5 C. com., l'article L442-1 »).
     Seulement s'il n'est pas lié à sa citation (`_source_after` : ni préposition, « … et
     L112-2 du code monétaire et financier, art. L441-10 » : il suit L112-2, ni
-    parenthèses), et si seuls des séparateurs le séparent de la citation suivante
-    (`_BEFORE`), ou, après une énumération, « l'article » ou « l'art. » (`_OPENING`).
-    Limite : après une citation seule, « l' » ne l'ouvre pas."""
+    parenthèses), et si seuls des séparateurs le séparent de la citation suivante, suivis
+    au besoin d'une parenthèse ouvrante, de deux-points ou de « en son » (`_NEXT`), ou,
+    après une énumération, aussi de « l'article » ou « l'art. » (`_OPENING`). Limite :
+    après une citation seule, « l' » ne l'ouvre pas."""
     _, length, bound = after
-    gap = _OPENING if enumeration else _BEFORE
+    gap = _OPENING if enumeration else _NEXT
     return (
         following is not None
         and not bound
@@ -391,17 +405,21 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     « ou » (« Le Code de commerce et le Code civil : art. L441-10 et art. 1231-5 ») : rien
     ne dit lequel des noms vise la citation, comparée par son seul numéro. Sous ces trois
     formes, le nom avant cède à un nom qui suit la citation (« Hors du Code civil :
-    article L441-10 du Code de commerce » : Code de commerce).
+    article L441-10 du Code de commerce » : Code de commerce), sauf si ce nom ouvre la
+    citation suivante (« Code civil : article 1171 Code de commerce : article L442-1 »,
+    une liste de références par ligne : chacune à son code).
 
     Un nom pris après une citation ne sert pas de nom avant à la suivante. Une citation
     qui a un nom avant consomme aussi le nom qui la suit et la touche, avec ou sans
     préposition : il ne sert à aucune autre citation (« C. com., art. L441-10 du Code de
     commerce, art. 1231-5 du Code civil » : 1231-5 au Code civil). S'ils désignent deux
     sources, le nom avant sous la forme des références l'emporte (« C. com., art. L441-10
-    du Code civil » : Code de commerce). Sauf si ce nom ouvre la citation suivante (`_opens`) : il n'est pas lié à
-    la sienne (ni préposition, ni parenthèses), et seuls des séparateurs le séparent de la
-    suivante (« C. com., art. L441-10 C. civ., art. 1231-5 » : C. civ. est à 1231-5), ou,
-    après une énumération seulement, « l'article » ou « l'art. ».
+    du Code civil » : Code de commerce). Sauf si ce nom ouvre la citation suivante
+    (`_opens`) : il n'est pas lié à la sienne (ni préposition, ni parenthèses), et seuls
+    des séparateurs le séparent de la suivante, au besoin suivis d'une parenthèse
+    ouvrante, de deux-points ou de « en son » (« C. com., art. L441-10 C. civ., art.
+    1231-5 » ; « C. com., art. L441-10 C. civ. : art. 1231-5 » : C. civ. est à 1231-5),
+    ou, après une énumération seulement, « l'article » ou « l'art. ».
 
     Dans une énumération, seul le numéro que le nom touche lui est rattaché : le dernier
     pour un nom qui suit (« articles 1171 et L442-1 du Code de commerce » : L442-1), le

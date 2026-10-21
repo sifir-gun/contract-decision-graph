@@ -412,6 +412,28 @@ CPI = "code-propriete-intellectuelle"
             "Le Code civil et le Code de commerce (art. 1171 et L442-1)",
             {(None, "1171"), (None, "L442-1")},
         ),
+        # nom qui suit une citation et introduit la suivante (deux-points) : il ouvre la
+        # suivante, il ne prend pas la place du nom avant de la première (liste de
+        # références, une par ligne)
+        (
+            "Code civil : article 1171 Code de commerce : article L442-1",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "Code de commerce : article L441-10\nCode civil : article 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        (
+            "Code monétaire et financier : article L112-2 CPI : article L112-2",
+            {
+                ("code-monetaire-financier", "L112-2"),
+                ("code-propriete-intellectuelle", "L112-2"),
+            },
+        ),
+        (
+            "C. com., art. L441-10 C. civ. : art. 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
         # limite : « l' » après un nom qui ne suit aucune citation (comme « Au-delà du
         # Code civil, l'article L442-1 »)
         ("Selon le CPI, l'article L112-2", {(None, "L112-2")}),
@@ -820,6 +842,22 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
         pytest.param(
             *alone(DELAI, "Hors du Code civil : article L441-10 du Code de commerce."),
             id="nom-avant-deux-points-puis-nom-apres",
+        ),
+        # acceptées sur main (7b4655b), vérifié le 21/10/2026
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "Références :\nCode de commerce : article L441-10\n"
+                "Code civil : article 1231-5",
+            ),
+            id="liste-de-references-par-ligne",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Code civil : article 1171 Code de commerce : article L442-1.",
+            ),
+            id="noms-avant-deux-points-empiles",
         ),
         pytest.param(
             *alone(
