@@ -258,14 +258,18 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
     # suivante (« art. 1171 du Code civil, art. L442-1 du Code de commerce »)
     taken = 0
     for match, number, form in matches:
+        numbers = [form(n) for n in re.findall(number, match[1], re.IGNORECASE)]
         # le nom qui précède l'emporte : celui qui suit peut ouvrir la référence
-        # suivante (« C. com., art. L441-10 C. civ., art. 1231-5 »)
+        # suivante (« C. com., art. L441-10 C. civ., art. 1231-5 ») ; dans une
+        # énumération, il touche le premier numéro, le nom qui suit le dernier
+        touched = 0
         source = _source_before(text[taken : match.start()], lookup)
         if source is None and (after := _source_after(text[match.end() :], lookup)):
             source, length = after
             taken = match.end() + length
+            touched = len(numbers) - 1
         found |= {
-            (source, form(n)) for n in re.findall(number, match[1], re.IGNORECASE)
+            (source if rank == touched else None, n) for rank, n in enumerate(numbers)
         }
     return found
 
@@ -278,9 +282,12 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     (« C. mon. fin., art. L112-2 ») ou après lui (« l'article L112-2 du code monétaire et
     financier »), casse ignorée, sur le texte normalisé ; sinon à aucune (None). Un nom
     absent du corpus (« code de la consommation ») ne rattache rien. Un nom pris après
-    une citation ne sert pas de nom avant à la suivante. Une énumération suivie d'un seul
-    nom (« articles 1171 et L442-1 du Code de commerce ») rattache tous ses numéros à ce
-    nom : le texte l'affirme."""
+    une citation ne sert pas de nom avant à la suivante. Dans une énumération, seul le
+    numéro que le nom touche lui est rattaché : le dernier pour un nom qui suit
+    (« articles 1171 et L442-1 du Code de commerce » : L442-1), le premier pour un nom qui
+    précède (« C. civ., art. 1171 et L442-1 » : 1171) ; les autres sont sans source,
+    comparés par leur seul numéro. Limite : un numéro d'une énumération qui viserait
+    l'homonyme d'un autre code passe, comme une citation sans nom."""
     return _citations(text, _lookup(names))
 
 

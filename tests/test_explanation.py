@@ -255,7 +255,8 @@ CMF = "code-monetaire-financier"
         ("l’article L. 441-10 du Code de commerce", {("code-commerce", "L441-10")}),
         ("ART. 1231-5 DU CODE CIVIL", {("code-civil", "1231-5")}),
         ("(art. 28 RGPD)", {("rgpd", "28")}),
-        ("articles 44 à 46 du RGPD", {("rgpd", "44"), ("rgpd", "46")}),
+        # une énumération : seul le numéro que le nom touche lui est rattaché
+        ("articles 44 à 46 du RGPD", {(None, "44"), ("rgpd", "46")}),
         # chaque citation a sa source ; le nom qui précède l'emporte sur celui qui suit
         (
             "RGPD, art. 28 ; C. civ., art. 1231-5",
@@ -274,10 +275,20 @@ CMF = "code-monetaire-financier"
             "(art. 1171 C. civ., art. L442-1 C. com.)",
             {("code-civil", "1171"), ("code-commerce", "L442-1")},
         ),
-        # une énumération suivie d'un seul nom : tous ses numéros à ce nom
+        # une énumération : seul le numéro que le nom touche lui est rattaché, après
+        # comme avant ; les autres, sans source, comparés par leur seul numéro
         (
             "articles 1171 et L442-1 du Code de commerce",
-            {("code-commerce", "1171"), ("code-commerce", "L442-1")},
+            {(None, "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "C. civ., art. 1171 et L442-1",
+            {("code-civil", "1171"), (None, "L442-1")},
+        ),
+        # homonymes du corpus : L112-2 au Code monétaire et financier, 1231-1 sans source
+        (
+            "les articles 1231-1 et L112-2 du code monétaire et financier",
+            {(None, "1231-1"), (CMF, "L112-2")},
         ),
         # aucun nom ne touche la citation : aucune source
         ("article 28", {(None, "28")}),
@@ -415,6 +426,9 @@ DEUX_CODES = retained_alone(
     ["C. civ., art. 1171", "C. com., art. L442-1"],
     domain="juridique",
 )
+INDEXATION = retained_alone(
+    "revision_prix", ["C. civ., art. 1231-1", "C. mon. fin., art. L112-2"]
+)
 POINT_RETENU = TRANSFERT.model_copy(
     update={"references": ["Règl. (UE) 748/2012, annexe I, point 21.A.307"]}
 )
@@ -513,12 +527,47 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
             *alone(DEUX_CODES, "Voir C. civ., art. 1171 ; C. com., art. L442-1."),
             id="deux-codes-nom-avant",
         ),
+        # acceptée sur main (7b4655b), vérifié le 21/10/2026
+        pytest.param(
+            *alone(DEUX_CODES, "Les articles 1171 et L442-1 du Code de commerce."),
+            id="deux-codes-enumeration",
+        ),
+        pytest.param(
+            *alone(
+                INDEXATION,
+                "Les articles 1231-1 et L112-2 du code monétaire et financier.",
+            ),
+            id="homonyme-dans-une-enumeration",
+        ),
     ],
 )
 def test_explications_acceptees_aujourd_hui_le_restent(d, req):
     # acceptée aujourd'hui : par le seul numéro, aucune source n'étant nommée
     assert explanation.refusals(d, req, names={}) == []
     assert explanation.refusals(d, req, names=NAMES) == []
+
+
+def test_enumeration_le_numero_touche_compare_par_source():
+    # L112-2, que touche le nom du Code monétaire et financier, est refusé si seul son
+    # homonyme du CPI est retenu ; 1231-1, sans source, comparé par son seul numéro
+    finding = retained_alone(
+        "revision_prix", ["C. civ., art. 1231-1", "CPI, art. L112-2"]
+    )
+    text = "Les articles 1231-1 et L112-2 du code monétaire et financier."
+    assert explanation.refusals(*alone(finding, text), names=NAMES) == [
+        (
+            "financier-1 : article cité hors des références retenues pour la clause "
+            "revision_prix : L112-2 (code-monetaire-financier)"
+        )
+    ]
+    # limite : un numéro de l'énumération que le nom ne touche pas passe, même s'il vise
+    # l'homonyme d'un autre code (ici L112-2 du CPI, quand seul celui du C. mon. fin.
+    # est retenu), comme une citation sans nom
+    finding = retained_alone(
+        "revision_prix", ["C. mon. fin., art. L112-2", "CPI, art. L111-1"]
+    )
+    text = "Les articles L112-2 et L111-1 du CPI."
+    assert explanation.refusals(*alone(finding, text), names=NAMES) == []
 
 
 # --- Contrôles : critère 7 ---------------------------------------------------------------------
