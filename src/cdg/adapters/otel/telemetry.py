@@ -47,11 +47,12 @@ from cdg.application.observation import (
     cost_usd,
 )
 from cdg.application.service import state_label
+from cdg.domain import profiles
 from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import CONTRACT_ID
 from cdg.domain.models import Usage
 from cdg.domain.numeric import rounded
-from cdg.domain.profiles import Profile, parse
+from cdg.domain.profiles import Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.telemetry import Finish, LLMCall, Operation, Telemetry
 
@@ -60,6 +61,10 @@ SERVICE = "contract-decision-graph"
 PROVIDERS = {"mistral": "mistral_ai", "anthropic": "anthropic"}
 IDENTITIES = ("aucune", "sub")
 Identity = Literal["aucune", "sub"]
+# opérations qui ne connaissent pas le profil à l'ouverture et le lisent dans le statut
+# final du moteur (spec-profils-sous-traitance.md, « Traces »). L'expiration n'en lit
+# aucun : une seule trace couvre plusieurs contrats, de profils peut-être différents.
+PROFILE_FROM_STATUS: frozenset[Operation] = frozenset({"revue", "reprise"})
 log = logging.getLogger(__name__)
 
 
@@ -123,16 +128,18 @@ def _session(contract_id: str | None) -> str | None:
 
 
 def _profile_of(status: Mapping[str, Any]) -> str | None:
-    """Profil lu dans le statut final du moteur (`thread_status`), pour les opérations qui
-    ne le connaissent pas à l'ouverture (revue, reprise). Un statut sans profil n'en donne
-    pas. Un profil inconnu n'est jamais posé tel quel ni écarté en silence : remplacé par
-    `REFUSED`, comme toute valeur refusée, et l'avertissement nomme la clé, jamais la
-    valeur (une trace ne casse pas l'opération)."""
-    value = status.get("profil")
-    if value is None:
+    """Profil lu dans le statut final du moteur (`thread_status`, qui pose toujours la clé
+    `profil`), pour la revue et la reprise. Jamais de valeur par défaut :
+    - clé absente (le moteur a manqué à son contrat) : avertissement qui nomme la clé, pas
+      d'attribut ;
+    - profil inconnu, `None` compris : remplacé par `REFUSED`, comme toute valeur refusée,
+      et l'avertissement nomme la clé, jamais la valeur.
+    Dans les deux cas la trace n'échoue pas (échec ouvert)."""
+    if "profil" not in status:
+        log.warning("attribut cdg.profil : clé profil absente du statut final")
         return None
     try:
-        return parse(value)
+        return profiles.parse(status["profil"])
     except ValueError:
         log.warning(
             "attribut cdg.profil : profil inconnu dans le statut final, remplacé"
@@ -229,7 +236,7 @@ class OtelTelemetry:
                         "cdg.decision.finale": state.status.get("final_decision"),
                         "cdg.rejet": bool(state.status.get("reject_reason")),
                     }
-                    if profile is None:  # revue, reprise : lu dans le statut final
+                    if profile is None and name in PROFILE_FROM_STATUS:
                         values["cdg.profil"] = _profile_of(state.status)
                 values |= {
                     "cdg.appels_llm": state.calls,
