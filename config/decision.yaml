@@ -349,14 +349,13 @@ sous_traitance:
   # une extraction `norme_et_preuves` n'y est pas contredite (sens favorable). Ceux des
   # catégories pénalisées restent larges. Une forme positive qui manque pousse le modèle
   # vers une pénalité si la citation contient un terme d'une catégorie pénalisée
-  # (« conforme à la norme »…), sens
-  # prudent ; sinon, la citation n'est pas contrôlée. Une forme qu'une négation contient,
-  # au contraire, y pousserait la négation : ni nom de preuve seul (« aucun procès-verbal
-  # d'essai n'est exigé »), ni participe (« aucun certificat de conformité remis », « sans
-  # rapport d'essai à remettre »), ni « accompagné(e)(s) des … » (« ne sont pas
-  # accompagnées des … »), ni « livré avec un … » (« n'est pas livré avec un … »). Chaque
-  # preuve est nommée avec son complément : un procès-verbal de réception n'est pas une
-  # preuve d'essai.
+  # (« conforme à la norme »…), sens prudent ; sinon, la citation n'est pas contrôlée.
+  # Une forme qu'une négation contient, au contraire, y pousserait la négation : ni nom
+  # de preuve seul (« aucun procès-verbal d'essai n'est exigé »), ni participe (« aucun
+  # certificat de conformité remis », « sans rapport d'essai à remettre »), ni
+  # « accompagné(e)(s) des … » (« ne sont pas accompagnées des … »), ni « livré avec
+  # un … » (« n'est pas livré avec un … »). Chaque preuve est nommée avec son
+  # complément : un procès-verbal de réception n'est pas une preuve d'essai.
   category_terms:
     protection_design:
       reutilisation_autorisee:
