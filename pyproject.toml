@@ -73,6 +73,10 @@ mcp = [
 
 [tool.uv]
 default-groups = ["dev", "mcp"]
+# versions corrigées qu'une bibliothèque refuse encore par sa borne ; chacune est retirée
+# dès qu'aucune ne la refuse (tests/test_dependances.py). pillow : huit failles corrigées
+# en 13.0.0 seulement, fastembed 0.8.1 déclare pillow<13.0 (journal, 21/10/2026)
+override-dependencies = ["pillow>=13.0.0"]
 
 # Vérification des types (mypy) : strict sur domain/, ports/ et application/, mode de base
 # sur adapters/ et cli.py. `strict` ne se règle que globalement : ses options sont reprises
