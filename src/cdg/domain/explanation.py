@@ -443,22 +443,26 @@ def _citable(finding: FindingToExplain, lookup: _Lookup) -> set[Citation]:
     return found
 
 
-def _uncitable(cited: set[Citation], citable: set[Citation]) -> list[str]:
-    """Citations du LLM hors de `citable`, chacune avec sa source si elle en nomme une.
-    Sans source : comparée par son seul numéro, comme avant les homonymes. Avec une
-    source : par source et numéro ; un numéro que le texte du constat cite sans nom de
-    source reste citable sous tout nom."""
+def _uncitable(cited: set[Citation], citable: set[Citation]) -> dict[str, list[str]]:
+    """Citations du LLM hors de `citable`, chacune avec sa source si elle en nomme une,
+    les articles (« article ») à part des points d'annexe (« point d'annexe ») : un numéro
+    d'article est normalisé sans point, un numéro de point en garde au moins un. Sans
+    source : comparée par son seul numéro, comme avant les homonymes. Avec une source :
+    par source et numéro ; un numéro que le texte du constat cite sans nom de source
+    reste citable sous tout nom."""
     numbers = {number for _, number in citable}
     unnamed = {number for source, number in citable if source is None}
-    return sorted(
-        number if source is None else f"{number} ({source})"
-        for source, number in cited
-        if not (
+    found: dict[str, list[str]] = {"article": [], "point d'annexe": []}
+    for source, number in cited:
+        if (
             number in numbers
             if source is None
-            else (source, number) in citable or number in unnamed
-        )
-    )
+            else ((source, number) in citable or number in unnamed)
+        ):
+            continue
+        unit = "point d'annexe" if "." in number else "article"
+        found[unit].append(number if source is None else f"{number} ({source})")
+    return {unit: sorted(wrong) for unit, wrong in found.items()}
 
 
 # --- Contrôles ---------------------------------------------------------------------------
@@ -508,12 +512,14 @@ def refusals(
                 + f"référence non retenue pour la clause {finding.kind} : "
                 + ", ".join(foreign)
             )
+        # motif d'un article mot pour mot, renvoyé au LLM et scellé
         cited = _uncitable(_citations(entry.text, lookup), _citable(finding, lookup))
-        if cited:
-            reasons.append(
-                prefix + "article cité hors des références retenues pour la clause "
-                f"{finding.kind} : {', '.join(cited)}"
-            )
+        for unit, wrong in cited.items():
+            if wrong:
+                reasons.append(
+                    prefix + f"{unit} cité hors des références retenues pour la clause "
+                    f"{finding.kind} : {', '.join(wrong)}"
+                )
 
     return reasons
 

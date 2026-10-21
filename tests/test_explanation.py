@@ -977,9 +977,31 @@ def test_point_d_annexe_hors_references_refuse():
     )
     assert reasons == [
         (
-            "conformite-2 : article cité hors des références retenues pour la clause "
-            "transfert_hors_ue : 21.A.307"
+            "conformite-2 : point d'annexe cité hors des références retenues pour la "
+            "clause transfert_hors_ue : 21.A.307"
         )
+    ]
+
+
+def test_article_et_point_hors_references_chacun_son_motif():
+    # le motif d'un article reste mot pour mot (renvoyé au LLM et scellé) ; celui d'un
+    # point d'annexe le nomme
+    text = (
+        "Le transfert relève de l'art. 28 RGPD et du Règl. (UE) 748/2012, annexe I, "
+        "point 21.A.307."
+    )
+    reasons = explanation.refusals(
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
+    )
+    assert reasons == [
+        (
+            "conformite-2 : article cité hors des références retenues pour la clause "
+            "transfert_hors_ue : 28 (rgpd)"
+        ),
+        (
+            "conformite-2 : point d'annexe cité hors des références retenues pour la "
+            "clause transfert_hors_ue : 21.A.307 (certification-navigabilite)"
+        ),
     ]
 
 
