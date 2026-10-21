@@ -311,7 +311,7 @@ Critères testés avec le vrai modèle : le critère 3 (un constat sans référe
 
 Le CRAG justifie chaque constat par une référence du corpus : encore faut-il que la recherche la lui montre. Un jeu d'évaluation la mesure seule, sans LLM : pour les 21 requêtes que donnent les constats du jeu de démonstration, 55 références attendues, choisies à la lecture des textes et jamais d'après le rattachement que la recherche utilise déjà, puis validées et figées avant toute mesure (`uv run python -m cdg.cli mesure-recherche --profil fournisseur`). Ce jeu est celui du profil fournisseur ; celui de la sous-traitance reste à établir, et `--profil sous_traitance` est refusé d'ici là. Chaque technique n'est gardée que si la mesure progresse sans qu'aucune requête ne perde avec le filtre ([ADR 006](docs/adr-006-recherche.md), détail requête par requête dans le [journal](docs/journal.md)).
 
-| rappel@4 (rang du CRAG) | avant (01/10) | après (02/10) | lecture |
+| rappel@4 (rang du CRAG) | avant (01/10) | après (01/10) | lecture |
 | --- | --- | --- | --- |
 | avec le filtre du CRAG, toutes les références | 75,4 % | **89,3 %** | |
 | avec le filtre, articles de loi seuls | 62,7 % | **84,1 %** | le juge voit l'article attendu |
