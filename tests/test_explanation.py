@@ -299,6 +299,25 @@ CMF = "code-monetaire-financier"
             "C. civ., art. 1171 et 1231-5 C. com., art. L442-1",
             {("code-civil", "1171"), (None, "1231-5"), ("code-commerce", "L442-1")},
         ),
+        # ou qui l'ouvre par « l'article » ou « l'art. »
+        (
+            "C. civ., art. 1171 et 1231-5 C. com., l'article L442-1",
+            {("code-civil", "1171"), (None, "1231-5"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "C. civ., art. 1171 et 1231-5 C. com., l'art. L442-1",
+            {("code-civil", "1171"), (None, "1231-5"), ("code-commerce", "L442-1")},
+        ),
+        # un nom précédé d'une préposition suit sa citation : il n'ouvre pas la suivante
+        (
+            (
+                "C. civ., art. 1171 et L112-2 du code monétaire et financier, "
+                "art. L441-10 du Code de commerce"
+            ),
+            {("code-civil", "1171"), (CMF, "L112-2"), ("code-commerce", "L441-10")},
+        ),
+        # un nom qui ne suit aucune citation n'ouvre pas « l'article » qui le suit
+        ("Au-delà du Code civil, l'article L442-1", {(None, "L442-1")}),
         # homonymes du corpus : L112-2 au Code monétaire et financier, 1231-1 sans source
         (
             "les articles 1231-1 et L112-2 du code monétaire et financier",
@@ -448,6 +467,11 @@ TROIS_ARTICLES = retained_alone(
     ["C. civ., art. 1171", "C. civ., art. 1231-5", "C. com., art. L442-1"],
     domain="juridique",
 )
+TROIS_CODES = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1171", "C. mon. fin., art. L112-2", "C. com., art. L441-10"],
+    domain="juridique",
+)
 POINT_RETENU = TRANSFERT.model_copy(
     update={"references": ["Règl. (UE) 748/2012, annexe I, point 21.A.307"]}
 )
@@ -570,6 +594,37 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
                 TROIS_ARTICLES, "C. civ., art. 1171 et 1231-5 C. com., art. L442-1."
             ),
             id="enumeration-puis-reference",
+        ),
+        # acceptées sur main (7b4655b) elles aussi, vérifié le 21/10/2026 : le nom qui
+        # suit une énumération ouvre la référence suivante par « l'article » ou
+        # « l'art. », jamais après une préposition
+        pytest.param(
+            *alone(
+                TROIS_ARTICLES,
+                "C. civ., art. 1171 et 1231-5 C. com., l'article L442-1.",
+            ),
+            id="enumeration-puis-l-article",
+        ),
+        pytest.param(
+            *alone(
+                TROIS_ARTICLES, "C. civ., art. 1171 et 1231-5 C. com., l'art. L442-1."
+            ),
+            id="enumeration-puis-l-art",
+        ),
+        pytest.param(
+            *alone(
+                TROIS_CODES,
+                "C. civ., art. 1171 et L112-2 du code monétaire et financier, "
+                "art. L441-10 du Code de commerce.",
+            ),
+            id="enumeration-nom-apres-puis-reference",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Au-delà du Code civil, l'article L442-1 sanctionne le déséquilibre.",
+            ),
+            id="nom-en-fin-de-phrase-puis-l-article",
         ),
     ],
 )

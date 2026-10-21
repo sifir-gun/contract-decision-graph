@@ -171,7 +171,12 @@ _POINT = re.compile(
 # l'annexe d'un point (« Règl. (UE) 748/2012, annexe I, point 21.A.307 »). Après elle :
 # l'annexe d'un point, puis une préposition (« l'article L112-2 du code monétaire et
 # financier », « art. 28 RGPD ») ; une virgule l'arrête (« art. 46, par. 3, a) RGPD »).
-_BEFORE = re.compile(r"(?:[\s,]*\bannexes?(?:\s+[ivxlc]+\b)?)?[\s,]*\Z")
+_SEPARATORS = r"(?:[\s,]*\bannexes?(?:\s+[ivxlc]+\b)?)?[\s,]*"
+_BEFORE = re.compile(_SEPARATORS + r"\Z")
+# Entre le nom qui suit une énumération et la citation suivante qu'il ouvre (`_opens`) :
+# les mêmes séparateurs, ou le « l' » de « l'article » et de « l'art. » (la citation
+# commence à « art »).
+_OPENING = re.compile(_SEPARATORS + r"(?:\bl')?")
 _AFTER = re.compile(
     r"\A\s*(?:de\s+l'annexe(?:\s+[ivxlc]+\b)?\s+)?(?:de\s+l'|d'|(?:du|des|de\s+la|de)\s+)?"
 )
@@ -229,14 +234,15 @@ def _source_before(head: str, lookup: _Lookup) -> str | None:
     return None
 
 
-def _source_after(tail: str, lookup: _Lookup) -> tuple[str, int] | None:
-    """Source dont un nom commence `tail`, le texte qui suit une citation, et la longueur
-    de `tail` jusqu'à la fin de ce nom."""
+def _source_after(tail: str, lookup: _Lookup) -> tuple[str, int, bool] | None:
+    """Source dont un nom commence `tail`, le texte qui suit une citation ; la longueur
+    de `tail` jusqu'à la fin de ce nom ; et si une préposition le précède (« du », « de
+    l' », « de l'annexe »…) : hors des espaces, `_AFTER` ne retire rien d'autre."""
     rest = _AFTER.sub("", tail, count=1)
     gap = len(tail) - len(rest)
     for name, source in lookup:
         if rest.startswith(name) and not _glued(rest[len(name) : len(name) + 1]):
-            return source, gap + len(name)
+            return source, gap + len(name), bool(tail[:gap].strip())
     return None
 
 
@@ -257,12 +263,20 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
     # fin du dernier nom pris après une citation : il ne sert pas de nom avant à la
     # suivante (« art. 1171 du Code civil, art. L442-1 du Code de commerce »)
     taken = 0
+    # nom laissé par une énumération à la citation suivante, qu'il ouvre (`_opens`) : il
+    # en est le nom avant, même séparé d'elle par « l' » (« … C. com., l'article L442-1 »)
+    left: str | None = None
     for index, (match, number, form) in enumerate(matches):
         numbers = [form(n) for n in re.findall(number, match[1], re.IGNORECASE)]
         # dans une énumération, le nom qui précède touche le premier numéro, le nom qui
         # suit le dernier ; les autres numéros restent sans source
         sources: list[str | None] = [None] * len(numbers)
-        before = _source_before(text[taken : match.start()], lookup)
+        before = (
+            left
+            if left is not None
+            else _source_before(text[taken : match.start()], lookup)
+        )
+        left = None
         after = _source_after(text[match.end() :], lookup)
         if before is not None:
             sources[0] = before
@@ -270,23 +284,37 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
         # le nom qui suit est laissé à la citation suivante quand celle-ci a déjà un nom
         # avant : pour une citation seule, toujours (« C. com., art. L441-10 C. civ.,
         # art. 1231-5 ») ; pour une énumération, s'il ouvre la référence suivante
-        # (« C. civ., art. 1171 et 1231-5 C. com., art. L442-1 »)
-        if after is not None and (
-            before is None
-            or (
-                len(numbers) > 1 and not _opens(text, match.end() + after[1], following)
-            )
+        # (`_opens` : « C. civ., art. 1171 et 1231-5 C. com., art. L442-1 »)
+        enumeration = len(numbers) > 1
+        if (
+            after is not None
+            and before is not None
+            and enumeration
+            and _opens(text, match.end(), after, following)
         ):
+            left = after[0]
+        elif after is not None and (before is None or enumeration):
             sources[-1] = after[0]
             taken = match.end() + after[1]
         found |= set(zip(sources, numbers, strict=True))
     return found
 
 
-def _opens(text: str, end: int, following: int | None) -> bool:
-    """Le nom qui finit à `end` précède immédiatement la citation suivante, sous la forme
-    des références (« C. com., art. L442-1 ») : il en est le nom avant."""
-    return following is not None and _BEFORE.fullmatch(text[end:following]) is not None
+def _opens(
+    text: str, cited: int, after: tuple[str, int, bool], following: int | None
+) -> bool:
+    """Le nom `after` (`_source_after`), qui suit l'énumération finie à `cited`, ouvre la
+    citation suivante, qui commence à `following` : il en est le nom avant (« C. com.,
+    art. L442-1 », « C. com., l'article L442-1 »). Seulement si aucune préposition ne le
+    précède (« … et L112-2 du code monétaire et financier, art. L441-10 » : il suit
+    L112-2), et si seuls des séparateurs, ou « l'article » ou « l'art. », le séparent de
+    la citation suivante (`_OPENING`)."""
+    _, length, preposition = after
+    return (
+        following is not None
+        and not preposition
+        and _OPENING.fullmatch(text[cited + length : following]) is not None
+    )
 
 
 def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
@@ -302,12 +330,16 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     (« articles 1171 et L442-1 du Code de commerce » : L442-1), le premier pour un nom qui
     précède (« C. civ., art. 1171 et L442-1 » : 1171), les deux s'il y a un nom de chaque
     côté (« C. civ., art. 1231-1 et L112-2 du code monétaire et financier »), sauf si le
-    nom qui suit ouvre la référence suivante (« C. civ., art. 1171 et 1231-5 C. com., art.
-    L442-1 » : il est à L442-1) ; les autres numéros sont sans source, comparés par leur
-    seul numéro. Limite : un numéro d'une énumération qui viserait l'homonyme d'un autre
-    code passe, comme une citation sans nom ; elle vaut aussi pour le texte du constat,
-    écrit par le code et lu par la même fonction (`_citable`) : « (art. 44 à 46 RGPD) »
-    laisse 44 sans source, citable sous tout nom (aucun homonyme de 44 au corpus)."""
+    nom qui suit ouvre la référence suivante : aucune préposition ne le précède, et seuls
+    des séparateurs, ou « l'article » ou « l'art. », le séparent d'elle (« C. civ., art.
+    1171 et 1231-5 C. com., art. L442-1 », « …, l'article L442-1 » : il est à L442-1). Un
+    nom précédé d'une préposition suit sa citation (« C. civ., art. 1171 et L112-2 du code
+    monétaire et financier, art. L441-10 » : il est à L112-2). Les autres numéros sont
+    sans source, comparés par leur seul numéro. Limite : un numéro d'une énumération qui
+    viserait l'homonyme d'un autre code passe, comme une citation sans nom ; elle vaut
+    aussi pour le texte du constat, écrit par le code et lu par la même fonction
+    (`_citable`) : « (art. 44 à 46 RGPD) » laisse 44 sans source, citable sous tout nom
+    (aucun homonyme de 44 au corpus)."""
     return _citations(text, _lookup(names))
 
 
