@@ -891,7 +891,9 @@ contracts:
     parties: [Fomalhaut Navale Synthétique, Achernar Aménagements Synthétique]
     # rédigé de façon réaliste : définitions auxquelles renvoient les articles, quantités
     # en lettres, conformité renvoyée aux normes en vigueur avec des justificatifs tenus à
-    # disposition (jamais remis), « plan d'assurance qualité » qui n'est pas une assurance
+    # disposition (jamais remis), « plan d'assurance qualité » qui n'est pas une assurance ;
+    # chaque passage de l'article 8 renvoie aux normes en vigueur ou applicables : aucun
+    # ne peut être lu comme des preuves remises sans être contredit
     realistic: true
     expected:
       # conformité générale et assurance absente : conformité à 0,4, les autres domaines à
@@ -930,7 +932,7 @@ contracts:
       - kind: obligation_certification  # « conformes aux normes en vigueur » : aucune norme nommée
         present: true
         category: conformite_generale
-        quote: "Les ouvrages livrés sont conformes aux normes en vigueur à la date de leur livraison ; le Sous-traitant en tient les justificatifs à la disposition du Donneur d'ordre."
+        quote: "Les ouvrages livrés sont conformes aux normes en vigueur à la date de leur livraison ; le Sous-traitant tient à la disposition du Donneur d'ordre les justificatifs de leur conformité aux normes applicables."
       - kind: assurance_sous_traitant  # aucune assurance du sous-traitant
         present: false
       - kind: delai_execution  # dates du calendrier, définies à l'article 1

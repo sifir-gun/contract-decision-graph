@@ -453,8 +453,9 @@ def test_contrat_piege_citations_enveloppees(demo):
 
 @pytest.mark.parametrize("citations", [False, True])
 def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
-    """Les 13 contrats du jeu, analysés puis consultés : aucune fenêtre de six mots de
-    leur texte hors d'une enveloppe, hors des textes écrits par le code."""
+    """Les 20 contrats du jeu, chacun sous son profil, analysés puis consultés : aucune
+    fenêtre de six mots de leur texte hors d'une enveloppe, hors des textes écrits par le
+    code."""
     server, service = demo
     found = {}
     for contract_id in sorted(EXPECTED):
@@ -462,7 +463,7 @@ def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
             server,
             "analyser_contrat",
             {
-                "profil": "fournisseur",
+                "profil": EXPECTED[contract_id].profile,
                 "contrat_du_jeu": contract_id,
                 "identifiant": contract_id,
             },
@@ -473,6 +474,10 @@ def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
             {"thread_id": contract_id, "citations": citations},
         )
         assert not analysed.is_error and not consulted.is_error, seen(analysed)
+        # analysé jusqu'à son issue attendue, pas raccourci par un échec d'extraction
+        assert analysed.structured_content["decision_proposee"] == (
+            EXPECTED[contract_id].expected.get("proposed_decision")
+        ), contract_id
         found[contract_id] = [
             *leaked(service, contract_id, analysed),
             *leaked(service, contract_id, consulted),

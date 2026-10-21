@@ -1,9 +1,9 @@
 """Série réelle sur le jeu de démonstration (J5), avec le vrai modèle. Payant.
 
-Extraction, CRAG et explication réels, sur les 13 contrats du jeu, 5 essais chacun. Quand
-un contrat part en revue avec l'issue attendue, la décision humaine du jeu est reprise ;
-avec une autre issue, un NO_GO prudent. Chaque contrat est scellé dans un journal jetable,
-puis rejoué à l'identique.
+Extraction, CRAG et explication réels, sur les 13 contrats du jeu du profil fournisseur,
+5 essais chacun. Quand un contrat part en revue avec l'issue attendue, la décision humaine
+du jeu est reprise ; avec une autre issue, un NO_GO prudent. Chaque contrat est scellé dans
+un journal jetable, puis rejoué à l'identique.
 
 Invariant exigé à chaque essai : jamais de décision automatique plus favorable que la
 décision attendue. Concordance, stabilité, coût et latences sont mesurés sans seuil : une
@@ -50,7 +50,10 @@ from cdg.domain.config import load_config
 pytestmark = [pytest.mark.llm, pytest.mark.pg]
 
 CONFIG = load_config()
-ANALYSIS_DATE, CONTRACTS = load()
+ANALYSIS_DATE, JEU = load()
+# contrats du profil fournisseur seulement, analysés sous ce profil : la série réelle du
+# profil sous-traitance (sept contrats, filtre par profil) vient avec la PR 4 des profils
+CONTRACTS = [c for c in JEU if c.profile == "fournisseur"]
 BY_ID = {c.id: c for c in CONTRACTS}
 RUNS = range(1, 6)
 # revue non prévue par le jeu (une autre issue que l'attendue) : décision prudente

@@ -2,10 +2,11 @@
 trace par opération, la garde de chaque nœud une étape, le fournisseur LLM observé un
 appel par requête au modèle ; rien d'autre.
 
-Confidentialité (point 4 de la spec) : les 13 contrats du jeu passent par l'extraction et
-l'explication réelles (LLM en doublure), puis par la revue humaine ; aucune trace ni
-métrique ne contient une fenêtre de six mots de leur texte, brut ou masqué, des prompts
-envoyés au modèle ni de ses réponses, ni le nom d'une partie.
+Confidentialité (point 4 de la spec) : les 20 contrats du jeu (13 du profil fournisseur,
+7 de la sous-traitance), chacun sous son profil, passent par l'extraction et l'explication
+réelles (LLM en doublure), puis par la revue humaine ; aucune trace ni métrique ne contient
+une fenêtre de six mots de leur texte, brut ou masqué, des prompts envoyés au modèle ni de
+ses réponses, ni le nom d'une partie.
 """
 
 import json
@@ -299,7 +300,7 @@ def test_revue_refusee_type_seulement(otel):
     assert "jamais" not in json.dumps(dict(revue.attributes))
 
 
-# --- confidentialité : les 13 contrats du jeu ------------------------------------------------
+# --- confidentialité : les contrats du jeu ---------------------------------------------------
 
 
 def dumped(exporter, reader) -> str:
@@ -307,7 +308,7 @@ def dumped(exporter, reader) -> str:
     return json.dumps(spans, ensure_ascii=False) + reader.get_metrics_data().to_json()
 
 
-def test_aucun_texte_des_13_contrats_dans_les_traces(otel):
+def test_aucun_texte_des_contrats_du_jeu_dans_les_traces(otel):
     telemetry, exporter, reader = otel
     expected_on, contracts = demo_set.load()
     sources: list[str] = [p.read_text(encoding="utf-8") for p in PROMPTS.glob("*.md")]
@@ -325,8 +326,12 @@ def test_aucun_texte_des_13_contrats_dans_les_traces(otel):
             contract_id=contract.id,
             actor=ANALYSTE,
             parties=list(contract.parties),
-            profile="fournisseur",
+            profile=contract.profile,
         )
+        # sous le profil du contrat, la voie de succès : aucun échec, d'extraction ou de
+        # nœud, qui raccourcirait l'analyse et laisserait des étapes sans trace
+        status = svc.dossier(contract.id)["status"]
+        assert (status["failure_report"], status["failures"]) == (None, []), contract.id
         if svc.dossier(contract.id)["etat"] == "en_attente":
             svc.decide(contract.id, answer(CLI))
         sources += [contract.text(), svc.dossier(contract.id)["texte_masque"]]

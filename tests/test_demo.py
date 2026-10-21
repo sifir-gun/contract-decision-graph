@@ -864,11 +864,15 @@ def test_constats_scores_et_decision_des_contrats_de_sous_traitance(cid):
 def test_contrat_realiste_sous_traitance_formulations_indirectes():
     contract = BY_ID[REALISTIC_ST]
     text, clauses = contract.text, by_kind(contract)
-    # conformité renvoyée aux normes en vigueur, justificatifs tenus à disposition : le
-    # code lit une conformité générale, jamais des preuves que le texte ne promet pas
+    # conformité renvoyée aux normes en vigueur, justificatifs de la conformité aux normes
+    # applicables tenus à disposition : le code lit une conformité générale, jamais des
+    # preuves que le texte ne promet pas (chaque passage de l'article : test suivant)
     certification = clauses["obligation_certification"]
     assert "normes en vigueur" in certification.quote
     assert "à la disposition du Donneur d'ordre" in certification.quote
+    assert "justificatifs de leur conformité aux normes applicables" in (
+        certification.quote
+    )
     assert certification.category == "conformite_generale"
     # quantités écrites comme dans un contrat réel : chiffre entre parenthèses, ou
     # nombre seulement en lettres
@@ -888,6 +892,44 @@ def test_contrat_realiste_sous_traitance_formulations_indirectes():
     # `test_citations_attendues_dans_le_texte_masque`)
     assert not clauses["assurance_sous_traitant"].present
     assert "plan d'assurance qualité" in text
+
+
+def article(text: str, number: int) -> list[str]:
+    """Lignes d'un article du contrat, sans son titre."""
+    _, _, rest = text.partition(f"\nArticle {number} - ")
+    body, _, _ = rest.partition(f"\nArticle {number + 1} - ")
+    return [line.strip() for line in body.splitlines()[1:] if line.strip()]
+
+
+def test_contrat_realiste_sous_traitance_aucun_passage_de_la_qualite_lu_comme_preuves():
+    # défense de st-07 : chaque phrase de l'article sur la qualité, et chaque membre de
+    # phrase séparé par un point-virgule, évoque une catégorie pénalisée ; une extraction
+    # qui en cite un en le classant « norme_et_preuves » (preuves remises, acceptée) est
+    # contredite, jamais acceptée en silence (sinon : conformité à 0,7, écart 0,3, GO)
+    contract = BY_ID[REALISTIC_ST]
+    masked = masking.mask(contract.text, contract.parties).text
+    lines = article(contract.text, 8)
+    members = [m.strip() for line in lines for m in line.split(";") if m.strip()]
+    passages = list(dict.fromkeys(lines + members))
+    assert len(lines) >= 2 and len(passages) > len(lines)
+    for passage in passages:
+        claimed = [
+            c.model_copy(update={"quote": passage, "category": "norme_et_preuves"})
+            if c.kind == "obligation_certification"
+            else c
+            for c in contract.clauses
+        ]
+        problems = verification.problems_of(
+            masked,
+            claimed,
+            profile=contract.profile,
+            **CONFIG.terms(contract.profile)._asdict(),
+            instruction_patterns=CONFIG.input.instruction_patterns,
+        )
+        # citation trouvée, catégorie contredite, rien d'autre
+        assert len(problems) == 1, (passage, problems)
+        assert problems[0].startswith("catégorie contredite"), (passage, problems)
+        assert problems[0].endswith(": obligation_certification"), (passage, problems)
 
 
 @pytest.mark.parametrize(

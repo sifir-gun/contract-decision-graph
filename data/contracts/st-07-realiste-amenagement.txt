@@ -35,8 +35,8 @@ Article 7 - Documents techniques
 Les Documents techniques restent la propriété du Donneur d'ordre ; le Sous-traitant ne s'en sert qu'aux seules fins de la Commande et les tient pour confidentiels.
 
 Article 8 - Qualité des ouvrages
-Les ouvrages livrés sont conformes aux normes en vigueur à la date de leur livraison ; le Sous-traitant en tient les justificatifs à la disposition du Donneur d'ordre.
-Le Sous-traitant met en place un contrôle de ses fabrications, qu'il décrit dans son plan d'assurance qualité.
+Les ouvrages livrés sont conformes aux normes en vigueur à la date de leur livraison ; le Sous-traitant tient à la disposition du Donneur d'ordre les justificatifs de leur conformité aux normes applicables.
+Le Sous-traitant contrôle ses fabrications au regard des normes applicables, selon son plan d'assurance qualité.
 
 Article 9 - Responsabilité
 Le Sous-traitant répond des dommages causés par ses ouvrages dans la limite du Plafond de responsabilité du Sous-traitant.
