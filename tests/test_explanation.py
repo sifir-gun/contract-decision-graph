@@ -285,6 +285,20 @@ CMF = "code-monetaire-financier"
             "C. civ., art. 1171 et L442-1",
             {("code-civil", "1171"), (None, "L442-1")},
         ),
+        # un nom avant le premier numéro, un autre après le dernier : chacun le sien
+        (
+            "C. civ., art. 1231-1 et L112-2 du code monétaire et financier",
+            {("code-civil", "1231-1"), (CMF, "L112-2")},
+        ),
+        (
+            "C. com., art. L441-10 et 1231-5 C. civ.",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # sauf le nom qui ouvre la référence suivante, comme pour une citation seule
+        (
+            "C. civ., art. 1171 et 1231-5 C. com., art. L442-1",
+            {("code-civil", "1171"), (None, "1231-5"), ("code-commerce", "L442-1")},
+        ),
         # homonymes du corpus : L112-2 au Code monétaire et financier, 1231-1 sans source
         (
             "les articles 1231-1 et L112-2 du code monétaire et financier",
@@ -429,6 +443,11 @@ DEUX_CODES = retained_alone(
 INDEXATION = retained_alone(
     "revision_prix", ["C. civ., art. 1231-1", "C. mon. fin., art. L112-2"]
 )
+TROIS_ARTICLES = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1171", "C. civ., art. 1231-5", "C. com., art. L442-1"],
+    domain="juridique",
+)
 POINT_RETENU = TRANSFERT.model_copy(
     update={"references": ["Règl. (UE) 748/2012, annexe I, point 21.A.307"]}
 )
@@ -539,6 +558,19 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
             ),
             id="homonyme-dans-une-enumeration",
         ),
+        pytest.param(
+            *alone(
+                INDEXATION,
+                "C. civ., art. 1231-1 et L112-2 du code monétaire et financier.",
+            ),
+            id="enumeration-deux-noms",
+        ),
+        pytest.param(
+            *alone(
+                TROIS_ARTICLES, "C. civ., art. 1171 et 1231-5 C. com., art. L442-1."
+            ),
+            id="enumeration-puis-reference",
+        ),
     ],
 )
 def test_explications_acceptees_aujourd_hui_le_restent(d, req):
@@ -553,13 +585,18 @@ def test_enumeration_le_numero_touche_compare_par_source():
     finding = retained_alone(
         "revision_prix", ["C. civ., art. 1231-1", "CPI, art. L112-2"]
     )
-    text = "Les articles 1231-1 et L112-2 du code monétaire et financier."
-    assert explanation.refusals(*alone(finding, text), names=NAMES) == [
+    refused = [
         (
             "financier-1 : article cité hors des références retenues pour la clause "
             "revision_prix : L112-2 (code-monetaire-financier)"
         )
     ]
+    for text in (
+        "Les articles 1231-1 et L112-2 du code monétaire et financier.",
+        # un nom avant le premier numéro n'efface pas celui qui suit le dernier
+        "C. civ., art. 1231-1 et L112-2 du code monétaire et financier.",
+    ):
+        assert explanation.refusals(*alone(finding, text), names=NAMES) == refused
     # limite : un numéro de l'énumération que le nom ne touche pas passe, même s'il vise
     # l'homonyme d'un autre code (ici L112-2 du CPI, quand seul celui du C. mon. fin.
     # est retenu), comme une citation sans nom

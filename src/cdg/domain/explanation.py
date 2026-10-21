@@ -257,21 +257,36 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
     # fin du dernier nom pris après une citation : il ne sert pas de nom avant à la
     # suivante (« art. 1171 du Code civil, art. L442-1 du Code de commerce »)
     taken = 0
-    for match, number, form in matches:
+    for index, (match, number, form) in enumerate(matches):
         numbers = [form(n) for n in re.findall(number, match[1], re.IGNORECASE)]
-        # le nom qui précède l'emporte : celui qui suit peut ouvrir la référence
-        # suivante (« C. com., art. L441-10 C. civ., art. 1231-5 ») ; dans une
-        # énumération, il touche le premier numéro, le nom qui suit le dernier
-        touched = 0
-        source = _source_before(text[taken : match.start()], lookup)
-        if source is None and (after := _source_after(text[match.end() :], lookup)):
-            source, length = after
-            taken = match.end() + length
-            touched = len(numbers) - 1
-        found |= {
-            (source if rank == touched else None, n) for rank, n in enumerate(numbers)
-        }
+        # dans une énumération, le nom qui précède touche le premier numéro, le nom qui
+        # suit le dernier ; les autres numéros restent sans source
+        sources: list[str | None] = [None] * len(numbers)
+        before = _source_before(text[taken : match.start()], lookup)
+        after = _source_after(text[match.end() :], lookup)
+        if before is not None:
+            sources[0] = before
+        following = matches[index + 1][0].start() if index + 1 < len(matches) else None
+        # le nom qui suit est laissé à la citation suivante quand celle-ci a déjà un nom
+        # avant : pour une citation seule, toujours (« C. com., art. L441-10 C. civ.,
+        # art. 1231-5 ») ; pour une énumération, s'il ouvre la référence suivante
+        # (« C. civ., art. 1171 et 1231-5 C. com., art. L442-1 »)
+        if after is not None and (
+            before is None
+            or (
+                len(numbers) > 1 and not _opens(text, match.end() + after[1], following)
+            )
+        ):
+            sources[-1] = after[0]
+            taken = match.end() + after[1]
+        found |= set(zip(sources, numbers, strict=True))
     return found
+
+
+def _opens(text: str, end: int, following: int | None) -> bool:
+    """Le nom qui finit à `end` précède immédiatement la citation suivante, sous la forme
+    des références (« C. com., art. L442-1 ») : il en est le nom avant."""
+    return following is not None and _BEFORE.fullmatch(text[end:following]) is not None
 
 
 def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
@@ -285,9 +300,14 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     une citation ne sert pas de nom avant à la suivante. Dans une énumération, seul le
     numéro que le nom touche lui est rattaché : le dernier pour un nom qui suit
     (« articles 1171 et L442-1 du Code de commerce » : L442-1), le premier pour un nom qui
-    précède (« C. civ., art. 1171 et L442-1 » : 1171) ; les autres sont sans source,
-    comparés par leur seul numéro. Limite : un numéro d'une énumération qui viserait
-    l'homonyme d'un autre code passe, comme une citation sans nom."""
+    précède (« C. civ., art. 1171 et L442-1 » : 1171), les deux s'il y a un nom de chaque
+    côté (« C. civ., art. 1231-1 et L112-2 du code monétaire et financier »), sauf si le
+    nom qui suit ouvre la référence suivante (« C. civ., art. 1171 et 1231-5 C. com., art.
+    L442-1 » : il est à L442-1) ; les autres numéros sont sans source, comparés par leur
+    seul numéro. Limite : un numéro d'une énumération qui viserait l'homonyme d'un autre
+    code passe, comme une citation sans nom ; elle vaut aussi pour le texte du constat,
+    écrit par le code et lu par la même fonction (`_citable`) : « (art. 44 à 46 RGPD) »
+    laisse 44 sans source, citable sous tout nom (aucun homonyme de 44 au corpus)."""
     return _citations(text, _lookup(names))
 
 
@@ -300,7 +320,9 @@ def articles(text: str) -> set[str]:
 def _citable(finding: FindingToExplain, lookup: _Lookup) -> set[Citation]:
     """Ce que l'explication d'un constat peut citer : ses références retenues, chacune
     lue à part (le nom de la suivante ne rattache pas l'article de la précédente), et le
-    texte du constat, écrit par le code des règles."""
+    texte du constat, écrit par le code des règles, avec les mêmes règles et la même
+    limite (`citations` : un numéro d'énumération que le nom ne touche pas est sans
+    source)."""
     found = _citations(finding.text, lookup)
     for reference in finding.references:
         found |= _citations(reference, lookup)
