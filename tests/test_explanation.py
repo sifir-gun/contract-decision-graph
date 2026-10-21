@@ -378,6 +378,24 @@ CPI = "code-propriete-intellectuelle"
             "Règl. (UE) 748/2012 (annexe I, point 21.A.307)",
             {("certification-navigabilite", "21.A.307")},
         ),
+        # suivi d'une parenthèse, de deux-points ou de « en son », le nom avant cède au
+        # nom qui suit la citation ; sous la forme des références, il l'emporte
+        (
+            "Hors du Code civil : article L441-10 du Code de commerce",
+            {("code-commerce", "L441-10")},
+        ),
+        (
+            "Le Code civil (article L441-10 du Code de commerce)",
+            {("code-commerce", "L441-10")},
+        ),
+        (
+            "Code civil : articles 1171 et L442-1 du Code de commerce",
+            {(None, "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "Hors du Code civil, article L441-10 du Code de commerce",
+            {("code-civil", "L441-10")},
+        ),
         # nom pris après une citation : pas un nom avant pour la suivante, même suivi
         # de deux-points
         (
@@ -798,6 +816,10 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
                 "Le Code civil et le Code de commerce (art. 1171 et L442-1).",
             ),
             id="noms-enumeres-avant-une-parenthese",
+        ),
+        pytest.param(
+            *alone(DELAI, "Hors du Code civil : article L441-10 du Code de commerce."),
+            id="nom-avant-deux-points-puis-nom-apres",
         ),
         pytest.param(
             *alone(

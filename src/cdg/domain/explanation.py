@@ -245,15 +245,16 @@ def _ending(head: str, lookup: _Lookup) -> tuple[str, int] | None:
     return None
 
 
-def _source_before(head: str, lookup: _Lookup) -> str | None:
-    """Source dont un nom finit `head`, le texte qui précède une citation : après des
-    séparateurs (`_BEFORE`), ou suivi d'une parenthèse ouvrante, de deux-points ou de
-    « en son » (`_INTRODUCED`), sauf s'il suit un autre nom et « et » ou « ou »
-    (`_LISTED`) : rien ne dit alors lequel des noms vise la citation."""
+def _source_before(head: str, lookup: _Lookup) -> tuple[str, bool] | None:
+    """Source dont un nom finit `head`, le texte qui précède une citation, et si ce nom
+    l'introduit : après des séparateurs (`_BEFORE`), non ; suivi d'une parenthèse
+    ouvrante, de deux-points ou de « en son » (`_INTRODUCED`), oui, sauf s'il suit un
+    autre nom et « et » ou « ou » (`_LISTED`) : rien ne dit alors lequel des noms vise
+    la citation, et aucun ne la rattache."""
     head = _BEFORE.sub("", head, count=1)
     found = _ending(head, lookup)
     if found is not None:
-        return found[0]
+        return found[0], False
     introduced = _INTRODUCED.search(head)
     if introduced is None:
         return None
@@ -265,7 +266,7 @@ def _source_before(head: str, lookup: _Lookup) -> str | None:
     listed = _LISTED.search(head[:start])
     if listed is not None and _ending(head[: listed.start()], lookup) is not None:
         return None
-    return source
+    return source, True
 
 
 def _source_after(tail: str, lookup: _Lookup) -> tuple[str, int, bool] | None:
@@ -316,13 +317,16 @@ def _citations(text: str, lookup: _Lookup) -> set[Citation]:
         # dans une énumération, le nom qui précède touche le premier numéro, le nom qui
         # suit le dernier ; les autres numéros restent sans source
         sources: list[str | None] = [None] * len(numbers)
-        before = (
-            left
+        named = (
+            (left, False)
             if left is not None
             else _source_before(text[taken : match.start()], lookup)
         )
         left = None
         after = _source_after(text[match.end() :], lookup)
+        # un nom qui introduit la citation (parenthèse, deux-points, « en son ») cède au
+        # nom qui la suit (« Hors du Code civil : article L441-10 du Code de commerce »)
+        before = None if named is None or (named[1] and after is not None) else named[0]
         if before is not None:
             sources[0] = before
         following = matches[index + 1][0].start() if index + 1 < len(matches) else None
@@ -385,14 +389,16 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     intellectuelle (article L112-2) », « Code civil : art. 1231-5 », « Le CPI, en son
     article L112-2 ») ; sauf, sous ces trois formes, s'il suit un autre nom et « et » ou
     « ou » (« Le Code de commerce et le Code civil : art. L441-10 et art. 1231-5 ») : rien
-    ne dit lequel des noms vise la citation, comparée par son seul numéro.
+    ne dit lequel des noms vise la citation, comparée par son seul numéro. Sous ces trois
+    formes, le nom avant cède à un nom qui suit la citation (« Hors du Code civil :
+    article L441-10 du Code de commerce » : Code de commerce).
 
     Un nom pris après une citation ne sert pas de nom avant à la suivante. Une citation
     qui a un nom avant consomme aussi le nom qui la suit et la touche, avec ou sans
     préposition : il ne sert à aucune autre citation (« C. com., art. L441-10 du Code de
     commerce, art. 1231-5 du Code civil » : 1231-5 au Code civil). S'ils désignent deux
-    sources, le nom avant l'emporte (« C. com., art. L441-10 du Code civil » : Code de
-    commerce). Sauf si ce nom ouvre la citation suivante (`_opens`) : il n'est pas lié à
+    sources, le nom avant sous la forme des références l'emporte (« C. com., art. L441-10
+    du Code civil » : Code de commerce). Sauf si ce nom ouvre la citation suivante (`_opens`) : il n'est pas lié à
     la sienne (ni préposition, ni parenthèses), et seuls des séparateurs le séparent de la
     suivante (« C. com., art. L441-10 C. civ., art. 1231-5 » : C. civ. est à 1231-5), ou,
     après une énumération seulement, « l'article » ou « l'art. ».
@@ -417,10 +423,10 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     l'article L112-2 » laissent L112-2 sans source, comme « Au-delà du Code civil,
     l'article L442-1 », qui ne vise pas le Code civil. Un nom entre parenthèses suivi
     d'autre chose (« L112-2 (CPI, indexation) ») ne rattache rien. En sens inverse
-    (refus, puis gabarit) : la garde de l'énumération de noms ne vaut pas pour les
-    séparateurs des références (« Le Code de commerce et le Code civil, art. L441-10 » :
-    Code civil), et un nom avant, sous toutes ses formes, l'emporte sur un autre nom qui
-    suit la citation (« Hors du Code civil : article L441-10 du Code de commerce » : Code
+    (refus, puis gabarit), sous la forme des références, règles antérieures gardées : la
+    garde de l'énumération de noms n'y vaut pas (« Le Code de commerce et le Code civil,
+    art. L441-10 » : Code civil), et le nom avant l'emporte sur un autre nom qui suit la
+    citation (« Hors du Code civil, article L441-10 du Code de commerce » : Code
     civil)."""
     return _citations(text, _lookup(names))
 
