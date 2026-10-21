@@ -142,6 +142,18 @@ def test_formulaire_d_analyse_etiquete():
     assert "htmx-indicator" in page  # indicateur de chargement pendant l'analyse
 
 
+def test_contrats_du_jeu_listes_avec_leur_profil():
+    """Chaque contrat du jeu, sous son identifiant, avec le profil qu'il déclare : le
+    choisir sous un autre profil est refusé à la saisie."""
+    page = client().get("/analyse").text
+    opening = re.search(r'<select\b[^>]*\bid="contrat"[^>]*>', page)
+    assert opening
+    body = page[opening.end() : page.index("</select>", opening.end())]
+    options = re.findall(r'<option value="([^"]*)">([^<]*)</option>', body)
+    _, contracts = demo_set.load()
+    assert options == [(c.id, f"{c.id} ({c.profile})") for c in contracts.values()]
+
+
 def test_formulaire_liste_les_profils_sans_preselection():
     """Profil obligatoire, jamais déduit : une première option vide, désactivée et
     sélectionnée, puis une option par profil, aucune présélectionnée."""
