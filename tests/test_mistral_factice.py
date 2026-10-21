@@ -12,15 +12,21 @@ from pathlib import Path
 import mistral_factice
 import pytest
 from mistral_factice import serve
+from mistralai.extra.utils.response_format import response_format_from_pydantic_model
 
 from cdg.adapters.llm.mistral import MistralProvider
-from cdg.application import demo_set, ingestion
+from cdg.application import demo_set, extraction, ingestion
 from cdg.application.crag import GradeOutput, RewriteOutput
 from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
-from cdg.domain import masking
+from cdg.domain import masking, profiles
 from cdg.domain.config import load_config
-from cdg.domain.explanation import ExplanationRequest, FindingToExplain, refusals
+from cdg.domain.explanation import (
+    Draft,
+    ExplanationRequest,
+    FindingToExplain,
+    refusals,
+)
 
 CONFIG = load_config()
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,16 +58,14 @@ def control(url: str, body: dict | None = None) -> dict:
 
 def test_extraction_attendue_pour_chaque_contrat_du_jeu(factice):
     """Les clauses d'une extraction correcte (data/contracts/attendus.yaml), par le vrai
-    SDK et le vrai extracteur, comme l'extraction simulée de la démonstration."""
+    SDK et le vrai extracteur, comme l'extraction simulée de la démonstration : les
+    contrats des deux profils, chacun sous le schéma de son profil."""
     _, contracts = demo_set.load()
     extractor = LLMExtractor(provider(factice))
-    # contrats du profil fournisseur seulement, jusqu'à la tâche 14 du plan de la PR 2
-    # des profils : le serveur factice ne reconnaît pas encore le schéma d'extraction
-    # de la sous-traitance
-    analysed = [
-        c for c in contracts.values() if c.clauses and c.profile == "fournisseur"
-    ]
-    assert len(analysed) >= 10
+    analysed = [c for c in contracts.values() if c.clauses]
+    # le seul contrat sans clause attendue est rejeté à l'entrée, avant toute extraction
+    assert set(contracts) - {c.id for c in analysed} == {"demo-10-rejet-anglais"}
+    assert {c.profile for c in analysed} == set(profiles.PROFILES)
     for contract in analysed:
         masked = masking.mask(contract.text(), contract.parties).text
         result = extractor(masked, [], contract.profile)
@@ -69,11 +73,86 @@ def test_extraction_attendue_pour_chaque_contrat_du_jeu(factice):
         assert result.usage[0].tokens_in > 0
 
 
-def test_texte_hors_du_jeu_refuse_explicitement(factice):
+def test_schema_de_chaque_profil_reconnu():
+    """Le serveur lit `extraction.SCHEMAS` : un schéma de profil ajouté y est reconnu sans
+    liste à tenir. Le nom que le SDK met dans `response_format.json_schema.name` est le
+    `__name__` du modèle (mistralai 2.10.1, extra/utils/response_format.py)."""
+    assert mistral_factice.PROFILE_OF_SCHEMA == {
+        schema.__name__: profile for profile, schema in extraction.SCHEMAS.items()
+    }
+    assert set(mistral_factice.PROFILE_OF_SCHEMA.values()) == set(profiles.PROFILES)
+    state = mistral_factice.State()
+    _, contracts = demo_set.load()
+    for profile, schema in extraction.SCHEMAS.items():
+        sent = response_format_from_pydantic_model(schema)
+        assert sent["json_schema"]["name"] == schema.__name__
+        contract = next(c for c in contracts.values() if c.profile == profile)
+        masked = masking.mask(contract.text(), contract.parties).text
+        message = f"<<<CONTRAT-ab12>>>\n{masked}\n<<<FIN-CONTRAT-ab12>>>"
+        answered = mistral_factice.answer(state, sent["json_schema"]["name"], message)
+        assert [c["kind"] for c in answered["clauses"]] == [
+            c.kind for c in contract.clauses
+        ], profile
+
+
+def test_noms_des_schemas_distincts():
+    """Le serveur choisit sa réponse d'après ce nom seul : deux schémas de même nom, ou
+    un nom partagé avec ceux de l'explication et du CRAG, le laisseraient sans savoir à
+    quoi répondre."""
+    names = [schema.__name__ for schema in extraction.SCHEMAS.values()]
+    assert len(names) == len(set(names)) == len(profiles.PROFILES)
+    assert not set(names) & {
+        GradeOutput.__name__,
+        RewriteOutput.__name__,
+        Draft.__name__,
+    }
+    assert set(mistral_factice.PROFILE_OF_SCHEMA) == set(names)
+
+
+@pytest.mark.parametrize("profile", profiles.PROFILES)
+def test_texte_hors_du_jeu_refuse_explicitement(factice, profile):
     with pytest.raises(Exception) as raised:
-        LLMExtractor(provider(factice))("Contrat inconnu du jeu.", [], "fournisseur")
+        LLMExtractor(provider(factice))("Contrat inconnu du jeu.", [], profile)
     assert "422" in str(raised.value) or "hors du jeu" in str(raised.value)
     assert control(factice)["refus"] == 1
+
+
+def other_profile(profile: str) -> str:
+    return next(p for p in profiles.PROFILES if p != profile)
+
+
+CROSSED = [
+    ("demo-01-go-maintenance", "fournisseur"),
+    ("st-01-go-cabine", "sous_traitance"),
+]
+
+
+@pytest.mark.parametrize(("contract_id", "declared"), CROSSED)
+def test_contrat_du_jeu_sous_le_schema_d_un_autre_profil_refuse(
+    factice, contract_id, declared
+):
+    """Un contrat du jeu reçu sous le schéma d'un autre profil est refusé (422) et nomme
+    son profil : jamais les clauses d'un autre genre de contrat, ni « hors du jeu »."""
+    _, contracts = demo_set.load()
+    contract = contracts[contract_id]
+    assert contract.profile == declared
+    asked = other_profile(declared)
+    masked = masking.mask(contract.text(), contract.parties).text
+    message = f"<<<CONTRAT-ab12>>>\n{masked}\n<<<FIN-CONTRAT-ab12>>>"
+    with pytest.raises(mistral_factice.Refused) as direct:
+        mistral_factice.answer(
+            mistral_factice.State(), extraction.SCHEMAS[asked].__name__, message
+        )
+    assert f"contrat du jeu du profil {declared}" in str(direct.value)
+    assert "hors du jeu" not in str(direct.value)
+    # par le SDK : l'extracteur du profil demandé, pointé sur le serveur
+    with pytest.raises(Exception) as raised:
+        LLMExtractor(provider(factice))(masked, [], asked)
+    assert raised.value.status_code == 422
+    assert f"contrat du jeu du profil {declared}" in str(raised.value)
+    assert "hors du jeu" not in str(raised.value)
+    assert control(factice)["refus"] == 1
+    assert control(factice)["appels"] == {}
 
 
 @pytest.mark.parametrize(
@@ -96,9 +175,10 @@ def test_balises_du_contrat_lues_en_temps_lineaire(hostile):
 
 def test_contrat_lu_entre_ses_balises_et_leur_jeton():
     state = mistral_factice.State()
-    masked, clauses = next(iter(state.by_text.items()))
+    (profile, masked), clauses = next(iter(state.by_text.items()))
+    schema = extraction.SCHEMAS[profile].__name__
     message = f"Jeton : ab12\n\n<<<CONTRAT-ab12>>>\n{masked}\n<<<FIN-CONTRAT-ab12>>>"
-    answered = mistral_factice.answer(state, "ExtractionOutput", message)
+    answered = mistral_factice.answer(state, schema, message)
     assert len(answered["clauses"]) == len(clauses)
     for broken in (
         message.replace("<<<FIN-CONTRAT-ab12>>>", "<<<FIN-CONTRAT-cd34>>>"),
@@ -108,7 +188,7 @@ def test_contrat_lu_entre_ses_balises_et_leur_jeton():
         ),
     ):
         with pytest.raises(mistral_factice.Refused):
-            mistral_factice.answer(state, "ExtractionOutput", broken)
+            mistral_factice.answer(state, schema, broken)
 
 
 def test_juge_du_crag_retient_tous_les_extraits(factice):

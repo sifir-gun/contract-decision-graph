@@ -45,7 +45,6 @@ from cdg.domain.authorization import Actor
 
 _, _EXPECTED = load_expected()
 EXPECTED = {c.id: c for c in _EXPECTED}
-FOURNISSEUR = [cid for cid, c in EXPECTED.items() if c.profile == "fournisseur"]
 PIEGE = "demo-11-piege-injection"
 INJECTED_LINE = EXPECTED[PIEGE].injected.split("\n")[1]
 NAMES = {"analyser_contrat", "lister_contrats", "consulter_dossier", "verifier_journal"}
@@ -199,10 +198,7 @@ def test_acteur_du_canal_mcp_exige():
 # --- démonstration ------------------------------------------------------------------------
 
 
-# Contrats du profil fournisseur seulement, jusqu'à la tâche 14 du plan de la PR 2 des
-# profils (mode démonstration des deux profils) : le test analyse chaque contrat sous
-# « fournisseur ».
-@pytest.mark.parametrize("contract_id", sorted(FOURNISSEUR))
+@pytest.mark.parametrize("contract_id", sorted(EXPECTED))
 def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
     server, _ = demo
     contract = EXPECTED[contract_id]
@@ -210,7 +206,7 @@ def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
         server,
         "analyser_contrat",
         {
-            "profil": "fournisseur",
+            "profil": contract.profile,
             "contrat_du_jeu": contract_id,
             "identifiant": contract_id,
         },
@@ -231,6 +227,37 @@ def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
         assert (fiche["etat"], fiche["decision_finale"]) == ("en_attente", None)
         assert fiche["revue_humaine_en_attente"]
     assert fiche["analyse_par"] == MCP_ACTOR.model_dump(mode="json")
+
+
+@pytest.mark.parametrize(
+    ("contract_id", "chosen"),
+    [
+        ("demo-01-go-maintenance", "sous_traitance"),
+        ("st-01-go-cabine", "fournisseur"),
+    ],
+)
+def test_contrat_du_jeu_sous_un_autre_profil_refuse_a_la_saisie(
+    demo, contract_id, chosen
+):
+    """Un contrat du jeu choisi sous un profil qui n'est pas le sien : erreur de l'outil,
+    avant toute analyse. Le message est celui de la saisie commune, écrit par le code : il
+    nomme le profil du contrat, jamais celui qui a été reçu, ni le texte du contrat."""
+    server, service = demo
+    declared = EXPECTED[contract_id].profile
+    result = call(
+        server,
+        "analyser_contrat",
+        {"profil": chosen, "contrat_du_jeu": contract_id, "identifiant": "refuse"},
+    )
+    message = error_text(result)
+    assert (
+        f"démonstration : ce contrat du jeu est du profil {declared} ; "
+        "choisissez ce profil"
+    ) in message
+    assert chosen not in message  # jamais la valeur reçue
+    assert result.structured_content is None
+    assert leaks(EXPECTED[contract_id].text, seen(result)) == []
+    assert service.contracts() == []
 
 
 def test_demo_texte_libre_refuse(demo):

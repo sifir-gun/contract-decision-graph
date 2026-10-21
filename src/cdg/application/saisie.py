@@ -51,14 +51,23 @@ def _names(parties: Sequence[str]) -> list[str]:
 
 
 def from_demo_set(
-    contract: str, parties: Sequence[str], *, demo: bool
+    contract: str, parties: Sequence[str], *, demo: bool, profile: Profile
 ) -> ContractInput:
     """Contrat du jeu de démonstration. En démonstration, ses parties déclarées, dont
-    dépend l'extraction simulée ; sinon les parties saisies, ou à défaut les déclarées."""
+    dépend l'extraction simulée, et seulement sous son propre profil : l'extraction
+    simulée ne rend que les clauses de ce profil, et un autre choix finirait par un rapport
+    d'échec plutôt que par une erreur de saisie. Le message nomme le profil du contrat,
+    jamais la valeur reçue. Hors démonstration, le contrat est admis sous tout profil, et
+    les parties saisies l'emportent sur les déclarées."""
     _, contracts = demo_set.load()
     chosen = contracts.get(contract)
     if chosen is None:
         raise InputError("contrat inconnu du jeu de démonstration")
+    if demo and chosen.profile != profile:
+        raise InputError(
+            f"démonstration : ce contrat du jeu est du profil {chosen.profile} ; "
+            "choisissez ce profil"
+        )
     declared = list(chosen.parties)
     given = _names(parties)
     return ContractInput(

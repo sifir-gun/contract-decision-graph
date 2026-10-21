@@ -273,7 +273,7 @@ def create_server(service: ContractService, *, actor: Actor, demo: bool) -> MCPS
                 )
             names = parties or []
             entry = (
-                saisie.from_demo_set(contrat_du_jeu, names, demo=demo)
+                saisie.from_demo_set(contrat_du_jeu, names, demo=demo, profile=profile)
                 if contrat_du_jeu is not None
                 else saisie.from_text(lambda: texte or "", names, demo=demo)
             )
