@@ -103,6 +103,21 @@ def test_note_stockee_hors_du_texte(pg, ingested):
     )
 
 
+def test_cree_par_stocke_en_metadonnee_hors_du_texte(pg, ingested):
+    # « Créé par … » de la page de L122-4 (CPI) : une création, comme « Création … »
+    rows = query(
+        pg,
+        "SELECT text, amendment FROM rag_chunks WHERE embedding_model = %s "
+        "AND reference = 'CPI, art. L122-4'",
+        EMBEDDER.model,
+    )
+    assert rows and all(
+        "Créé par" not in text
+        and amendment == "création : Loi 92-597 1992-07-01 annexe JORF 3 juillet 1992"
+        for text, amendment in rows
+    )
+
+
 def test_hors_perimetre_et_domaines(pg, ingested):
     refs = {
         r
@@ -129,7 +144,7 @@ def test_hors_perimetre_et_domaines(pg, ingested):
         "AND source_id LIKE 'fiche-%%'",
         EMBEDDER.model,
     )
-    assert len(fiches) == 7
+    assert len(fiches) == 13  # 7 du fournisseur, 6 de la sous-traitance
 
 
 def test_extrait_disparu_supprime(pg, ingested):

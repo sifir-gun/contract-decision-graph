@@ -71,6 +71,86 @@ def test_version_ouverte_et_creation():
     assert article.text.startswith("Le débiteur n'est tenu")
 
 
+def test_cree_par_lu_comme_une_creation_hors_du_texte():
+    # page de L122-4 (CPI), enregistrée le 21/10/2026 : « Créé par … », et non
+    # « Création … » ; texte modificateur gardé tel qu'affiché
+    article = corpus.parse_legifrance(real("code-propriete-intellectuelle/L122-4.txt"))
+    assert article.amendment == (
+        "création",
+        "Loi 92-597 1992-07-01 annexe JORF 3 juillet 1992",
+    )
+    assert "Créé par" not in article.text
+    assert article.text.startswith("Toute représentation ou reproduction intégrale")
+
+
+@pytest.mark.parametrize(
+    "path,number,start,amendment",
+    [
+        (
+            "code-propriete-intellectuelle/L111-1.txt",
+            "L111-1",
+            date(2020, 12, 27),
+            ("modification", "LOI n°2020-1674 du 24 décembre 2020 - art. 35 (V)"),
+        ),
+        (
+            "code-propriete-intellectuelle/L112-2.txt",
+            "L112-2",
+            date(1994, 5, 11),
+            # tel qu'affiché, parenthèses vides comprises
+            (
+                "modification",
+                "Loi n°94-361 du 10 mai 1994 - art. 1 () JORF 11 mai 1994",
+            ),
+        ),
+        (
+            "code-propriete-intellectuelle/L122-4.txt",
+            "L122-4",
+            date(1992, 7, 3),
+            ("création", "Loi 92-597 1992-07-01 annexe JORF 3 juillet 1992"),
+        ),
+        (
+            "code-propriete-intellectuelle/L131-3.txt",
+            "L131-3",
+            date(1992, 7, 3),
+            ("création", "Loi 92-597 1992-07-01 annexe JORF 3 juillet 1992"),
+        ),
+        (
+            "code-civil/1231.txt",
+            "1231",
+            date(2016, 10, 1),
+            ("modification", "Ordonnance n°2016-131 du 10 février 2016 - art. 2"),
+        ),
+        (
+            "code-civil/1231-1.txt",
+            "1231-1",
+            date(2016, 10, 1),
+            ("création", "Ordonnance n°2016-131 du 10 février 2016 - art. 2"),
+        ),
+        (
+            "code-assurances/L124-3.txt",
+            "L124-3",
+            date(2007, 12, 19),
+            ("modification", "LOI n°2007-1774 du 17 décembre 2007 - art. 1"),
+        ),
+    ],
+    ids=["L111-1", "L112-2", "L122-4", "L131-3", "1231", "1231-1", "L124-3"],
+)
+def test_articles_legifrance_de_la_sous_traitance(path, number, start, amendment):
+    # débuts de validité de la spec (« Nouvelles sources Légifrance »), versions ouvertes ;
+    # aucune ligne de métadonnée dans le texte indexé
+    article = corpus.parse_legifrance(real(path))
+    assert (article.article, article.valid_from, article.valid_until) == (
+        number,
+        start,
+        None,
+    )
+    assert (article.amendment, article.note) == (amendment, None)
+    for line in article.text.splitlines():
+        assert not line.startswith(
+            ("Article ", "Version en vigueur", "Modifié par", "Création", "Créé par")
+        ), (path, line)
+
+
 # --- 2. Lignes d'interface en fin de fichier : supprimées ------------------------------
 
 
@@ -248,6 +328,53 @@ def test_marque_de_consolidation_dans_une_ligne_refusee(corpus_synthetique):
         list(ingestion.articles())
 
 
+@pytest.mark.parametrize(
+    "path,number,heading,first,last",
+    [
+        (
+            "sti-materiel-roulant/point-4.2.10.2.1.txt",
+            "4.2.10.2.1",
+            "Exigences relatives aux matériaux",
+            f"1){NBSP}La sélection des matériaux",
+            f"Elle doit être renouvelée tous les 5{NBSP}ans.",
+        ),
+        (
+            "certification-navigabilite/point-21.A.307.txt",
+            "21.A.307",
+            (
+                "Conditions d’admissibilité pour l’installation applicables aux pièces "
+                "et équipements"
+            ),
+            "a)",
+            "avec les données de définition concernées.",
+        ),
+    ],
+    ids=["1302-2014", "748-2012"],
+)
+def test_points_d_annexe_reels(path, number, heading, first, last):
+    # copies du 20/10/2026 : numéro et intitulé sur la première ligne, aucun paragraphe
+    # perdu ; marques de consolidation retirées, appel de note gardé
+    raw = real(path)
+    point = corpus.parse_eurlex(raw)
+    assert (point.article, point.heading) == (number, heading)
+    assert point.text.startswith(first) and point.text.endswith(last)
+    assert (point.valid_from, point.valid_until, point.note) == (None,) * 3
+    assert not any(mark in point.text for mark in ("▼", "►", "◄"))
+    kept = [
+        line.strip()
+        for line in raw.splitlines()[1:]
+        if line.strip() and not line.strip().startswith("▼")
+    ]
+    assert [line.strip() for line in point.text.splitlines() if line.strip()] == kept
+
+
+def test_appel_de_note_du_point_21_a_307_garde():
+    point = corpus.parse_eurlex(real("certification-navigabilite/point-21.A.307.txt"))
+    assert f"règlement (UE) no{NBSP}965/2012 de la Commission{NBSP}( 9 ); et" in (
+        point.text
+    )
+
+
 def test_reference_d_un_point(corpus_synthetique):
     add_points(corpus_synthetique)
     by_ref = {a.reference: (a, kinds) for a, kinds in ingestion.articles()}
@@ -380,8 +507,8 @@ def citing(req: explanation.ExplanationRequest, text: str) -> explanation.Draft:
 def test_numeros_partages_du_corpus_compares_par_source(corpus_lu, request):
     # l'explication rattache une citation à la source dont un nom la touche (citation ou
     # titre du manifeste) et la compare par source et numéro ; sans nom, par son seul
-    # numéro (domain/explanation.py). Aucun homonyme au dépôt avant la sous-traitance
-    # (CPI et C. mon. fin., art. L112-2) : la paire synthétique donne son sens au test.
+    # numéro (domain/explanation.py). Au dépôt : CPI et C. mon. fin., art. L112-2 ; la
+    # paire synthétique garde le test indépendant du corpus du dépôt.
     if corpus_lu == "paire_synthetique":
         write_homonyms(request.getfixturevalue("corpus_synthetique"))
     manifest = ingestion.load_manifest()
@@ -400,6 +527,13 @@ def test_numeros_partages_du_corpus_compares_par_source(corpus_lu, request):
     if corpus_lu == "paire_synthetique":
         assert names == HOMONYM_NAMES
         assert shared == {HOMONYM: {CODE_A: CODE_A_REF, CODE_B: CODE_B_REF}}
+    else:
+        assert shared == {
+            "L112-2": {
+                "code-monetaire-financier": "C. mon. fin., art. L112-2",
+                "code-propriete-intellectuelle": "CPI, art. L112-2",
+            }
+        }
     # chaque numéro partagé : la source retenue acceptée, l'autre refusée, sous les deux
     # formes et par chacun de ses noms ; sans nom de source, accepté comme aujourd'hui
     for number, sources in shared.items():
@@ -443,17 +577,24 @@ def test_date_de_recuperation_propre_a_un_article():
     clause_penale, kinds = by_ref["C. civ., art. 1231-5"]
     assert (clause_penale.retrieved_at, kinds) == (
         date(2026, 9, 25),
-        ["penalites_execution"],
+        ["penalites_execution", "penalites_retard_execution"],
     )
     assert by_ref["C. civ., art. 1231-3"][0].retrieved_at == date(
         2026, 9, 24
     )  # date de la source
+    # articles ajoutés pour la sous-traitance : copies du 21/10/2026 (Légifrance) et du
+    # 20/10/2026 (EUR-Lex)
+    retrieved = {ref: a.retrieved_at for ref, (a, _) in by_ref.items()}
+    assert {ref: retrieved[ref] for ref in NOUVELLES_REFERENCES} == {
+        ref: date(2026, 10, 20) if "Règl." in ref else date(2026, 10, 21)
+        for ref in NOUVELLES_REFERENCES
+    }
 
 
 # --- Fiches : avertissement, et aucune affirmation sans source du corpus ------------------
 
 
-FICHES = {
+FICHES_FOURNISSEUR = {
     "fiche-sous-traitance-rgpd",
     "fiche-transferts-hors-ue",
     "fiche-responsabilite-plafonds",
@@ -462,6 +603,17 @@ FICHES = {
     "fiche-revision-prix",
     "fiche-duree-preavis",
 }
+# fiches propres au profil sous_traitance (spec, « Nouvelles fiches ») : début de leur
+# période de validité, d'après les articles qu'elles citent ; aucune fin
+FICHES_SOUS_TRAITANCE = {
+    "fiche-protection-design": date(2020, 12, 27),  # CPI, art. L111-1
+    "fiche-certification-preuves": None,  # points EUR-Lex, sans borne
+    "fiche-assurance-sous-traitant": date(2007, 12, 19),  # C. assur., art. L124-3
+    "fiche-delais-execution": date(2016, 10, 1),  # C. civ., art. 1231 et 1231-1
+    "fiche-responsabilite-sous-traitance": date(2018, 10, 1),  # C. civ., art. 1171
+    "fiche-penalites-retard-execution": date(2016, 10, 1),  # C. civ., art. 1231-5
+}
+FICHES = FICHES_FOURNISSEUR | set(FICHES_SOUS_TRAITANCE)
 
 
 def test_fiches_du_corpus():
@@ -569,6 +721,71 @@ def test_entree_de_citation_hors_du_bloc_refusee():
     assert corpus.citations(prose) == [("code-civil", "1231-3")]
 
 
+@pytest.mark.parametrize(
+    "line,unread",
+    [
+        (
+            "- Texte (sources : rgpd, art. 46, par. 3, a) et b) ; rgpd, art. 28).",
+            " et b) ; rgpd, art. 28).",
+        ),
+        (
+            "- Texte (sources : rgpd, art. 46, par. 3, a), rgpd, art. 28).",
+            ", rgpd, art. 28).",
+        ),
+        (
+            "- Texte (sources : rgpd, art. 46, par. 3, a) ; rgpd, art. 28).",
+            " ; rgpd, art. 28).",
+        ),
+    ],
+    ids=["et", "virgule", "point-virgule"],
+)
+def test_bloc_ferme_par_un_sous_point_texte_non_lu_refuse(line, unread):
+    # la parenthèse d'un sous-point (« a) ») ferme le bloc : ce qui la suit jusqu'à la
+    # parenthèse qui ferme vraiment le bloc n'est pas lu, quel que soit le séparateur
+    message = re.escape(
+        "entrée de citation hors de son bloc, fermé par la parenthèse d'un sous-point ; "
+        f"suite non lue : {unread!r}"
+    )
+    with pytest.raises(ValueError, match=message):
+        corpus.citations(line)
+
+
+@pytest.mark.parametrize(
+    "line,cited",
+    [
+        # sous-point en fin de bloc : rien n'est laissé avant la parenthèse fermante
+        (
+            "- Texte (source : sti-materiel-roulant, point 4.2.10.2.1, 2)).",
+            [("sti-materiel-roulant", "4.2.10.2.1")],
+        ),
+        (
+            "- Texte (source : code-commerce, art. L441-10, I).",
+            [("code-commerce", "L441-10")],
+        ),
+        # parenthèses équilibrées après le bloc
+        (
+            "- Texte (source : code-civil, art. 1231-3) ; voir aussi (hors corpus).",
+            [("code-civil", "1231-3")],
+        ),
+    ],
+    ids=["sous-point-final", "romain-final", "parentheses-apres"],
+)
+def test_bloc_ferme_sans_texte_non_lu_admis(line, cited):
+    assert corpus.citations(line) == cited
+
+
+def test_fiche_avec_un_bloc_ferme_par_un_sous_point_refusee(corpus_synthetique):
+    replace_line(
+        corpus_synthetique / "fiches" / "test.md",
+        "(source : code-test, art. T1)",
+        "(sources : code-test, art. T1, a) et b) ; code-test, art. T1)",
+    )
+    with pytest.raises(
+        ValueError, match="fiche-test : entrée de citation hors de son bloc, fermé par"
+    ):
+        ingestion.load_fiches()
+
+
 def test_fiche_avec_une_entree_de_citation_illisible_refusee(corpus_synthetique):
     replace_line(
         corpus_synthetique / "fiches" / "test.md",
@@ -581,20 +798,29 @@ def test_fiche_avec_une_entree_de_citation_illisible_refusee(corpus_synthetique)
         ingestion.load_fiches()
 
 
-def test_entrees_de_citation_des_fiches_du_corpus_toutes_lues():
-    # chaque entrée commence par une citation : aucune n'est ignorée en silence
+def entries_and_citations(fiches: list[corpus.Fiche]) -> tuple[int, int]:
+    """Entrées des blocs de citation des fiches, et citations lues."""
+    lines = [line for fiche in fiches for line in corpus.claim_lines(fiche.body)]
     entries = [
         entry
-        for fiche in ingestion.load_fiches()
-        for line in corpus.claim_lines(fiche.body)
+        for line in lines
         for block in re.findall(r"\(sources? : ([^)]+)\)", line)
         for entry in block.split(";")
     ]
-    assert entries and sum(
-        len(corpus.citations(line))
-        for fiche in ingestion.load_fiches()
-        for line in corpus.claim_lines(fiche.body)
-    ) == len(entries)
+    return len(entries), sum(len(corpus.citations(line)) for line in lines)
+
+
+def test_entrees_de_citation_des_fiches_du_corpus_toutes_lues():
+    # chaque entrée commence par une citation : aucune n'est ignorée en silence
+    fiches = ingestion.load_fiches()
+    entries, cited = entries_and_citations(fiches)
+    assert entries and cited == entries
+    # les 79 entrées des fiches du fournisseur, comptées le 20/10/2026, restent lues
+    # malgré la garde des blocs fermés par un sous-point
+    assert entries_and_citations([f for f in fiches if f.id in FICHES_FOURNISSEUR]) == (
+        79,
+        79,
+    )
 
 
 def test_sections_d_une_fiche():
@@ -629,6 +855,171 @@ def test_une_fiche_herite_la_fin_de_validite_des_articles_qu_elle_cite():
     assert validity["code-commerce"] >= {date(2027, 1, 1)}
 
 
+# --- Corpus de la sous-traitance (spec des profils, « Corpus ») --------------------------
+
+NOUVELLES_REFERENCES = {
+    "CPI, art. L111-1",
+    "CPI, art. L112-2",
+    "CPI, art. L122-4",
+    "CPI, art. L131-3",
+    "C. civ., art. 1231",
+    "C. civ., art. 1231-1",
+    "C. assur., art. L124-3",
+    "Règl. (UE) 1302/2014, annexe, point 4.2.10.2.1",
+    "Règl. (UE) 748/2012, annexe I, point 21.A.307",
+}
+TITRES_SOUS_TRAITANCE = {
+    "fiche-protection-design": "Protection du design",
+    "fiche-certification-preuves": "Certification et preuves",
+    "fiche-assurance-sous-traitant": "Assurance du sous-traitant",
+    "fiche-delais-execution": "Délais d'exécution",
+    "fiche-responsabilite-sous-traitance": "Responsabilité dans la sous-traitance",
+    "fiche-penalites-retard-execution": "Pénalités de retard d'exécution",
+}
+
+
+def test_fenetres_des_fiches_sous_traitance():
+    windows: dict[str, set] = {}
+    for meta, _, _ in ingestion.pending_chunks(CONFIG.corpus.chunk_max_words):
+        if meta["source_id"] in FICHES_SOUS_TRAITANCE:
+            windows.setdefault(meta["source_id"], set()).add(
+                (meta["valid_from"], meta["valid_until"])
+            )
+    assert windows == {
+        fiche: {(start, None)} for fiche, start in FICHES_SOUS_TRAITANCE.items()
+    }
+
+
+def test_nouvelles_references_dans_le_dossier():
+    # chaque nouvelle référence a son texte à la date d'analyse du jeu, donc au dossier
+    texts = ingestion.reference_texts(date(2026, 9, 25))
+    fiches = {
+        f"Fiche projet : {title}": fiche
+        for fiche, title in TITRES_SOUS_TRAITANCE.items()
+    }
+    assert NOUVELLES_REFERENCES | set(fiches) <= set(texts)
+    for reference in NOUVELLES_REFERENCES | set(fiches):
+        assert texts[reference]["texte"].strip(), reference
+    assert {r: texts[r]["source"] for r in fiches} == fiches
+
+
+def test_fiches_sous_traitance_rattachees_aux_types_propres_au_profil():
+    # les types communs (révision de prix, délai de paiement) gardent leurs fiches
+    fiches = {f.id: f for f in ingestion.load_fiches()}
+    sous_traitance = set(profiles.spec("sous_traitance").kinds)
+    for fiche_id, title in TITRES_SOUS_TRAITANCE.items():
+        fiche = fiches[fiche_id]
+        assert fiche.title == title
+        assert set(fiche.kinds) <= sous_traitance - set(FOURNISSEUR.kinds), fiche_id
+        # aucun article cité à plusieurs versions : rien à déclarer relu
+        assert fiche.verified == {}, fiche_id
+    clauses = {k for f in TITRES_SOUS_TRAITANCE for k in fiches[f].kinds}
+    assert clauses == sous_traitance - {"revision_prix", "delai_paiement"}
+
+
+def test_rattachements_elargis_a_la_sous_traitance():
+    # spec, « Sources existantes, rattachements élargis » : les types du fournisseur
+    # restent, en tête
+    kinds = {a.reference: k for a, k in ingestion.articles()}
+    responsabilite = [
+        "responsabilite_acheteur",
+        "responsabilite_fournisseur",
+        "responsabilite_donneur_ordre",
+        "responsabilite_sous_traitant",
+    ]
+    for article in ("1170", "1171", "1231-3"):
+        assert kinds[f"C. civ., art. {article}"] == responsabilite
+    assert kinds["C. civ., art. 1231-5"] == [
+        "penalites_execution",
+        "penalites_retard_execution",
+    ]
+    assert kinds["C. com., art. L441-10"] == ["delai_paiement"]
+    assert kinds["C. mon. fin., art. L112-2"] == ["revision_prix"]
+
+
+def test_nouvelles_sources_du_manifeste():
+    manifest = ingestion.load_manifest()
+    sources = manifest.sources
+    assert {
+        sid: (s["format"], s["citation"], manifest.unit(sid), s["file"])
+        for sid, s in sources.items()
+        if sid
+        in {
+            "code-propriete-intellectuelle",
+            "code-assurances",
+            "sti-materiel-roulant",
+            "certification-navigabilite",
+        }
+    } == {
+        "code-propriete-intellectuelle": ("legifrance", "CPI", "art.", "{article}.txt"),
+        "code-assurances": ("legifrance", "C. assur.", "art.", "{article}.txt"),
+        "sti-materiel-roulant": (
+            "eurlex",
+            "Règl. (UE) 1302/2014",
+            "annexe, point",
+            "point-{article}.txt",
+        ),
+        "certification-navigabilite": (
+            "eurlex",
+            "Règl. (UE) 748/2012",
+            "annexe I, point",
+            "point-{article}.txt",
+        ),
+    }
+    # hiérarchies relues le 21/10/2026 : celles du Code civil, du CPI et du Code des
+    # assurances ; lien de la version en vigueur de chaque nouvel article (spec)
+    for sid in ("code-civil", "code-propriete-intellectuelle", "code-assurances"):
+        assert sources[sid]["hierarchy_verified_at"] == date(2026, 10, 21), sid
+    legiarti = {
+        ("code-propriete-intellectuelle", "L111-1"): "LEGIARTI000042814694",
+        ("code-propriete-intellectuelle", "L112-2"): "LEGIARTI000006278875",
+        ("code-propriete-intellectuelle", "L122-4"): "LEGIARTI000006278911",
+        ("code-propriete-intellectuelle", "L131-3"): "LEGIARTI000006278958",
+        ("code-civil", "1231"): "LEGIARTI000032041443",
+        ("code-civil", "1231-1"): "LEGIARTI000032010123",
+        ("code-assurances", "L124-3"): "LEGIARTI000017735449",
+    }
+    for (sid, number), identifier in legiarti.items():
+        assert sources[sid]["hierarchy"][number]["url"] == (
+            f"https://www.legifrance.gouv.fr/codes/article_lc/{identifier}"
+        ), number
+    # intitulé en vigueur depuis le 01/07/2012, jamais l'intitulé abrogé
+    assert (
+        "Titre II : Règles relatives aux assurances de dommages"
+        in sources["code-assurances"]["hierarchy"]["L124-3"]["levels"]
+    )
+    # aucune version suivante annoncée au 20/10/2026 (API) ; EUR-Lex n'en a jamais
+    for sid in (
+        "code-civil",
+        "code-propriete-intellectuelle",
+        "code-assurances",
+        "sti-materiel-roulant",
+        "certification-navigabilite",
+    ):
+        assert "later_versions" not in sources[sid], sid
+
+
+def test_aucune_norme_payante_dans_le_corpus():
+    # EN 45545-2 et les règles de l'OMI ne sont pas libres : jamais dans raw/
+    for path in sorted(RAW.rglob("*.txt")):
+        text = path.read_text(encoding="utf-8")
+        assert "EN 45545" not in text, path
+        assert "Organisation maritime internationale" not in text, path
+        assert not re.search(r"\bOMI\b", text), path
+    # dans une fiche, nommées seulement, dans « Comment le projet l'applique », sans
+    # extrait entre guillemets
+    named = []
+    for fiche in ingestion.load_fiches():
+        for section, lines in corpus.fiche_sections(fiche.body).items():
+            for line in lines:
+                if re.search(r"EN 45545|\bOMI\b|Organisation maritime", line):
+                    assert section == corpus.APPLICATION_SECTION, (fiche.id, line)
+                    assert "«" not in line and "»" not in line, (fiche.id, line)
+                    named.append(fiche.id)
+    assert "fiche-certification-preuves" in named
+    assert set(named) == {"fiche-certification-preuves"}
+
+
 def test_aucun_fichier_brut_ne_repete_sa_ligne_de_titre():
     # un titre répété (« Article 32 » deux fois) deviendrait l'intitulé à l'ingestion
     repeated = []
@@ -655,12 +1046,13 @@ def test_chaque_source_declare_des_types_de_clause_connus():
     for source, kinds in articles + fiches:
         assert kinds, f"{source} : aucun type de clause déclaré"
         assert len(set(kinds)) == len(kinds), f"{source} : type répété"
-        assert set(kinds) <= set(FOURNISSEUR.kinds), (source, kinds)
+        assert set(kinds) <= profiles.ALL_KINDS, (source, kinds)
 
 
 def test_chaque_type_de_clause_a_au_moins_un_article_et_une_fiche():
+    # types de tous les profils
     articles, fiches = declared()
-    for kind in FOURNISSEUR.kinds:
+    for kind in sorted(profiles.ALL_KINDS):
         assert any(kind in kinds for _, kinds in articles), f"{kind} : aucun article"
         assert any(kind in kinds for _, kinds in fiches), f"{kind} : aucune fiche"
 
@@ -708,18 +1100,19 @@ def test_fiche_domaines_deduits():
 
 def test_sources_md_donne_les_memes_rattachements_que_le_manifeste_et_les_fiches():
     text = (RAW.parent / "SOURCES.md").read_text(encoding="utf-8")
+    manifest = ingestion.load_manifest()
     documented = {}
     for line in text.splitlines():
         cells = [c.strip() for c in line.strip("|").split("|")]
         if len(cells) >= 4 and cells[0].startswith("`") and "`" in cells[-2]:
             kinds = [k.strip(" `") for k in cells[-2].split(",")]
+            source = cells[0].strip("`")
+            # « art. 4 », « L441-10 », « annexe, point 4.2.10.2.1 » : l'unité de la
+            # source retirée
             key = (
-                cells[0].strip("`")
+                source
                 if cells[0].startswith("`fiche-")
-                else (
-                    cells[0].strip("`"),
-                    cells[1].removeprefix("art. "),
-                )
+                else (source, cells[1].removeprefix(f"{manifest.unit(source)} "))
             )
             documented[key] = kinds
     expected = {(a.source_id, a.article): k for a, k in ingestion.articles()}
@@ -747,8 +1140,25 @@ LEGIFRANCE_ARTICLE = re.compile(
     r"^https://www\.legifrance\.gouv\.fr/codes/article_lc/LEGIARTI\d{12}$"
 )
 LEVEL = re.compile(
-    r"^(Partie|LIVRE|Livre|TITRE|Titre|Sous-titre|Chapitre|Section|Sous-section) "
+    r"^(Partie|Première partie|LIVRE|Livre|TITRE|Titre|Sous-titre|Chapitre|Section"
+    r"|Sous-section) "
 )
+
+
+@pytest.mark.parametrize(
+    "level,official",
+    [
+        ("Partie législative", True),
+        ("Première partie : La propriété littéraire et artistique", True),
+        ("Livre Ier : Le droit d'auteur", True),
+        ("Chapitre IV : Les assurances de responsabilité.", True),
+        ("première partie : en minuscules", False),
+        ("Premièrepartie : collé", False),
+        ("Annexe : hors des niveaux de Légifrance", False),
+    ],
+)
+def test_motif_des_intitules(level, official):
+    assert bool(LEVEL.match(level)) is official
 
 
 def test_intitules_officiels_de_chaque_article_legifrance_presents():
@@ -767,5 +1177,9 @@ def test_intitules_officiels_de_chaque_article_legifrance_presents():
             assert LEGIFRANCE_ARTICLE.match(entry["url"]), (number, entry["url"])
             assert entry["levels"], number
             assert all(LEVEL.match(level) for level in entry["levels"]), number
+            # un seul espace entre les mots, aucun en fin
+            for level in entry["levels"]:
+                assert level == " ".join(level.split()), (number, level)
             urls.append(entry["url"])
-    assert len(urls) == len(set(urls)) == 9
+    # 9 articles du fournisseur, 7 de la sous-traitance
+    assert len(urls) == len(set(urls)) == 16

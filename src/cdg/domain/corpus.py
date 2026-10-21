@@ -4,8 +4,9 @@ La lecture des fichiers et la construction des extraits embarqués sont dans
 `application/ingestion.py`.
 
 Règles de nettoyage explicites, testées sur les fichiers réels :
-1. Légifrance : « Version en vigueur … » et « Modifié par … » / « Création … » deviennent
-   des métadonnées (début, fin de validité, texte modificateur), pas du contenu indexé ;
+1. Légifrance : « Version en vigueur … » et « Modifié par … » / « Création … » / « Créé
+   par … » deviennent des métadonnées (début, fin de validité, texte modificateur), pas du
+   contenu indexé ;
 2. lignes d'interface en fin de fichier (« Voir les versions »…) : supprimées ;
 3. notes « Conformément à … » : sorties du texte, conservées en métadonnée `note` ;
    l'étiquette « NOTA : » qui les précède sur la page est supprimée ;
@@ -63,7 +64,9 @@ _VERSION = re.compile(
     rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE}"
     rf"|à partir du {_DATE})$"
 )
-_AMENDMENT = re.compile(r"^(Modifié par|Création) (.+)$")
+# texte modificateur : « Modifié par … », ou une création, « Création … » ou « Créé par … »
+# (page de L122-4 du CPI, enregistrée le 21/10/2026), gardé tel qu'affiché
+_AMENDMENT = re.compile(r"^(Modifié par|Création|Créé par) (.+)$")
 _NOTE = re.compile(r"^Conformément (?:à|aux?) ")
 # étiquette de la page devant la note, seule sur sa ligne ou suivie de la note ; espaces
 # insécables comprises (\s en Unicode)
@@ -502,18 +505,42 @@ def claim_lines(body: str) -> list[str]:
     ]
 
 
+def _closed_early(line: str, end: int) -> bool:
+    """Bloc de citation fermé avant sa vraie fin, en `end` : la parenthèse d'un sous-point
+    (« a) », « 2) ») l'a fermé, et du texte, non lu, la sépare de la parenthèse suivante
+    restée sans ouvrante. Faux si aucune parenthèse ne reste à fermer, ou si rien ne
+    l'en sépare (« point 4.2.10.2.1, 2)) »)."""
+    depth = 0
+    for index in range(end, len(line)):
+        if line[index] == "(":
+            depth += 1
+        elif line[index] == ")":
+            if depth == 0:
+                return bool(line[end:index].strip())
+            depth -= 1
+    return False
+
+
 def citations(line: str) -> list[tuple[str, str]]:
     """(source, article ou point) cités par les blocs « (source : …) » d'une ligne, dans
     l'ordre. Chaque entrée d'un bloc, séparée par « ; », commence par une citation
     (« rgpd, art. 28, par. 3 », « sti-materiel-roulant, point 4.2.10.2.1, 2) ») ; sinon,
     erreur : jamais une entrée ignorée en silence. La parenthèse d'un sous-point (« 2) »)
-    ferme le bloc : une entrée qui le suit après « ; » en sortirait, erreur aussi."""
+    ferme le bloc : du texte laissé avant la parenthèse qui le ferme vraiment, quel que
+    soit le séparateur (« a) et b) ; … », « a), … »), n'est pas lu, erreur ; une entrée
+    qui suit le bloc après « ; », parenthèse fermante oubliée, en sortirait, erreur
+    aussi."""
     found = []
     for block in _CITATION.finditer(line):
         for entry in (part.strip() for part in block[1].split(";")):
             if not _ONE.match(entry):
                 raise ValueError(f"entrée de citation illisible : {entry!r}")
             found += [(m[1], m[2] or m[3]) for m in _ONE.finditer(entry)]
+        if _closed_early(line, block.end()):
+            raise ValueError(
+                "entrée de citation hors de son bloc, fermé par la parenthèse d'un "
+                f"sous-point ; suite non lue : {line[block.end() :][:60]!r}"
+            )
         after = _NEXT_ENTRY.match(line, block.end())
         if after and _ONE.match(line, after.end()):
             raise ValueError(
