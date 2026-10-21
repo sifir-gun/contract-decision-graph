@@ -429,7 +429,8 @@ _NEXT_ENTRY = re.compile(r"\s*(?:[;,]|\bet\b)\s*")
 
 
 TEXT_SECTION = "Ce que dit le texte"  # paraphrases fidèles, chacune sourcée
-APPLICATION_SECTION = "Comment le projet l'applique"  # choix de politique d'achat
+# choix de la politique d'achat ou du donneur d'ordre, selon le profil
+APPLICATION_SECTION = "Comment le projet l'applique"
 
 
 def fiche_sections(body: str) -> dict[str, list[str]]:
