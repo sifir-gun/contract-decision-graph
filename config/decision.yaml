@@ -273,6 +273,9 @@ sous_traitance:
       - propriété intellectuelle
       - documents remis
     revision_prix:
+      # termes du fournisseur ; « peut être révisé » attrape aussi « le planning peut être
+      # révisé » : une révision de prix déclarée absente y est redemandée, puis escaladée
+      # (sens prudent)
       - révision des prix
       - révision du prix
       - révision des tarifs

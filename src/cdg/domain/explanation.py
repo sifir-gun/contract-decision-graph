@@ -433,7 +433,10 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
 
 def articles(text: str) -> set[str]:
     """Numéros des articles et des points d'annexe cités (`citations`), sans leur
-    source."""
+    source. Tout « point » suivi d'un numéro à points est lu comme un point d'annexe,
+    même un renvoi au contrat : « au point 3.2 du contrat », accepté sur `main`, est
+    refusé s'il n'est pas retenu pour la clause (extension aux points d'annexe voulue
+    par la spec ; sens prudent : régénération, puis gabarit)."""
     return {number for _, number in _citations(text, [])}
 
 
