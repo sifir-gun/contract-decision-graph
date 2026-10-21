@@ -1025,9 +1025,12 @@ def test_negation_des_preuves_n_evoque_jamais_norme_et_preuves(negation):
 
 
 # --- réutilisation des dessins : lue dans le sens prudent (blocage dur) ------------------
-# « réutiliser » et « librement » évoquent `reutilisation_autorisee`, la première
-# catégorie : une citation qui l'évoque n'est jamais lue `confidentialite_seule` ni
-# `usage_limite_au_projet`, au prix d'une redemande quand le texte nie la réutilisation.
+# La racine « réutilis » (réutiliser, réutilise, réutilisation, réutilisable), sa graphie
+# sans accent « reutilis » (la comparaison, `text.folded`, ignore la casse mais garde les
+# accents), « librement » et « usage libre » évoquent `reutilisation_autorisee`, la
+# première catégorie : une citation qui l'évoque n'est jamais lue `confidentialite_seule`
+# ni `usage_limite_au_projet`, au prix d'une redemande quand le texte nie la
+# réutilisation.
 
 
 @pytest.mark.parametrize(
@@ -1049,6 +1052,12 @@ def test_negation_des_preuves_n_evoque_jamais_norme_et_preuves(negation):
         "La libre réutilisation des dessins remis, confidentiels, est admise.",
         "Le sous-traitant réutilise les dessins remis pour d'autres clients.",
         "Les dessins remis, confidentiels, sont réutilisables par le sous-traitant.",
+        # graphie sans accent, en capitales comme en minuscules ; usage libre (passe
+        # finale)
+        "Le sous-traitant peut REUTILISER les dessins remis, qui restent confidentiels.",
+        "Les dessins remis, confidentiels, sont reutilisables par le sous-traitant.",
+        "Le sous-traitant a l'usage libre des plans remis, qui restent confidentiels.",
+        "Usage libre des dessins remis, confidentiels, pour d'autres clients.",
     ],
 )
 @pytest.mark.parametrize(

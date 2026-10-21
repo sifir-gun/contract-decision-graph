@@ -330,17 +330,19 @@ sous_traitance:
   # catégories dont un terme figure dans la citation, la première l'emporte, d'où l'ordre,
   # du plus spécifique au moins spécifique. « confidentiel » vient après les termes de
   # limite d'usage : une citation qui limite l'usage dit aussi la confidentialité. Les
-  # termes de réutilisation sont larges (la racine « réutilis » couvre réutiliser, « peut
-  # les réutiliser », réutilise, réutilisation, réutilisable), dans le sens prudent :
-  # c'est la catégorie qui bloque, et une citation qui l'évoque n'est jamais lue autrement.
-  # Une négation (« n'est autorisé à réutiliser … que pour … ») est donc redemandée, puis
-  # revue par un humain : voulu. Les autres types sont ancrés (« certificat » seul est dans
-  # « certification » ; « conformes aux normes » seul dit « sans norme nommée », ce qui
-  # est la conformité générale, non « norme sans preuves »). La conformité générale vient
-  # avant les preuves : des procès-verbaux remis ne nomment pas de norme, et une citation
-  # qui renvoie aux normes en vigueur n'est jamais lue `norme_et_preuves` (acceptée). Les
-  # termes de la catégorie acceptée sont des formes verbales actives suivies d'un article
-  # défini (« remet les procès-verbaux d'essai ») : une négation du verbe s'insère entre le
+  # termes de réutilisation sont larges (la racine « réutilis » couvre réutiliser,
+  # « peut les réutiliser », réutilise, réutilisation, réutilisable ; « reutilis », la
+  # même sans accent, que la comparaison ne retire pas ; « librement », « usage
+  # libre »), dans le sens prudent : c'est la catégorie qui bloque, et une citation qui
+  # l'évoque n'est jamais lue autrement. Une négation (« n'est autorisé à réutiliser …
+  # que pour … ») est donc redemandée, puis revue par un humain : voulu. Les autres
+  # types sont ancrés (« certificat » seul est dans « certification » ; « conformes aux
+  # normes » seul dit « sans norme nommée », ce qui est la conformité générale, non
+  # « norme sans preuves »). La conformité générale vient avant les preuves : des
+  # procès-verbaux remis ne nomment pas de norme, et une citation qui renvoie aux normes
+  # en vigueur n'est jamais lue `norme_et_preuves` (acceptée). Les termes de la
+  # catégorie acceptée sont des formes verbales actives suivies d'un article défini
+  # (« remet les procès-verbaux d'essai ») : une négation du verbe s'insère entre le
   # verbe et son objet (« ne remet pas les », « ne remet aucun », « sans remettre les »,
   # « n'est pas tenu de remettre les »), et n'en contient donc aucun. Limite, les termes
   # étant cherchés comme sous-chaînes de la citation : une négation portée par le sujet
@@ -360,7 +362,9 @@ sous_traitance:
     protection_design:
       reutilisation_autorisee:
         - réutilis   # racine : réutiliser, réutilise, réutilisation, réutilisable
+        - reutilis   # même racine sans accent : la comparaison garde les accents
         - librement
+        - usage libre
       usage_limite_au_projet:
         - seules fins
         - seule fin
