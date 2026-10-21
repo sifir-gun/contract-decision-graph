@@ -423,7 +423,9 @@ _CITATION = re.compile(r"\(sources? : ([^)]+)\)")
 _ONE = re.compile(
     r"([a-z-]+), (?:art\. ([A-Z]?\d+(?:-\d+)?)|point (\d+(?:\.[0-9A-Z]+)+))"
 )
-_NEXT_ENTRY = re.compile(r"\s*;\s*")  # après un bloc : une entrée qui en serait sortie
+# après un bloc, un séparateur (« ; », virgule, « et ») : une citation qui le suit serait
+# une entrée sortie du bloc
+_NEXT_ENTRY = re.compile(r"\s*(?:[;,]|\bet\b)\s*")
 
 
 TEXT_SECTION = "Ce que dit le texte"  # paraphrases fidèles, chacune sourcée
@@ -505,13 +507,14 @@ def claim_lines(body: str) -> list[str]:
     ]
 
 
-def _closed_early(line: str, end: int) -> bool:
+def _closed_early(line: str, end: int, stop: int) -> bool:
     """Bloc de citation fermé avant sa vraie fin, en `end` : la parenthèse d'un sous-point
     (« a) », « 2) ») l'a fermé, et du texte, non lu, la sépare de la parenthèse suivante
-    restée sans ouvrante. Faux si aucune parenthèse ne reste à fermer, ou si rien ne
-    l'en sépare (« point 4.2.10.2.1, 2)) »)."""
+    restée sans ouvrante, avant `stop`, le début du bloc suivant (ses parenthèses sont
+    les siennes). Faux si aucune parenthèse ne reste à fermer, ou si rien ne l'en sépare
+    (« point 4.2.10.2.1, 2)) »)."""
     depth = 0
-    for index in range(end, len(line)):
+    for index in range(end, stop):
         if line[index] == "(":
             depth += 1
         elif line[index] == ")":
@@ -528,18 +531,20 @@ def citations(line: str) -> list[tuple[str, str]]:
     erreur : jamais une entrée ignorée en silence. La parenthèse d'un sous-point (« 2) »)
     ferme le bloc : du texte laissé avant la parenthèse qui le ferme vraiment, quel que
     soit le séparateur (« a) et b) ; … », « a), … »), n'est pas lu, erreur ; une entrée
-    qui suit le bloc après « ; », parenthèse fermante oubliée, en sortirait, erreur
-    aussi."""
+    qui suit le bloc après « ; », une virgule ou « et », parenthèse fermante oubliée, en
+    sortirait, erreur aussi. Chaque bloc n'est contrôlé que jusqu'au bloc suivant."""
     found = []
-    for block in _CITATION.finditer(line):
+    blocks = list(_CITATION.finditer(line))
+    for index, block in enumerate(blocks):
+        stop = blocks[index + 1].start() if index + 1 < len(blocks) else len(line)
         for entry in (part.strip() for part in block[1].split(";")):
             if not _ONE.match(entry):
                 raise ValueError(f"entrée de citation illisible : {entry!r}")
             found += [(m[1], m[2] or m[3]) for m in _ONE.finditer(entry)]
-        if _closed_early(line, block.end()):
+        if _closed_early(line, block.end(), stop):
             raise ValueError(
                 "entrée de citation hors de son bloc, fermé par la parenthèse d'un "
-                f"sous-point ; suite non lue : {line[block.end() :][:60]!r}"
+                f"sous-point ; suite non lue : {line[block.end() : stop][:60]!r}"
             )
         after = _NEXT_ENTRY.match(line, block.end())
         if after and _ONE.match(line, after.end()):

@@ -709,16 +709,73 @@ def test_entree_de_citation_illisible_refusee(line, entry):
 
 def test_entree_de_citation_hors_du_bloc_refusee():
     # la parenthèse d'un sous-point ferme le bloc : l'entrée suivante en sortirait, en
-    # silence
+    # silence ; parenthèse finale présente, celle-ci reste sans ouvrante : garde des
+    # blocs fermés trop tôt
     line = (
         "- Texte (sources : sti-materiel-roulant, point 4.2.10.2.1, 2) ; "
         "certification-navigabilite, point 21.A.307)."
     )
-    with pytest.raises(ValueError, match="entrée de citation hors de son bloc"):
+    message = (
+        "entrée de citation hors de son bloc, fermé par la parenthèse d'un sous-point ; "
+        "suite non lue : "
+    )
+    with pytest.raises(ValueError, match=re.escape(message)):
         corpus.citations(line)
-    # une phrase qui suit un bloc après « ; » reste admise (fiche des plafonds)
-    prose = "- Texte (source : code-civil, art. 1231-3) ; l'article ne dit pas tout."
-    assert corpus.citations(prose) == [("code-civil", "1231-3")]
+
+
+@pytest.mark.parametrize(
+    "line,outside",
+    [
+        (
+            (
+                "- Texte (sources : sti-materiel-roulant, point 4.2.10.2.1, 2) ; "
+                "certification-navigabilite, point 21.A.307."
+            ),
+            "certification-navigabilite, point 21.A.307.",
+        ),
+        (
+            "- Texte (sources : rgpd, art. 46, par. 3, a), rgpd, art. 28.",
+            "rgpd, art. 28.",
+        ),
+        (
+            "- Texte (sources : rgpd, art. 46, par. 3, a) et rgpd, art. 28.",
+            "rgpd, art. 28.",
+        ),
+    ],
+    ids=["point-virgule", "virgule", "et"],
+)
+def test_entree_apres_un_bloc_sans_parenthese_finale_refusee(line, outside):
+    # parenthèse finale oubliée : aucune ne reste à fermer, mais une citation suit le
+    # bloc, quel que soit le séparateur ; garde de l'entrée qui suit le bloc
+    message = re.escape(
+        "entrée de citation hors de son bloc, après la parenthèse d'un sous-point : "
+        f"{outside!r}"
+    )
+    with pytest.raises(ValueError, match=message):
+        corpus.citations(line)
+
+
+@pytest.mark.parametrize(
+    "prose,cited",
+    [
+        # une phrase qui suit un bloc reste admise (fiche des plafonds, du design)
+        (
+            "- Texte (source : code-civil, art. 1231-3) ; l'article ne dit pas tout.",
+            [("code-civil", "1231-3")],
+        ),
+        (
+            "- Texte (source : code-civil, art. 1231-3), dont le texte ne dit pas tout.",
+            [("code-civil", "1231-3")],
+        ),
+        (
+            "- Texte (source : code-civil, art. 1171) et du déséquilibre significatif.",
+            [("code-civil", "1171")],
+        ),
+    ],
+    ids=["point-virgule", "virgule", "et"],
+)
+def test_phrase_apres_un_bloc_admise(prose, cited):
+    assert corpus.citations(prose) == cited
 
 
 @pytest.mark.parametrize(
@@ -736,8 +793,24 @@ def test_entree_de_citation_hors_du_bloc_refusee():
             "- Texte (sources : rgpd, art. 46, par. 3, a) ; rgpd, art. 28).",
             " ; rgpd, art. 28).",
         ),
+        # premier bloc fermé trop tôt : la suite citée s'arrête au bloc suivant
+        (
+            (
+                "- A (sources : rgpd, art. 46, par. 3, a) et b) ; rgpd, art. 28) puis B "
+                "(source : code-civil, art. 1231-3)."
+            ),
+            " et b) ; rgpd, art. 28) puis B ",
+        ),
+        # second bloc fermé trop tôt : c'est lui que la suite citée désigne
+        (
+            (
+                "- A (source : code-civil, art. 1231-3) et B (sources : rgpd, art. 46, "
+                "par. 3, a), rgpd, art. 28)."
+            ),
+            ", rgpd, art. 28).",
+        ),
     ],
-    ids=["et", "virgule", "point-virgule"],
+    ids=["et", "virgule", "point-virgule", "premier-bloc", "second-bloc"],
 )
 def test_bloc_ferme_par_un_sous_point_texte_non_lu_refuse(line, unread):
     # la parenthèse d'un sous-point (« a) ») ferme le bloc : ce qui la suit jusqu'à la
@@ -767,8 +840,17 @@ def test_bloc_ferme_par_un_sous_point_texte_non_lu_refuse(line, unread):
             "- Texte (source : code-civil, art. 1231-3) ; voir aussi (hors corpus).",
             [("code-civil", "1231-3")],
         ),
+        # deux blocs, le second fini par un sous-point : le premier n'est pas fermé
+        # trop tôt, la parenthèse restée sans ouvrante est celle du second
+        (
+            (
+                "- A (source : code-civil, art. 1231-3) et B (source : sti-materiel-roulant, "
+                "point 4.2.10.2.1, 2))."
+            ),
+            [("code-civil", "1231-3"), ("sti-materiel-roulant", "4.2.10.2.1")],
+        ),
     ],
-    ids=["sous-point-final", "romain-final", "parentheses-apres"],
+    ids=["sous-point-final", "romain-final", "parentheses-apres", "deux-blocs"],
 )
 def test_bloc_ferme_sans_texte_non_lu_admis(line, cited):
     assert corpus.citations(line) == cited
