@@ -3,7 +3,7 @@
 import math
 
 DECIMALS = 6  # constante de format, pas un réglage métier
-GROUPING_FROM = 10_000  # constante de format : à partir de là, un entier est groupé
+GROUPING_FROM = 10_000  # constante de format : à partir de là, un nombre est groupé
 
 
 def rounded(x: float) -> float:
@@ -14,9 +14,14 @@ def rounded(x: float) -> float:
 
 
 def shown(value: float) -> str:
-    """Valeur pour un message ou une requête : un entier de 10 000 ou plus est groupé par
-    milliers avec une espace (« 2 000 000 »), sinon la forme `:g` (« 45 », « 2.5 »),
-    jamais la notation scientifique d'un montant (« 2e+06 »)."""
-    if value >= GROUPING_FROM and value.is_integer():
-        return f"{int(value):,}".replace(",", " ")
-    return f"{value:g}"
+    """Valeur pour un message ou une requête, arrondie d'abord (`rounded`), puis écrite :
+    à partir de 10 000, groupée par milliers avec une espace (« 2 000 000 »,
+    « 10 000.5 »), jamais en notation scientifique (« 2e+06 ») ; en dessous, la forme
+    `:g` (« 45 », « 2.5 »)."""
+    value = rounded(value)
+    if value < GROUPING_FROM:
+        return f"{value:g}"
+    fixed = f"{value:.{DECIMALS}f}".rstrip("0").rstrip(".")
+    whole, _, decimals = fixed.partition(".")
+    grouped = f"{int(whole):,}".replace(",", " ")
+    return f"{grouped}.{decimals}" if decimals else grouped

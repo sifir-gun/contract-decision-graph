@@ -49,11 +49,34 @@ def test_grand_nombre_affiche_groupe():
         (0.0, "0"),
         (45.0, "45"),
         (1.5, "1.5"),
-        (10000.5, "10000.5"),  # non entier : jamais groupé
+        # non entier de 10 000 ou plus : groupé aussi, sans la forme `:g`
+        (10000.5, "10 000.5"),
+        (1234567.25, "1 234 567.25"),
     ],
 )
-def test_affichage_groupe_seulement_des_entiers_de_dix_mille_ou_plus(value, expected):
+def test_affichage_groupe_a_partir_de_dix_mille(value, expected):
     assert shown(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        # arrondi d'abord (`rounded`), puis écrit : jamais « 2e+06 »
+        (2000000.0000001, "2 000 000"),
+        (2000000.0, "2 000 000"),  # un entier
+        (2.0000001, "2"),  # un décimal sous 10 000
+        (9999.9999999, "10 000"),  # arrondi à 10 000 : groupé
+        (12345.6789012, "12 345.678901"),  # un décimal au-dessus, six décimales
+    ],
+)
+def test_affichage_arrondi_avant_d_etre_ecrit(value, expected):
+    assert shown(value) == expected
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf])
+def test_affichage_refuse_les_valeurs_non_finies(value):
+    with pytest.raises(ValueError, match="non fini"):
+        shown(value)
 
 
 @pytest.mark.parametrize("value", [0.0, 1.0, 0.5, 45.0, 60.0, 100.0, 9999.0, 2.5, 1e-5])
