@@ -108,6 +108,13 @@ def edit_manifest(root: Path, change: Callable[[dict[str, Any]], None]) -> None:
     write_manifest(root, content)
 
 
+def edit_sources(root: Path, change: Callable[[dict[str, Any]], None]) -> None:
+    """Modifie toutes les sources du manifeste écrit sous `root`."""
+    content = yaml.safe_load((root / "manifest.yaml").read_text(encoding="utf-8"))
+    change(content["sources"])
+    write_manifest(root, content)
+
+
 def raw(root: Path, name: str) -> Path:
     return root / "raw" / "code-test" / name
 
@@ -212,10 +219,11 @@ def replace_line(path: Path, old: str, new: str) -> None:
 
 HOMONYM = "L1-1"
 CODE_A, CODE_B = "code-a", "code-b"
-# noms de chaque source : sa citation et son titre au manifeste
+# noms de chaque source : sa citation et son titre au manifeste ; titres à voyelle
+# initiale (« de l'Ordonnance synthétique B »)
 HOMONYM_NAMES = {
-    CODE_A: ("Code A", "Code synthétique A"),
-    CODE_B: ("Code B", "Code synthétique B"),
+    CODE_A: ("Code A", "Ordonnance synthétique A"),
+    CODE_B: ("Code B", "Ordonnance synthétique B"),
 }
 CODE_A_REF, CODE_B_REF = (
     f"{HOMONYM_NAMES[code][0]}, art. {HOMONYM}" for code in (CODE_A, CODE_B)

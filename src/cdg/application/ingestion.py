@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from cdg.domain import explanation
 from cdg.domain.corpus import (
     Article,
     ChunkRow,
@@ -45,7 +46,9 @@ def load_manifest(path: Path | None = None) -> Manifest:
 def source_names(manifest: Manifest | None = None) -> dict[str, tuple[str, ...]]:
     """Noms de chaque source du manifeste, sa citation et son titre : le contrôle de
     l'explication rattache par eux une citation à sa source (`explanation.citations`).
-    Un nom absent ou illisible est une erreur, qui nomme la source et la clé."""
+    Un nom absent ou illisible est une erreur, qui nomme la source et la clé ; un nom
+    commun à deux sources aussi (`explanation.check_names`) : lus à la construction du
+    graphe, ils l'empêchent."""
     manifest = manifest or load_manifest()
     names: dict[str, tuple[str, ...]] = {}
     for source_id, source in manifest.sources.items():
@@ -55,6 +58,7 @@ def source_names(manifest: Manifest | None = None) -> dict[str, tuple[str, ...]]
                     f"{source_id} : nom de source absent ou illisible (clé {key})"
                 )
         names[source_id] = (source["citation"], source["title"])
+    explanation.check_names(names)
     return names
 
 

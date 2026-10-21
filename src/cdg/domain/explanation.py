@@ -173,7 +173,7 @@ _POINT = re.compile(
 # financier », « art. 28 RGPD ») ; une virgule l'arrête (« art. 46, par. 3, a) RGPD »).
 _BEFORE = re.compile(r"(?:[\s,]*\bannexes?(?:\s+[ivxlc]+\b)?)?[\s,]*\Z")
 _AFTER = re.compile(
-    r"\A\s*(?:de\s+l'annexe(?:\s+[ivxlc]+\b)?\s+)?(?:(?:du|des|de\s+la|de)\s+|de\s+l'|d')?"
+    r"\A\s*(?:de\s+l'annexe(?:\s+[ivxlc]+\b)?\s+)?(?:de\s+l'|d'|(?:du|des|de\s+la|de)\s+)?"
 )
 _WORD = re.compile(r"\w")
 # noms des sources, sans casse, du plus long au plus court : (nom, source)
@@ -210,6 +210,12 @@ def _lookup(names: Mapping[str, Sequence[str]]) -> _Lookup:
     return sorted(owners.items(), key=lambda item: len(item[0]), reverse=True)
 
 
+def check_names(names: Mapping[str, Sequence[str]]) -> None:
+    """Refuse des noms de source vides, communs à deux sources, ou donnés en chaîne seule
+    (`_lookup`) : appelé à leur lecture, avant toute explication."""
+    _lookup(names)
+
+
 def _glued(char: str) -> bool:
     return bool(_WORD.match(char))
 
@@ -223,31 +229,44 @@ def _source_before(head: str, lookup: _Lookup) -> str | None:
     return None
 
 
-def _source_after(tail: str, lookup: _Lookup) -> str | None:
-    """Source dont un nom commence `tail`, le texte qui suit une citation."""
-    tail = _AFTER.sub("", tail, count=1)
+def _source_after(tail: str, lookup: _Lookup) -> tuple[str, int] | None:
+    """Source dont un nom commence `tail`, le texte qui suit une citation, et la longueur
+    de `tail` jusqu'à la fin de ce nom."""
+    rest = _AFTER.sub("", tail, count=1)
+    gap = len(tail) - len(rest)
     for name, source in lookup:
-        if tail.startswith(name) and not _glued(tail[len(name) : len(name) + 1]):
-            return source
+        if rest.startswith(name) and not _glued(rest[len(name) : len(name) + 1]):
+            return source, gap + len(name)
     return None
 
 
 def _citations(text: str, lookup: _Lookup) -> set[Citation]:
     text = folded(text)
-    found: set[Citation] = set()
-    for pattern, number, form in (
-        (_ARTICLE, _NUMBER, lambda n: re.sub(r"[.\s]", "", n).upper()),
-        (_POINT, _POINT_NUMBER, str.upper),
-    ):
-        for match in pattern.finditer(text):
-            # le nom qui précède l'emporte : celui qui suit peut ouvrir la référence
-            # suivante (« C. com., art. L441-10 C. civ., art. 1231-5 »)
-            source = _source_before(text[: match.start()], lookup) or _source_after(
-                text[match.end() :], lookup
+    matches = sorted(
+        (
+            (match, number, form)
+            for pattern, number, form in (
+                (_ARTICLE, _NUMBER, lambda n: re.sub(r"[.\s]", "", n).upper()),
+                (_POINT, _POINT_NUMBER, str.upper),
             )
-            found |= {
-                (source, form(n)) for n in re.findall(number, match[1], re.IGNORECASE)
-            }
+            for match in pattern.finditer(text)
+        ),
+        key=lambda item: item[0].start(),
+    )
+    found: set[Citation] = set()
+    # fin du dernier nom pris après une citation : il ne sert pas de nom avant à la
+    # suivante (« art. 1171 du Code civil, art. L442-1 du Code de commerce »)
+    taken = 0
+    for match, number, form in matches:
+        # le nom qui précède l'emporte : celui qui suit peut ouvrir la référence
+        # suivante (« C. com., art. L441-10 C. civ., art. 1231-5 »)
+        source = _source_before(text[taken : match.start()], lookup)
+        if source is None and (after := _source_after(text[match.end() :], lookup)):
+            source, length = after
+            taken = match.end() + length
+        found |= {
+            (source, form(n)) for n in re.findall(number, match[1], re.IGNORECASE)
+        }
     return found
 
 
@@ -258,7 +277,10 @@ def citations(text: str, names: Mapping[str, Sequence[str]]) -> set[Citation]:
     nom (`names` : citation et titre de chaque source du corpus) le touche, avant lui
     (« C. mon. fin., art. L112-2 ») ou après lui (« l'article L112-2 du code monétaire et
     financier »), casse ignorée, sur le texte normalisé ; sinon à aucune (None). Un nom
-    absent du corpus (« code de la consommation ») ne rattache rien."""
+    absent du corpus (« code de la consommation ») ne rattache rien. Un nom pris après
+    une citation ne sert pas de nom avant à la suivante. Une énumération suivie d'un seul
+    nom (« articles 1171 et L442-1 du Code de commerce ») rattache tous ses numéros à ce
+    nom : le texte l'affirme."""
     return _citations(text, _lookup(names))
 
 

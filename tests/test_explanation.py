@@ -8,7 +8,9 @@ Python pur et doublures : aucun appel réseau. Le graphe complet est testé dans
 
 import pytest
 from corpus_de_test import (
+    CODE_A,
     CODE_A_REF,
+    CODE_B,
     HOMONYM_NAMES,
     POINT_A,
     POINT_B,
@@ -263,6 +265,20 @@ CMF = "code-monetaire-financier"
             "C. com., art. L441-10 C. civ., art. 1231-5",
             {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
         ),
+        # un nom pris après une citation ne sert pas de nom avant à la suivante
+        (
+            "art. 1171 du Code civil, art. L442-1 du Code de commerce",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "(art. 1171 C. civ., art. L442-1 C. com.)",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        # une énumération suivie d'un seul nom : tous ses numéros à ce nom
+        (
+            "articles 1171 et L442-1 du Code de commerce",
+            {("code-commerce", "1171"), ("code-commerce", "L442-1")},
+        ),
         # aucun nom ne touche la citation : aucune source
         ("article 28", {(None, "28")}),
         ("art. 46, par. 3, a) RGPD", {(None, "46")}),
@@ -342,7 +358,17 @@ def test_homonymes_compares_par_source():
         )
     ]
     assert reasons("Voir l'article L1-1 du code B.") == refused
-    assert reasons("Voir Code synthétique B, art. L1-1.") == refused
+    assert reasons("Voir Ordonnance synthétique B, art. L1-1.") == refused
+    # nom à voyelle initiale, après « de l' »
+    assert reasons("Voir l'article L1-1 de l'Ordonnance synthétique B.") == refused
+    assert reasons("Voir l'article L1-1 de l'Ordonnance synthétique A.") == []
+    # le nom qui suit une citation n'est pas pris par la suivante
+    text = "Voir art. 2 du code A, art. L1-1 du code B."
+    assert explanation.citations(text, HOMONYM_NAMES) == {
+        (CODE_A, "2"),
+        (CODE_B, "L1-1"),
+    }
+    assert "L1-1 (code-b)" in reasons(text)[0]
     # la source retenue, ou aucun nom de source : acceptés
     assert reasons("Voir l'article L1-1 du code A.") == []
     assert reasons("Voir Code A, art. L1-1.") == []
@@ -382,6 +408,11 @@ PENALITES = retained_alone("penalites_execution", ["C. civ., art. 1231-5"])
 RESPONSABILITE = retained_alone(
     "responsabilite_fournisseur",
     ["C. civ., art. 1170", "C. civ., art. 1231-3"],
+    domain="juridique",
+)
+DEUX_CODES = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1171", "C. com., art. L442-1"],
     domain="juridique",
 )
 POINT_RETENU = TRANSFERT.model_copy(
@@ -457,6 +488,30 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
         pytest.param(
             *alone(RESPONSABILITE, "Plafond : articles 1170 et 1231-3 du Code civil."),
             id="deux-articles",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES, "Art. 1171 du Code civil, art. L442-1 du Code de commerce."
+            ),
+            id="deux-codes-nom-apres",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Clause déséquilibrée (art. 1171 C. civ., art. L442-1 C. com.).",
+            ),
+            id="deux-codes-entre-parentheses",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "L'article 1171 du Code civil et l'article L442-1 du Code de commerce.",
+            ),
+            id="deux-codes-et",
+        ),
+        pytest.param(
+            *alone(DEUX_CODES, "Voir C. civ., art. 1171 ; C. com., art. L442-1."),
+            id="deux-codes-nom-avant",
         ),
     ],
 )

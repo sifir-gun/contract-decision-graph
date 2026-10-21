@@ -420,6 +420,16 @@ def test_numeros_partages_du_corpus_compares_par_source(corpus_lu, request):
             assert explanation.refusals(unnamed, req, names=names) == []
 
 
+def test_nom_commun_a_deux_sources_refuse_a_la_lecture():
+    # validés à la lecture du manifeste : le graphe ne se construit pas (orchestrateur)
+    sources = {
+        sid: {"citation": "C. x", "title": f"Code {sid}", "articles": {}}
+        for sid in ("code-x", "code-y")
+    }
+    with pytest.raises(ValueError, match="nom de source commun à code-x et code-y"):
+        ingestion.source_names(corpus.Manifest(sources=sources))
+
+
 def test_source_sans_nom_refusee():
     sources = {"code-x": {"citation": "C. x", "articles": {}}}
     with pytest.raises(

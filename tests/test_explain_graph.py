@@ -2,7 +2,8 @@
 motifs, hors de la partie décision ; reprise sur erreur passagère, puis gabarit ;
 l'explication ne bloque jamais le scellement. Doublures, journal en mémoire."""
 
-from corpus_de_test import CODE_A_REF, write_homonyms
+import pytest
+from corpus_de_test import CODE_A_REF, edit_sources, write_homonyms
 from doubles import (
     ANALYSIS_DATE,
     CONTRACT_TEXT,
@@ -169,3 +170,14 @@ def test_noms_des_sources_lus_dans_le_manifeste_a_la_construction(corpus_synthet
     right = LLMExplainer(FakeLLM({"explain": citing("Voir l'article L1-1 du code A.")}))
     _, accepted = run(right, crag=crag, cid="c-code-a")
     assert accepted.record["explanation"]["source"] == "llm"
+
+
+def test_noms_ambigus_le_graphe_ne_se_construit_pas(corpus_synthetique):
+    # deux sources au même nom : aucune citation ne s'y rattacherait sûrement ; refusé
+    # avant toute analyse, à la construction du graphe
+    write_homonyms(corpus_synthetique)
+    edit_sources(
+        corpus_synthetique, lambda sources: sources["code-b"].update(citation="Code A")
+    )
+    with pytest.raises(ValueError, match="nom de source commun à code-a et code-b"):
+        orchestrator.build_graph(CONFIG, make_deps())
