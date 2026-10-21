@@ -503,6 +503,20 @@ def citing(req: explanation.ExplanationRequest, text: str) -> explanation.Draft:
     )
 
 
+def named_forms(name: str, unit: str, number: str) -> tuple[str, ...]:
+    """Citations d'un numéro que touche un nom de sa source (`explanation.citations`) :
+    avant lui, sous la forme des références, suivi d'une parenthèse, de deux-points ou de
+    « en son » ; après lui, après une préposition ou entre parenthèses."""
+    return (
+        f"{name}, {unit} {number}",
+        f"{name} ({unit} {number})",
+        f"{name} : {unit} {number}",
+        f"{name}, en son {unit} {number}",
+        f"{unit} {number} du {name}",
+        f"{unit} {number} ({name})",
+    )
+
+
 @pytest.mark.parametrize("corpus_lu", ["depot", "paire_synthetique"])
 def test_numeros_partages_du_corpus_compares_par_source(corpus_lu, request):
     # l'explication rattache une citation à la source dont un nom la touche (citation ou
@@ -521,7 +535,7 @@ def test_numeros_partages_du_corpus_compares_par_source(corpus_lu, request):
         unit = manifest.unit(source)
         assert explanation.citations(article.reference, names) == {(source, number)}
         for name in names[source]:
-            for form in (f"{name}, {unit} {number}", f"{unit} {number} du {name}"):
+            for form in named_forms(name, unit, number):
                 assert explanation.citations(form, names) == {(source, number)}, form
     shared = shared_numbers()
     if corpus_lu == "paire_synthetique":
@@ -534,18 +548,15 @@ def test_numeros_partages_du_corpus_compares_par_source(corpus_lu, request):
                 "code-propriete-intellectuelle": "CPI, art. L112-2",
             }
         }
-    # chaque numéro partagé : la source retenue acceptée, l'autre refusée, sous les deux
-    # formes et par chacun de ses noms ; sans nom de source, accepté comme aujourd'hui
+    # chaque numéro partagé : la source retenue acceptée, l'autre refusée, sous chaque
+    # forme et par chacun de ses noms ; sans nom de source, accepté comme aujourd'hui
     for number, sources in shared.items():
         for retained, reference in sources.items():
             req = retaining(reference)
             for source in sources:
                 unit = manifest.unit(source)
                 for name in names[source]:
-                    for form in (
-                        f"{name}, {unit} {number}",
-                        f"{unit} {number} du {name}",
-                    ):
+                    for form in named_forms(name, unit, number):
                         reasons = explanation.refusals(
                             citing(req, f"Voir {form}."), req, names=names
                         )

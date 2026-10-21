@@ -242,6 +242,7 @@ def test_article_4_point_8_reste_l_article_4():
 # --- Citations rattachées à leur source --------------------------------------------------------
 
 CMF = "code-monetaire-financier"
+CPI = "code-propriete-intellectuelle"
 
 
 @pytest.mark.parametrize(
@@ -340,6 +341,63 @@ CMF = "code-monetaire-financier"
             "les articles 1231-1 et L112-2 du code monétaire et financier",
             {(None, "1231-1"), (CMF, "L112-2")},
         ),
+        # nom qui suit, entre parenthèses juste après la citation
+        ("L'article L112-2 (CPI) encadre", {(CPI, "L112-2")}),
+        (
+            "L'article L112-2 (Code de la propriété intellectuelle)",
+            {(CPI, "L112-2")},
+        ),
+        ("articles L111-1 et L112-2 (CPI)", {(None, "L111-1"), (CPI, "L112-2")}),
+        # lié à sa citation, comme après une préposition : il n'ouvre pas la suivante
+        (
+            "C. com., art. L441-10 (Code de commerce), art. 1231-5",
+            {("code-commerce", "L441-10"), (None, "1231-5")},
+        ),
+        # une parenthèse qui ne contient pas que le nom : il est le nom avant de la
+        # citation qu'elle contient
+        (
+            "art. L441-10 (C. civ., art. 1231-5)",
+            {(None, "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # nom qui précède, suivi d'une parenthèse ouvrante ou de deux-points
+        ("Le Code de la propriété intellectuelle (article L112-2)", {(CPI, "L112-2")}),
+        ("Code de la propriété intellectuelle : article L112-2", {(CPI, "L112-2")}),
+        (
+            "Le Code civil (art. 1171) et le Code de commerce (art. L442-1)",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "Code de commerce : art. L441-10 ; Code civil : art. 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # « en son article », « en ses articles »
+        ("Le CPI, en son article L112-2", {(CPI, "L112-2")}),
+        ("Le RGPD, en ses articles 44 à 46", {("rgpd", "44"), (None, "46")}),
+        # l'annexe d'un point, entre le nom et le point, comme sous la forme des références
+        (
+            "Règl. (UE) 748/2012 (annexe I, point 21.A.307)",
+            {("certification-navigabilite", "21.A.307")},
+        ),
+        # nom pris après une citation : pas un nom avant pour la suivante, même suivi
+        # de deux-points
+        (
+            "art. 1231-5 du Code civil : art. L441-10",
+            {("code-civil", "1231-5"), (None, "L441-10")},
+        ),
+        # énumération de noms avant la parenthèse ou les deux-points : rien ne dit lequel
+        # vise la citation, comparée par son seul numéro
+        (
+            "Le Code de commerce et le Code civil : art. L441-10 et art. 1231-5",
+            {(None, "L441-10"), (None, "1231-5")},
+        ),
+        (
+            "Le Code civil et le Code de commerce (art. 1171 et L442-1)",
+            {(None, "1171"), (None, "L442-1")},
+        ),
+        # limite : « l' » après un nom qui ne suit aucune citation (comme « Au-delà du
+        # Code civil, l'article L442-1 »)
+        ("Selon le CPI, l'article L112-2", {(None, "L112-2")}),
+        ("CPI, l'article L112-2", {(None, "L112-2")}),
         # aucun nom ne touche la citation : aucune source
         ("article 28", {(None, "28")}),
         ("art. 46, par. 3, a) RGPD", {(None, "46")}),
@@ -685,6 +743,69 @@ TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
             ),
             id="deux-codes-nommes-deux-fois",
         ),
+        # acceptées sur main (7b4655b), vérifié le 21/10/2026 : nom entre parenthèses
+        # après la citation, nom avant elle suivi d'une parenthèse, de deux-points ou de
+        # « en son article », énumération de noms avant la citation
+        pytest.param(
+            *alone(
+                REVISION,
+                "L'article L112-2 (code monétaire et financier) encadre l'indexation.",
+            ),
+            id="nom-entre-parentheses-apres",
+        ),
+        pytest.param(
+            *alone(
+                REVISION,
+                "Le Code monétaire et financier (article L112-2) encadre l'indexation.",
+            ),
+            id="nom-avant-une-parenthese",
+        ),
+        pytest.param(
+            *alone(DELAI, "Code de commerce : article L441-10, I."),
+            id="nom-avant-deux-points",
+        ),
+        pytest.param(
+            *alone(
+                ACCORD, "Le RGPD, en son article 28, exige un accord de traitement."
+            ),
+            id="en-son-article",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Le Code civil (art. 1171) et le Code de commerce (art. L442-1) "
+                "sanctionnent le déséquilibre.",
+            ),
+            id="deux-codes-nom-avant-une-parenthese",
+        ),
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "Article L441-10 (Code de commerce) et article 1231-5 (Code civil).",
+            ),
+            id="deux-codes-entre-parentheses-apres",
+        ),
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "Le Code de commerce et le Code civil : art. L441-10 et art. 1231-5.",
+            ),
+            id="noms-enumeres-avant-deux-points",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Le Code civil et le Code de commerce (art. 1171 et L442-1).",
+            ),
+            id="noms-enumeres-avant-une-parenthese",
+        ),
+        pytest.param(
+            *alone(
+                POINT_RETENU,
+                "Règl. (UE) 748/2012 (annexe I, point 21.A.307) : certificat exigé.",
+            ),
+            id="point-nom-avant-une-parenthese",
+        ),
     ],
 )
 def test_explications_acceptees_aujourd_hui_le_restent(d, req):
@@ -719,6 +840,53 @@ def test_enumeration_le_numero_touche_compare_par_source():
     )
     text = "Les articles L112-2 et L111-1 du CPI."
     assert explanation.refusals(*alone(finding, text), names=NAMES) == []
+
+
+# nom entre parenthèses après la citation ; nom avant elle, suivi d'une parenthèse, de
+# deux-points ou de « en son article » : (sous le code du CPI, sous celui du C. mon. fin.)
+NAMED_AROUND = [
+    (
+        "L'article L112-2 (CPI) encadre l'indexation.",
+        "L'article L112-2 (C. mon. fin.) encadre l'indexation.",
+    ),
+    (
+        "L'article L112-2 (Code de la propriété intellectuelle) encadre l'indexation.",
+        "L'article L112-2 (Code monétaire et financier) encadre l'indexation.",
+    ),
+    (
+        "Le Code de la propriété intellectuelle (article L112-2) encadre l'indexation.",
+        "Le Code monétaire et financier (article L112-2) encadre l'indexation.",
+    ),
+    (
+        "Code de la propriété intellectuelle : article L112-2.",
+        "Code monétaire et financier : article L112-2.",
+    ),
+    (
+        "Le CPI, en son article L112-2, encadre l'indexation.",
+        "Le C. mon. fin., en son article L112-2, encadre l'indexation.",
+    ),
+]
+
+
+@pytest.mark.parametrize(("cpi", "cmf"), NAMED_AROUND)
+def test_homonyme_nomme_entre_parentheses_deux_points_ou_en_son_article(cpi, cmf):
+    # seul « C. mon. fin., art. L112-2 » retenu : le CPI refusé, le bon code accepté
+    assert explanation.refusals(*alone(REVISION, cpi), names=NAMES) == [
+        (
+            "financier-1 : article cité hors des références retenues pour la clause "
+            "revision_prix : L112-2 (code-propriete-intellectuelle)"
+        )
+    ]
+    assert explanation.refusals(*alone(REVISION, cmf), names=NAMES) == []
+    # et à l'inverse, seul « CPI, art. L112-2 » retenu
+    design = retained_alone("protection_design", ["CPI, art. L112-2"], "juridique")
+    assert explanation.refusals(*alone(design, cmf), names=NAMES) == [
+        (
+            "juridique-1 : article cité hors des références retenues pour la clause "
+            "protection_design : L112-2 (code-monetaire-financier)"
+        )
+    ]
+    assert explanation.refusals(*alone(design, cpi), names=NAMES) == []
 
 
 # --- Contrôles : critère 7 ---------------------------------------------------------------------
