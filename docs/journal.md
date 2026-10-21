@@ -3541,7 +3541,7 @@ Deuxième des quatre PR du chantier (spec : [spec-profils-sous-traitance.md](spe
 - **Profil fournisseur figé avant tout déplacement.** Les textes des constats des 13 contrats fournisseur sont figés dans `tests/fixtures/constats-fournisseur.json` (commit edccba3) avant que leurs règles ne deviennent communes aux deux profils (`rules/_common.py`, qui prend les noms des parties en paramètre).
 - **Valeurs de démonstration** de `sous_traitance.rules`, à valider avec le cabinet (spec, « Questions ») : plafond du sous-traitant à 100 % au moins, pénalités de retard d'exécution plafonnées à 5 % au moins, délais de paiement de 60, 45 et 45 jours selon le point de départ, assurance de 2 000 000 € par sinistre au moins ; pénalités de score de 0,2 à 0,5. Poids, seuils, marge et écart de conflit : communs.
 - **Répartition des clauses des sept contrats.** La spec la renvoie au plan. Par rapport à son tableau (« Ce qu'il montre »), st-02 gagne « confidentialité seule » et st-05 « délai indicatif » (sinon marge sous 0,05, ou conflit), st-03, st-04 et st-06 chacun une pénalité qui couvre une branche (délai d'exécution absent, protection des dessins absente, pénalités de retard d'exécution absentes). Décisions sous doublures : st-01 `GO` ; st-02 `GO_RESERVES` (agrégat 0,655) ; st-03, st-04 et st-06 `NO_GO` (blocage) ; st-05 `GO_RESERVES` (0,57) ; st-07 `ESCALADE` (écart de 0,6 entre domaines, conformité pénalisée), puis décision humaine `GO_RESERVES`.
-- **Mesure fournisseur avant et après le même jour**, sur `main` dans un worktree temporaire puis sur la branche, et non au début de l'exécution : l'ADR 009 ne compare qu'à date égale, et l'exécution a duré plusieurs jours. Chiffres consignés à part dans cette entrée.
+- **Mesure fournisseur avant et après le même jour**, sur `main` dans un worktree temporaire puis sur la branche, et non au début de l'exécution : l'ADR 009 ne compare qu'à date égale, et l'exécution a duré plusieurs jours. Chiffres : « Mesure fournisseur, avant et après », ci-dessous.
 
 ### Décisions prises en route
 
@@ -3594,10 +3594,23 @@ La spec validée n'est pas amendée par cette PR : chaque écart qui change le c
 - **Licences** : EUR-Lex et EASA relues le 20/10 ; mention etalab-2.0 de Légifrance relue le 21/10, dans le pied de page des pages enregistrées (la vérification anti-robots l'empêchait le 20/10). Le message du commit 29399d6 dit « licences relues le 20/10/2026 » : inexact pour Légifrance, `SOURCES.md` fait foi.
 - **Limite des 512 jetons du modèle d'embedding**, vue par la seule ingestion réelle : deux fiches (« Protection du design », « Pénalités de retard d'exécution ») dépassaient (526 et 517 jetons) et ont été raccourcies ; plus long extrait : 495 jetons.
 - **Durée de l'ingestion dans le cluster** : mesurée à 18 min 24 s pour 64 extraits ; le corpus en a désormais 88. Non remesurée : le job `cluster` de la CI, borné à 100 minutes, le dira.
-- **Base locale** : le premier `ingest` de la branche a supprimé 12 lignes périmées, quand 4 étaient attendues : la base était déjà décalée. À remettre en état avant la mesure.
+- **Base locale** : le premier `ingest` de la branche a supprimé 12 lignes périmées, quand 4 étaient attendues : la base était déjà décalée. Remise en état par l'`ingest` de chaque mesure (ci-dessous).
 - **Worktree** : `EMBEDDING_CACHE_DIR`, relatif dans le `.env`, y désigne un `.cache` sans le modèle ; `ingest` a été lancé avec le chemin du dépôt principal.
 - **pip-audit** : une faille critique de certifi, publiée le 20/10, fait échouer le job `audit` ; corrigée par la PR #64, hors de cette branche : `main` à intégrer avant la vérification finale.
 - **Textes du produit restés au singulier** : la docstring de `src/cdg/__init__.py` et la description de `pyproject.toml` parlent encore de « contrats fournisseurs » ; `pyproject.toml` ne change pas dans cette PR.
+
+### Mesure fournisseur, avant et après
+
+Mesurée par le contrôleur le 21/10/2026, entre 05 h 01 et 05 h 06 : `mesure-recherche --profil fournisseur`, 21 requêtes du jeu figé, même modèle (intfloat/multilingual-e5-large), même date d'analyse. Moyennes sur les 21 requêtes, arrondies à trois décimales.
+
+- **Avant** : `main` à 7b4655b, dans un worktree temporaire ; `ingest` : 4 insérés, 25 supprimés, 70 au total ; mesure sur 67 extraits.
+- **Après** : la branche à be093be ; `ingest` : 25 insérés, 4 supprimés, 91 au total ; mesure sur 88 extraits.
+- **Mesure filtrée** (rattachement déclaré, chemin du produit) : identique requête par requête (références rendues, rangs, rappel, précision), donc moyennes identiques, comme l'exige la spec (« Mesure de la recherche »).
+- **Mesure sans filtre** : écart attendu, les nouvelles sources entrant dans la recherche sans filtre de domaine. Rangs 1 et 2 inchangés, toutes références comme articles seuls. Avant, puis après :
+  - toutes références, rang 4 : rappel 0,722 → 0,675, précision 0,452 → 0,429 ; rang 8 : rappel 0,893 → 0,821, précision 0,286 → 0,268 ; rang 20 : rappel 0,952 → 0,940, précision 0,124 → 0,121 ;
+  - articles seuls, rang 4 : rappel 0,556 → 0,460, précision 0,500 → 0,429 ; rang 8 : rappel 0,841 → 0,698, précision 0,282 → 0,322 ; rang 20 : rappel 0,929 → 0,913, précision 0,105 → 0,128. La précision des articles seuls monte aux rangs 8 et 20 : elle se calcule sur les seuls articles parmi les rendus, moins nombreux quand des fiches de la sous-traitance prennent des rangs.
+- **Requête par requête, sans filtre** : les 21 changent, chacune reçoit des fiches et des articles de la sous-traitance, et les attendues reculent de quelques rangs. Par exemple, C. com., art. L441-10 passe du rang 4 au rang 7 pour une requête du délai de paiement, hors des quatre premiers ; C. civ., art. 1171, au rang 18 pour la responsabilité de l'acheteur, sort des résultats rendus.
+- **Base locale** : remise ensuite sur le corpus de `main` (`ingest` depuis le worktree de `main`). Après la fusion, relancer `ingest` sur le poste (exploitation, « Mise à jour vers le profil sous-traitance »).
 
 ### Nombre de tests
 
