@@ -3666,7 +3666,7 @@ Mesurée par le contrôleur le 21/10/2026, entre 05 h 01 et 05 h 06 : `mesure-re
 
 ### Nombre de tests
 
-- Tests collectés par défaut (`uv run pytest --collect-only -q`, tests `pg` compris ; à part, 284 tests de marqueurs exclus par défaut des deux côtés : charts, images, cluster, modèle, tests payants, vrai journal) : sur `main` (7b4655b), 2 617 sur 2 901, dont 2 453 hors base ; sur la branche (après la passe de correction de la relecture finale et sa relecture), 3 532 sur 3 816, dont 3 367 hors base (3 472 sur 3 756 à ee0355d). Soit 915 de plus, surtout la configuration (264), les règles (163), l'explication (136), la saisie (83), le corpus (71), la vérification de l'extraction (38) et le jeu de démonstration (37). Décompte de collecte, et non de « passed » comme à l'entrée précédente.
+- Tests collectés par défaut (`uv run pytest --collect-only -q`, tests `pg` compris ; à part, 284 tests de marqueurs exclus par défaut des deux côtés : charts, images, cluster, modèle, tests payants, vrai journal) : sur `main` (7b4655b), 2 617 sur 2 901, dont 2 453 hors base ; sur la branche (après la passe de correction de la relecture finale et sa relecture), 3 532 sur 3 816, dont 3 367 hors base (3 472 sur 3 756 à ee0355d). Après l'intégration de `main` à 3426bd6 (PR #65, dont 3 tests ajoutés), 3 535 sur 3 819, dont 3 370 hors base. Soit 915 de plus, surtout la configuration (264), les règles (163), l'explication (136), la saisie (83), le corpus (71), la vérification de l'extraction (38) et le jeu de démonstration (37). Décompte de collecte, et non de « passed » comme à l'entrée précédente.
 
 ### Suite
 
