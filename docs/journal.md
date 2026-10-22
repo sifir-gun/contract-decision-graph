@@ -3694,3 +3694,24 @@ La PR #65 fusionnée (`3426bd6`), la CI de `main` passe en entier, cluster compr
 ### Nombre de tests
 
 - Inchangé.
+
+## 2026-10-22 · Profils, PR 4 : série réelle de la sous-traitance (branche `profils-sous-traitance-pr4`)
+
+Dernière PR du chantier (spec des profils, « Découpage », PR 4 ; critère 9) : `tests/test_llm_jeu.py` couvre les deux profils, chaque contrat sous le sien, et la série des sept contrats de sous-traitance, cinq essais chacun, est lancée par le propriétaire. Conception validée par le propriétaire le 22/10, avant le code.
+
+### Décisions du propriétaire (22/10)
+
+- **Profil choisi par `-k`**, dans l'identifiant de chaque essai (`test_jeu_reel[1-sous_traitance-st-01-go-cabine]`) : une seule paramétrisation sur les 20 contrats du jeu. Écartées : deux fonctions de test (code dupliqué, et `-k "not prealable"` lancerait de toute façon les deux séries) ; une option de `conftest.py` (ce ne serait plus le `-k` de la spec).
+- **Essai préalable par profil** : `demo-01` pour le fournisseur, inchangé ; **`st-05-reserves-revetements`** pour la sous-traitance, et non `st-01`. Le CRAG ne tourne que sur les clauses qui portent un constat (`nodes/analyst.py`) : un contrat sans constat ne toucherait jamais le corpus du profil, nouveau ; `st-05` a des constats dans les quatre domaines.
+- **Essai préalable strict** : il exige l'issue attendue (`classement` « conforme »), aux deux profils. Le 01/10, un préalable qui ne vérifiait que l'invariant passait alors que tout le jeu escaladait (CRAG en échec). Un banc défaillant (corpus non indexé : domaine `INSUFFISANT`, escalade) arrête désormais avant la dépense. Contrepartie acceptée : une variation prudente du modèle sur `st-05` (marge 0,07) ferait échouer le préalable, à relancer (environ 0,002 $).
+
+### Ce qui change
+
+- `tests/test_llm_jeu.py` : les 20 contrats du jeu, analysés chacun sous son profil (`contract.profile` au lieu de `fournisseur` écrit en dur) ; à chaque essai, l'enregistrement scellé doit porter le profil du contrat ; `LLM-RESULT` gagne la clé `profil`, et une ligne `LLM-SERIE` est écrite par profil lancé.
+- **Série du fournisseur inchangée** : mêmes 13 contrats, même ordre (essai par essai), mêmes fils (`llm-jeu-<contrat>-<essai>`), mêmes décisions humaines, donc même coût ; seuls changent l'identifiant des essais (profil en tête) et les commandes.
+- **Commandes** : `-k "fournisseur and prealable"`, puis `-k "fournisseur and not prealable"` ; de même avec `sous_traitance`. Sans profil dans `-k`, les deux séries tournent (100 essais, environ 0,14 $) : l'ancien `-k "not prealable"` ne choisit plus le seul fournisseur. Docstring, `CLAUDE.md` et exploitation mis à jour.
+- **Tests d'abord, sans LLM** (`tests/test_serie.py`) : la collecte réelle de la série, en sous-processus, avec chacune des quatre expressions `-k` documentées, rend la liste exacte attendue, tirée de `attendus.yaml` : 65 essais du fournisseur dans l'ordre d'avant, 35 de la sous-traitance, un préalable par profil. Rouges avant le changement (aucun essai choisi), verts après.
+
+### Nombre de tests
+
+- Tests payants collectés (`--collect-only --llm -m llm tests/test_llm_jeu.py`) : 66 avant (1 préalable, 65 essais), 102 après (2 préalables, 100 essais). Suite par défaut : 5 tests de plus (`tests/test_serie.py`).
