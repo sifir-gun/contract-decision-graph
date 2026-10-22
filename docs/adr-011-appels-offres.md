@@ -1,6 +1,6 @@
 # ADR-011 : profils appel d'offres, secteur et fiche du candidat
 
-- **Statut** : proposé le 22/10/2026, conception validée section par section par le propriétaire ; accepté à la PR 1 du chantier. Numéro à confirmer à la fusion si un autre chantier prend le 011 avant.
+- **Statut** : proposé le 22/10/2026, conception validée section par section par le propriétaire, spec validée le même jour ; accepté à la PR 1 du chantier. Numéro à confirmer à la fusion si un autre chantier prend le 011 avant.
 - **Portée** : deux profils qui défendent le candidat à une consultation ; une entrée secteur, scellée ; une fiche du cabinet dans la configuration ; des constats qui imposent la revue humaine ; le rattachement du corpus par profil. Spec : [`spec-appels-offres.md`](spec-appels-offres.md).
 
 ## Contexte

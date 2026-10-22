@@ -1,8 +1,8 @@
 # Spec · Profils appel d'offres public et privé
 
-Version du 22 octobre 2026, révisée le même jour après une relecture indépendante (constats à trancher hors des verdicts, contexte des règles, rattachement par article, jeu de démonstration, découpage). Conçue en séance de brainstorming avec le propriétaire les 21 et 22 octobre, section par section, chaque section validée ; règles amendées le 22/10 après lecture des textes sur Légifrance (« Amendements imposés par les textes »). Source de vérité pour ce chantier ; `docs/spec-phase1.md` et `docs/spec-profils-sous-traitance.md` le restent pour tout ce que ce document ne modifie pas. Décision d'architecture : [ADR 011](adr-011-appels-offres.md), proposé.
+Version du 22 octobre 2026, révisée le même jour après une relecture indépendante (constats à trancher hors des verdicts, contexte des règles, rattachement par article, jeu de démonstration, découpage), puis **validée par le propriétaire le 22/10/2026**, écarts compris. Conçue en séance de brainstorming avec le propriétaire les 21 et 22 octobre, section par section, chaque section validée ; règles amendées le 22/10 après lecture des textes sur Légifrance (« Amendements imposés par les textes »). Source de vérité pour ce chantier ; `docs/spec-phase1.md` et `docs/spec-profils-sous-traitance.md` le restent pour tout ce que ce document ne modifie pas. Décision d'architecture : [ADR 011](adr-011-appels-offres.md), proposé.
 
-**Condition d'entrée.** Aucune ligne de code de ce chantier avant que (1) le chantier sous-traitance soit terminé (PR 2, 3 et 4 de sa spec, fusionnées), (2) les réponses du cabinet aux questions 1 à 7 (« Questions pour le cabinet ») soient consignées dans `docs/journal.md`, et (3) cette spec soit révisée en conséquence et ses écarts validés par le propriétaire. Le profil privé a sa propre condition (question 1).
+**Condition d'entrée.** Aucune ligne de code de ce chantier avant que (1) le chantier sous-traitance soit terminé (PR 2, 3 et 4 de sa spec, fusionnées), (2) les réponses du cabinet aux questions 1 à 7 (« Questions pour le cabinet ») soient consignées dans `docs/journal.md`, et (3) cette spec soit révisée en conséquence, toute révision validée par le propriétaire. Le profil privé a sa propre condition (question 1).
 
 ## Objectif et périmètre
 
@@ -309,7 +309,7 @@ Validés par le propriétaire le 22/10/2026, après la séance de conception :
 
 ## Écarts avec le design validé en séance
 
-Introduits à l'écriture de cette spec et à sa relecture indépendante, **à valider par le propriétaire** à sa relecture ; la validation est consignée ici avant tout plan.
+Introduits à l'écriture de cette spec et à sa relecture indépendante ; **les dix-huit validés par le propriétaire le 22/10/2026**, à la relecture de la spec révisée.
 
 À l'écriture :
 
