@@ -13,10 +13,18 @@
 import json
 
 import pytest
+from cli_helpers import run_cli
+from doubles import (
+    CONTRACT_TEXT_SOUS_TRAITANCE,
+    FixedExtractor,
+    clauses_sous_traitance,
+)
 from test_archive_configurations import ARCHIVED, chain_of
 from test_audit import CONFIG, analysed, record
 from test_audit_v2 import reviewed, v1_record, v2_record
+from web_helpers import memory_service
 
+from cdg import cli
 from cdg.domain import audit
 from cdg.domain.audit import AuditRecordV2, DecisionRecordV2
 from cdg.domain.resumption import INTERRUPTED
@@ -157,6 +165,52 @@ def test_v3_sans_profil_refuse_par_ses_modeles():
     del data["decision"]["profile"]
     with pytest.raises(ValueError, match="profile"):
         audit.AuditRecord.model_validate(data)
+
+
+# --- profil sous_traitance : scellé, vérifié, rejoué (critère 5) ------------------------------
+
+
+def test_v3_sous_traitance_verifie_et_rejoue(monkeypatch, capsys, tmp_path):
+    """Graphe réel sous doublures, deux pénalités (pénalités de retard d'exécution à
+    2 %, assurance de 1 000 000 €) justifiées par le CRAG : décision automatique GO,
+    scellée v3 sous le profil `sous_traitance` ; `verify` rend 0, `replay` est fidèle et
+    identique, règles du profil comprises."""
+    found = clauses_sous_traitance(
+        penalites_retard_execution=2.0, assurance_sous_traitant=1_000_000.0
+    )
+    service = memory_service(extractor=FixedExtractor(found))
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    contract = tmp_path / "c-st-v3.txt"
+    contract.write_text(CONTRACT_TEXT_SOUS_TRAITANCE, encoding="utf-8")
+    code, run = run_cli(
+        capsys,
+        "run",
+        str(contract),
+        "--profil",
+        "sous_traitance",
+        "--operateur",
+        "lot-v3",
+    )
+    assert (code, run["statut"]) == (0, "termine")
+    [entry] = service.audit_store().entries()
+    decision = entry.record["decision"]
+    assert (entry.record["version"], decision["profile"]) == (3, "sous_traitance")
+    assert decision["final_decision"] == "GO"
+    penalized = {
+        v["domain"]: v["finding_kinds"] for v in decision["verdicts"] if v["findings"]
+    }
+    assert penalized == {
+        "financier": ["penalites_retard_execution"],
+        "conformite": ["assurance_sous_traitant"],
+    }
+    code, verify = run_cli(capsys, "verify")
+    assert code == 0 and verify["verify"] == "ok"
+    assert (verify["enregistrements"], verify["configurations_archivees"]) == (1, 1)
+    code, replay = run_cli(capsys, "replay", "c-st-v3")
+    assert code == 0
+    assert (replay["identique"], replay["recalcule"]) == (True, True)
+    assert (replay["sens"], replay["anomalie"]) == ("fidele", False)
+    assert audit.record_profile(entry.record) == "sous_traitance"
 
 
 # --- journal mêlé : vérification et rejeu -----------------------------------------------------

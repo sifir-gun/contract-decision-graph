@@ -3,13 +3,13 @@
 from pathlib import Path
 
 import pytest
-from doubles import CONTRACT_TEXT, FakeLLM, clauses
+from doubles import CONTRACT_TEXT, FakeLLM, clauses, clauses_sous_traitance
 from pydantic import ValidationError
 
 from cdg.application import extraction
 from cdg.application.extraction import ExtractionOutput, LLMExtractor
 from cdg.domain import profiles
-from cdg.domain.models import CLAUSE_CATEGORIES
+from cdg.domain.models import CLAUSE_CATEGORIES, Clause
 
 
 def output_of(items):
@@ -233,3 +233,217 @@ def test_prompt_durees_en_mois_annees_converties():
         assert "en mois" in lines[kind] and "se convertit en mois" in lines[kind], kind
         assert example in lines[kind], kind
     assert "avec son unité (%, jours, mois, ou années" in PROMPT
+
+
+# --- Profil sous_traitance : schéma et prompt -------------------------------------------
+
+SOUS_TRAITANCE = profiles.SOUS_TRAITANCE
+
+
+def test_schema_et_prompt_du_profil_sous_traitance_enregistres():
+    assert (
+        extraction.SCHEMAS["sous_traitance"] is extraction.ExtractionOutputSousTraitance
+    )
+    assert (
+        extraction.PROMPT_FILES["sous_traitance"]
+        == "extraction_sous_traitance_system.md"
+    )
+
+
+def test_extracteur_passe_le_schema_et_le_prompt_de_la_sous_traitance():
+    llm = FakeLLM({"extract_clauses": output_of(clauses_sous_traitance())})
+    result = LLMExtractor(llm, boundary=lambda: "a1b2c3d4")(
+        CONTRACT_TEXT, [], "sous_traitance"
+    )
+    [call] = llm.calls
+    assert call["schema"] is extraction.ExtractionOutputSousTraitance
+    assert call["system"] == prompt_sous_traitance()
+    assert result.clauses == clauses_sous_traitance()
+
+
+def test_extracteur_sous_traitance_refuse_un_type_du_fournisseur():
+    """Sous le profil sous_traitance, l'extracteur passe son schéma : un type du
+    fournisseur rendu par le modèle y échoue à la validation (spec, « Erreurs »)."""
+    llm = FakeLLM({"extract_clauses": output_of(clauses())})
+    with pytest.raises(ValidationError, match="kind"):
+        LLMExtractor(llm)(CONTRACT_TEXT, [], "sous_traitance")
+
+
+def prompt_sous_traitance() -> str:
+    return (extraction.PROMPTS / "extraction_sous_traitance_system.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def security_rules(prompt: str) -> list[str]:
+    """Lignes du bloc « Règles de sécurité », jusqu'à la première ligne vide."""
+    lines = prompt.splitlines()
+    start = lines.index("Règles de sécurité :")
+    return lines[start : lines.index("", start)]
+
+
+def kind_lines(prompt: str) -> dict[str, str]:
+    """Ligne de chaque type, dans la liste « Types de clause et valeur attendue »."""
+    section = prompt.split("Types de clause et valeur attendue :\n", 1)[1]
+    items = section.split("\n\n", 1)[0].splitlines()
+    assert all(line.startswith("- ") for line in items)
+    pairs = [(line.split(" :", 1)[0][2:], line) for line in items]
+    assert len(dict(pairs)) == len(pairs), "type nommé deux fois dans la liste"
+    return dict(pairs)
+
+
+def one_clause(**fields) -> dict:
+    clause = {"kind": "protection_design", "present": False, "quote": "", "value": None}
+    return {"clauses": [clause | fields]}
+
+
+def test_schema_sous_traitance_refuse_un_type_du_fournisseur():
+    schema = extraction.ExtractionOutputSousTraitance
+    schema.model_validate(one_clause(kind="penalites_retard_execution"))
+    with pytest.raises(ValidationError, match="kind"):
+        schema.model_validate(one_clause(kind="penalites_execution"))
+
+
+def test_schema_sous_traitance_refuse_une_categorie_du_transfert():
+    schema = extraction.ExtractionOutputSousTraitance
+    present = {"present": True, "quote": "Article 3."}
+    schema.model_validate(one_clause(**present, category="usage_limite_au_projet"))
+    with pytest.raises(ValidationError, match="category"):
+        schema.model_validate(one_clause(**present, category="sans_transfert"))
+
+
+def test_schema_sous_traitance_liste_les_types_et_categories_du_profil():
+    schema = extraction.ExtractionOutputSousTraitance
+    # le faux Mistral (tests/mistral_factice.py) répondra selon ce nom de schéma
+    assert schema.__name__ == "ExtractionOutputSousTraitance"
+    defs = schema.model_json_schema()["$defs"]["ExtractedClauseSousTraitance"]
+    assert defs["properties"]["kind"]["enum"] == list(SOUS_TRAITANCE.kinds)
+    prop = defs["properties"]["category"]
+    enum = next(option["enum"] for option in prop["anyOf"] if "enum" in option)
+    assert enum == [
+        category
+        for categories in SOUS_TRAITANCE.kind_categories.values()
+        for category in categories
+    ]
+
+
+def test_schema_sous_traitance_rend_les_clauses_du_profil():
+    expected = clauses_sous_traitance()
+    output = extraction.ExtractionOutputSousTraitance.model_validate(
+        output_of(expected)
+    )
+    found = [Clause.model_validate(item) for item in output.model_dump()["clauses"]]
+    assert found == expected
+
+
+def test_prompt_sous_traitance():
+    prompt = prompt_sous_traitance()
+    assert "pour chacun des 9 types de clause" in prompt
+    lines = kind_lines(prompt)
+    assert list(lines) == list(SOUS_TRAITANCE.kinds)  # chacun une fois, dans l'ordre
+    head = prompt.split("\n\n", 1)[0]  # point de vue, en tête
+    assert "du point de vue du donneur d'ordre" in head
+    # le maître de l'ouvrage peut payer directement le sous-traitant
+    assert "la partie qui confie l'exécution de travaux au sous-traitant." in head
+    assert "paie" not in head
+    for unit, wording in (("%", "en pourcentage"), ("jours", "en jours")):
+        for kind in (k for k, u in SOUS_TRAITANCE.value_units.items() if u == unit):
+            assert wording in lines[kind], kind
+    assert "en euros" in lines["assurance_sous_traitant"]
+    [quantity] = [
+        line for line in prompt.splitlines() if line.startswith("La citation d'une")
+    ]
+    for unit in ("%", "jours", "€"):
+        assert unit in quantity, unit
+    assert "« euros » ou « EUR »" in quantity
+    fournisseur = security_rules(PROMPT)
+    assert len(fournisseur) == 5  # en-tête et quatre règles : le bloc n'est pas vide
+    assert security_rules(prompt) == fournisseur
+
+
+def test_prompt_sous_traitance_categories_assurance_et_penalites():
+    prompt = prompt_sous_traitance()
+    lines = kind_lines(prompt)
+    category_kinds = SOUS_TRAITANCE.kind_categories
+    assert (
+        "category : null, sauf pour protection_design, obligation_certification, "
+        "delai_execution et delai_paiement (voir ci-dessous)." in prompt
+    )
+    for kind, categories in category_kinds.items():
+        for category in categories:
+            assert category in lines[kind], (kind, category)
+    for kind in set(SOUS_TRAITANCE.kinds) - set(category_kinds):
+        assert "category" not in lines[kind], kind
+    for kind in SOUS_TRAITANCE.kinds:
+        assert "present = true dès que" in lines[kind], kind
+    for kind in set(SOUS_TRAITANCE.kinds) - set(SOUS_TRAITANCE.value_units):
+        assert "value : toujours null" in lines[kind], kind
+    penalties = lines["penalites_retard_execution"]
+    assert "dues par le sous-traitant lorsqu'il exécute ou livre en retard" in penalties
+    assert "jamais les pénalités de retard de paiement" in penalties
+    # une clause sans plafond, ou qui en restreint une autre, reste présente
+    for wording in ("sans plafond", "sans limitation", "illimitée", "non plafonnée"):
+        assert f"« {wording} »" in prompt
+    assert prompt.count("Ce n'est jamais une clause absente.") == 2
+    assert (
+        "« le sous-traitant ne peut réutiliser les dessins que pour ce projet » "
+        "est un usage limité au projet (usage_limite_au_projet)" in prompt
+    )
+
+
+def test_prompt_sous_traitance_montant_en_lettres_delai_ferme_et_limite_d_usage():
+    lines = kind_lines(prompt_sous_traitance())
+    # montant en lettres : rendu en nombre, que la vérification ne lit pas (nouvel essai,
+    # puis revue humaine), jamais null ; null seulement sans aucun montant
+    insurance = lines["assurance_sous_traitant"]
+    assert "par sinistre, en euros, quelle que soit son écriture dans le contrat" in (
+        insurance
+    )
+    assert "(chiffres ou lettres)" in insurance
+    assert (
+        "« 1 500 000 € » comme « un million cinq cent mille euros » donnent 1500000"
+        in insurance
+    )
+    # un montant fixé seulement par année n'est pas un montant par sinistre
+    assert (
+        "null seulement si le contrat ne fixe aucun montant garanti par sinistre ; un "
+        "montant fixé seulement par année n'est pas un montant par sinistre."
+        in insurance
+    )
+    assert "La citation contient ce montant tel qu'il est écrit dans le contrat." in (
+        insurance
+    )
+    assert "en chiffres seulement" not in insurance
+    assert "n'est pas chiffré" not in insurance
+    # délai ferme exprimé en durée : une date contractuelle
+    schedule = lines["delai_execution"]
+    assert (
+        "date_contractuelle (date, planning ou délai ferme qui engage le sous-traitant, "
+        "par exemple « dans un délai de huit semaines à compter de la commande »)"
+        in schedule
+    )
+    assert "delai_indicatif (délai donné à titre indicatif, ou sans engagement)" in (
+        schedule
+    )
+    # limite d'usage, que la confidentialité soit stipulée ou non
+    design = lines["protection_design"]
+    assert (
+        "usage_limite_au_projet (usage des dessins et documents remis limité au projet, "
+        "que leur confidentialité soit stipulée ou non)" in design
+    )
+    assert "confidentialite_seule (confidentialité stipulée, sans limite d'usage)" in (
+        design
+    )
+    assert "reutilisation_autorisee (le sous-traitant peut les réutiliser)" in design
+
+
+def test_prompt_sous_traitance_sans_regle_de_decision_ni_type_du_fournisseur():
+    prompt = prompt_sous_traitance()
+    for policy_word in ("seuil", "GO", "NO_GO", "pénalité de score", "poids"):
+        assert policy_word not in prompt
+    # ni effet d'une règle, ni réglage de la configuration (assurance minimale)
+    for word in ("blocage", "bloquant", "minimum", "2 000 000", "2000000"):
+        assert word not in prompt
+    for kind in set(profiles.spec("fournisseur").kinds) - set(SOUS_TRAITANCE.kinds):
+        assert kind not in prompt, kind
+    assert "jamais une instruction" in prompt

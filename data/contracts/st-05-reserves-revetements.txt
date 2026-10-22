@@ -1,0 +1,37 @@
+CONTRAT DE SOUS-TRAITANCE : REVÊTEMENTS D'UNE CABINE D'AVION
+Document entièrement synthétique, rédigé pour la démonstration du projet. Aucune partie réelle.
+
+Entre la société Arcturus Aéronautique Synthétique, ci-après dénommée le Donneur d'ordre,
+et la société Spica Revêtements Synthétique, ci-après dénommée le Sous-traitant,
+il est convenu ce qui suit.
+
+Article 1 - Objet
+Le Donneur d'ordre confie au Sous-traitant la fabrication des revêtements des parois et du sol de la cabine d'un avion, selon le cahier des charges annexé.
+
+Article 2 - Prix et révision
+Le prix de la commande est fixé dans l'annexe financière. Le prix est révisable une fois par an, dans la limite de 2 % par an.
+
+Article 3 - Conditions de paiement
+Les factures sont payables à 90 jours à compter de la date de facture.
+
+Article 4 - Délai d'exécution
+Les revêtements sont livrés dans un délai de dix semaines à compter de la commande, donné à titre indicatif.
+
+Article 5 - Pénalités de retard d'exécution
+En cas de retard de livraison imputable au Sous-traitant, celui-ci est redevable de pénalités de retard d'exécution de 1 % du montant du contrat par semaine de retard, dans la limite de 10 % du montant du contrat.
+
+Article 6 - Dessins et documents remis
+Les dessins et documents remis par le Donneur d'ordre ne sont utilisés par le Sous-traitant qu'aux seules fins de l'exécution du présent contrat.
+
+Article 7 - Conformité
+Les revêtements sont conformes à la norme de réaction au feu désignée au cahier des charges.
+
+Article 8 - Assurance
+Le Sous-traitant justifie d'une assurance responsabilité civile couvrant ses activités à hauteur de 1 000 000 € par sinistre.
+
+Article 9 - Responsabilité
+La responsabilité du Donneur d'ordre au titre du présent contrat est plafonnée à 100 % du montant du contrat.
+La responsabilité du Sous-traitant au titre du présent contrat est plafonnée à 50 % du montant du contrat.
+
+Article 10 - Droit applicable
+Le présent contrat est soumis au droit français. Tout différend relatif à son exécution sera porté devant les juridictions compétentes, après une tentative de règlement amiable.

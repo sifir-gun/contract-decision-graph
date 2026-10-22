@@ -19,6 +19,7 @@ from doubles import (
     FakeRetriever,
     FixedExtractor,
     clauses,
+    clauses_sous_traitance,
     context,
     make_deps,
     passage,
@@ -52,6 +53,9 @@ def autre_profil(monkeypatch):
         domain_kinds={"financier": ("delai_paiement", "frais_x")},
         value_units={"delai_paiement": "jours"},
         kind_categories={"delai_paiement": ("date_facture",)},
+        parties=profiles.Parties(
+            "donneur d'ordre", "du donneur d'ordre", "sous-traitant", "du sous-traitant"
+        ),
     )
     monkeypatch.setattr(profiles, "PROFILES", ("fournisseur", "autre"))
     monkeypatch.setattr(
@@ -109,6 +113,185 @@ def test_tables_du_crag_indexees_d_abord_par_profil():
     )
 
 
+@pytest.mark.parametrize("profile", profiles.PROFILES)
+def test_tables_du_crag_couvrent_les_types_et_categories_du_profil(profile):
+    spec = profiles.spec(profile)
+    assert set(crag.DOMAIN_LABELS[profile]) == set(DOMAINS)
+    assert set(crag._SUBJECTS[profile]) == set(spec.kinds)
+    admitted = {c for cats in spec.kind_categories.values() for c in cats}
+    assert admitted <= set(crag._CATEGORY_LABELS[profile])
+    for kind, (_, unit, _) in crag._SUBJECTS[profile].items():
+        # un type chiffré a son unité dans la requête, un type à catégorie seule n'en a pas
+        assert (unit is not None) == (kind in spec.value_units), kind
+
+
+# tables du profil sous_traitance, au caractère près (plan de la PR 2, tâche 9)
+SOUS_TRAITANCE_LABELS = {
+    "juridique": (
+        "responsabilité des parties et protection des dessins : plafonds de "
+        "responsabilité, propriété intellectuelle"
+    ),
+    "financier": (
+        "conditions financières du contrat : prix, paiement, pénalités de retard "
+        "d'exécution"
+    ),
+    "conformite": (
+        "certification des matériaux et des équipements, assurance de responsabilité "
+        "civile"
+    ),
+    "operationnel": "délai d'exécution des travaux",
+}
+SOUS_TRAITANCE_SUBJECTS = {
+    "responsabilite_donneur_ordre": (
+        "plafond de responsabilité du donneur d'ordre",
+        "% du montant du contrat",
+        "illimitée",
+    ),
+    "responsabilite_sous_traitant": (
+        "plafond de responsabilité du sous-traitant",
+        "% du montant du contrat",
+        "illimitée",
+    ),
+    "protection_design": (
+        "protection des dessins et documents remis au sous-traitant",
+        None,
+        None,
+    ),
+    "revision_prix": ("révision du prix", "%", "non plafonnée"),
+    "delai_paiement": (
+        "délai de paiement par le donneur d'ordre",
+        "jours",
+        "non chiffré",
+    ),
+    "penalites_retard_execution": (
+        "pénalités de retard d'exécution à la charge du sous-traitant",
+        "% du montant du contrat",
+        "non plafonnées",
+    ),
+    "obligation_certification": (
+        "obligation de certification et preuves de conformité",
+        None,
+        None,
+    ),
+    "assurance_sous_traitant": (
+        "assurance de responsabilité civile du sous-traitant",
+        "€ par sinistre",
+        "non chiffrée",
+    ),
+    "delai_execution": ("délai d'exécution des travaux", None, None),
+}
+SOUS_TRAITANCE_CATEGORY_LABELS = {
+    "usage_limite_au_projet": "usage limité au projet",
+    "confidentialite_seule": "confidentialité seule",
+    "reutilisation_autorisee": "réutilisation autorisée",
+    "norme_et_preuves": "norme et preuves",
+    "norme_sans_preuves": "norme sans preuves",
+    "conformite_generale": "conformité générale",
+    "date_contractuelle": "date contractuelle",
+    "delai_indicatif": "délai indicatif",
+    "date_facture": "date de facture",
+    "fin_de_mois": "fin de mois",
+    "facture_periodique": "après une facture périodique",
+}
+
+
+def test_tables_du_crag_du_profil_sous_traitance():
+    assert crag.DOMAIN_LABELS["sous_traitance"] == SOUS_TRAITANCE_LABELS
+    assert crag._SUBJECTS["sous_traitance"] == SOUS_TRAITANCE_SUBJECTS
+    assert crag._CATEGORY_LABELS["sous_traitance"] == SOUS_TRAITANCE_CATEGORY_LABELS
+
+
+def clause_st(kind, **overrides):
+    return next(c for c in clauses_sous_traitance(**overrides) if c.kind == kind)
+
+
+def test_requete_d_une_clause_sous_traitance():
+    insurance = clause_st("assurance_sous_traitant")  # 3 000 000 € par sinistre
+    assert crag.clause_query("conformite", insurance, "sous_traitance") == (
+        "certification des matériaux et des équipements, assurance de responsabilité "
+        "civile ; assurance de responsabilité civile du sous-traitant : "
+        "3 000 000 € par sinistre"
+    )
+    design = clause_st(
+        "protection_design", categories={"protection_design": "confidentialite_seule"}
+    )
+    assert crag.clause_query("juridique", design, "sous_traitance") == (
+        f"{SOUS_TRAITANCE_LABELS['juridique']} ; protection des dessins et documents "
+        "remis au sous-traitant : confidentialité seule"
+    )
+
+
+@pytest.mark.parametrize(
+    ("domain", "kind", "overrides", "detail"),
+    [
+        (
+            "financier",
+            "delai_paiement",
+            {},
+            "délai de paiement par le donneur d'ordre : 30 jours date de facture",
+        ),
+        (
+            "financier",
+            "penalites_retard_execution",
+            {"penalites_retard_execution": 2.0},
+            (
+                "pénalités de retard d'exécution à la charge du sous-traitant : 2 % "
+                "du montant du contrat"
+            ),
+        ),
+        (
+            "financier",
+            "penalites_retard_execution",
+            {"penalites_retard_execution": ABSENT},
+            (
+                "pénalités de retard d'exécution à la charge du sous-traitant : "
+                "clause absente"
+            ),
+        ),
+        (
+            "juridique",
+            "responsabilite_donneur_ordre",
+            {"responsabilite_donneur_ordre": None},
+            "plafond de responsabilité du donneur d'ordre : illimitée",
+        ),
+        (
+            "conformite",
+            "assurance_sous_traitant",
+            {"assurance_sous_traitant": None},
+            "assurance de responsabilité civile du sous-traitant : non chiffrée",
+        ),
+        (
+            "conformite",
+            "obligation_certification",
+            {"categories": {"obligation_certification": "conformite_generale"}},
+            (
+                "obligation de certification et preuves de conformité : "
+                "conformité générale"
+            ),
+        ),
+        (
+            "operationnel",
+            "delai_execution",
+            {"categories": {"delai_execution": "delai_indicatif"}},
+            "délai d'exécution des travaux : délai indicatif",
+        ),
+    ],
+)
+def test_requetes_des_constats_sous_traitance(domain, kind, overrides, detail):
+    query = crag.clause_query(domain, clause_st(kind, **overrides), "sous_traitance")
+    assert query == f"{SOUS_TRAITANCE_LABELS[domain]} ; {detail}"
+
+
+def test_requete_d_un_type_commun_selon_le_profil():
+    """Un type commun aux deux profils n'a pas le même sujet : « par l'acheteur », « par
+    le donneur d'ordre »."""
+    delay = clause_of("delai_paiement")
+    assert "par l'acheteur" in crag.clause_query("financier", delay, "fournisseur")
+    assert crag.clause_query("financier", delay, "sous_traitance").endswith(
+        "délai de paiement par le donneur d'ordre : 30 jours date de facture"
+    )
+
+
 def test_chaque_domaine_nomme_par_ce_qu_il_couvre():
     # le nom seul est ambigu : « financier » lu comme « services financiers » (série 2)
     labels = crag.DOMAIN_LABELS["fournisseur"]
@@ -130,6 +313,19 @@ def test_requete_selon_les_tables_du_profil(autre_profil):
     # le profil fournisseur garde son sujet et son libellé
     assert crag.clause_query("financier", delay, "fournisseur") == (
         f"{FINANCIER} ; délai de paiement par l'acheteur : 30 jours date de facture"
+    )
+
+
+def test_requete_grand_nombre_groupe_par_milliers():
+    # un entier de 10 000 ou plus est groupé (« 2 000 000 »), jamais en notation
+    # scientifique ; sous 10 000, l'affichage reste celui d'avant
+    big = clause_of("delai_paiement", delai_paiement=20000.0)
+    assert crag.clause_query("financier", big, "fournisseur") == (
+        f"{FINANCIER} ; délai de paiement par l'acheteur : 20 000 jours date de facture"
+    )
+    small = clause_of("delai_paiement", delai_paiement=9999.0)
+    assert crag.clause_query("financier", small, "fournisseur").endswith(
+        ": 9999 jours date de facture"
     )
 
 

@@ -25,7 +25,7 @@
     <label for="contrat">Contrat du jeu</label>
     <select id="contrat" name="contrat">
       {% for c in contracts %}
-      <option value="{{ c.id }}">{{ c.id }}</option>
+      <option value="{{ c.id }}">{{ c.id }} ({{ c.profile }})</option>
       {% endfor %}
     </select>
     {% if not demo %}

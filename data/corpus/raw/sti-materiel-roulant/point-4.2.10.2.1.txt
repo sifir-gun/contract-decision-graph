@@ -1,0 +1,21 @@
+4.2.10.2.1.   Exigences relatives aux matériaux
+
+1) La sélection des matériaux et des composants doit tenir compte de leurs propriétés de comportement au feu, comme l’inflammabilité, l’opacité des fumées et la toxicité.
+
+2) Les matériaux utilisés pour construire l’unité de matériel roulant doivent être conformes aux exigences de la spécification mentionnée à l’appendice J-1, index [30] pour les «catégories d’exploitation» définies ci-dessous:
+
+— 
+«catégorie d’exploitation 2» pour la catégorie A: matériel roulant destiné au transport de passagers (y compris les locomotives passagers);
+— 
+«catégorie d’exploitation 3» pour la catégorie B: matériel roulant destiné au transport de passagers (y compris les locomotives passagers);
+— 
+«catégorie d’exploitation 2» pour les locomotives marchandises et les unités automotrices conçues pour le transport d’autres charges utiles que les passagers (courrier, fret, etc.);
+— 
+«catégorie d’exploitation 1» pour les engins de voie, les exigences particulières étant limitées aux zones accessibles au personnel lorsque l’unité se trouve en configuration de transport (voir le point 2.3).
+
+3) Pour garantir la constance des caractéristiques du produit et du processus de fabrication:
+
+— 
+il est nécessaire que les rapports d’essai destinés à prouver la conformité d’un matériau avec la norme, qui doivent être établis immédiatement après essai du matériau, soient renouvelés tous les 5 ans,
+— 
+si les caractéristiques du produit et le processus de fabrication restent inchangés, et s’il en va de même des exigences s’y rapportant (STI), il n’est pas nécessaire de soumettre ce matériau à un nouvel essai; les rapports d’essai arrivés à expiration doivent être acceptés à condition qu’ils soient accompagnés d’une déclaration du fabricant de l’équipement d’origine, fournie lors de la mise sur le marché du produit, attestant que les caractéristiques du produit et le processus de fabrication sont restés inchangés depuis que les propriétés du produit en matière de comportement au feu ont été testées et couvrant l’ensemble de la chaîne d’approvisionnement concernée. Cette déclaration doit être fournie au plus tard 6 mois après l’expiration du rapport d’essai initial. Elle doit être renouvelée tous les 5 ans.

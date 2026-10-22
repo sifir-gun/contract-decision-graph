@@ -58,9 +58,37 @@ def test_le_jeu_couvre_exactement_les_requetes_des_constats_du_jeu_de_demonstrat
 
 
 def test_un_jeu_d_evaluation_par_profil():
+    """Un jeu par profil, sauf `sous_traitance`, dont le jeu vient en PR 3 (spec,
+    « Mesure de la recherche ») : la PR 3 ramène ce test à l'égalité."""
     assert evaluation.EVALUATION_SETS == {"fournisseur": evaluation.EVALUATION}
-    assert set(evaluation.EVALUATION_SETS) == set(profiles.PROFILES)
+    with_set = set(profiles.PROFILES) - {"sous_traitance"}
+    assert set(evaluation.EVALUATION_SETS) == with_set
     assert evaluation.EVALUATION.name == "recherche.yaml"
+    assert evaluation.evaluation_set("fournisseur") == evaluation.EVALUATION
+    with pytest.raises(
+        evaluation.EvaluationSetMissing,
+        match="^aucun jeu d'évaluation de la recherche pour le profil sous_traitance$",
+    ):
+        evaluation.evaluation_set("sous_traitance")
+
+
+@pytest.mark.parametrize("profile", ["inexistant", "", None])
+def test_jeu_d_evaluation_d_un_profil_inconnu_refuse(profile):
+    with pytest.raises(ValueError, match="profil inconnu"):
+        evaluation.evaluation_set(profile)
+
+
+def test_mesure_d_un_profil_sans_jeu_refusee_avant_toute_recherche():
+    """La mesure s'arrête au jeu manquant : ni l'index ni la recherche ne sont lus."""
+
+    class Untouched:
+        def __getattr__(self, name):
+            raise AssertionError(f"port appelé : {name}")
+
+    with pytest.raises(evaluation.EvaluationSetMissing, match="sous_traitance"):
+        evaluation.run(
+            CONFIG, Untouched(), Untouched(), profile="sous_traitance", on=ON
+        )
 
 
 def test_demo_queries_ne_prend_que_les_contrats_du_profil(monkeypatch):
@@ -410,13 +438,31 @@ def test_mesure_recherche_sans_profil_refusee(capsys):
     assert "--profil" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("profil", ["sous_traitance", "", "Fournisseur"])
+@pytest.mark.parametrize("profil", ["inexistant", "", "Fournisseur"])
 def test_mesure_recherche_profil_inconnu_refuse(capsys, profil):
     with pytest.raises(SystemExit) as exc:
         cli.main(["mesure-recherche", "--profil", profil])
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "--profil" in err and "fournisseur" in err  # le profil admis est cité
+
+
+def test_mesure_recherche_sous_traitance_refusee(capsys, monkeypatch):
+    """Critère 15 : sans jeu d'évaluation du profil (PR 3), refus explicite, code 1 et
+    message qui nomme le profil ; ni modèle d'embedding, ni base, ni recherche."""
+
+    def never(*args, **kwargs):
+        raise AssertionError("construit malgré le refus")
+
+    monkeypatch.setattr(cli.fastembed, "FastembedEmbedder", never)
+    monkeypatch.setattr(cli, "app_pool", never)
+    monkeypatch.setattr(cli.rag_store, "PgvectorRetriever", never)
+    monkeypatch.setattr(cli.evaluation, "run", never)
+    code, err = run_cli(capsys, "mesure-recherche", "--profil", "sous_traitance")
+    assert code == 1 and err["erreur"] == "EvaluationSetMissing"
+    assert err["detail"] == (
+        "aucun jeu d'évaluation de la recherche pour le profil sous_traitance"
+    )
 
 
 def test_commande_mesure_recherche_mesure_le_profil_demande(

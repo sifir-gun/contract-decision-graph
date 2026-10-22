@@ -313,8 +313,10 @@ def _ingest(args: argparse.Namespace) -> dict:
 
 def _mesure_recherche(args: argparse.Namespace) -> dict:
     """Mesure de la recherche seule, sans LLM (ADR 006) : modèle d'embedding local,
-    corpus indexé lu avec le rôle applicatif."""
+    corpus indexé lu avec le rôle applicatif. Un profil sans jeu d'évaluation est refusé
+    avant le modèle et la base (`EvaluationSetMissing`)."""
     config = load_config()
+    evaluation.evaluation_set(args.profil)
     embedder = fastembed.FastembedEmbedder(
         config.embedding,
         settings.embedding_cache_dir(),

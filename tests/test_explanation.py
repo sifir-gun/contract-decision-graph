@@ -7,12 +7,31 @@ Python pur et doublures : aucun appel réseau. Le graphe complet est testé dans
 """
 
 import pytest
-from doubles import ABSENT, CONTRACT_TEXT, FakeLLM, clauses
+from corpus_de_test import (
+    CODE_A,
+    CODE_A_REF,
+    CODE_B,
+    HOMONYM_NAMES,
+    POINT_A,
+    POINT_B,
+    POINTS,
+    point_source,
+)
+from doubles import (
+    ABSENT,
+    CONTRACT_TEXT,
+    FaithfulExplainer,
+    FakeLLM,
+    clauses,
+    faithful_explanation,
+)
 
+from cdg.application import explanation as application_explanation
+from cdg.application import ingestion
 from cdg.application.deps import TemplateOnly
 from cdg.application.explanation import LLMExplainer
 from cdg.application.nodes.explain import explain
-from cdg.domain import explanation
+from cdg.domain import explanation, profiles
 from cdg.domain.config import load_config
 from cdg.domain.explanation import Draft, ExplainedFinding
 from cdg.domain.justification import justify
@@ -25,6 +44,9 @@ from cdg.domain.rules import RULES
 from cdg.ports.llm import LLMOutputError, LLMTransientError
 
 CONFIG = load_config()
+# noms des sources du corpus du dépôt (citation et titre du manifeste), que l'orchestrateur
+# passe au nœud explain
+NAMES = ingestion.source_names()
 
 # conformité : données personnelles sans accord (blocage, clause de l'accord) et transfert
 # sur clauses ad hoc (pénalité, clause du transfert), chacune avec sa propre référence
@@ -190,21 +212,752 @@ def test_libelles_de_decision_nommes(text, labels):
         ("art. 46, par. 3, a) RGPD", {"46"}),
         ("articles 44 à 46 et 1231-5", {"44", "46", "1231-5"}),
         ("les parties au contrat, 30 jours", set()),
+        # points d'annexe : un numéro à points, qui garde ses points
+        ("le point 4.2.10.2.1 de l'annexe", {"4.2.10.2.1"}),
+        ("Règl. (UE) 748/2012, annexe I, point 21.A.307", {"21.A.307"}),
+        ("au point 21.a.307.", {"21.A.307"}),
+        ("points 4.2.10.2.1 et 21.A.307", {"4.2.10.2.1", "21.A.307"}),
+        ("art. 83, par. 5, point c", {"83"}),
+        ("le point de départ du délai, point 8", set()),
     ],
 )
 def test_articles_cites(text, found):
     assert explanation.articles(text) == found
 
 
+def test_article_4_point_8_reste_l_article_4():
+    assert explanation.articles("l'article 4, point 8 du RGPD") == {"4"}
+    # acceptée aujourd'hui, elle le reste : l'art. 4 est retenu pour la clause
+    finding = ACCORD.model_copy(update={"references": ["RGPD, art. 4"]})
+    req = REQUEST.model_copy(update={"findings": [finding, TRANSFERT]})
+    text = "Données personnelles au sens de l'article 4, point 8 du RGPD."
+    assert (
+        explanation.refusals(
+            draft(entry(finding, text=text), entry(TRANSFERT)), req, names=NAMES
+        )
+        == []
+    )
+
+
+# --- Citations rattachées à leur source --------------------------------------------------------
+
+CMF = "code-monetaire-financier"
+CPI = "code-propriete-intellectuelle"
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        # nom avant le numéro, sous la forme des références
+        ("C. mon. fin., art. L112-2", {(CMF, "L112-2")}),
+        ("RGPD art. 28", {("rgpd", "28")}),
+        # nom après le numéro, casse ignorée, texte normalisé
+        ("l'article L112-2 du code monétaire et financier", {(CMF, "L112-2")}),
+        ("l’article L. 441-10 du Code de commerce", {("code-commerce", "L441-10")}),
+        ("ART. 1231-5 DU CODE CIVIL", {("code-civil", "1231-5")}),
+        ("(art. 28 RGPD)", {("rgpd", "28")}),
+        # une énumération : seul le numéro que le nom touche lui est rattaché
+        ("articles 44 à 46 du RGPD", {(None, "44"), ("rgpd", "46")}),
+        # chaque citation a sa source ; le nom qui précède l'emporte sur celui qui suit
+        (
+            "RGPD, art. 28 ; C. civ., art. 1231-5",
+            {("rgpd", "28"), ("code-civil", "1231-5")},
+        ),
+        (
+            "C. com., art. L441-10 C. civ., art. 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # un nom pris après une citation ne sert pas de nom avant à la suivante
+        (
+            "art. 1171 du Code civil, art. L442-1 du Code de commerce",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "(art. 1171 C. civ., art. L442-1 C. com.)",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        # une citation qui a un nom avant consomme aussi le nom qui la suit et la
+        # touche : il ne sert pas de nom avant à la suivante
+        (
+            "C. com., art. L441-10 du Code de commerce, art. 1231-5 du Code civil",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        (
+            "C. civ., art. 1171 du Code civil, art. L442-1 du Code de commerce",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        # deux noms de sources différentes autour d'une citation : le nom avant l'emporte
+        ("C. com., art. L441-10 du Code civil", {("code-commerce", "L441-10")}),
+        # limite : « l'article » n'ouvre la citation suivante qu'après une énumération
+        (
+            "C. com., art. L441-10 C. civ., l'article 1231-5",
+            {("code-commerce", "L441-10"), (None, "1231-5")},
+        ),
+        # une énumération : seul le numéro que le nom touche lui est rattaché, après
+        # comme avant ; les autres, sans source, comparés par leur seul numéro
+        (
+            "articles 1171 et L442-1 du Code de commerce",
+            {(None, "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "C. civ., art. 1171 et L442-1",
+            {("code-civil", "1171"), (None, "L442-1")},
+        ),
+        # un nom avant le premier numéro, un autre après le dernier : chacun le sien
+        (
+            "C. civ., art. 1231-1 et L112-2 du code monétaire et financier",
+            {("code-civil", "1231-1"), (CMF, "L112-2")},
+        ),
+        (
+            "C. com., art. L441-10 et 1231-5 C. civ.",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # sauf le nom qui ouvre la référence suivante, comme pour une citation seule
+        (
+            "C. civ., art. 1171 et 1231-5 C. com., art. L442-1",
+            {("code-civil", "1171"), (None, "1231-5"), ("code-commerce", "L442-1")},
+        ),
+        # ou qui l'ouvre par « l'article » ou « l'art. »
+        (
+            "C. civ., art. 1171 et 1231-5 C. com., l'article L442-1",
+            {("code-civil", "1171"), (None, "1231-5"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "C. civ., art. 1171 et 1231-5 C. com., l'art. L442-1",
+            {("code-civil", "1171"), (None, "1231-5"), ("code-commerce", "L442-1")},
+        ),
+        # un nom précédé d'une préposition suit sa citation : il n'ouvre pas la suivante
+        (
+            (
+                "C. civ., art. 1171 et L112-2 du code monétaire et financier, "
+                "art. L441-10 du Code de commerce"
+            ),
+            {("code-civil", "1171"), (CMF, "L112-2"), ("code-commerce", "L441-10")},
+        ),
+        # un nom qui ne suit aucune citation n'ouvre pas « l'article » qui le suit
+        ("Au-delà du Code civil, l'article L442-1", {(None, "L442-1")}),
+        # homonymes du corpus : L112-2 au Code monétaire et financier, 1231-1 sans source
+        (
+            "les articles 1231-1 et L112-2 du code monétaire et financier",
+            {(None, "1231-1"), (CMF, "L112-2")},
+        ),
+        # nom qui suit, entre parenthèses juste après la citation
+        ("L'article L112-2 (CPI) encadre", {(CPI, "L112-2")}),
+        (
+            "L'article L112-2 (Code de la propriété intellectuelle)",
+            {(CPI, "L112-2")},
+        ),
+        ("articles L111-1 et L112-2 (CPI)", {(None, "L111-1"), (CPI, "L112-2")}),
+        # lié à sa citation, comme après une préposition : il n'ouvre pas la suivante
+        (
+            "C. com., art. L441-10 (Code de commerce), art. 1231-5",
+            {("code-commerce", "L441-10"), (None, "1231-5")},
+        ),
+        # une parenthèse qui ne contient pas que le nom : il est le nom avant de la
+        # citation qu'elle contient
+        (
+            "art. L441-10 (C. civ., art. 1231-5)",
+            {(None, "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # nom qui précède, suivi d'une parenthèse ouvrante ou de deux-points
+        ("Le Code de la propriété intellectuelle (article L112-2)", {(CPI, "L112-2")}),
+        ("Code de la propriété intellectuelle : article L112-2", {(CPI, "L112-2")}),
+        (
+            "Le Code civil (art. 1171) et le Code de commerce (art. L442-1)",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "Code de commerce : art. L441-10 ; Code civil : art. 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # « en son article », « en ses articles »
+        ("Le CPI, en son article L112-2", {(CPI, "L112-2")}),
+        ("Le RGPD, en ses articles 44 à 46", {("rgpd", "44"), (None, "46")}),
+        # l'annexe d'un point, entre le nom et le point, comme sous la forme des références
+        (
+            "Règl. (UE) 748/2012 (annexe I, point 21.A.307)",
+            {("certification-navigabilite", "21.A.307")},
+        ),
+        # suivi d'une parenthèse, de deux-points ou de « en son », le nom avant cède au
+        # nom qui suit la citation ; sous la forme des références, il l'emporte
+        (
+            "Hors du Code civil : article L441-10 du Code de commerce",
+            {("code-commerce", "L441-10")},
+        ),
+        (
+            "Le Code civil (article L441-10 du Code de commerce)",
+            {("code-commerce", "L441-10")},
+        ),
+        (
+            "Code civil : articles 1171 et L442-1 du Code de commerce",
+            {(None, "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "Hors du Code civil, article L441-10 du Code de commerce",
+            {("code-civil", "L441-10")},
+        ),
+        # nom pris après une citation : pas un nom avant pour la suivante, même suivi
+        # de deux-points
+        (
+            "art. 1231-5 du Code civil : art. L441-10",
+            {("code-civil", "1231-5"), (None, "L441-10")},
+        ),
+        # énumération de noms avant la parenthèse ou les deux-points : rien ne dit lequel
+        # vise la citation, comparée par son seul numéro
+        (
+            "Le Code de commerce et le Code civil : art. L441-10 et art. 1231-5",
+            {(None, "L441-10"), (None, "1231-5")},
+        ),
+        (
+            "Le Code civil et le Code de commerce (art. 1171 et L442-1)",
+            {(None, "1171"), (None, "L442-1")},
+        ),
+        # nom qui suit une citation et introduit la suivante (deux-points) : il ouvre la
+        # suivante, il ne prend pas la place du nom avant de la première (liste de
+        # références, une par ligne)
+        (
+            "Code civil : article 1171 Code de commerce : article L442-1",
+            {("code-civil", "1171"), ("code-commerce", "L442-1")},
+        ),
+        (
+            "Code de commerce : article L441-10\nCode civil : article 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        (
+            "Code monétaire et financier : article L112-2 CPI : article L112-2",
+            {
+                ("code-monetaire-financier", "L112-2"),
+                ("code-propriete-intellectuelle", "L112-2"),
+            },
+        ),
+        (
+            "C. com., art. L441-10 C. civ. : art. 1231-5",
+            {("code-commerce", "L441-10"), ("code-civil", "1231-5")},
+        ),
+        # limite : « l' » après un nom qui ne suit aucune citation (comme « Au-delà du
+        # Code civil, l'article L442-1 »)
+        ("Selon le CPI, l'article L112-2", {(None, "L112-2")}),
+        ("CPI, l'article L112-2", {(None, "L112-2")}),
+        # aucun nom ne touche la citation : aucune source
+        ("article 28", {(None, "28")}),
+        ("art. 46, par. 3, a) RGPD", {(None, "46")}),
+        ("l'article 4, point 8 du RGPD", {(None, "4")}),
+        ("le RGPD. Article 28 : sous-traitant", {(None, "28")}),
+        ("art. 28 RGPDX", {(None, "28")}),
+        # nom absent du corpus : ne rattache rien
+        ("l'article L212-1 du code de la consommation", {(None, "L212-1")}),
+    ],
+)
+def test_citations_rattachees_a_leur_source(text, found):
+    assert explanation.citations(text, NAMES) == found
+
+
+POINT_NAMES = {POINTS: (point_source()["citation"], point_source()["title"])}
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        (f"Règl. (UE) test, annexe, point {POINT_B}", {(POINTS, POINT_B)}),
+        (f"règl. (UE) test, annexe I, point {POINT_A}", {(POINTS, POINT_A)}),
+        (f"le point {POINT_A} de l'annexe du Règlement de test", {(POINTS, POINT_A)}),
+        (f"le point {POINT_B} du règlement 748/2012", {(None, POINT_B)}),
+    ],
+)
+def test_points_d_annexe_rattaches_a_leur_source(text, found):
+    assert explanation.citations(text, POINT_NAMES) == found
+
+
+def test_sans_noms_de_source_numeros_seuls():
+    text = "C. mon. fin., art. L112-2 ; point 21.A.307"
+    assert explanation.citations(text, {}) == {(None, "L112-2"), (None, "21.A.307")}
+    assert explanation.articles(text) == {"L112-2", "21.A.307"}
+
+
+@pytest.mark.parametrize(
+    ("names", "message"),
+    [
+        (
+            {"code-a": ("Code X",), "code-b": ("code  x",)},
+            "nom de source commun à code-a et code-b",
+        ),
+        ({"code-a": ("Code A", " ")}, "code-a : nom de source vide"),
+    ],
+    ids=["commun", "vide"],
+)
+def test_noms_de_source_ambigus_ou_vides_refuses(names, message):
+    with pytest.raises(ValueError, match=message):
+        explanation.citations("art. 1", names)
+
+
+def test_noms_de_source_en_chaine_seule_refuses():
+    # une chaîne serait lue lettre par lettre : « RGPD » rattacherait « r », « g »…
+    with pytest.raises(TypeError, match="code-a : noms de source attendus en liste"):
+        explanation.citations("art. 1", {"code-a": "RGPD"})
+
+
+def homonym_request():
+    """Code A et code B, même numéro L1-1 : seul « Code A, art. L1-1 » est retenu pour
+    le premier constat."""
+    finding = ACCORD.model_copy(update={"references": [CODE_A_REF]})
+    return finding, REQUEST.model_copy(update={"findings": [finding, TRANSFERT]})
+
+
+def test_homonymes_compares_par_source():
+    finding, req = homonym_request()
+
+    def reasons(text, names=HOMONYM_NAMES):
+        d = draft(entry(finding, text=text), entry(TRANSFERT))
+        return explanation.refusals(d, req, names=names)
+
+    refused = [
+        (
+            "conformite-1 : article cité hors des références retenues pour la clause "
+            "accord_traitement_donnees : L1-1 (code-b)"
+        )
+    ]
+    assert reasons("Voir l'article L1-1 du code B.") == refused
+    assert reasons("Voir Ordonnance synthétique B, art. L1-1.") == refused
+    # nom à voyelle initiale, après « de l' »
+    assert reasons("Voir l'article L1-1 de l'Ordonnance synthétique B.") == refused
+    assert reasons("Voir l'article L1-1 de l'Ordonnance synthétique A.") == []
+    # le nom qui suit une citation n'est pas pris par la suivante
+    text = "Voir art. 2 du code A, art. L1-1 du code B."
+    assert explanation.citations(text, HOMONYM_NAMES) == {
+        (CODE_A, "2"),
+        (CODE_B, "L1-1"),
+    }
+    assert "L1-1 (code-b)" in reasons(text)[0]
+    # la source retenue, ou aucun nom de source : acceptés
+    assert reasons("Voir l'article L1-1 du code A.") == []
+    assert reasons("Voir Code A, art. L1-1.") == []
+    assert reasons("Voir l'article L1-1.") == []
+    # sans les noms des sources, par le seul numéro, comme avant
+    assert reasons("Voir l'article L1-1 du code B.", names={}) == []
+
+
+def test_citation_entre_deux_noms_le_nom_avant_l_emporte():
+    # deux noms de sources différentes touchent une même citation : elle est rattachée
+    # au nom avant ; le nom qui la suit, consommé, ne nomme pas la citation suivante
+    finding, req = homonym_request()
+
+    def reasons(text):
+        d = draft(entry(finding, text=text), entry(TRANSFERT))
+        return explanation.refusals(d, req, names=HOMONYM_NAMES)
+
+    assert reasons("Voir Code A, art. L1-1 du code B.") == []
+    assert reasons("Voir Code B, art. L1-1 du code A.") == [
+        (
+            "conformite-1 : article cité hors des références retenues pour la clause "
+            "accord_traitement_donnees : L1-1 (code-b)"
+        )
+    ]
+    text = "Voir Code A, art. 2 du code B, art. L1-1."
+    assert explanation.citations(text, HOMONYM_NAMES) == {
+        (CODE_A, "2"),
+        (None, "L1-1"),
+    }
+
+
+# Explications acceptées aujourd'hui (par le seul numéro, sans nom de source) : celles des
+# tests de ce fichier, celle de `faithful_explanation`, et des citations nommées justes.
+
+FAITHFUL, _ = LLMExplainer(FakeLLM({"explain": faithful_explanation}))(
+    REQUEST, [], profile="fournisseur"
+)
+
+
+def alone(finding, text):
+    """Le seul constat `finding`, expliqué par `text`."""
+    return draft(entry(finding, text=text)), REQUEST.model_copy(
+        update={"findings": [finding]}
+    )
+
+
+def retained_alone(kind, references, domain="financier"):
+    return explanation.FindingToExplain(
+        id=f"{domain}-1",
+        domain=domain,
+        kind=kind,
+        text="Constat des règles, sans article cité.",
+        references=references,
+    )
+
+
+DELAI = retained_alone("delai_paiement", ["C. com., art. L441-10"])
+REVISION = retained_alone("revision_prix", ["C. mon. fin., art. L112-2"])
+PENALITES = retained_alone("penalites_execution", ["C. civ., art. 1231-5"])
+RESPONSABILITE = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1170", "C. civ., art. 1231-3"],
+    domain="juridique",
+)
+DEUX_CODES = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1171", "C. com., art. L442-1"],
+    domain="juridique",
+)
+INDEXATION = retained_alone(
+    "revision_prix", ["C. civ., art. 1231-1", "C. mon. fin., art. L112-2"]
+)
+TROIS_ARTICLES = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1171", "C. civ., art. 1231-5", "C. com., art. L442-1"],
+    domain="juridique",
+)
+DELAI_PENALITES = retained_alone(
+    "delai_paiement", ["C. com., art. L441-10", "C. civ., art. 1231-5"]
+)
+TROIS_CODES = retained_alone(
+    "responsabilite_fournisseur",
+    ["C. civ., art. 1171", "C. mon. fin., art. L112-2", "C. com., art. L441-10"],
+    domain="juridique",
+)
+POINT_RETENU = TRANSFERT.model_copy(
+    update={"references": ["Règl. (UE) 748/2012, annexe I, point 21.A.307"]}
+)
+# transfert sans référence retenue : l'art. 46 n'est cité que par le texte du constat,
+# sans nom qui le touche (« art. 46, par. 3, a) RGPD »)
+TRANSFERT_SEUL = TRANSFERT.model_copy(update={"references": []})
+
+
+@pytest.mark.parametrize(
+    ("d", "req"),
+    [
+        pytest.param(draft(), REQUEST, id="sans-article"),
+        pytest.param(
+            explanation.template(REQUEST, reasons=[]).draft(), REQUEST, id="recopie"
+        ),
+        pytest.param(FAITHFUL, REQUEST, id="faithful_explanation"),
+        pytest.param(
+            *alone(
+                ACCORD.model_copy(update={"references": ["RGPD, art. 4"]}),
+                "Données personnelles au sens de l'article 4, point 8 du RGPD.",
+            ),
+            id="article-4-point-8",
+        ),
+        pytest.param(
+            *alone(POINT_RETENU, "Le point 21.A.307 exige un certificat."),
+            id="point-retenu",
+        ),
+        pytest.param(
+            *alone(
+                TRANSFERT,
+                "Clauses ad hoc : autorisation à vérifier (art. 46, par. 3, a) RGPD).",
+            ),
+            id="article-du-constat",
+        ),
+        pytest.param(
+            *alone(ACCORD, "Sans accord de traitement : l'article 28 du RGPD l'exige."),
+            id="nom-apres",
+        ),
+        pytest.param(
+            *alone(ACCORD, "Accord de traitement absent (RGPD, art. 28)."),
+            id="nom-avant",
+        ),
+        pytest.param(
+            *alone(TRANSFERT_SEUL, "L'article 46 du RGPD exige une autorisation."),
+            id="article-du-constat-nomme",
+        ),
+        pytest.param(
+            *alone(DELAI, "Délai au-delà de l'article L. 441-10 du Code de commerce."),
+            id="code-de-commerce",
+        ),
+        pytest.param(
+            *alone(DELAI, "Délai au-delà du plafond (C. com., art. L441-10, I)."),
+            id="c-com",
+        ),
+        pytest.param(
+            *alone(REVISION, "Indexation encadrée par l'article L112-2."),
+            id="numero-seul",
+        ),
+        pytest.param(
+            *alone(
+                REVISION,
+                "Indexation encadrée par l'article L112-2 du code monétaire et "
+                "financier.",
+            ),
+            id="code-monetaire",
+        ),
+        pytest.param(
+            *alone(PENALITES, "Clause pénale : art. 1231-5 du Code civil."),
+            id="code-civil",
+        ),
+        pytest.param(
+            *alone(RESPONSABILITE, "Plafond : articles 1170 et 1231-3 du Code civil."),
+            id="deux-articles",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES, "Art. 1171 du Code civil, art. L442-1 du Code de commerce."
+            ),
+            id="deux-codes-nom-apres",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Clause déséquilibrée (art. 1171 C. civ., art. L442-1 C. com.).",
+            ),
+            id="deux-codes-entre-parentheses",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "L'article 1171 du Code civil et l'article L442-1 du Code de commerce.",
+            ),
+            id="deux-codes-et",
+        ),
+        pytest.param(
+            *alone(DEUX_CODES, "Voir C. civ., art. 1171 ; C. com., art. L442-1."),
+            id="deux-codes-nom-avant",
+        ),
+        # acceptée sur main (7b4655b), vérifié le 21/10/2026
+        pytest.param(
+            *alone(DEUX_CODES, "Les articles 1171 et L442-1 du Code de commerce."),
+            id="deux-codes-enumeration",
+        ),
+        pytest.param(
+            *alone(
+                INDEXATION,
+                "Les articles 1231-1 et L112-2 du code monétaire et financier.",
+            ),
+            id="homonyme-dans-une-enumeration",
+        ),
+        pytest.param(
+            *alone(
+                INDEXATION,
+                "C. civ., art. 1231-1 et L112-2 du code monétaire et financier.",
+            ),
+            id="enumeration-deux-noms",
+        ),
+        pytest.param(
+            *alone(
+                TROIS_ARTICLES, "C. civ., art. 1171 et 1231-5 C. com., art. L442-1."
+            ),
+            id="enumeration-puis-reference",
+        ),
+        # acceptées sur main (7b4655b) elles aussi, vérifié le 21/10/2026 : le nom qui
+        # suit une énumération ouvre la référence suivante par « l'article » ou
+        # « l'art. », jamais après une préposition
+        pytest.param(
+            *alone(
+                TROIS_ARTICLES,
+                "C. civ., art. 1171 et 1231-5 C. com., l'article L442-1.",
+            ),
+            id="enumeration-puis-l-article",
+        ),
+        pytest.param(
+            *alone(
+                TROIS_ARTICLES, "C. civ., art. 1171 et 1231-5 C. com., l'art. L442-1."
+            ),
+            id="enumeration-puis-l-art",
+        ),
+        pytest.param(
+            *alone(
+                TROIS_CODES,
+                "C. civ., art. 1171 et L112-2 du code monétaire et financier, "
+                "art. L441-10 du Code de commerce.",
+            ),
+            id="enumeration-nom-apres-puis-reference",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Au-delà du Code civil, l'article L442-1 sanctionne le déséquilibre.",
+            ),
+            id="nom-en-fin-de-phrase-puis-l-article",
+        ),
+        # acceptées sur main (7b4655b), vérifié le 21/10/2026 : le nom qui suit une
+        # citation déjà nommée avant elle ne nomme pas la citation suivante
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "C. com., art. L441-10 du Code de commerce, art. 1231-5 du Code civil.",
+            ),
+            id="citation-nommee-deux-fois-puis-reference",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "C. civ., art. 1171 du Code civil, art. L442-1 du Code de commerce.",
+            ),
+            id="deux-codes-nommes-deux-fois",
+        ),
+        # acceptées sur main (7b4655b), vérifié le 21/10/2026 : nom entre parenthèses
+        # après la citation, nom avant elle suivi d'une parenthèse, de deux-points ou de
+        # « en son article », énumération de noms avant la citation
+        pytest.param(
+            *alone(
+                REVISION,
+                "L'article L112-2 (code monétaire et financier) encadre l'indexation.",
+            ),
+            id="nom-entre-parentheses-apres",
+        ),
+        pytest.param(
+            *alone(
+                REVISION,
+                "Le Code monétaire et financier (article L112-2) encadre l'indexation.",
+            ),
+            id="nom-avant-une-parenthese",
+        ),
+        pytest.param(
+            *alone(DELAI, "Code de commerce : article L441-10, I."),
+            id="nom-avant-deux-points",
+        ),
+        pytest.param(
+            *alone(
+                ACCORD, "Le RGPD, en son article 28, exige un accord de traitement."
+            ),
+            id="en-son-article",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Le Code civil (art. 1171) et le Code de commerce (art. L442-1) "
+                "sanctionnent le déséquilibre.",
+            ),
+            id="deux-codes-nom-avant-une-parenthese",
+        ),
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "Article L441-10 (Code de commerce) et article 1231-5 (Code civil).",
+            ),
+            id="deux-codes-entre-parentheses-apres",
+        ),
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "Le Code de commerce et le Code civil : art. L441-10 et art. 1231-5.",
+            ),
+            id="noms-enumeres-avant-deux-points",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Le Code civil et le Code de commerce (art. 1171 et L442-1).",
+            ),
+            id="noms-enumeres-avant-une-parenthese",
+        ),
+        pytest.param(
+            *alone(DELAI, "Hors du Code civil : article L441-10 du Code de commerce."),
+            id="nom-avant-deux-points-puis-nom-apres",
+        ),
+        # acceptées sur main (7b4655b), vérifié le 21/10/2026
+        pytest.param(
+            *alone(
+                DELAI_PENALITES,
+                "Références :\nCode de commerce : article L441-10\n"
+                "Code civil : article 1231-5",
+            ),
+            id="liste-de-references-par-ligne",
+        ),
+        pytest.param(
+            *alone(
+                DEUX_CODES,
+                "Code civil : article 1171 Code de commerce : article L442-1.",
+            ),
+            id="noms-avant-deux-points-empiles",
+        ),
+        pytest.param(
+            *alone(
+                POINT_RETENU,
+                "Règl. (UE) 748/2012 (annexe I, point 21.A.307) : certificat exigé.",
+            ),
+            id="point-nom-avant-une-parenthese",
+        ),
+    ],
+)
+def test_explications_acceptees_aujourd_hui_le_restent(d, req):
+    # acceptée aujourd'hui : par le seul numéro, aucune source n'étant nommée
+    assert explanation.refusals(d, req, names={}) == []
+    assert explanation.refusals(d, req, names=NAMES) == []
+
+
+def test_enumeration_le_numero_touche_compare_par_source():
+    # L112-2, que touche le nom du Code monétaire et financier, est refusé si seul son
+    # homonyme du CPI est retenu ; 1231-1, sans source, comparé par son seul numéro
+    finding = retained_alone(
+        "revision_prix", ["C. civ., art. 1231-1", "CPI, art. L112-2"]
+    )
+    refused = [
+        (
+            "financier-1 : article cité hors des références retenues pour la clause "
+            "revision_prix : L112-2 (code-monetaire-financier)"
+        )
+    ]
+    for text in (
+        "Les articles 1231-1 et L112-2 du code monétaire et financier.",
+        # un nom avant le premier numéro n'efface pas celui qui suit le dernier
+        "C. civ., art. 1231-1 et L112-2 du code monétaire et financier.",
+    ):
+        assert explanation.refusals(*alone(finding, text), names=NAMES) == refused
+    # limite : un numéro de l'énumération que le nom ne touche pas passe, même s'il vise
+    # l'homonyme d'un autre code (ici L112-2 du CPI, quand seul celui du C. mon. fin.
+    # est retenu), comme une citation sans nom
+    finding = retained_alone(
+        "revision_prix", ["C. mon. fin., art. L112-2", "CPI, art. L111-1"]
+    )
+    text = "Les articles L112-2 et L111-1 du CPI."
+    assert explanation.refusals(*alone(finding, text), names=NAMES) == []
+
+
+# nom entre parenthèses après la citation ; nom avant elle, suivi d'une parenthèse, de
+# deux-points ou de « en son article » : (sous le code du CPI, sous celui du C. mon. fin.)
+NAMED_AROUND = [
+    (
+        "L'article L112-2 (CPI) encadre l'indexation.",
+        "L'article L112-2 (C. mon. fin.) encadre l'indexation.",
+    ),
+    (
+        "L'article L112-2 (Code de la propriété intellectuelle) encadre l'indexation.",
+        "L'article L112-2 (Code monétaire et financier) encadre l'indexation.",
+    ),
+    (
+        "Le Code de la propriété intellectuelle (article L112-2) encadre l'indexation.",
+        "Le Code monétaire et financier (article L112-2) encadre l'indexation.",
+    ),
+    (
+        "Code de la propriété intellectuelle : article L112-2.",
+        "Code monétaire et financier : article L112-2.",
+    ),
+    (
+        "Le CPI, en son article L112-2, encadre l'indexation.",
+        "Le C. mon. fin., en son article L112-2, encadre l'indexation.",
+    ),
+]
+
+
+@pytest.mark.parametrize(("cpi", "cmf"), NAMED_AROUND)
+def test_homonyme_nomme_entre_parentheses_deux_points_ou_en_son_article(cpi, cmf):
+    # seul « C. mon. fin., art. L112-2 » retenu : le CPI refusé, le bon code accepté
+    assert explanation.refusals(*alone(REVISION, cpi), names=NAMES) == [
+        (
+            "financier-1 : article cité hors des références retenues pour la clause "
+            "revision_prix : L112-2 (code-propriete-intellectuelle)"
+        )
+    ]
+    assert explanation.refusals(*alone(REVISION, cmf), names=NAMES) == []
+    # et à l'inverse, seul « CPI, art. L112-2 » retenu
+    design = retained_alone("protection_design", ["CPI, art. L112-2"], "juridique")
+    assert explanation.refusals(*alone(design, cmf), names=NAMES) == [
+        (
+            "juridique-1 : article cité hors des références retenues pour la clause "
+            "protection_design : L112-2 (code-monetaire-financier)"
+        )
+    ]
+    assert explanation.refusals(*alone(design, cpi), names=NAMES) == []
+
+
 # --- Contrôles : critère 7 ---------------------------------------------------------------------
 
 
 def test_explication_fidele_acceptee():
-    assert explanation.refusals(draft(), REQUEST) == []
+    assert explanation.refusals(draft(), REQUEST, names=NAMES) == []
 
 
 def test_7_explication_qui_contredit_le_verdict_rejetee():
-    assert explanation.refusals(bad(), REQUEST) == [
+    assert explanation.refusals(bad(), REQUEST, names=NAMES) == [
         "conformite-1 : nomme une autre décision que la décision finale (NO_GO) : GO"
     ]
 
@@ -216,6 +969,7 @@ def test_7_autre_libelle_dans_un_constat_rejete():
             entry(TRANSFERT),
         ),
         REQUEST,
+        names=NAMES,
     )
     assert reasons == [
         (
@@ -228,7 +982,7 @@ def test_7_autre_libelle_dans_un_constat_rejete():
 def test_7_escalade_nommee_rejetee():
     text = "Constat relevé après escalade du dossier."
     reasons = explanation.refusals(
-        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
     )
     assert any("ESCALADE" in r for r in reasons)
 
@@ -237,6 +991,7 @@ def test_reference_non_retenue_rejetee():
     reasons = explanation.refusals(
         draft(entry(ACCORD, references=["C. civ., art. 1170"]), entry(TRANSFERT)),
         REQUEST,
+        names=NAMES,
     )
     assert reasons == [
         (
@@ -249,7 +1004,9 @@ def test_reference_non_retenue_rejetee():
 def test_reference_d_une_autre_clause_rejetee():
     # art. 28 est retenu, mais pour l'accord de traitement, pas pour le transfert
     reasons = explanation.refusals(
-        draft(entry(ACCORD), entry(TRANSFERT, references=["RGPD, art. 28"])), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, references=["RGPD, art. 28"])),
+        REQUEST,
+        names=NAMES,
     )
     assert reasons == [
         (
@@ -262,28 +1019,81 @@ def test_reference_d_une_autre_clause_rejetee():
 def test_article_cite_dans_le_texte_hors_des_references_de_la_clause_rejete():
     text = "Le transfert relève de l'art. 28 RGPD."
     reasons = explanation.refusals(
-        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
+    )
+    # « art. 28 RGPD » nomme sa source : le motif la donne
+    assert reasons == [
+        (
+            "conformite-2 : article cité hors des références retenues pour la clause "
+            "transfert_hors_ue : 28 (rgpd)"
+        )
+    ]
+
+
+def test_point_d_annexe_hors_references_refuse():
+    text = "Le transfert relève du point 21.A.307 de l'annexe I du règlement 748/2012."
+    reasons = explanation.refusals(
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
+    )
+    assert reasons == [
+        (
+            "conformite-2 : point d'annexe cité hors des références retenues pour la "
+            "clause transfert_hors_ue : 21.A.307"
+        )
+    ]
+
+
+def test_article_et_point_hors_references_chacun_son_motif():
+    # le motif d'un article reste mot pour mot (renvoyé au LLM et scellé) ; celui d'un
+    # point d'annexe le nomme
+    text = (
+        "Le transfert relève de l'art. 28 RGPD et du Règl. (UE) 748/2012, annexe I, "
+        "point 21.A.307."
+    )
+    reasons = explanation.refusals(
+        draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
     )
     assert reasons == [
         (
             "conformite-2 : article cité hors des références retenues pour la clause "
-            "transfert_hors_ue : 28"
-        )
+            "transfert_hors_ue : 28 (rgpd)"
+        ),
+        (
+            "conformite-2 : point d'annexe cité hors des références retenues pour la "
+            "clause transfert_hors_ue : 21.A.307 (certification-navigabilite)"
+        ),
     ]
+
+
+def test_point_d_annexe_retenu_citable():
+    point = "Règl. (UE) 748/2012, annexe I, point 21.A.307"
+    finding = TRANSFERT.model_copy(update={"references": [point]})
+    req = REQUEST.model_copy(update={"findings": [ACCORD, finding]})
+    text = "Le point 21.A.307 exige un certificat pour la pièce installée."
+    assert (
+        explanation.refusals(
+            draft(entry(ACCORD), entry(finding, text=text)), req, names=NAMES
+        )
+        == []
+    )
 
 
 def test_article_du_texte_du_constat_citable():
     # le constat de transfert cite lui-même l'art. 46 (texte du code, non du LLM)
     text = "Clauses ad hoc : autorisation à vérifier (art. 46, par. 3, a) RGPD)."
     assert (
-        explanation.refusals(draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST)
+        explanation.refusals(
+            draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
+        )
         == []
     )
 
 
 def test_constats_manquants_inconnus_ou_repetes_rejetes():
     stray = ExplainedFinding(id="juridique-9", kind=None, references=[], text="x")
-    reasons = explanation.refusals(draft(entry(ACCORD), entry(ACCORD), stray), REQUEST)
+    reasons = explanation.refusals(
+        draft(entry(ACCORD), entry(ACCORD), stray), REQUEST, names=NAMES
+    )
     assert reasons[:3] == [
         "constats non expliqués : conformite-2",
         "constats inconnus : juridique-9",
@@ -295,6 +1105,7 @@ def test_clause_erronee_ou_texte_vide_rejetes():
     reasons = explanation.refusals(
         draft(entry(ACCORD, kind="transfert_hors_ue"), entry(TRANSFERT, text=" ")),
         REQUEST,
+        names=NAMES,
     )
     assert (
         "conformite-1 : clause transfert_hors_ue, attendue accord_traitement_donnees"
@@ -346,7 +1157,7 @@ def test_gabarit_passe_ses_propres_controles(overrides):
         request.decision,
         0,
     )
-    assert explanation.refusals(result.draft(), request) == []
+    assert explanation.refusals(result.draft(), request, names=NAMES) == []
     assert result.reasons == ["motif"]
 
 
@@ -377,7 +1188,7 @@ def llm_answer(d: Draft):
 
 def test_explicateur_recoit_le_verdict_fige_jamais_le_texte_du_contrat():
     llm = FakeLLM({"explain": llm_answer(draft())})
-    result, usage = LLMExplainer(llm)(REQUEST, [])
+    result, usage = LLMExplainer(llm)(REQUEST, [], profile="fournisseur")
     [call] = llm.calls
     assert (call["tier"], call["node"], call["schema"]) == ("main", "explain", Draft)
     assert (result, usage.node) == (draft(), "explain")
@@ -392,7 +1203,11 @@ def test_explicateur_recoit_le_verdict_fige_jamais_le_texte_du_contrat():
 
 def test_explicateur_retour_de_refus_hors_des_donnees():
     llm = FakeLLM({"explain": llm_answer(draft())})
-    LLMExplainer(llm)(REQUEST, ["essai 1 : conformite-1 : nomme une autre décision"])
+    LLMExplainer(llm)(
+        REQUEST,
+        ["essai 1 : conformite-1 : nomme une autre décision"],
+        profile="fournisseur",
+    )
     user = llm.calls[0]["user"]
     data, feedback = user.split("Essai précédent refusé", 1)
     assert "essai 1 : conformite-1 : nomme une autre décision" in feedback
@@ -402,9 +1217,110 @@ def test_explicateur_retour_de_refus_hors_des_donnees():
 def test_explicateur_motif_humain_transmis_releveur_non():
     llm = FakeLLM({"explain": llm_answer(draft())})
     request = explanation.request(state(final_decision="GO", human=HUMAN))
-    LLMExplainer(llm)(request, [])
+    LLMExplainer(llm)(request, [], profile="fournisseur")
     user = llm.calls[0]["user"]
     assert "risque accepté, pas un NO_GO" in user and "relecteur-synth" not in user
+
+
+# --- Explicateur LLM : prompt de chaque profil ---------------------------------------------------
+
+PROMPTS = application_explanation.PROMPTS
+RULES_HEADER = "Règles, sans exception :"
+
+
+def prompt_named(name: str) -> str:
+    return (PROMPTS / name).read_text(encoding="utf-8")
+
+
+def rules_of(prompt: str) -> list[str]:
+    """Lignes du bloc « Règles, sans exception », jusqu'à la première ligne vide."""
+    lines = prompt.splitlines()
+    start = lines.index(RULES_HEADER)
+    end = lines.index("", start) if "" in lines[start:] else len(lines)
+    return lines[start:end]
+
+
+def test_prompt_du_profil_fournisseur_inchange():
+    assert application_explanation.PROMPT_FILES["fournisseur"] == "explain_system.md"
+    assert prompt_named("explain_system.md").startswith(
+        "Tu expliques les constats d'une analyse de contrat fournisseur."
+    )
+
+
+def test_un_prompt_d_explication_pour_chaque_profil_et_seulement_eux():
+    assert set(application_explanation.PROMPT_FILES) == set(profiles.PROFILES)
+    for profile in profiles.PROFILES:
+        assert (PROMPTS / application_explanation.PROMPT_FILES[profile]).is_file()
+
+
+def test_explicateur_passe_le_prompt_du_profil():
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    LLMExplainer(llm)(REQUEST, [], profile="fournisseur")
+    [call] = llm.calls
+    assert call["system"] == prompt_named("explain_system.md")
+
+
+def test_explicateur_lit_le_prompt_du_profil_demande(monkeypatch):
+    monkeypatch.setattr(profiles, "PROFILES", ("fournisseur", "autre"))
+    monkeypatch.setattr(
+        application_explanation,
+        "PROMPT_FILES",
+        {"fournisseur": "explain_system.md", "autre": "crag_grade_system.md"},
+    )
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    explainer = LLMExplainer(llm)
+    explainer(REQUEST, [], profile="autre")
+    explainer(REQUEST, [], profile="fournisseur")
+    autre, fournisseur = llm.calls
+    assert autre["system"] == prompt_named("crag_grade_system.md")
+    assert fournisseur["system"] == prompt_named("explain_system.md")
+
+
+def test_explicateur_lit_les_prompts_de_tous_les_profils_a_la_construction(monkeypatch):
+    monkeypatch.setattr(profiles, "PROFILES", ("fournisseur", "autre"))
+    monkeypatch.setattr(
+        application_explanation,
+        "PROMPT_FILES",
+        {"fournisseur": "explain_system.md", "autre": "absent.md"},
+    )
+    with pytest.raises(FileNotFoundError, match="absent.md"):
+        LLMExplainer(FakeLLM())
+
+
+def test_explicateur_refuse_un_profil_inconnu_sans_appeler_le_llm():
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    with pytest.raises(ValueError, match="profil inconnu"):
+        LLMExplainer(llm)(REQUEST, [], profile="inexistant")
+    assert llm.calls == []
+
+
+def test_prompt_du_profil_sous_traitance_enregistre():
+    files = application_explanation.PROMPT_FILES
+    assert files["sous_traitance"] == "explain_sous_traitance_system.md"
+
+
+def test_explicateur_passe_le_prompt_de_la_sous_traitance():
+    llm = FakeLLM({"explain": llm_answer(draft())})
+    LLMExplainer(llm)(REQUEST, [], profile="sous_traitance")
+    [call] = llm.calls
+    assert call["system"] == prompt_named("explain_sous_traitance_system.md")
+
+
+# Prompts des deux profils, lus par leur entrée de `PROMPT_FILES` : mêmes règles, sujet et
+# parties propres au profil.
+
+
+def test_prompts_d_explication_memes_regles():
+    files = application_explanation.PROMPT_FILES
+    fournisseur = prompt_named(files["fournisseur"])
+    sous_traitance = prompt_named(files["sous_traitance"])
+    assert rules_of(sous_traitance) == rules_of(fournisseur)
+    assert len(rules_of(fournisseur)) == 6  # l'en-tête et cinq règles
+    # le sujet et les parties changent, pas les règles
+    assert "contrat de sous-traitance" in sous_traitance
+    assert "donneur d'ordre" in sous_traitance
+    assert "contrat fournisseur" not in sous_traitance
+    assert "contrat de sous-traitance" not in fournisseur
 
 
 # --- Nœud explain --------------------------------------------------------------------------------
@@ -419,6 +1335,7 @@ def run_explain(explainer, retrying=never_retried, **overrides):
         state(**overrides),
         explainer=explainer,
         decision_config=CONFIG,
+        source_names=NAMES,
         retrying=retrying,
     )
 
@@ -466,16 +1383,75 @@ def test_nombre_d_essais_lu_dans_la_configuration():
         state(),
         explainer=LLMExplainer(llm),
         decision_config=config,
+        source_names=NAMES,
         retrying=never_retried,
     )
     assert (out["explanation"].source, len(llm.calls)) == ("gabarit", 1)
+
+
+def test_explication_recoit_le_profil_de_l_etat():
+    # état sans clé `profile` (d'avant les profils) : le seul profil possible alors
+    without, with_profile = FaithfulExplainer(), FaithfulExplainer()
+    run_explain(without)
+    run_explain(with_profile, profile="fournisseur")
+    assert without.profiles == with_profile.profiles == ["fournisseur"]
+
+
+def test_explication_recoit_le_profil_par_mot_cle():
+    seen = {}
+
+    def explainer(request, feedback, *, profile):
+        seen["profile"] = profile
+        return FaithfulExplainer()(request, feedback, profile=profile)
+
+    run_explain(explainer, profile="fournisseur")
+    assert seen == {"profile": "fournisseur"}
+
+
+def test_explication_refuse_un_profil_inconnu_sans_gabarit_de_repli():
+    explainer = FaithfulExplainer()
+    with pytest.raises(ValueError, match="profil inconnu"):
+        run_explain(explainer, profile="inexistant")
+    assert explainer.profiles == []
+
+
+def test_noeud_explain_compare_par_les_noms_recus():
+    # seul « Code A, art. L1-1 » est retenu pour l'accord ; l'explication cite le code B
+    retained = {**RETAINED, "accord_traitement_donnees": [CODE_A_REF]}
+    homonyms = state(verdicts=[verdict("conformite", CONFORMITE, retained)])
+
+    def explainer(request, feedback, *, profile):
+        faithful, spent = FaithfulExplainer()(request, feedback, profile=profile)
+        first, *rest = faithful.findings
+        wrong = first.model_copy(update={"text": "Voir l'article L1-1 du code B."})
+        return Draft(findings=[wrong, *rest]), spent
+
+    def run_with(names):
+        return explain(
+            homonyms,
+            explainer=explainer,
+            decision_config=CONFIG,
+            source_names=names,
+            retrying=never_retried,
+        )["explanation"]
+
+    refused = run_with(HOMONYM_NAMES)
+    assert (refused.source, refused.reasons[0]) == (
+        "gabarit",
+        (
+            "essai 1 : conformite-1 : article cité hors des références retenues pour "
+            "la clause accord_traitement_donnees : L1-1 (code-b)"
+        ),
+    )
+    # sans les noms des sources, par le seul numéro : acceptée
+    assert run_with({}).source == "llm"
 
 
 class Failing:
     def __init__(self, exc):
         self.exc, self.calls = exc, 0
 
-    def __call__(self, request, feedback):
+    def __call__(self, request, feedback, *, profile):
         self.calls += 1
         raise self.exc
 

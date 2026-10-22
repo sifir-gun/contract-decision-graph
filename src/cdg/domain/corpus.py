@@ -4,14 +4,19 @@ La lecture des fichiers et la construction des extraits embarqués sont dans
 `application/ingestion.py`.
 
 Règles de nettoyage explicites, testées sur les fichiers réels :
-1. Légifrance : « Version en vigueur … » et « Modifié par … » / « Création … » deviennent
-   des métadonnées (début, fin de validité, texte modificateur), pas du contenu indexé ;
+1. Légifrance : « Version en vigueur … » et « Modifié par … » / « Création … » / « Créé
+   par … » deviennent des métadonnées (début, fin de validité, texte modificateur), pas du
+   contenu indexé ;
 2. lignes d'interface en fin de fichier (« Voir les versions »…) : supprimées ;
 3. notes « Conformément à … » : sorties du texte, conservées en métadonnée `note` ;
    l'étiquette « NOTA : » qui les précède sur la page est supprimée ;
 4. début et fin de validité sont stockés ; `expired` dit si une version a expiré à une
    date, `in_force` si elle y est en vigueur, et `drop_superseded` écarte les versions
-   supplantées : la date d'analyse choisit la version (docs/spec-versions-corpus.md).
+   supplantées : la date d'analyse choisit la version (docs/spec-versions-corpus.md) ;
+5. EUR-Lex : un point d'annexe porte son numéro et son intitulé sur une même ligne
+   (« 4.2.10.2.1.   Exigences relatives aux matériaux ») ; les marques de consolidation
+   seules sur leur ligne (« ▼B », « ▼M12 ») sont supprimées, une marque dans une ligne
+   (« ►M5 … ◄ ») est une erreur.
 
 Rattachement déclaré (J4) : chaque article du manifeste et chaque fiche déclarent les types
 de clause qu'ils peuvent justifier ; les domaines d'indexation s'en déduisent (`by_domain`).
@@ -59,13 +64,23 @@ _VERSION = re.compile(
     rf"^Version en vigueur (?:du {_DATE} au {_DATE}|depuis le {_DATE}"
     rf"|à partir du {_DATE})$"
 )
-_AMENDMENT = re.compile(r"^(Modifié par|Création) (.+)$")
+# texte modificateur : « Modifié par … », ou une création, « Création … » ou « Créé par … »
+# (page de L122-4 du CPI, enregistrée le 21/10/2026), gardé tel qu'affiché
+_AMENDMENT = re.compile(r"^(Modifié par|Création|Créé par) (.+)$")
 _NOTE = re.compile(r"^Conformément (?:à|aux?) ")
 # étiquette de la page devant la note, seule sur sa ligne ou suivie de la note ; espaces
 # insécables comprises (\s en Unicode)
 _NOTE_LABEL = re.compile(r"^NOTA\s*:\s*(.*)$")
 _INTERFACE = ("Voir les versions", "Comparer les versions", "Textes liés")
 _TITLE = re.compile(r"^Article (\S+)$")
+# point d'annexe EUR-Lex : numéro à points (au moins un), point final éventuel, puis
+# l'intitulé sur la même ligne, après des espaces (insécables comprises : \s en Unicode)
+_POINT_TITLE = re.compile(r"^(\d+(?:\.[0-9A-Z]+)+)\.?\s+(.+)$")
+# marques de consolidation d'EUR-Lex : seule sur sa ligne, le début d'un passage du texte
+# de base ou d'un texte modificateur (« ▼B », « ▼M12 ») ; dans une ligne, un passage
+# modifié (« ►M5 … ◄ »)
+_CONSOLIDATION_LINE = re.compile(r"^▼[A-Z]\d*$")
+_CONSOLIDATION_MARKS = ("▼", "►", "◄")
 
 
 def french_date(text: str) -> date:
@@ -162,12 +177,31 @@ def _paragraphs(lines: list[str]) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in lines)).strip()
 
 
-def _title(lines: list[str]) -> tuple[str, list[str]]:
+def _without_consolidation_marks(lines: list[str]) -> list[str]:
+    """Marques de consolidation d'EUR-Lex seules sur leur ligne : supprimées. Une marque
+    dans une ligne encadre un passage modifié ; aucune règle ne la retire : erreur, jamais
+    une marque indexée en silence."""
+    kept = []
+    for line in lines:
+        stripped = line.strip()
+        if _CONSOLIDATION_LINE.match(stripped):
+            continue
+        if any(mark in stripped for mark in _CONSOLIDATION_MARKS):
+            raise ValueError(
+                f"marque de consolidation dans une ligne : {stripped[:60]!r}"
+            )
+        kept.append(line)
+    return kept
+
+
+def _title(
+    lines: list[str], expected: str = "titre d'article"
+) -> tuple[str, list[str]]:
     while lines and not lines[0].strip():
         lines = lines[1:]
     match = _TITLE.match(lines[0].strip()) if lines else None
     if not match:
-        raise ValueError(f"titre d'article attendu en première ligne : {lines[:1]!r}")
+        raise ValueError(f"{expected} attendu en première ligne : {lines[:1]!r}")
     return match[1], lines[1:]
 
 
@@ -221,8 +255,15 @@ def parse_legifrance(raw: str) -> Article:
 
 
 def parse_eurlex(raw: str) -> Article:
-    number, lines = _title(_lines_without_interface(raw))
-    rest = [line for line in lines]
+    """Article (« Article 28 », intitulé à la ligne suivante) ou point d'annexe (numéro et
+    intitulé sur la première ligne : aucun paragraphe pris pour l'intitulé), marques de
+    consolidation supprimées. Ni version ni note : un texte EUR-Lex est sans borne."""
+    lines = _without_consolidation_marks(_lines_without_interface(raw))
+    while lines and not lines[0].strip():
+        lines = lines[1:]
+    if lines and (point := _POINT_TITLE.match(lines[0].strip())):
+        return Article(article=point[1], heading=point[2], text=_paragraphs(lines[1:]))
+    number, rest = _title(lines, "titre d'article ou de point d'annexe")
     while rest and not rest[0].strip():
         rest = rest[1:]
     heading = rest[0].strip() if rest else None
@@ -258,12 +299,18 @@ def chunk(text: str, max_words: int) -> list[str]:
 # --- Manifeste ------------------------------------------------------------------------
 
 
+DEFAULT_UNIT = "art."  # unité de la référence d'une source sans clé `unit`
+
+
 @dataclass(frozen=True)
 class Manifest:
     sources: dict[str, Any]
 
     def __post_init__(self) -> None:
         for sid, source in self.sources.items():
+            unit = source.get("unit", DEFAULT_UNIT)
+            if not isinstance(unit, str) or not unit or unit != unit.strip():
+                raise ValueError(f"{sid} : unité de référence illisible (clé unit)")
             unknown = sorted(
                 set(source.get("later_versions", {})) - set(source["articles"])
             )
@@ -299,6 +346,12 @@ class Manifest:
 
     def admits(self, source_id: str, article: str) -> bool:
         return article in self.sources.get(source_id, {}).get("articles", {})
+
+    def unit(self, source_id: str) -> str:
+        """Unité des références d'une source : « art. » par défaut, « annexe, point »
+        pour les points d'une annexe (« Règl. (UE) 1302/2014, annexe, point
+        4.2.10.2.1 »)."""
+        return str(self.sources[source_id].get("unit", DEFAULT_UNIT))
 
 
 def check_chain(versions: Sequence[tuple[str, Article]]) -> None:
@@ -355,17 +408,29 @@ class Fiche:
     # été relue (`versions_verifiees`) ; absent : la première version seule
     verified: Mapping[tuple[str, str], Sequence[date]] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        fiche_citations(self)  # entrées de citation contrôlées dès la lecture
+
     @property
     def domains(self) -> list[Domain]:
         return [domain for domain, _ in by_domain(self.kinds)]
 
 
 _CITATION = re.compile(r"\(sources? : ([^)]+)\)")
-_ONE = re.compile(r"([a-z-]+), art\. ([A-Z]?\d+(?:-\d+)?)")
+# une citation : la source, puis un article (« art. 1231-5 ») ou un point d'annexe, au
+# numéro à points (« point 4.2.10.2.1 », « point 21.A.307 ») ; un point sans numéro à
+# points précise l'article (« art. 4, point 8 » : l'art. 4)
+_ONE = re.compile(
+    r"([a-z-]+), (?:art\. ([A-Z]?\d+(?:-\d+)?)|point (\d+(?:\.[0-9A-Z]+)+))"
+)
+# après un bloc, un séparateur (« ; », virgule, « et ») : une citation qui le suit serait
+# une entrée sortie du bloc
+_NEXT_ENTRY = re.compile(r"\s*(?:[;,]|\bet\b)\s*")
 
 
 TEXT_SECTION = "Ce que dit le texte"  # paraphrases fidèles, chacune sourcée
-APPLICATION_SECTION = "Comment le projet l'applique"  # choix de politique d'achat
+# choix de la politique d'achat ou du donneur d'ordre, selon le profil
+APPLICATION_SECTION = "Comment le projet l'applique"
 
 
 def fiche_sections(body: str) -> dict[str, list[str]]:
@@ -443,10 +508,61 @@ def claim_lines(body: str) -> list[str]:
     ]
 
 
+def _closed_early(line: str, end: int, stop: int) -> bool:
+    """Bloc de citation fermé avant sa vraie fin, en `end` : la parenthèse d'un sous-point
+    (« a) », « 2) ») l'a fermé, et du texte, non lu, la sépare de la parenthèse suivante
+    restée sans ouvrante, avant `stop`, le début du bloc suivant (ses parenthèses sont
+    les siennes). Faux si aucune parenthèse ne reste à fermer, ou si rien ne l'en sépare
+    (« point 4.2.10.2.1, 2)) »)."""
+    depth = 0
+    for index in range(end, stop):
+        if line[index] == "(":
+            depth += 1
+        elif line[index] == ")":
+            if depth == 0:
+                return bool(line[end:index].strip())
+            depth -= 1
+    return False
+
+
 def citations(line: str) -> list[tuple[str, str]]:
-    return [
-        (m[1], m[2]) for block in _CITATION.findall(line) for m in _ONE.finditer(block)
-    ]
+    """(source, article ou point) cités par les blocs « (source : …) » d'une ligne, dans
+    l'ordre. Chaque entrée d'un bloc, séparée par « ; », commence par une citation
+    (« rgpd, art. 28, par. 3 », « sti-materiel-roulant, point 4.2.10.2.1, 2) ») ; sinon,
+    erreur : jamais une entrée ignorée en silence. La parenthèse d'un sous-point (« 2) »)
+    ferme le bloc : du texte laissé avant la parenthèse qui le ferme vraiment, quel que
+    soit le séparateur (« a) et b) ; … », « a), … »), n'est pas lu, erreur ; une entrée
+    qui suit le bloc après « ; », une virgule ou « et », parenthèse fermante oubliée, en
+    sortirait, erreur aussi. Chaque bloc n'est contrôlé que jusqu'au bloc suivant."""
+    found = []
+    blocks = list(_CITATION.finditer(line))
+    for index, block in enumerate(blocks):
+        stop = blocks[index + 1].start() if index + 1 < len(blocks) else len(line)
+        for entry in (part.strip() for part in block[1].split(";")):
+            if not _ONE.match(entry):
+                raise ValueError(f"entrée de citation illisible : {entry!r}")
+            found += [(m[1], m[2] or m[3]) for m in _ONE.finditer(entry)]
+        if _closed_early(line, block.end(), stop):
+            raise ValueError(
+                "entrée de citation hors de son bloc, fermé par la parenthèse d'un "
+                f"sous-point ; suite non lue : {line[block.end() : stop][:60]!r}"
+            )
+        after = _NEXT_ENTRY.match(line, block.end())
+        if after and _ONE.match(line, after.end()):
+            raise ValueError(
+                "entrée de citation hors de son bloc, après la parenthèse d'un "
+                f"sous-point : {line[after.end() :][:60]!r}"
+            )
+    return found
+
+
+def fiche_citations(fiche: Fiche) -> set[tuple[str, str]]:
+    """Articles et points cités par une fiche, toutes sections comprises ; une entrée de
+    citation illisible est une erreur qui nomme la fiche."""
+    try:
+        return {c for line in claim_lines(fiche.body) for c in citations(line)}
+    except ValueError as exc:
+        raise ValueError(f"{fiche.id} : {exc}") from exc
 
 
 # --- Extrait à ingérer -------------------------------------------------------------------

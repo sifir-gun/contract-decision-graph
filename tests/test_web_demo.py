@@ -6,6 +6,7 @@ instructions, revue humaine, scellement et vérification tournent pour de vrai, 
 
 import html
 import json
+import re
 from dataclasses import replace
 from datetime import date
 
@@ -31,6 +32,7 @@ BANNER = (
 )
 _, EXPECTED = expected_set.load()
 EXPECTED = {c.id: c for c in EXPECTED}
+SOUS_TRAITANCE = [cid for cid, c in EXPECTED.items() if c.profile == "sous_traitance"]
 
 
 def forbidden(*args, **kwargs):
@@ -47,18 +49,23 @@ def demo(monkeypatch):
     return client(service, demo=True), service
 
 
-def analyse_demo(web, contract_id: str) -> str:
-    token = csrf(web)
-    response = web.post(
+def post_demo(web, contract_id: str, profile: str | None = None):
+    """Formulaire de démonstration : le contrat du jeu sous son profil, ou sous celui
+    qu'on indique."""
+    return web.post(
         "/analyse",
         data={
-            "csrf": token,
-            "profil": "fournisseur",
+            "csrf": csrf(web),
+            "profil": profile or EXPECTED[contract_id].profile,
             "source": "jeu",
             "contrat": contract_id,
             "identifiant": contract_id,
         },
     )
+
+
+def analyse_demo(web, contract_id: str, profile: str | None = None) -> str:
+    response = post_demo(web, contract_id, profile)
     assert response.status_code == 303, response.text
     return contract_id
 
@@ -122,6 +129,82 @@ def test_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
     assert response.status_code == 303
     final = service.dossier(contract_id)["status"]
     assert final["final_decision"] == wanted["final_decision"]
+
+
+# décisions des sept contrats de sous-traitance sous les valeurs du plan de la PR 2
+# (docs/plan-profils-pr2.md) : proposée, puis finale après la revue humaine éventuelle
+DECISIONS_SOUS_TRAITANCE = {
+    "st-01-go-cabine": ("GO", "GO"),
+    "st-02-reserves-marqueterie": ("GO_RESERVES", "GO_RESERVES"),
+    "st-03-no-go-ferronnerie": ("NO_GO", "NO_GO"),
+    "st-04-no-go-sellerie": ("NO_GO", "NO_GO"),
+    "st-05-reserves-revetements": ("GO_RESERVES", "GO_RESERVES"),
+    "st-06-no-go-ebenisterie": ("NO_GO", "NO_GO"),
+    "st-07-realiste-amenagement": ("ESCALADE", "GO_RESERVES"),
+}
+
+
+def test_contrats_sous_traitance_en_demonstration(demo):
+    """`web --demo` analyse les sept contrats de sous-traitance sous leur profil et rend
+    les sept décisions attendues ; st-07 attend une revue humaine, tranchée ici."""
+    web, service = demo
+    assert sorted(SOUS_TRAITANCE) == sorted(DECISIONS_SOUS_TRAITANCE)
+    for contract_id, (proposed, final) in DECISIONS_SOUS_TRAITANCE.items():
+        analyse_demo(web, contract_id, "sous_traitance")
+        status = service.dossier(contract_id)["status"]
+        assert status["profil"] == "sous_traitance", contract_id
+        assert status["proposed_decision"] == proposed, contract_id
+        if proposed == final:
+            assert (status["statut"], status["final_decision"]) == (
+                "termine",
+                final,
+            ), contract_id
+            continue
+        assert status["statut"] == "suspendu", contract_id
+        human = EXPECTED[contract_id].human
+        response = web.post(
+            f"/contrats/{contract_id}/decision",
+            data={
+                "csrf": csrf(web),
+                "decision": human["decision"],
+                "motif": human["reason"],
+            },
+        )
+        assert response.status_code == 303, response.text
+        assert service.dossier(contract_id)["status"]["final_decision"] == final
+
+
+def test_formulaire_de_demonstration_propose_les_deux_profils(demo):
+    web, _ = demo
+    page = web.get("/analyse").text
+    for profile in ("fournisseur", "sous_traitance"):
+        assert f'value="{profile}"' in page
+
+
+@pytest.mark.parametrize(
+    ("contract_id", "chosen"),
+    [
+        ("demo-01-go-maintenance", "sous_traitance"),
+        ("st-01-go-cabine", "fournisseur"),
+    ],
+)
+def test_contrat_du_jeu_sous_un_autre_profil_refuse_a_la_saisie(
+    demo, contract_id, chosen
+):
+    """Un contrat du jeu choisi sous un profil qui n'est pas le sien est une erreur de
+    formulaire (400), avant toute analyse : le message nomme le profil du contrat, pas
+    celui qui a été choisi."""
+    web, service = demo
+    declared = EXPECTED[contract_id].profile
+    response = post_demo(web, contract_id, chosen)
+    assert response.status_code == 400
+    [error] = re.findall(r'<p class="error" role="alert">(.*?)</p>', response.text)
+    assert html.unescape(error) == (
+        f"démonstration : ce contrat du jeu est du profil {declared} ; "
+        "choisissez ce profil"
+    )
+    assert chosen not in error  # jamais la valeur reçue
+    assert service.contracts() == []
 
 
 def test_parties_du_jeu_masquees_d_office(demo):

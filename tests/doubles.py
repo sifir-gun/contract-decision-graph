@@ -10,6 +10,7 @@ from cdg.domain import audit, profiles
 from cdg.domain.authorization import Actor, interface_actor
 from cdg.domain.config import load_config
 from cdg.domain.corpus import drop_superseded
+from cdg.domain.explanation import Draft, ExplainedFinding, ExplanationRequest
 from cdg.domain.identity import Identity
 from cdg.domain.models import (
     DOMAINS,
@@ -19,12 +20,13 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
-from cdg.domain.profiles import Profile
+from cdg.domain.numeric import shown
+from cdg.domain.profiles import SOUS_TRAITANCE, Profile
 from cdg.domain.version import CodeVersion
 from cdg.ports.identity import IdentityRejected, ProviderUnavailable
 from cdg.ports.retriever import Passage
 
-# profil des contrats synthétiques des tests : le seul qui existe
+# profil des contrats synthétiques des tests, sauf ceux de la sous-traitance (plus bas)
 FOURNISSEUR = profiles.spec("fournisseur")
 
 # date d'analyse fixe des tests : avant la fin de validité de L441-10 (2027-01-01)
@@ -126,6 +128,100 @@ def clauses(categories: dict | None = None, **overrides) -> list[Clause]:
     return result
 
 
+# --- Profil sous_traitance ---------------------------------------------------------------------
+# Mêmes conventions que le fournisseur : contrat synthétique favorable (aucune règle déclenchée),
+# `ABSENT`, citations qui portent la valeur et son unité. Les doublures nomment
+# `profiles.SOUS_TRAITANCE`, enregistré sous `sous_traitance`.
+
+FAVORABLE_SOUS_TRAITANCE = {
+    "responsabilite_donneur_ordre": 100.0,  # plafonnée à 100 % du montant du contrat
+    "responsabilite_sous_traitant": 150.0,  # plafond au-dessus du minimum (100 %)
+    "protection_design": None,  # catégorie usage_limite_au_projet
+    "revision_prix": 3.0,  # révision plafonnée à 3 %
+    "delai_paiement": 30.0,  # jours, à compter de la date de facture
+    "penalites_retard_execution": 10.0,  # plafonnées à 10 % du montant du contrat
+    "obligation_certification": None,  # catégorie norme_et_preuves
+    "assurance_sous_traitant": 3_000_000.0,  # € par sinistre, au-dessus du minimum
+    "delai_execution": None,  # catégorie date_contractuelle
+}
+
+CATEGORIES_SOUS_TRAITANCE = {
+    "protection_design": "usage_limite_au_projet",
+    "delai_paiement": "date_facture",
+    "obligation_certification": "norme_et_preuves",
+    "delai_execution": "date_contractuelle",
+}
+
+# Valeurs d'essai du profil, comme `TEST_VALUES` : le contrat synthétique en contient la citation.
+TEST_VALUES_SOUS_TRAITANCE = {
+    "responsabilite_sous_traitant": (50.0,),
+    "delai_paiement": (90.0,),
+    "penalites_retard_execution": (2.0,),
+    "assurance_sous_traitant": (1_000_000.0,),
+}
+
+
+def quote_of_sous_traitance(kind: str, value) -> str:
+    """Citation synthétique d'une clause présente du profil, avec sa valeur et son unité
+    quand elle est chiffrée, écrite par `numeric.shown` : « 3 000 000 € », jamais
+    « 3e+06 ». Elle ne nomme pas le type de la clause, mais un numéro d'article : le nom
+    « obligation_certification » contient « certification », terme qui interdit de
+    déclarer cette clause absente (`sous_traitance.absence_terms`)."""
+    article = f"Article synthétique n° {SOUS_TRAITANCE.kinds.index(kind) + 1}"
+    unit = SOUS_TRAITANCE.value_units.get(kind)
+    if value is None or unit is None:
+        return f"{article}."
+    return f"{article} : la clause est fixée à {shown(value)} {unit}."
+
+
+# Contrat synthétique du profil : la citation de chaque clause (sans valeur, puis pour chaque
+# valeur d'essai), et rien qui évoque une clause : chacune peut être déclarée absente.
+CONTRACT_TEXT_SOUS_TRAITANCE = (
+    "CONTRAT DE SOUS-TRAITANCE (document synthétique)\n\n"
+    "Entre la société donneuse d'ordre, ci-après dénommée le Donneur d'ordre, et la société "
+    "sous-traitante, ci-après dénommée le Sous-traitant, il est convenu ce qui suit.\n\n"
+    + "".join(
+        f"{quote_of_sous_traitance(kind, value)}\n"
+        for kind in SOUS_TRAITANCE.kinds
+        for value in dict.fromkeys(
+            (
+                None,
+                FAVORABLE_SOUS_TRAITANCE[kind],
+                *TEST_VALUES_SOUS_TRAITANCE.get(kind, ()),
+            )
+        )
+    )
+    + "\nLe présent contrat est soumis au droit français. Les parties s'engagent à exécuter "
+    "leurs obligations de bonne foi. Toute modification du présent contrat fera l'objet "
+    "d'un avenant écrit signé par les deux parties.\n"
+)
+
+
+def clauses_sous_traitance(categories: dict | None = None, **overrides) -> list[Clause]:
+    """Les clauses attendues du profil sous_traitance, favorables par défaut : même contrat
+    que `clauses()` (`kind=valeur`, `kind=ABSENT`, `categories={kind: catégorie}`)."""
+    categories = CATEGORIES_SOUS_TRAITANCE | (categories or {})
+    unknown = set(overrides) - set(SOUS_TRAITANCE.kinds)
+    if unknown:
+        raise TypeError(f"types de clauses inconnus : {sorted(unknown)}")
+    result = []
+    for kind in SOUS_TRAITANCE.kinds:
+        value = overrides.get(kind, FAVORABLE_SOUS_TRAITANCE[kind])
+        if value is ABSENT:
+            result.append(Clause(kind=kind, present=False, quote="", value=None))
+        else:
+            result.append(
+                Clause(
+                    kind=kind,
+                    present=True,
+                    quote=quote_of_sous_traitance(kind, value),
+                    value=value,
+                    category=categories.get(kind),
+                )
+            )
+    return result
+
+
 def verdict(domain, score=1.0, hard_block=False, status="OK") -> AgentVerdict:
     return AgentVerdict(
         domain=domain,
@@ -170,12 +266,34 @@ class FixedExtractor:
         )
 
 
+class FaithfulExplainer:
+    """Doublure de l'explicateur LLM : une explication fidèle (le texte et les références
+    du constat, recopiés), sans appel de LLM ; garde le profil reçu à chaque appel."""
+
+    def __init__(self):
+        self.profiles: list[Profile] = []  # profil reçu à chaque appel
+
+    def __call__(
+        self, request: ExplanationRequest, feedback: list[str], *, profile: Profile
+    ) -> tuple[Draft, Usage]:
+        self.profiles.append(profile)
+        findings = [
+            ExplainedFinding(
+                id=f.id, kind=f.kind, references=list(f.references), text=f.text
+            )
+            for f in request.findings
+        ]
+        return Draft(findings=findings), usage(node="explain")
+
+
 class FakeCrag:
     """Doublure du CRAG : une référence par clause reçue (celles qui portent un constat),
-    aucune pour les domaines de `empty`, où le corpus ne justifie rien."""
+    `reference` si elle est donnée, aucune pour les domaines de `empty`, où le corpus ne
+    justifie rien."""
 
-    def __init__(self, empty=(), tokens_in=0, tokens_out=0):
+    def __init__(self, empty=(), tokens_in=0, tokens_out=0, reference=None):
         self.empty, self.tokens = set(empty), (tokens_in, tokens_out)
+        self.reference = reference
         self.calls: list[str] = []
         self.kinds: dict[str, list[str]] = {}  # clauses reçues, par domaine
         self.profiles: list[Profile] = []  # profil reçu à chaque appel
@@ -186,7 +304,7 @@ class FakeCrag:
         self.calls.append(domain)
         self.profiles.append(profile)
         self.kinds[domain] = [c.kind for c in clauses]
-        retained = [] if domain in self.empty else [f"{domain}-ref-1"]
+        retained = [] if domain in self.empty else [self.reference or f"{domain}-ref-1"]
         trace = RetrievalTrace(
             clauses=[
                 ClauseRetrieval(

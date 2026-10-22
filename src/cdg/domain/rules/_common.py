@@ -5,7 +5,7 @@ porte la clause qui le déclenche et son effet ; la justification par le corpus 
 (`domain/justification.py`).
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Literal
 
 from pydantic import BaseModel, model_validator
@@ -101,3 +101,105 @@ def below(value: float, threshold: float) -> bool:
 
 def above(value: float, threshold: float) -> bool:
     return rounded(value) > rounded(threshold)
+
+
+# --- Règles partagées entre profils ---------------------------------------------------------
+# Une règle commune lit une clause et rend ses constats ; les libellés qui changent d'un profil
+# à l'autre (parties, base du plafond, nom des pénalités) sont des paramètres. Le texte d'un
+# constat est celui du profil `fournisseur` quand on lui passe les libellés du fournisseur
+# (`tests/test_demo.py`, constats figés).
+
+DELAY_BASIS_LABELS = {
+    "date_facture": "date de facture",
+    "fin_de_mois": "fin de mois",
+    "facture_periodique": "après une facture périodique",
+}
+# délai supplétif, cité quand le contrat n'en stipule pas (version de L441-10 en vigueur du
+# 26/04/2019 au 01/01/2027) ; à revoir avec la version suivante du texte
+DEFAULT_DELAY_NOTE = (
+    "délai de paiement non stipulé : sauf dispositions contraires, le délai de règlement ne "
+    "peut dépasser trente jours après la date de réception des marchandises ou d'exécution "
+    "de la prestation demandée (C. com., art. L441-10, I)"
+)
+
+
+def uncapped_liability(c: Clause, party_of: str) -> list[RuleFinding]:
+    """Blocage : responsabilité stipulée sans plafond. `party_of` : « de l'acheteur »."""
+    if c.present and c.value is None:
+        return [block(c.kind, f"blocage : responsabilité {party_of} illimitée")]
+    return []
+
+
+def cap_below_minimum(
+    c: Clause, party_of: str, basis: str, minimum: float, penalty: float
+) -> list[RuleFinding]:
+    """Pénalité : plafond de responsabilité chiffré sous le minimum (une responsabilité
+    illimitée ou absente est favorable). `party_of` : « du fournisseur » ; `basis` : « du
+    montant annuel »."""
+    if c.present and c.value is not None and below(c.value, minimum):
+        text = (
+            f"plafond de responsabilité {party_of} à {c.value:g} % {basis}, "
+            f"sous le minimum de {minimum:g} %"
+        )
+        return [penalize(c.kind, text, penalty)]
+    return []
+
+
+def uncapped_revision(c: Clause) -> list[RuleFinding]:
+    """Blocage : révision de prix stipulée sans plafond."""
+    if c.present and c.value is None:
+        return [block(c.kind, "blocage : révision de prix non plafonnée")]
+    return []
+
+
+def capped_penalties(
+    c: Clause, label: str, minimum: float, penalty: float
+) -> list[RuleFinding]:
+    """Pénalité : pénalités absentes, ou plafonnées sous le minimum (non plafonnées, elles
+    sont favorables). `label` : « pénalités d'exécution »."""
+    if not c.present:
+        return [penalize(c.kind, f"{label} absentes", penalty)]
+    if c.value is not None and below(c.value, minimum):
+        text = (
+            f"{label} plafonnées à {c.value:g} % du montant du contrat, "
+            f"sous le minimum de {minimum:g} %"
+        )
+        return [penalize(c.kind, text, penalty)]
+    return []
+
+
+def payment_delay(
+    c: Clause, limits: Mapping[str, float], penalty: float
+) -> list[RuleFinding]:
+    """Délai de paiement (C. com., art. L441-10) : `limits` donne le plafond en jours de
+    chaque point de départ (`DELAY_BASIS_LABELS`), les trois et eux seuls : un point de
+    départ oublié ou inconnu est refusé, jamais remplacé en silence par le seuil le plus
+    strict."""
+    missing = sorted(set(DELAY_BASIS_LABELS) - set(limits))
+    extra = sorted(set(limits) - set(DELAY_BASIS_LABELS))
+    if missing or extra:
+        details = [
+            f"{name} : {', '.join(keys)}"
+            for name, keys in (("manquantes", missing), ("en trop", extra))
+            if keys
+        ]
+        raise ValueError(f"seuils du délai de paiement, clés {' ; '.join(details)}")
+    if not c.present:  # pas de pénalité : le délai supplétif s'applique
+        return [note(c.kind, DEFAULT_DELAY_NOTE)]
+    if c.value is None:  # présent mais non chiffré : pénalité par prudence
+        text = (
+            "délai de paiement non chiffré : pénalité par prudence, délai non conforme, "
+            "à renégocier"
+        )
+        return [penalize(c.kind, text, penalty)]
+    # point de départ inconnu (impossible après vérification) : le seuil le plus strict
+    basis = c.category or ""  # sans point de départ : aucune clé ne correspond
+    limit = limits.get(basis, min(limits.values()))
+    if not above(c.value, limit):
+        return []
+    label = DELAY_BASIS_LABELS.get(basis, "point de départ non précisé")
+    text = (
+        f"délai non conforme, à renégocier : {c.value:g} jours {label}, "
+        f"au-delà de {limit:g} jours"
+    )
+    return [penalize(c.kind, text, penalty)]

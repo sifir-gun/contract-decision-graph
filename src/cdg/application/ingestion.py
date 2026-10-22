@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from cdg.domain import explanation
 from cdg.domain.corpus import (
     Article,
     ChunkRow,
@@ -23,10 +24,9 @@ from cdg.domain.corpus import (
     by_domain,
     check_chain,
     chunk,
-    citations,
-    claim_lines,
     embedded_hash,
     embedded_text,
+    fiche_citations,
     fiche_window,
     in_force,
     parse_eurlex,
@@ -43,10 +43,30 @@ def load_manifest(path: Path | None = None) -> Manifest:
     return Manifest(sources=yaml.safe_load(text)["sources"])
 
 
+def source_names(manifest: Manifest | None = None) -> dict[str, tuple[str, ...]]:
+    """Noms de chaque source du manifeste, sa citation et son titre : le contrôle de
+    l'explication rattache par eux une citation à sa source (`explanation.citations`).
+    Un nom absent ou illisible est une erreur, qui nomme la source et la clé ; un nom
+    commun à deux sources aussi (`explanation.check_names`) : lus à la construction du
+    graphe, ils l'empêchent."""
+    manifest = manifest or load_manifest()
+    names: dict[str, tuple[str, ...]] = {}
+    for source_id, source in manifest.sources.items():
+        for key in ("citation", "title"):
+            if not isinstance(source.get(key), str) or not source[key].strip():
+                raise ValueError(
+                    f"{source_id} : nom de source absent ou illisible (clé {key})"
+                )
+        names[source_id] = (source["citation"], source["title"])
+    explanation.check_names(names)
+    return names
+
+
 def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[str]]]:
-    """Articles admis, nettoyés, avec les types de clause qu'ils peuvent justifier : une
-    `Article` par version, dans l'ordre, toutes sous la même référence ; enchaînement des
-    versions contrôlé (`check_chain`)."""
+    """Articles et points d'annexe admis, nettoyés, avec les types de clause qu'ils peuvent
+    justifier : une `Article` par version, dans l'ordre, toutes sous la même référence
+    (citation et unité de la source, puis numéro) ; enchaînement des versions contrôlé
+    (`check_chain`)."""
     manifest = manifest or load_manifest()
     parsers = {"legifrance": parse_legifrance, "eurlex": parse_eurlex}
     grouped: dict[tuple[str, str], list[str]] = {}
@@ -77,7 +97,8 @@ def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[s
                 raise ValueError(f"{path} : {exc}") from exc
             if article.article != number:
                 raise ValueError(
-                    f"{path} : titre « Article {article.article} », attendu {number}"
+                    f"{path} : numéro « {article.article} » lu en première ligne, "
+                    f"attendu « {number} »"
                 )
             versions.append(
                 (
@@ -85,7 +106,9 @@ def articles(manifest: Manifest | None = None) -> Iterator[tuple[Article, list[s
                     replace(
                         article,
                         source_id=source_id,
-                        reference=f"{source['citation']}, art. {number}",
+                        reference=(
+                            f"{source['citation']}, {manifest.unit(source_id)} {number}"
+                        ),
                         retrieved_at=retrieved_at,
                     ),
                 )
@@ -227,8 +250,7 @@ def _fiche_window(
 ) -> Window:
     """Période de validité d'une fiche, d'après les articles qu'elle cite et les
     versions qu'elle déclare avoir relues (`fiche_window`)."""
-    cited = {c for line in claim_lines(fiche.body) for c in citations(line)}
-    return fiche_window(fiche.id, cited, fiche.verified, versions)
+    return fiche_window(fiche.id, fiche_citations(fiche), fiche.verified, versions)
 
 
 def source_validities() -> dict[str, date | None]:

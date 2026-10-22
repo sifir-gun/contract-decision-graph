@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from cdg.application.deps import ExtractionResult
 from cdg.domain import profiles
-from cdg.domain.models import Clause, ClauseCategory
+from cdg.domain.models import Clause, ClauseCategory, SubcontractCategory
 from cdg.domain.profiles import Profile
 from cdg.ports.llm import LLMProvider
 
@@ -45,10 +45,46 @@ class ExtractionOutput(BaseModel):
     clauses: list[ExtractedClause]
 
 
+# Schéma du profil `sous_traitance` (`profiles.SOUS_TRAITANCE`) : ses 9 types et leurs
+# seules catégories. Un type ou une catégorie propre à un autre profil est refusé dès la
+# sortie du modèle ; la catégorie d'un autre type du profil l'est par la vérification
+# (`verification.problems_of`). Le faux Mistral choisit sa réponse d'après le nom du
+# schéma : `ExtractionOutputSousTraitance`.
+KindSousTraitance = Literal[
+    "responsabilite_donneur_ordre",
+    "responsabilite_sous_traitant",
+    "protection_design",
+    "revision_prix",
+    "delai_paiement",
+    "penalites_retard_execution",
+    "obligation_certification",
+    "assurance_sous_traitant",
+    "delai_execution",
+]
+
+
+class ExtractedClauseSousTraitance(BaseModel):
+    kind: KindSousTraitance
+    present: bool
+    quote: str
+    value: float | None
+    category: SubcontractCategory | None = None
+
+
+class ExtractionOutputSousTraitance(BaseModel):
+    clauses: list[ExtractedClauseSousTraitance]
+
+
 # schéma de sortie et prompt système de chaque profil (ADR 010) : le profil `fournisseur`
 # garde `ExtractionOutput` (son nom est celui que le faux Mistral reconnaît) et son prompt
-SCHEMAS: Mapping[Profile, type[BaseModel]] = {"fournisseur": ExtractionOutput}
-PROMPT_FILES: Mapping[Profile, str] = {"fournisseur": "extraction_system.md"}
+SCHEMAS: Mapping[Profile, type[BaseModel]] = {
+    "fournisseur": ExtractionOutput,
+    "sous_traitance": ExtractionOutputSousTraitance,
+}
+PROMPT_FILES: Mapping[Profile, str] = {
+    "fournisseur": "extraction_system.md",
+    "sous_traitance": "extraction_sous_traitance_system.md",
+}
 
 
 def _boundary() -> str:
