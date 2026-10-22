@@ -90,11 +90,11 @@ def test_authentification_exige_ses_valeurs(missing):
     assert missing.split(".")[-1] in refused(*kept)
 
 
-# index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; oauth2-proxy v7.15.5,
-# compilé avec Go 1.26.9), signature cosign et provenance vérifiées le 13/10/2026
+# index publié par la CI à la fusion de la PR #65 (sha-3426bd6 ; oauth2-proxy v7.15.5,
+# compilé avec Go 1.26.10), signature cosign et provenance vérifiées le 22/10/2026
 # (docs/exploitation.md, « Image publiée »)
 OAUTH2_PROXY_INDEX = (
-    "sha256:63370d5ff5944f657e99783644429419c35f7ab0535caf61c8c1e67361a4ebe1"
+    "sha256:4652be29bdb0bc33e9eb17b804cd2468bb9cc6beb184d8acc32cf3e30d15698e"
 )
 
 
