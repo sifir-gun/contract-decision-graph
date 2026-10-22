@@ -33,11 +33,12 @@ Conséquences de la décision, retenues :
 
 - **Point de vue inversé** pour ces deux profils : une clause qui protège l'acheteur devient un risque.
 - **Secteur obligatoire** pour les profils qui le déclarent, refusé pour les autres, aux trois portes ; dans l'état avant tout nœud, dans `AnalystInput` et dans la partie décision de l'enregistrement.
-- **Constats à trancher** : un verdict d'analyste peut imposer la revue humaine (CCAG non pris en charge, norme non reconnue, certification hors catalogue, date illisible), la proposition restant celle des règles, sur le modèle des constats du contrat (`input_findings`).
-- **Format v4** du journal : secteur et constats à trancher dans la partie décision, donc dans `decision_hash` ; les v3 relus par des modèles figés, comme les v2 et v1.
+- **Constats à trancher** : une règle peut imposer la revue humaine (CCAG non pris en charge, norme non reconnue, certification hors catalogue, date illisible ou absente), la proposition restant celle des règles, sur le modèle des constats du contrat (`input_findings`). Ils ne pèsent ni sur le score ni sur le blocage, et n'exigent aucune référence. Ils ne vont pas dans `AgentVerdict` : la partie décision et ses verdicts sont communs aux formats v1 à v3, et un champ ajouté, même avec une valeur par défaut, changerait leur relecture et leur rejeu.
+- **Contexte des règles** : la signature des règles change, pour leur passer le profil, le secteur, la date d'analyse et le CCAG cité ; le rejeu les reprend de l'enregistrement scellé.
+- **Format v4** du journal : secteur et constats à trancher au niveau de la partie décision du v4, comme le profil au v3, donc dans `decision_hash` ; les v3 relus par des modèles figés, comme les v2 et v1.
 - **Fiche du cabinet** dans `config/decision.yaml` (section `candidat`) : archivée et couverte par l'empreinte comme tout ce qui pèse sur une décision, donc rejouable sans mécanisme nouveau. Une fiche dans un fichier à part, avec sa propre empreinte et sa propre archive, a été écartée : plus de code pour éviter des escalades rares.
-- **Rattachement du corpus par profil** : chaque source déclare les profils qu'elle sert, la recherche filtre par domaine, type et profil (migration 010). Les sources existantes déclarent les profils qu'elles servent déjà : leur recherche ne change pas.
-- **Valeurs par défaut du CCAG-PI** dans la configuration, vérifiées par un test contre le texte ingéré ; une dérogation écrite dans le CCAP l'emporte.
+- **Rattachement du corpus par profil, article par article** : une source du manifeste est un code entier, dont les articles servent des profils différents (C. civ. 1102 pour le privé, 1163 pour les deux) ; chaque article déclare ses profils comme ses types, et la recherche filtre par domaine, type et profil (migration suivante libre). Les articles existants déclarent les profils qu'ils servent déjà : leur recherche ne change pas.
+- **Valeurs par défaut du CCAG-PI** dans la configuration, chacune avec un extrait d'appui vérifié par un test contre le texte ingéré ; une dérogation écrite dans le CCAP l'emporte. Les références d'un constat viennent toujours du CRAG.
 - **Quatre domaines inchangés**, donc le graphe aussi.
 
 ## Conséquences
