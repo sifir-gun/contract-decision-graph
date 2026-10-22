@@ -35,6 +35,7 @@ from serie import (
     expected_outcome,
     extraction_refusals,
     outcome_of,
+    planned_review,
     step_latencies,
     summarize,
     tokens_by_model,
@@ -129,10 +130,10 @@ def analyse(llm, crag, store, contract, thread):
         code=CODE,
         profile=contract.profile,
     )
-    outcome, human = outcome_of(status), None
+    outcome, human, planned = outcome_of(status), None, None
     if status["statut"] == "suspendu":
-        planned = classify(contract.expected, outcome) == "conforme"
-        human = contract.human if planned and contract.human else UNPLANNED_REVIEW
+        planned = planned_review(contract.expected, outcome, contract.human)
+        human = UNPLANNED_REVIEW if planned is None else planned
         status = orchestrator.resume_thread(graph, thread, human, config=CONFIG)
     duration_ms = round((time.monotonic() - start) * 1000)
     config = {"configurable": {"thread_id": thread}}
@@ -140,13 +141,13 @@ def analyse(llm, crag, store, contract, thread):
     history = list(reversed(list(graph.get_state_history(config))))
     steps = [(s.created_at, s.next) for s in history]
     feedback = [(s.next, s.values.get("extraction_feedback")) for s in history]
-    return outcome, human, status, values, steps, feedback, duration_ms
+    return outcome, human, planned, status, values, steps, feedback, duration_ms
 
 
 def measure(llm, crag, pace, store, contract, run) -> dict:
     pace.wait()
     thread = f"llm-jeu-{contract.id}-{run}"
-    outcome, human, status, values, steps, feedback, duration_ms = analyse(
+    outcome, human, planned, status, values, steps, feedback, duration_ms = analyse(
         llm, crag, store, contract, thread
     )
     usage = values.get("usage", [])
@@ -162,7 +163,7 @@ def measure(llm, crag, pace, store, contract, run) -> dict:
         "issue": describe(outcome),
         "classement": classify(contract.expected, outcome),
         "revue": None if human is None else human["decision"],
-        "revue_prevue": human is not None and human is contract.human,
+        "revue_prevue": planned is not None,
         "finale": status["final_decision"],
         "essais_extraction": values.get("extraction_attempts", 0),
         "echec": report.get("stage"),

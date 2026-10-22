@@ -3714,7 +3714,7 @@ Dernière PR du chantier (spec des profils, « Découpage », PR 4 ; critère 9)
 
 ### Nombre de tests
 
-- Tests payants collectés (`--collect-only --llm -m llm tests/test_llm_jeu.py`) : 66 avant (1 préalable, 65 essais), 102 après (2 préalables, 100 essais). Suite par défaut : 5 tests de plus (`tests/test_serie.py`).
+- Tests payants collectés (`--collect-only --llm -m llm tests/test_llm_jeu.py`) : 66 avant (1 préalable, 65 essais), 102 après (2 préalables, 100 essais). Suite par défaut : 8 tests de plus (`tests/test_serie.py` : 5 pour la sélection par profil, 3 pour la revue prévue).
 
 ### Série 10 : profil sous-traitance, sept contrats × cinq essais (critère 9)
 
@@ -3743,10 +3743,12 @@ Dernière PR du chantier (spec des profils, « Découpage », PR 4 ; critère 9)
 - **Latence** (poste de développement, embedding sur processeur, limites du compte) : analyse médiane de **7,3 s**, au plus 15,9 s ; extraction médiane 3,0 s, explication médiane 2,8 s ; étape des analystes médiane 1,5 s, au plus 5,6 s.
 - **Ce que la série ne prouve pas** : cinq essais à température 0, un seul fournisseur, un seul poste ; sept contrats écrits pour le projet, dont un seul réaliste ; décisions humaines écrites d'avance ; la concordance mesure l'accord avec les attendus du projet, pas la justesse juridique. La lecture de l'obligation de certification par le modèle n'est pas fiable sur ces formulations : la sûreté y repose entièrement sur les contrôles par code.
 
-### Défaut de mesure trouvé : `revue_prevue` toujours faux (signalé, non corrigé)
+### Défaut de mesure trouvé : `revue_prevue` toujours faux (corrigé, décision du propriétaire du 22/10)
 
-Dans les lignes `LLM-RESULT`, `revue_prevue` vaut `false` aux 5 essais de `st-07`, alors que la décision humaine appliquée est bien celle du jeu (`GO_RESERVES`), et non le `NO_GO` prudent d'une revue imprévue. Cause : `revue_prevue` compare par identité (`human is contract.human`), mais depuis le 30/09 (9605d6c, journal v2 et quatre yeux), `DemoContract.human` est une propriété qui reconstruit le dict à chaque appel : l'identité est toujours fausse. Défaut de la mesure seule : ni la décision reprise, ni l'invariant, ni le résumé (`summarize` ne lit pas ce champ) ne sont touchés. La série 9 du 01/10 (48e2f7b, qui contient 9605d6c) porte le même défaut, sans conséquence sur ses chiffres. Correction proposée, à décider par le propriétaire : comparer par égalité, ou garder le booléen `planned` déjà calculé dans `analyse`.
+Dans les lignes `LLM-RESULT`, `revue_prevue` vaut `false` aux 5 essais de `st-07`, alors que la décision humaine appliquée est bien celle du jeu (`GO_RESERVES`), et non le `NO_GO` prudent d'une revue imprévue. Cause : `revue_prevue` compare par identité (`human is contract.human`), mais depuis le 30/09 (9605d6c, journal v2 et quatre yeux), `DemoContract.human` est une propriété qui reconstruit le dict à chaque appel : l'identité est toujours fausse. Défaut de la mesure seule : ni la décision reprise, ni l'invariant, ni le résumé (`summarize` ne lit pas ce champ) ne sont touchés. La série 9 du 01/10 (48e2f7b, qui contient 9605d6c) porte le même défaut, sans conséquence sur ses chiffres. Avant 9605d6c, la propriété rendait le dict des attendus lui-même, et l'identité tenait.
+
+Correction, à la demande du propriétaire (22/10), dans cette PR : la série ne déduit plus `revue_prevue` après coup, elle le lit sur le choix de la revue. Une fonction pure, `serie.planned_review`, rend la décision humaine du jeu si l'issue est l'attendue, None sinon ; la série reprend la première, ou sa décision prudente, et `revue_prevue` vaut « la première a été reprise ». Même choix qu'avant, sans dépendre de l'objet que rend `DemoContract.human`. Tests d'abord (`tests/test_serie.py`) : rouges sans la fonction, verts après. Les lignes de la série 10, déjà consignées, gardent le champ faux ; aucun chiffre consigné ne le lit.
 
 ### Suite
 
-- **À décider par le propriétaire** : la correction de `revue_prevue` ; le README, qui annonce « les neuf séries » ; la présentation au cabinet, avec ce que la série montre de l'obligation de certification.
+- **À décider par le propriétaire** : le README, qui annonce « les neuf séries » ; la présentation au cabinet, avec ce que la série montre de l'obligation de certification.

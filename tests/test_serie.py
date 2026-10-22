@@ -19,6 +19,7 @@ from serie import (
     describe,
     extraction_refusals,
     outcome_of,
+    planned_review,
     step_latencies,
     summarize,
     tokens_by_model,
@@ -108,6 +109,34 @@ def test_issue_decrite():
 def test_statut_inattendu_erreur_explicite():
     with pytest.raises(ValueError, match="en_cours"):
         outcome_of(status("en_cours", proposed="GO"))
+
+
+def test_revue_du_jeu_reprise_quand_l_issue_est_l_attendue():
+    """Revue humaine avec l'issue attendue : la décision humaine du jeu est reprise, et
+    `revue_prevue` se lit sur ce résultat. Jamais par identité avec `DemoContract.human`,
+    qui reconstruit son dict à chaque appel : `revue_prevue` était toujours faux depuis le
+    30/09 (série 10)."""
+    contract = BY_ID["st-07-realiste-amenagement"]
+    obtained = outcome_of(status("suspendu", proposed="ESCALADE"))
+    assert planned_review(contract.expected, obtained, contract.human) == contract.human
+
+
+@pytest.mark.parametrize(
+    ("cid", "obtained"),
+    [
+        # revue attendue, mais avec une autre proposition
+        ("st-07-realiste-amenagement", status("suspendu", proposed="GO")),
+        # revue là où une décision automatique était attendue
+        ("demo-01-go-maintenance", status("suspendu", proposed="ESCALADE")),
+    ],
+)
+def test_revue_non_prevue_quand_l_issue_differe(cid, obtained):
+    """Autre issue que l'attendue : aucune décision du jeu ; la série reprend alors sa
+    décision prudente."""
+    contract = BY_ID[cid]
+    assert (
+        planned_review(contract.expected, outcome_of(obtained), contract.human) is None
+    )
 
 
 def test_ecarts_d_extraction_par_clause():
