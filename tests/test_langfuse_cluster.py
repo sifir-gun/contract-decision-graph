@@ -19,7 +19,7 @@ import yaml
 from test_cluster_outillage import cluster
 
 SECRET = re.compile(r"(PASSWORD|SECRET|SALT|ENCRYPTION_KEY|REDIS_AUTH|ACCESS_KEY)")
-TODAY = date(2026, 10, 13)
+TODAY = date(2026, 10, 22)
 
 
 def docs() -> list[dict]:
@@ -104,6 +104,9 @@ def test_langfuse_sans_licence_commerciale_ni_appel_sortant():
         )
     [web] = pods()["langfuse-web"]["containers"]
     assert variables(web)["AUTH_DISABLE_SIGNUP"]["value"] == "true"
+    # depuis la 4.68.0, l'accueil après inscription propose la lettre d'information, que
+    # le navigateur demande à langfuse.com : coupé (décision du 22/10)
+    assert variables(web)["LANGFUSE_DISABLE_SIGNUP_ONBOARDING"]["value"] == "true"
 
 
 def test_regles_reseau_aucune_sortie_hors_du_cluster():
