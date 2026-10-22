@@ -1,16 +1,17 @@
 """Image d'oauth2-proxy (PR D1, ADR 005) : jusqu'au 12/10/2026, le binaire publié dans la
 release GitHub v7.15.4 (option B). Amendement du 12/10 à l'ADR 005 : aucune version publiée
 n'est compilée avec Go 1.26.9 (failles de net/http du 08/10) ; compilée par notre chaîne
-depuis les sources de l'étiquette v7.15.5, avec Go 1.26.9 et golang.org/x/net 0.60.0,
-jusqu'à ce qu'une version officielle soit compilée avec Go 1.26.9 ou plus.
+depuis les sources de l'étiquette v7.15.5, avec Go 1.26.10 (1.26.9 jusqu'au 21/10 :
+GO-2026-6809, crypto/x509) et golang.org/x/net 0.60.0, jusqu'à ce qu'une version
+officielle soit compilée avec Go 1.26.9 ou plus.
 
 - Sans image : Go officiel vérifié par son empreinte, commit de l'étiquette vérifié, x/net
   vérifié par la base de sommes de Go, suite de tests d'oauth2-proxy et govulncheck
   bloquants, binaire statique à la version de l'étiquette, licence figée, licences des
   modules Go du binaire reconstituées, bases vérifiables, contexte vide.
 - Sur l'image construite (marqueur `oauth2proxy`, `--oauth2-proxy ÉTIQUETTE`) : non root,
-  sans shell, version attendue et Go 1.26.9, x/net 0.60.0 lié, licences de chaque module
-  embarqué.
+  sans shell, version attendue et Go 1.26.10, x/net 0.60.0 lié, licences de chaque
+  module embarqué.
 """
 
 import hashlib
@@ -29,10 +30,10 @@ VERSION = "v7.15.5"
 SOURCE = f"https://github.com/oauth2-proxy/oauth2-proxy.git#{VERSION}"
 # commit de l'étiquette annotée v7.15.5 (objet 6e4bd00e…), relevé le 12/10/2026
 TAG_COMMIT = "bea3f04bf87b93f5354f392fe2216a88e6031350"
-GO = "1.26.9"
-GO_SHA256 = {  # https://go.dev/dl/?mode=json, relevé le 12/10/2026
-    "amd64": "42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d",
-    "arm64": "4a97373d49fcacdcf3694fea368a500b00ee3e963974f3e7514132717632f052",
+GO = "1.26.10"
+GO_SHA256 = {  # https://go.dev/dl/?mode=json, relevé le 21/10/2026
+    "amd64": "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5",
+    "arm64": "3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797",
 }
 # version gravée dans le binaire, comme dist.sh de la release
 LDFLAG_VERSION = "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/version.VERSION"
@@ -215,7 +216,7 @@ def test_image_non_root_sans_shell(image):
 
 
 @pytest.mark.oauth2proxy
-def test_version_attendue_compilee_avec_go_1_26_9(image):
+def test_version_attendue_compilee_avec_go_1_26_10(image):
     ran = docker("run", "--rm", "--read-only", image, "--version")
     assert ran.returncode == 0, ran.stderr
     assert f"oauth2-proxy {VERSION} (built with go{GO})" in ran.stdout + ran.stderr

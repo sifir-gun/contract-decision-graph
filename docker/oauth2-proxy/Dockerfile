@@ -4,7 +4,8 @@
 # du 08/10 (atteintes d'après govulncheck) ; compilée par notre chaîne depuis les sources de
 # l'étiquette v7.15.5 (MIT), jusqu'à ce qu'une version officielle soit compilée avec Go
 # 1.26.9 ou plus (retour à l'option B). Entrées figées et vérifiées :
-# - Go 1.26.9, archive officielle, vérifiée par son empreinte (https://go.dev/dl/?mode=json) ;
+# - Go 1.26.10 (1.26.9 jusqu'au 21/10/2026 : GO-2026-6809, crypto/x509), archive
+#   officielle, vérifiée par son empreinte (https://go.dev/dl/?mode=json) ;
 # - les sources de l'étiquette v7.15.5 publiée : le commit extrait est vérifié ;
 # - golang.org/x/net passé de v0.59.0 à v0.60.0, et les autres modules à leur version de
 #   go.sum, téléchargés par le proxy des modules et vérifiés par sum.golang.org ;
@@ -20,10 +21,10 @@
 ARG TARGETARCH
 
 FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-amd64
-ADD --checksum=sha256:42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d https://go.dev/dl/go1.26.9.linux-amd64.tar.gz /go.tar.gz
+ADD --checksum=sha256:ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 https://go.dev/dl/go1.26.10.linux-amd64.tar.gz /go.tar.gz
 
 FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-arm64
-ADD --checksum=sha256:4a97373d49fcacdcf3694fea368a500b00ee3e963974f3e7514132717632f052 https://go.dev/dl/go1.26.9.linux-arm64.tar.gz /go.tar.gz
+ADD --checksum=sha256:3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797 https://go.dev/dl/go1.26.10.linux-arm64.tar.gz /go.tar.gz
 
 FROM go-${TARGETARCH} AS binaire
 # autorités de confiance pour le proxy et la base de sommes des modules de Go : celles de
@@ -82,7 +83,7 @@ FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55
 LABEL org.opencontainers.image.source="https://github.com/sifir-gun/contract-decision-graph" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.title="contract-decision-graph oauth2-proxy" \
-      org.opencontainers.image.description="oauth2-proxy v7.15.5, compilé depuis les sources de l'étiquette (Go 1.26.9, x/net 0.60.0)"
+      org.opencontainers.image.description="oauth2-proxy v7.15.5, compilé depuis les sources de l'étiquette (Go 1.26.10, x/net 0.60.0)"
 COPY --from=binaire /oauth2-proxy /oauth2-proxy
 COPY --from=licences /licences /licences
 USER 65532:65532
