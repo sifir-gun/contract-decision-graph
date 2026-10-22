@@ -3697,7 +3697,7 @@ La PR #65 fusionnée (`3426bd6`), la CI de `main` passe en entier, cluster compr
 
 ## 2026-10-22 · Profils, PR 4 : série réelle de la sous-traitance (branche `profils-sous-traitance-pr4`)
 
-Dernière PR du chantier (spec des profils, « Découpage », PR 4 ; critère 9) : `tests/test_llm_jeu.py` couvre les deux profils, chaque contrat sous le sien, et la série des sept contrats de sous-traitance, cinq essais chacun, est lancée par le propriétaire. Conception validée par le propriétaire le 22/10, avant le code.
+Dernière PR du chantier (spec des profils, « Découpage », PR 4 ; critère 9) : `tests/test_llm_jeu.py` couvre les deux profils, chaque contrat sous le sien, et la série des sept contrats de sous-traitance, cinq essais chacun, est lancée à la demande explicite du propriétaire, avec sa clé. Conception validée par le propriétaire le 22/10, avant le code.
 
 ### Décisions du propriétaire (22/10)
 
@@ -3715,3 +3715,38 @@ Dernière PR du chantier (spec des profils, « Découpage », PR 4 ; critère 9)
 ### Nombre de tests
 
 - Tests payants collectés (`--collect-only --llm -m llm tests/test_llm_jeu.py`) : 66 avant (1 préalable, 65 essais), 102 après (2 préalables, 100 essais). Suite par défaut : 5 tests de plus (`tests/test_serie.py`).
+
+### Série 10 : profil sous-traitance, sept contrats × cinq essais (critère 9)
+
+**Série 10 : 2026-10-22, 16:14:32 à 16:27:19 UTC, commit 4152e7d, fournisseur Mistral, `main` = `mistral-small-2603`, `light` = `ministral-8b-2512`. 35 réussites sur 35, sans relance, en 12 min 43 s ; lancée par l'agent, à la demande explicite du propriétaire (plafond annoncé : environ 0,05 $, au plus 0,10 $).** Essai préalable juste avant (16:13:33 UTC, `st-05`, non compté, strict) : conforme, `GO_RESERVES` automatique, les quatre domaines `OK`, 0,00273 $, 12,0 s, une extraction refusée (catégorie de la certification). Vrai journal d'audit : 5 enregistrements avant et après.
+
+**Banc.** Avant la série, l'index de la base locale ne correspondait pas aux fichiers (`mesure-recherche --profil fournisseur` : `IndexMismatch`, 21 extraits manquants) : le corpus de la sous-traitance n'avait pas été indexé depuis la fusion de la PR 2. `ingest` depuis le worktree (corpus de `main`) : 25 insérés, 4 supprimés, 66 inchangés, 91 extraits ; puis `mesure-recherche --profil fournisseur` : contrôle de l'index passé, moyennes identiques à l'« après » de la PR 2 (sans filtre, rang 4 : rappel 0,675, précision 0,429). Sans cela, l'essai préalable strict aurait échoué (domaines `INSUFFISANT`). Dans un worktree, le cache du modèle d'embedding se cherche sous la racine du worktree (`EMBEDDING_CACHE_DIR` relatif) : relié à celui du dépôt principal.
+
+**Critère 9 tenu : aucune décision automatique plus favorable que l'attendu, aux 35 essais ; issue conforme 35 fois sur 35.**
+
+| Contrat | Attendu | Obtenu (5 essais) | Concordance | Extractions refusées (motif) | Coût médian | Durée médiane (max) |
+| --- | --- | --- | --- | --- | --- | --- |
+| st-01 cabine | `GO` automatique | idem ×5 | 5/5 | 0 | 0,00072 $ | 3,0 s (4,2 s) |
+| st-02 marqueterie | `GO_RESERVES` automatique | idem ×5 | 5/5 | 0 | 0,00173 $ | 7,9 s (8,5 s) |
+| st-03 ferronnerie | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00127 $ | 5,9 s (15,9 s) |
+| st-04 sellerie | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00142 $ | 6,6 s (6,8 s) |
+| st-05 revêtements | `GO_RESERVES` automatique | idem ×5 | 5/5 | 5 (catégorie de la certification, au premier essai) | 0,00270 $ | 11,6 s (12,9 s) |
+| st-06 ébénisterie | `NO_GO` automatique | idem ×5 | 5/5 | 0 | 0,00165 $ | 9,4 s (11,0 s) |
+| st-07 réaliste | `ESCALADE`, revue humaine | idem ×5 : par l'extraction ×4, par le conflit entre domaines ×1 | 5/5 | 9 (catégorie de la certification ×8 ; valeur absente de la citation, 150 % ×4) | 0,00158 $ | 5,9 s (9,7 s) |
+
+- **Stabilité** : issue identique aux 5 essais pour les 7 contrats. Chaque essai est scellé une fois, sous le profil `sous_traitance` (vérifié à chaque essai), et rejoué à l'identique. Explications : 26 par le LLM, toutes au premier essai, aucune refusée ; 9 par le gabarit, sans constat à expliquer (`st-01` ×5, contrat propre ; `st-07` ×4, escaladé avant les analystes).
+- **L'obligation de certification, nouveau type, est lue trop favorablement au premier essai, et le code la refuse à chaque fois.** Au contrat réaliste, « conformes aux normes en vigueur », sans norme nommée, appelle `conformite_generale` : la catégorie rendue est refusée par la cohérence entre catégorie et citation aux deux extractions des essais 1 à 3, et à la première des essais 4 et 5. Aux essais 1 à 3, la dernière extraction refusée porte `norme_et_preuves`, la seule catégorie admise sans pénalité (`certification_accepted`) : l'erreur va dans le sens favorable. À `st-05`, « conformes à la norme », sans preuves remises, appelle `norme_sans_preuves` : une autre catégorie est rendue à la première extraction des 5 essais, refusée, et la seconde est juste. La ligne ne garde pas la catégorie d'une extraction refusée suivie d'une extraction acceptée. Les termes de catégorie de la sous-traitance (PR 2) se déclenchent donc en réel, et ce sont eux qui tiennent la décision : acceptée, la catégorie `norme_et_preuves` retirait à `st-07` la pénalité de sa clause de certification.
+- **Contrat réaliste, plafond du sous-traitant** : 150 % cité par l'article 9, qui renvoie à la définition de l'article 1 sans chiffre, à 4 essais sur 5 : valeur absente de la citation, refusée. Même piège qu'au contrat réaliste du fournisseur (120 %, séries 8 et 9).
+- **Contrat réaliste, deux chemins vers la même issue** : aux essais 1 à 4, la seconde extraction est aussi refusée, et le contrat escalade par l'extraction (rapport d'échec `extraction`) ; à l'essai 5, la seconde extraction est exacte, les quatre analystes tournent, et le contrat escalade par le conflit entre domaines (conformité pénalisée, les autres sans constat), le chemin prévu sous doublures. La décision humaine du jeu (`GO_RESERVES`) est reprise aux 5 essais.
+- **`st-06`, domaine financier `INSUFFISANT` à 2 essais sur 5** : le juge du CRAG n'a retenu aucune référence en vigueur pour un constat financier. Sans effet sur l'issue : les deux blocages durs (responsabilité du donneur d'ordre illimitée, révision de prix non plafonnée) donnent `NO_GO` sans revue (`hard_block_review: false`). Variation du juge, comme au contrat 03 de la série 9 ; sans blocage dur, elle aurait mené à une escalade, dans le sens prudent.
+- **Coût** : série **0,0563 $** pour 35 essais (170 396 tokens du modèle principal, 92 823 du petit modèle), 0,00161 $ par analyse en moyenne, 0,00158 $ en médiane ; essai préalable 0,00273 $ ; dépense totale **0,059 $**, sous le plafond de 0,10 $. Par analyse, environ un quart de plus que la série 9 du fournisseur (0,0841 $ pour 65 essais, soit 0,0013 $) : deux extractions à chaque essai de `st-05` et de `st-07`.
+- **Latence** (poste de développement, embedding sur processeur, limites du compte) : analyse médiane de **7,3 s**, au plus 15,9 s ; extraction médiane 3,0 s, explication médiane 2,8 s ; étape des analystes médiane 1,5 s, au plus 5,6 s.
+- **Ce que la série ne prouve pas** : cinq essais à température 0, un seul fournisseur, un seul poste ; sept contrats écrits pour le projet, dont un seul réaliste ; décisions humaines écrites d'avance ; la concordance mesure l'accord avec les attendus du projet, pas la justesse juridique. La lecture de l'obligation de certification par le modèle n'est pas fiable sur ces formulations : la sûreté y repose entièrement sur les contrôles par code.
+
+### Défaut de mesure trouvé : `revue_prevue` toujours faux (signalé, non corrigé)
+
+Dans les lignes `LLM-RESULT`, `revue_prevue` vaut `false` aux 5 essais de `st-07`, alors que la décision humaine appliquée est bien celle du jeu (`GO_RESERVES`), et non le `NO_GO` prudent d'une revue imprévue. Cause : `revue_prevue` compare par identité (`human is contract.human`), mais depuis le 30/09 (9605d6c, journal v2 et quatre yeux), `DemoContract.human` est une propriété qui reconstruit le dict à chaque appel : l'identité est toujours fausse. Défaut de la mesure seule : ni la décision reprise, ni l'invariant, ni le résumé (`summarize` ne lit pas ce champ) ne sont touchés. La série 9 du 01/10 (48e2f7b, qui contient 9605d6c) porte le même défaut, sans conséquence sur ses chiffres. Correction proposée, à décider par le propriétaire : comparer par égalité, ou garder le booléen `planned` déjà calculé dans `analyse`.
+
+### Suite
+
+- **À décider par le propriétaire** : la correction de `revue_prevue` ; le README, qui annonce « les neuf séries » ; la présentation au cabinet, avec ce que la série montre de l'obligation de certification.
