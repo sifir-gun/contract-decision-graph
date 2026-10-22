@@ -3572,3 +3572,22 @@ Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmè
 - **Tests d'abord** (`tests/test_scan_images_de_test.py`) : liste des exceptions des tests, et un test des quatre nouvelles (paquet et version exacts, décision du 21/10, 30 jours au plus, condition de sortie dans le motif) ; rouges sans les exceptions, verts ensuite. ADR 008 : historique du scan des images de test complété.
 - **Vérification.** `scripts/chaine.py images-de-test` sur le poste (images arm64) : quatre images scannées, sans faille critique ou haute non couverte (8 exceptions) ; les quatre avis hauts couverts, les avis moyens et faibles affichés sans bloquer.
 - **Nombre de tests.** Un de plus dans la suite principale.
+
+## 2026-10-22 · Empreintes des charts : les index publiés à la fusion de la #65 (branche `empreintes-chart-go`)
+
+La PR #65 fusionnée (`3426bd6`), la CI de `main` passe en entier, cluster compris : première exécution dans le cluster de Smokescreen et d'oauth2-proxy compilés en Go 1.26.10, et scan des images de test avec les exceptions du 21/10. Le job `publication` publie l'application et le proxy de sortie au premier essai. Celui d'oauth2-proxy échoue au premier essai : l'image amd64 est poussée, puis ghcr.io refuse celle d'arm64, trois secondes plus tard, avec « unknown blob », après avoir répondu « Layer already exists » pour les couches partagées entre les deux architectures. Ni image arm64, ni index, ni signature n'étaient dans le registre. Relance du seul job en échec par le propriétaire (`gh run rerun --failed`) : verte. Lecture : incohérence passagère du registre, l'image arm64 ayant passé ses tests et son scan dans le job `image`. Si elle revient, une nouvelle tentative du push dans le workflow, à décider.
+
+### Vérifications, sur chaque index
+
+- Empreintes lues dans le registre par l'étiquette du commit (`sha-3426bd6…`), l'index et ses deux architectures : application `d0353e84…` (amd64 `c773995e…`, arm64 `18d8538d…`) ; proxy de sortie `42322f2a…` (amd64 `eacb9ebc…`, arm64 `949bbe50…`) ; oauth2-proxy `4652be29…` (amd64 `1f4b83f1…`, arm64 `a07a3f8b…`). Le résumé du job de publication n'est pas lisible par l'API ; chaque empreinte est signée par l'identité du workflow et attestée pour cet index.
+- Signature : `cosign verify` (cosign v3.1.3, image figée de `scripts/chaine.py`) de l'index et de chaque architecture, identité du workflow `ci.yml` sur `main`, émetteur GitHub Actions.
+- Provenance : `gh attestation verify` (sortie JSON lue) : SLSA v1, sujet l'index, `ci.yml` sur `refs/heads/main`, commit `3426bd6` ; inventaires SPDX attestés pour chaque architecture.
+- Contenu : `CDG_COMMIT=3426bd6…` dans l'image de l'application, sur les deux architectures ; « oauth2-proxy v7.15.5 (built with go1.26.10) » sur amd64 et arm64 ; binaire de Smokescreen (amd64) compilé en go1.26.10.
+
+### Changements
+
+- Charts : les trois empreintes par défaut (application, proxy de sortie, oauth2-proxy) passent aux index de la #65. Tests d'abord : les trois tests qui les figent, rouges sur les anciennes empreintes, verts ensuite.
+
+### Nombre de tests
+
+- Inchangé.
