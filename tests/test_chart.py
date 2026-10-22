@@ -303,9 +303,9 @@ def test_images_par_empreinte_jamais_par_etiquette(reel):
                 assert DIGEST.fullmatch(volume["image"]["reference"]), name
 
 
-# index publié par la CI à la fusion de la PR #53 (sha-7a24bfb), signature cosign et
-# provenance vérifiées le 13/10/2026 (docs/exploitation.md, « Image publiée »)
-APP_INDEX = "sha256:54510fb02304ab276d65dd018e86cf44cf2fa862caccfbdfbaa628936d3a03ab"
+# index publié par la CI à la fusion de la PR #65 (sha-3426bd6), signature cosign et
+# provenance vérifiées le 22/10/2026 (docs/exploitation.md, « Image publiée »)
+APP_INDEX = "sha256:d0353e8419c13b5e9b409a8392f11061c9d7f48201778e9d245ed914ff2b016f"
 
 
 def test_image_de_l_application_par_defaut_l_index_publie():
