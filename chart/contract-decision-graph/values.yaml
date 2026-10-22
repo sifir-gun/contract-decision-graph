@@ -208,7 +208,8 @@ taches:
 
 # Traces OpenTelemetry (ADR 008) : aucune destination par défaut, rien n'est envoyé.
 # Destination : un service du cluster seulement (Langfuse auto-hébergé), en mode réel ;
-# l'export OTLP ne passe pas par le proxy de sortie (urllib3 ignore HTTPS_PROXY) : une règle
+# l'export OTLP ne passe pas par le proxy de sortie (exportateur 1.45.0 : urllib3 ignore
+# HTTPS_PROXY et HTTP_PROXY) : une règle
 # réseau ouvre la seule cible. Clés dans un Secret existant, montées en fichiers pour
 # l'interface seule. Identité : aucune par défaut ; « sub » émettrait le sub pseudonyme,
 # que Langfuse sans sa partie commerciale ne supprime jamais (conservation, RGPD).
