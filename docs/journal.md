@@ -3806,8 +3806,7 @@ Correction, à la demande du propriétaire (22/10), dans cette PR : la série ne
 
 Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmètre figé depuis la v1.1 pour ce seul chantier. Le 20/10/2026, étude de l'API JUDILIBRE de PISTE (spécification OpenAPI 1.2.5, CGU open data V8 du 6 janvier 2022), puis spec validée section par section et approuvée par écrit : [`docs/spec-jurisprudence-judilibre.md`](spec-jurisprudence-judilibre.md) (commit 1a2d985). Deux PR : celle-ci, puis la source « décision » (PR B : Com., 13 mai 2026, n° 24-17.137, indexé et scellé, qui comble le renvoi « hors corpus » de la fiche des plafonds sur l'articulation entre 1171 et L442-1).
 
-
-Code écrit le 20/10/2026 (tâches 1 et 2 du plan) ; `main` intégré et branche vérifiée le 23/10/2026, après la fusion de certifi (#64) et de la PR 2 des profils (#66).
+Code écrit le 20/10/2026 (tâches 1 et 2 du plan) ; `main` intégré le 23/10/2026, après la fusion de certifi (#64), de la PR 2 (#66) et de la PR 4 (#69) des profils ; relecture finale le même jour.
 
 ### Pourquoi ce contrôle d'abord
 
@@ -3815,19 +3814,24 @@ Code écrit le 20/10/2026 (tâches 1 et 2 du plan) ; `main` intégré et branche
 
 ### Ce qui change
 
-- **`domain/explanation.py`** : `pourvois` et `eclis` relèvent les numéros de pourvoi (`NN-NN.NNN`, lettre éventuelle devant) et les ECLI (mis en majuscules, sans le point final d'une phrase). `refusals` refuse un pourvoi absent des noms des références retenues pour la clause du constat et du texte du constat, et tout ECLI : les noms des références n'en portent pas, et le domaine ne lit pas le corpus.
+- **`domain/explanation.py`** : `pourvois` et `eclis` relèvent, sur le texte normalisé (`text.normalize` : tirets typographiques, chiffres pleine chasse), les numéros de pourvoi (`NN-NN.NNN`, lettre éventuelle devant, point facultatif : « 20-16782 » est ramené à « 20-16.782 ») et les ECLI (mis en majuscules, sans le point final d'une phrase). `refusals` refuse un pourvoi absent des noms des références retenues pour la clause du constat et du texte du constat, et tout ECLI : les noms des références n'en portent pas, et le domaine ne lit pas le corpus.
 - **Rencontre avec le contrôle de `main`** (PR 2 des profils : articles et points d'annexe cités, comparés par source et numéro quand un nom de source les touche) : les deux contrôles s'ajoutent, sans changer l'un l'autre. Un numéro de pourvoi n'est lu ni comme article (ni « art » devant) ni comme point d'annexe (ni « point » devant, ni numéro à points seul) ; `refusals` garde sa signature de `main`, avec `names`.
 - **Inchangés** : le nœud `explain` (un refus mène à un nouvel essai, puis au gabarit), le prompt, `FindingToExplain`, `ExplanationRequest` et la configuration (empreinte inchangée).
 - **CLAUDE.md** : contrôles de l'explication.
 
+### Relecture finale (23/10/2026)
+
+- **Corrigés** (5a6d63a) : le relevé lisait le texte brut, alors que le contrôle des articles de `main` lit le texte normalisé : « n° 20‑16.782 », écrit avec un trait d'union insécable, passait. Et, par décision du propriétaire, la forme sans point (« 20-16782 ») est reconnue ; spec amendée (« Usage dans l'analyse »).
+- **Mineurs laissés** : pas de test de refus avec deux pourvois dont un seul retenu ; le cas « montant » du test de relevé n'est pas un sosie de pourvoi ; `docs/exploitation.md` ne décrit pas les motifs des pourvois et des ECLI ; libellé de `CLAUDE.md` à préciser (pourvois retenus seulement, ECLI toujours refusés).
+
 ### Limites
 
 - Un arrêt nommé sans numéro (« l'arrêt Chronopost ») n'est pas détecté.
-- Un faux positif (un nombre de la forme `NN-NN.NNN` qui ne serait pas un pourvoi) mène au gabarit : sens prudent. Les textes des constats, écrits par les règles, n'en contiennent aucun.
+- Un faux positif (un nombre de la forme `NN-NN.NNN` ou `NN-NNNNN` qui ne serait pas un pourvoi, « 10-15000 ») mène au gabarit : sens prudent. Les textes des constats, écrits par les règles, n'en contiennent aucun.
 
 ### Nombre de tests
 
-- Suite principale : de 3 545 à 3 561 tests collectés après l'intégration de `main` (16 de plus : 10 cas de relevé, 6 de refus).
+- Suite principale : de 3 545 à 3 568 tests collectés après l'intégration de `main` (23 de plus : 14 cas de relevé, 9 de refus).
 
 ### Suite
 
