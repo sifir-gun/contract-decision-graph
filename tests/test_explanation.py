@@ -234,6 +234,13 @@ def test_articles_cites(text, found):
         ("articles 1231-5 et L441-10", set()),
         ("arrêt du 13-05.2026", set()),
         ("plafond de 10 000 euros, 30 jours", set()),
+        # texte normalisé, comme le contrôle des articles : tirets typographiques
+        ("n° 20‑16.782", {"20-16.782"}),
+        ("n° 20–16.782", {"20-16.782"}),
+        # forme sans point (décision du propriétaire, 23/10/2026), ramenée à la forme
+        # à point
+        ("n° 20-16782", {"20-16.782"}),
+        ("le 2026-10-23, loi n° 2018-287, EN 45545-2", set()),
     ],
 )
 def test_pourvois_cites(text, found):
@@ -1202,6 +1209,35 @@ def test_gabarit_avec_un_arret_retenu_passe_ses_controles():
     request = demande_acheteur([*RETENUES_ACHETEUR, ARRET])
     result = explanation.template(request, reasons=["motif"])
     assert explanation.refusals(result.draft(), request, names=NAMES) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Voir n° 20‑16.782.",  # trait d'union insécable
+        "Voir n° 20-16782.",  # sans point
+    ],
+)
+def test_pourvoi_non_retenu_sous_une_autre_graphie_rejete(text):
+    reasons = explanation.refusals(
+        draft(entry(ILLIMITEE, text=text)), DEMANDE_ACHETEUR, names=NAMES
+    )
+    assert reasons == [
+        (
+            "juridique-1 : pourvoi cité hors des références retenues pour la clause "
+            "responsabilite_acheteur : 20-16.782"
+        )
+    ]
+
+
+def test_pourvoi_sans_point_d_une_reference_retenue_citable():
+    request = demande_acheteur([*RETENUES_ACHETEUR, ARRET])
+    (finding,) = request.findings
+    text = "L'arrêt n° 24-17137 écarte l'article 1171 entre professionnels."
+    assert (
+        explanation.refusals(draft(entry(finding, text=text)), request, names=NAMES)
+        == []
+    )
 
 
 def test_constats_manquants_inconnus_ou_repetes_rejetes():

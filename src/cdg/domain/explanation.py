@@ -18,8 +18,9 @@ LLM peut décrire le parcours à tort. L'explication est refusée :
   passe, même s'il vise l'autre source ; le lecteur voit les références du constat, qui
   la nomment ;
 - si elle cite un numéro de pourvoi absent des références retenues pour la clause du
-  constat et de son texte, ou un ECLI, jamais citable : les noms des références n'en
-  portent pas, et le domaine ne lit pas le corpus ;
+  constat et de son texte (avec ou sans le point, sous toute graphie de tiret), ou un
+  ECLI, jamais citable : les noms des références n'en portent pas, et le domaine ne lit
+  pas le corpus ;
 - si elle n'explique pas chaque constat une fois et une seule, ou change sa clause.
 Le gabarit, sans LLM, passe ces contrôles ; il prend le relais après les essais refusés.
 """
@@ -38,7 +39,7 @@ from cdg.domain.models import (
     HumanDecision,
     HumanReview,
 )
-from cdg.domain.text import folded
+from cdg.domain.text import folded, normalize
 
 Source = Literal["llm", "gabarit"]
 
@@ -162,7 +163,8 @@ _ARTICLE = re.compile(
     rf"\bart(?:icles?|s?\.?)\s*({_NUMBER}(?:\s+(?:et|à|ou)\s+{_NUMBER})*)",
     re.IGNORECASE,
 )
-_POURVOI = re.compile(r"\b\d{2}-\d{2}\.\d{3}\b")
+# le point est facultatif (« 24-17137 », décision du propriétaire du 23/10/2026)
+_POURVOI = re.compile(r"\b(\d{2})-(\d{2})\.?(\d{3})\b")
 # le point final d'une phrase ne fait pas partie d'un ECLI
 _ECLI = re.compile(
     r"\bECLI:[A-Z]{2}:[A-Z0-9]{1,7}:\d{4}:[A-Z0-9.]{0,24}[A-Z0-9]", re.IGNORECASE
@@ -467,13 +469,15 @@ def articles(text: str) -> set[str]:
 
 
 def pourvois(text: str) -> set[str]:
-    """Numéros de pourvoi cités (« n° 24-17.137 »), tels qu'écrits."""
-    return set(_POURVOI.findall(text))
+    """Numéros de pourvoi cités (« n° 24-17.137 », ou « 24-17137 » sans point), sous la
+    forme à point, relevés sur le texte normalisé (`text.normalize` : tirets
+    typographiques, chiffres pleine chasse), comme les articles."""
+    return {f"{a}-{b}.{c}" for a, b, c in _POURVOI.findall(normalize(text))}
 
 
 def eclis(text: str) -> set[str]:
-    """ECLI cités, en majuscules."""
-    return {code.upper() for code in _ECLI.findall(text)}
+    """ECLI cités, relevés sur le texte normalisé, en majuscules."""
+    return {code.upper() for code in _ECLI.findall(normalize(text))}
 
 
 def _citable(finding: FindingToExplain, lookup: _Lookup) -> set[Citation]:
