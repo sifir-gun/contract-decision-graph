@@ -17,6 +17,10 @@ LLM peut décrire le parcours à tort. L'explication est refusée :
   (CPI et C. mon. fin., art. L112-2). Limite : un numéro partagé cité sans nom de source
   passe, même s'il vise l'autre source ; le lecteur voit les références du constat, qui
   la nomment ;
+- si elle cite un numéro de pourvoi absent des références retenues pour la clause du
+  constat et de son texte (avec ou sans le point, sous toute graphie de tiret), ou un
+  ECLI, jamais citable : les noms des références n'en portent pas, et le domaine ne lit
+  pas le corpus ;
 - si elle n'explique pas chaque constat une fois et une seule, ou change sa clause.
 Le gabarit, sans LLM, passe ces contrôles ; il prend le relais après les essais refusés.
 """
@@ -35,7 +39,7 @@ from cdg.domain.models import (
     HumanDecision,
     HumanReview,
 )
-from cdg.domain.text import folded
+from cdg.domain.text import folded, normalize
 
 Source = Literal["llm", "gabarit"]
 
@@ -158,6 +162,12 @@ _NUMBER = r"(?:L\.?\s?)?\d+(?:-\d+)*"
 _ARTICLE = re.compile(
     rf"\bart(?:icles?|s?\.?)\s*({_NUMBER}(?:\s+(?:et|à|ou)\s+{_NUMBER})*)",
     re.IGNORECASE,
+)
+# le point est facultatif (« 24-17137 », décision du propriétaire du 23/10/2026)
+_POURVOI = re.compile(r"\b(\d{2})-(\d{2})\.?(\d{3})\b")
+# le point final d'une phrase ne fait pas partie d'un ECLI
+_ECLI = re.compile(
+    r"\bECLI:[A-Z]{2}:[A-Z0-9]{1,7}:\d{4}:[A-Z0-9.]{0,24}[A-Z0-9]", re.IGNORECASE
 )
 # point d'annexe : numéro à points, au moins un (« 4.2.10.2.1 », « 21.A.307 ») ; « point 8 »
 # précise un article (« l'article 4, point 8 ») et n'est pas lu
@@ -458,6 +468,18 @@ def articles(text: str) -> set[str]:
     return {number for _, number in _citations(text, [])}
 
 
+def pourvois(text: str) -> set[str]:
+    """Numéros de pourvoi cités (« n° 24-17.137 », ou « 24-17137 » sans point), sous la
+    forme à point, relevés sur le texte normalisé (`text.normalize` : tirets
+    typographiques, chiffres pleine chasse), comme les articles."""
+    return {f"{a}-{b}.{c}" for a, b, c in _POURVOI.findall(normalize(text))}
+
+
+def eclis(text: str) -> set[str]:
+    """ECLI cités, relevés sur le texte normalisé, en majuscules."""
+    return {code.upper() for code in _ECLI.findall(normalize(text))}
+
+
 def _citable(finding: FindingToExplain, lookup: _Lookup) -> set[Citation]:
     """Ce que l'explication d'un constat peut citer : ses références retenues, chacune
     lue à part (le nom de la suivante ne rattache pas l'article de la précédente), et le
@@ -547,6 +569,18 @@ def refusals(
                     prefix + f"{unit} cité hors des références retenues pour la clause "
                     f"{finding.kind} : {', '.join(wrong)}"
                 )
+        numbers = pourvois(entry.text) - (
+            pourvois(" ".join(finding.references)) | pourvois(finding.text)
+        )
+        if numbers:
+            reasons.append(
+                prefix + "pourvoi cité hors des références retenues pour la clause "
+                f"{finding.kind} : {', '.join(sorted(numbers))}"
+            )
+        if codes := eclis(entry.text):
+            reasons.append(
+                prefix + f"ECLI cité, jamais citable : {', '.join(sorted(codes))}"
+            )
 
     return reasons
 

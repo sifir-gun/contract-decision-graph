@@ -225,6 +225,41 @@ def test_articles_cites(text, found):
     assert explanation.articles(text) == found
 
 
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        ("Cass. com., 13 mai 2026, n° 24-17.137", {"24-17.137"}),
+        ("Pourvoi n° Y 24-17.137", {"24-17.137"}),
+        ("pourvois n° 19-13.533 et 19-16.344", {"19-13.533", "19-16.344"}),
+        ("articles 1231-5 et L441-10", set()),
+        ("arrêt du 13-05.2026", set()),
+        ("plafond de 10 000 euros, 30 jours", set()),
+        # texte normalisé, comme le contrôle des articles : tirets typographiques
+        ("n° 20‑16.782", {"20-16.782"}),
+        ("n° 20–16.782", {"20-16.782"}),
+        # forme sans point (décision du propriétaire, 23/10/2026), ramenée à la forme
+        # à point
+        ("n° 20-16782", {"20-16.782"}),
+        ("le 2026-10-23, loi n° 2018-287, EN 45545-2", set()),
+    ],
+)
+def test_pourvois_cites(text, found):
+    assert explanation.pourvois(text) == found
+
+
+@pytest.mark.parametrize(
+    ("text", "found"),
+    [
+        ("ECLI:FR:CCASS:2026:CO00224", {"ECLI:FR:CCASS:2026:CO00224"}),
+        ("(ecli:fr:ccass:2026:co00224).", {"ECLI:FR:CCASS:2026:CO00224"}),
+        ("voir ECLI:EU:C:2014:317.", {"ECLI:EU:C:2014:317"}),
+        ("Cass. com., 13 mai 2026, n° 24-17.137", set()),
+    ],
+)
+def test_ecli_cites(text, found):
+    assert explanation.eclis(text) == found
+
+
 def test_article_4_point_8_reste_l_article_4():
     assert explanation.articles("l'article 4, point 8 du RGPD") == {"4"}
     # acceptée aujourd'hui, elle le reste : l'art. 4 est retenu pour la clause
@@ -1085,6 +1120,122 @@ def test_article_du_texte_du_constat_citable():
         explanation.refusals(
             draft(entry(ACCORD), entry(TRANSFERT, text=text)), REQUEST, names=NAMES
         )
+        == []
+    )
+
+
+# --- Contrôles : arrêts cités (numéros de pourvoi, ECLI) ------------------------------------
+
+# cas de demo-06 : responsabilité de l'acheteur illimitée, références retenues du jeu
+# d'évaluation de la recherche ; un seul constat, juridique-1
+ACHETEUR = clauses(responsabilite_acheteur=None)
+RETENUES_ACHETEUR = [
+    "C. civ., art. 1171",
+    "C. com., art. L442-1",
+    "C. civ., art. 1231-3",
+    "Fiche projet : Plafonds et clauses de responsabilité",
+]
+ARRET = "Cass. com., 13 mai 2026, n° 24-17.137"
+
+
+def demande_acheteur(retained):
+    found = verdict("juridique", ACHETEUR, {"responsabilite_acheteur": retained})
+    return explanation.request(state(verdicts=[found], clauses=ACHETEUR))
+
+
+DEMANDE_ACHETEUR = demande_acheteur(RETENUES_ACHETEUR)
+(ILLIMITEE,) = DEMANDE_ACHETEUR.findings
+
+
+def test_pourvoi_non_retenu_rejete():
+    text = "Voir Cass. com., 26 janv. 2022, n° 20-16.782."
+    reasons = explanation.refusals(
+        draft(entry(ILLIMITEE, text=text)), DEMANDE_ACHETEUR, names=NAMES
+    )
+    assert reasons == [
+        (
+            "juridique-1 : pourvoi cité hors des références retenues pour la clause "
+            "responsabilite_acheteur : 20-16.782"
+        )
+    ]
+
+
+def test_pourvoi_d_une_reference_retenue_citable():
+    request = demande_acheteur([*RETENUES_ACHETEUR, ARRET])
+    (finding,) = request.findings
+    text = "L'arrêt n° 24-17.137 écarte l'article 1171 entre professionnels."
+    assert (
+        explanation.refusals(draft(entry(finding, text=text)), request, names=NAMES)
+        == []
+    )
+
+
+def test_pourvoi_du_texte_du_constat_citable():
+    finding = ILLIMITEE.model_copy(update={"text": ILLIMITEE.text + " (n° 24-17.137)"})
+    request = DEMANDE_ACHETEUR.model_copy(update={"findings": [finding]})
+    text = "Le constat cite lui-même le pourvoi n° 24-17.137."
+    assert (
+        explanation.refusals(draft(entry(finding, text=text)), request, names=NAMES)
+        == []
+    )
+
+
+def test_ecli_toujours_rejete():
+    # même l'ECLI de l'arrêt retenu : le nom de la référence n'en porte pas
+    request = demande_acheteur([*RETENUES_ACHETEUR, ARRET])
+    (finding,) = request.findings
+    text = "Arrêt ECLI:FR:CCASS:2026:CO00224."
+    assert explanation.refusals(
+        draft(entry(finding, text=text)), request, names=NAMES
+    ) == ["juridique-1 : ECLI cité, jamais citable : ECLI:FR:CCASS:2026:CO00224"]
+
+
+def test_pourvoi_dans_un_constat_sans_clause_rejete():
+    finding = ILLIMITEE.model_copy(update={"kind": None, "references": []})
+    request = DEMANDE_ACHETEUR.model_copy(update={"findings": [finding]})
+    text = "Voir n° 24-17.137."
+    reasons = explanation.refusals(
+        draft(entry(finding, text=text)), request, names=NAMES
+    )
+    assert reasons == [
+        (
+            "juridique-1 : pourvoi cité hors des références retenues pour la clause "
+            "None : 24-17.137"
+        )
+    ]
+
+
+def test_gabarit_avec_un_arret_retenu_passe_ses_controles():
+    request = demande_acheteur([*RETENUES_ACHETEUR, ARRET])
+    result = explanation.template(request, reasons=["motif"])
+    assert explanation.refusals(result.draft(), request, names=NAMES) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Voir n° 20‑16.782.",  # trait d'union insécable
+        "Voir n° 20-16782.",  # sans point
+    ],
+)
+def test_pourvoi_non_retenu_sous_une_autre_graphie_rejete(text):
+    reasons = explanation.refusals(
+        draft(entry(ILLIMITEE, text=text)), DEMANDE_ACHETEUR, names=NAMES
+    )
+    assert reasons == [
+        (
+            "juridique-1 : pourvoi cité hors des références retenues pour la clause "
+            "responsabilite_acheteur : 20-16.782"
+        )
+    ]
+
+
+def test_pourvoi_sans_point_d_une_reference_retenue_citable():
+    request = demande_acheteur([*RETENUES_ACHETEUR, ARRET])
+    (finding,) = request.findings
+    text = "L'arrêt n° 24-17137 écarte l'article 1171 entre professionnels."
+    assert (
+        explanation.refusals(draft(entry(finding, text=text)), request, names=NAMES)
         == []
     )
 

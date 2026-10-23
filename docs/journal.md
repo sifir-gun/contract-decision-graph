@@ -3801,3 +3801,38 @@ Correction, à la demande du propriétaire (22/10), dans cette PR : la série ne
   - `tests` : `test_cli_traces.py::test_destination_par_variable_d_environnement` exigeait une seule requête OTLP. Les spans partent par lots (`delai_lot_ms`, une seconde) : sur le runner, plus lent, l'analyse en a envoyé deux. Reproduit en local avec `delai_lot_ms` ramené à 1 ms (trois requêtes, échec) ; code de production conforme à l'ADR 008. Corrigé ici (6c24ebc : la destination, plus le nombre de requêtes), et en parallèle par la PR #70 (54d5e98), qui vérifie en plus que la trace `cdg.analyse` arrive une fois : à l'intégration de `main`, sa version est gardée ; elle passe aussi la reproduction à 1 ms.
   - `cluster` : refusé avant les scénarios par le scan des images de test de Langfuse 4.58.0 (`next` 16.4.0 et `@sentry/nextjs` 10.64.0, avis du 22/10 vers 15 h 50 UTC) ; levé par la PR #70 (Langfuse 4.68.0).
 - **`main` intégré deux fois** : à 04a40b7 (PR #68, OpenTelemetry 1.45.1, et #60, langgraph 1.2.15), puis à 12ce46f (PR #70) ; conflits limités au journal (entrées gardées des deux côtés) et, la seconde fois, au test des traces.
+
+## 2026-10-23 · Jurisprudence, PR A : pourvois et ECLI dans l'explication (branche `claude/sad-curran-0fbe4f`)
+
+Chantier ouvert à la demande explicite du propriétaire, qui rouvre le périmètre figé depuis la v1.1 pour ce seul chantier. Le 20/10/2026, étude de l'API JUDILIBRE de PISTE (spécification OpenAPI 1.2.5, CGU open data V8 du 6 janvier 2022), puis spec validée section par section et approuvée par écrit : [`docs/spec-jurisprudence-judilibre.md`](spec-jurisprudence-judilibre.md) (commit 1a2d985). Deux PR : celle-ci, puis la source « décision » (PR B : Com., 13 mai 2026, n° 24-17.137, indexé et scellé, qui comble le renvoi « hors corpus » de la fiche des plafonds sur l'articulation entre 1171 et L442-1).
+
+Code écrit le 20/10/2026 (tâches 1 et 2 du plan) ; `main` intégré le 23/10/2026, après la fusion de certifi (#64), de la PR 2 (#66) et de la PR 4 (#69) des profils ; relecture finale le même jour.
+
+### Pourquoi ce contrôle d'abord
+
+- **Faille existante, relevée par l'étude.** Le contrôle de l'explication ne repérait que les articles (`_ARTICLE`) : une explication du LLM qui citait de mémoire un arrêt numéroté (« Cass. com., 26 janv. 2022, n° 20-16.782 ») n'était pas refusée. Le contrôle ne dépend pas de la PR B : sans décision au corpus, tout arrêt numéroté cité est refusé.
+
+### Ce qui change
+
+- **`domain/explanation.py`** : `pourvois` et `eclis` relèvent, sur le texte normalisé (`text.normalize` : tirets typographiques, chiffres pleine chasse), les numéros de pourvoi (`NN-NN.NNN`, lettre éventuelle devant, point facultatif : « 20-16782 » est ramené à « 20-16.782 ») et les ECLI (mis en majuscules, sans le point final d'une phrase). `refusals` refuse un pourvoi absent des noms des références retenues pour la clause du constat et du texte du constat, et tout ECLI : les noms des références n'en portent pas, et le domaine ne lit pas le corpus.
+- **Rencontre avec le contrôle de `main`** (PR 2 des profils : articles et points d'annexe cités, comparés par source et numéro quand un nom de source les touche) : les deux contrôles s'ajoutent, sans changer l'un l'autre. Un numéro de pourvoi n'est lu ni comme article (ni « art » devant) ni comme point d'annexe (ni « point » devant, ni numéro à points seul) ; `refusals` garde sa signature de `main`, avec `names`.
+- **Inchangés** : le nœud `explain` (un refus mène à un nouvel essai, puis au gabarit), le prompt, `FindingToExplain`, `ExplanationRequest` et la configuration (empreinte inchangée).
+- **CLAUDE.md** : contrôles de l'explication.
+
+### Relecture finale (23/10/2026)
+
+- **Corrigés** (5a6d63a) : le relevé lisait le texte brut, alors que le contrôle des articles de `main` lit le texte normalisé : « n° 20‑16.782 », écrit avec un trait d'union insécable, passait. Et, par décision du propriétaire, la forme sans point (« 20-16782 ») est reconnue ; spec amendée (« Usage dans l'analyse »).
+- **Mineurs laissés** : pas de test de refus avec deux pourvois dont un seul retenu ; le cas « montant » du test de relevé n'est pas un sosie de pourvoi ; `docs/exploitation.md` ne décrit pas les motifs des pourvois et des ECLI ; libellé de `CLAUDE.md` à préciser (pourvois retenus seulement, ECLI toujours refusés).
+
+### Limites
+
+- Un arrêt nommé sans numéro (« l'arrêt Chronopost ») n'est pas détecté.
+- Un faux positif (un nombre de la forme `NN-NN.NNN` ou `NN-NNNNN` qui ne serait pas un pourvoi, « 10-15000 ») mène au gabarit : sens prudent. Les textes des constats, écrits par les règles, n'en contiennent aucun.
+
+### Nombre de tests
+
+- Suite principale : de 3 545 à 3 568 tests collectés après l'intégration de `main` (23 de plus : 14 cas de relevé, 9 de refus).
+
+### Suite
+
+- **PR B** : source « décision », dans l'ordre de la spec (« Découpage ») ; elle commence par la mesure de référence de la recherche.
