@@ -134,10 +134,11 @@ def test_destination_par_variable_d_environnement(
 ):
     monkeypatch.setenv("CDG_TRACES", f"http://127.0.0.1:{receiver.port}/otel")
     assert launch() == 0
-    # la destination, pas le nombre de lots : une analyse plus longue que `delai_lot_ms`
-    # part en plusieurs lots (CI de la PR #69, runner plus lent)
-    assert receiver.requests, "rien reçu"
+    # un lot ou deux : les spans finissent en rafale, et l'échéance du lot (delai_lot_ms)
+    # peut tomber dedans sur un runner lent (CI du 22/10) ; la destination est fixe, et
+    # la trace arrive une fois
     assert {path for path, _, _ in receiver.requests} == {"/otel/v1/traces"}
+    assert receiver.span_names().count("cdg.analyse") == 1
 
 
 def test_destination_sans_cle_refusee(receiver, no_keys, analysed_by_mcp, capsys):

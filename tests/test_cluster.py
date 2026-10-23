@@ -1944,7 +1944,7 @@ def test_trace_d_une_analyse_dans_langfuse(langfuse):
         "-c",
         f'echo "fs.ls /buckets/{CLUSTER.LANGFUSE_BUCKET}/events/otel" | weed shell',
     )
-    # lots OTLP bruts sous events/otel/<projet>/… (Langfuse 4.50.0 à 4.58.0,
+    # lots OTLP bruts sous events/otel/<projet>/… (Langfuse 4.50.0 à 4.68.0,
     # OtelIngestionProcessor.publishToOtelIngestionQueue)
     assert "cdg-traces" in events, events
 

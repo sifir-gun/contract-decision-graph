@@ -61,15 +61,17 @@ def test_images_figees_et_communes_au_projet():
     )
     seaweedfs = cluster_script().SEAWEEDFS
     assert images["langfuse-seaweedfs"] == images["langfuse-seau"] == seaweedfs
-    assert images["langfuse-web"].startswith("docker.io/langfuse/langfuse:4.58.0@")
+    assert images["langfuse-web"].startswith("docker.io/langfuse/langfuse:4.68.0@")
     assert images["langfuse-worker"].startswith(
-        "docker.io/langfuse/langfuse-worker:4.58.0@"
+        "docker.io/langfuse/langfuse-worker:4.68.0@"
     )
 
 
 def test_langfuse_sans_licence_commerciale_ni_appel_sortant():
     """Partie libre seule (MIT hors `ee/`) : aucune clé de licence ; télémétrie et
-    assistant coupés, inscription fermée, aucun mode cloud ni fournisseur d'IA."""
+    assistant coupés, inscription fermée et son accueil coupé (lettre d'information
+    demandée à langfuse.com par le navigateur, depuis la 4.68.0), aucun mode cloud ni
+    fournisseur d'IA."""
     assert "LANGFUSE_EE_LICENSE_KEY" not in COMPOSE.read_text(encoding="utf-8")
     for name in LANGFUSE:
         variables = services()[name]["environment"]
@@ -81,7 +83,9 @@ def test_langfuse_sans_licence_commerciale_ni_appel_sortant():
         assert variables["LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT"] == (
             "http://langfuse-seaweedfs:8333"
         )
-    assert services()["langfuse-web"]["environment"]["AUTH_DISABLE_SIGNUP"] == "true"
+    web = services()["langfuse-web"]["environment"]
+    assert web["AUTH_DISABLE_SIGNUP"] == "true"
+    assert web["LANGFUSE_DISABLE_SIGNUP_ONBOARDING"] == "true"
 
 
 def test_secrets_exiges_jamais_par_defaut():

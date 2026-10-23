@@ -526,6 +526,10 @@ spec:
               value: "false"
             - name: AUTH_DISABLE_SIGNUP
               value: "true"
+            # accueil après inscription (4.68.0) : lettre d'information demandée à
+            # langfuse.com par le navigateur ; coupé
+            - name: LANGFUSE_DISABLE_SIGNUP_ONBOARDING
+              value: "true"
             - name: CLICKHOUSE_MIGRATION_URL
               value: clickhouse://langfuse-clickhouse:9000
             - name: CLICKHOUSE_URL
