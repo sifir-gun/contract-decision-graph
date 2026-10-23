@@ -53,7 +53,7 @@ x-depend: &depend
 
 services:
   langfuse-web:
-    image: docker.io/langfuse/langfuse:4.58.0@sha256:b5f4306480d844b2bce43ecd82960cefc0b219e5164ea588ea45ed806a41a4c9
+    image: docker.io/langfuse/langfuse:4.68.0@sha256:b29c245d72ab49b2b109190618829f9d5fbba229b11468d501cfe4f493885bf0
     restart: unless-stopped
     depends_on: *depend
     environment:
@@ -63,6 +63,9 @@ services:
       HOSTNAME: 0.0.0.0
       NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET absent, voir .env.example}
       AUTH_DISABLE_SIGNUP: "true"
+      # accueil après inscription (4.68.0) : lettre d'information demandée à langfuse.com
+      # par le navigateur ; coupé
+      LANGFUSE_DISABLE_SIGNUP_ONBOARDING: "true"
       # organisation, projet et clés posés au démarrage ; les clés sont celles que lit
       # l'application (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY)
       LANGFUSE_INIT_ORG_ID: cdg
@@ -89,7 +92,7 @@ services:
       retries: 60
 
   langfuse-worker:
-    image: docker.io/langfuse/langfuse-worker:4.58.0@sha256:5f0e9e0da70b0c5d91ad9158941ca042c25c936d371524a1454226ebc5f12093
+    image: docker.io/langfuse/langfuse-worker:4.68.0@sha256:f3afef571845b2365a3b991aab4977a53d75862077e3c9e9e4d1e32949ab15f7
     restart: unless-stopped
     depends_on: *depend
     environment: *langfuse-env

@@ -15,7 +15,7 @@ from test_chaine_approvisionnement import chaine
 from test_cluster_outillage import cluster
 
 ROOT = Path(__file__).resolve().parents[1]
-TODAY = date(2026, 10, 13)
+TODAY = date(2026, 10, 22)
 LANGFUSE_IMAGES = {"langfuse-web", "langfuse-worker", "langfuse-clickhouse"}
 
 
@@ -87,7 +87,7 @@ def test_jamais_une_image_du_produit():
             lambda e: e.update(decidee=date(2026, 9, 1), expire=date(2026, 10, 1)),
             "expirée",
         ),
-        (lambda e: e.update(decidee=date(2026, 10, 20)), "à venir"),
+        (lambda e: e.update(decidee=date(2026, 10, 30)), "à venir"),
         (lambda e: e.update(expire=date(2026, 9, 1)), "avant sa décision"),
     ],
 )

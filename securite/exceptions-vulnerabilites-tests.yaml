@@ -12,11 +12,12 @@ exceptions:
     paquet: {nom: deepmerge-ts, type: npm, version: 7.1.5}
     motif: >-
       CVE-2026-40345, épuisement de pile en fusionnant des graphes d'objets récursifs
-      (déni de service), corrigé en 8.0.0. Dans Langfuse web et worker 4.58.0 (revue du
-      13/10 : la 7.1.5 y reste, à côté de la 8.0.2, tirée par @prisma/config 6.19.3, le
-      chargeur de configuration de Prisma), que le projet ne construit pas ; images de test
-      seulement, joignables depuis l'application seule (cluster) ou le poste (127.0.0.1), et
-      du JSON ne peut pas exprimer de cycle. À revoir à la version suivante de Langfuse.
+      (déni de service), corrigé en 8.0.0. Dans Langfuse web et worker 4.68.0 (revues du
+      13/10 et du 22/10 : la 7.1.5 y reste, à côté de la 8.0.2, tirée par @prisma/config
+      6.19.3, le chargeur de configuration de Prisma), que le projet ne construit pas ;
+      images de test seulement, joignables depuis l'application seule (cluster) ou le poste
+      (127.0.0.1), et du JSON ne peut pas exprimer de cycle. À revoir à la version suivante
+      de Langfuse.
     decidee: 2026-10-13
     expire: 2026-12-31
   - vulnerabilite: CVE-2026-5450
@@ -50,59 +51,19 @@ exceptions:
       de l'image de Valkey ; 30 jours au plus (décision du 13/10).
     decidee: 2026-10-13
     expire: 2026-11-12
-  - vulnerabilite: GHSA-8r9p-f939-6h3c
-    paquet: {nom: follow-redirects, type: npm, version: 1.16.0}
+  - vulnerabilite: GHSA-mchm-gjx6-7h55
+    paquet: {nom: '@sentry/nextjs', type: npm, version: 10.64.0}
     motif: >-
-      CVE-2026-111755, publiée le 20/10 : l'option sensitiveHeaders, mal échappée dans une
-      expression régulière, peut laisser passer des en-têtes d'identification lors d'une
-      redirection ; corrigé en 1.16.1. Tiré par axios 1.20.0 dans Langfuse web et worker
-      4.58.0, que le projet ne construit pas ; la 4.67.0, dernière version au 21/10, le
-      garde (1.16.1 déjà sur la branche principale amont). Images de test seulement,
-      joignables depuis l'application seule (cluster) ou le poste (127.0.0.1) ; dans le
-      cluster, aucune sortie hors du cluster (règles réseau), donc aucune redirection vers
-      une autre origine. Sortie : la première version de Langfuse avec follow-redirects
-      1.16.1 et le SDK MCP 1.32.0 ; 30 jours au plus (décision du 21/10).
-    decidee: 2026-10-21
-    expire: 2026-11-20
-  - vulnerabilite: GHSA-q3jh-wrc6-jgq8
-    paquet: {nom: follow-redirects, type: npm, version: 1.16.0}
-    motif: >-
-      CVE-2026-111756, publiée le 20/10 : des en-têtes passés sous forme de tableau
-      échappent au retrait des en-têtes d'identification lors d'une redirection vers une
-      autre origine ; corrigé en 1.16.1. Tiré par axios 1.20.0 dans Langfuse web et worker
-      4.58.0, que le projet ne construit pas ; la 4.67.0, dernière version au 21/10, le
-      garde (1.16.1 déjà sur la branche principale amont). Images de test seulement,
-      joignables depuis l'application seule (cluster) ou le poste (127.0.0.1) ; dans le
-      cluster, aucune sortie hors du cluster (règles réseau), donc aucune redirection vers
-      une autre origine. Sortie : la première version de Langfuse avec follow-redirects
-      1.16.1 et le SDK MCP 1.32.0 ; 30 jours au plus (décision du 21/10).
-    decidee: 2026-10-21
-    expire: 2026-11-20
-  - vulnerabilite: GHSA-22jm-h49p-29qw
-    paquet: {nom: '@modelcontextprotocol/sdk', type: npm, version: 1.31.0}
-    motif: >-
-      CVE-2026-111767, publiée le 20/10 : les tâches expérimentales d'un serveur MCP ne
-      sont pas liées à la session qui les a créées ; corrigé en 1.32.0. Dépendance de
-      Langfuse web 4.58.0 (son serveur MCP, /api/public/mcp), présente aussi dans l'image
-      du worker, que le projet ne construit pas ; la 4.67.0, dernière version au 21/10, la
-      garde (mise à jour proposée en amont le 21/10, langfuse/langfuse#19137 et #19141).
-      L'application n'appelle jamais ce serveur ; images de test seulement, joignables
-      depuis l'application seule (cluster) ou le poste (127.0.0.1). Sortie : la première
-      version de Langfuse avec follow-redirects 1.16.1 et le SDK MCP 1.32.0 ; 30 jours au
-      plus (décision du 21/10).
-    decidee: 2026-10-21
-    expire: 2026-11-20
-  - vulnerabilite: GHSA-46jr-4wx8-v453
-    paquet: {nom: '@modelcontextprotocol/sdk', type: npm, version: 1.31.0}
-    motif: >-
-      CVE-2026-111768, publiée le 20/10 : une requête HTTP dans la limite de taille par
-      défaut peut épuiser la mémoire d'un serveur MCP pendant sa validation (déni de
-      service) ; corrigé en 1.32.0. Dépendance de Langfuse web 4.58.0 (son serveur MCP,
-      /api/public/mcp), présente aussi dans l'image du worker, que le projet ne construit
-      pas ; la 4.67.0, dernière version au 21/10, la garde (mise à jour proposée en amont
-      le 21/10, langfuse/langfuse#19137 et #19141). L'application n'appelle jamais ce
-      serveur ; images de test seulement, joignables depuis l'application seule (cluster)
-      ou le poste (127.0.0.1). Sortie : la première version de Langfuse avec
-      follow-redirects 1.16.1 et le SDK MCP 1.32.0 ; 30 jours au plus (décision du 21/10).
-    decidee: 2026-10-21
-    expire: 2026-11-20
+      CVE-2026-114139, publiée le 22/10 : avec l'option tunnelRoute, le SDK saute le
+      middleware de Next.js sur tout le chemin du tunnel, plus largement que la réécriture
+      vers Sentry ; corrigé en 10.75.2. Dans Langfuse web 4.68.0 (absent du worker), que
+      le projet ne construit pas ; la 4.68.0, dernière version au 22/10, et la branche
+      principale amont gardent la 10.64.0. L'avis exige quatre conditions réunies ; trois
+      manquent dans l'image, et une seule suffit : tunnelRoute non posé (commenté dans
+      next.config.mjs, aucune réécriture de tunnel compilée), construction Turbopack et non
+      webpack, aucun middleware (middleware-manifest.json vide). Images de test seulement,
+      joignables depuis l'application seule (cluster) ou le poste (127.0.0.1). Sortie : la
+      première version de Langfuse avec @sentry/nextjs 10.75.2 ; 30 jours au plus
+      (décision du 22/10).
+    decidee: 2026-10-22
+    expire: 2026-11-21
