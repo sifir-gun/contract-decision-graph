@@ -1,6 +1,11 @@
 """Mesures de la série réelle sur le jeu de démonstration (J5), sans LLM : issue d'un essai
 comparée à l'issue attendue, écarts d'extraction, coût, latences, résumé (`serie.py`).
-La série elle-même est dans `test_llm_jeu.py`."""
+La série elle-même est dans `test_llm_jeu.py` ; sa sélection par profil (`-k`) est
+vérifiée ici, par une collecte qui ne lance rien."""
+
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from demo_set import load
@@ -14,6 +19,7 @@ from serie import (
     describe,
     extraction_refusals,
     outcome_of,
+    planned_review,
     step_latencies,
     summarize,
     tokens_by_model,
@@ -25,6 +31,8 @@ from cdg.domain.models import Usage
 _, CONTRACTS = load()
 BY_ID = {c.id: c for c in CONTRACTS}
 MAIN, LIGHT = "mistral-small-2603", "ministral-8b-2512"
+ROOT = Path(__file__).resolve().parents[1]
+SERIE = "tests/test_llm_jeu.py"
 
 
 def status(statut="termine", proposed=None, final=None, reject_reason=None):
@@ -101,6 +109,34 @@ def test_issue_decrite():
 def test_statut_inattendu_erreur_explicite():
     with pytest.raises(ValueError, match="en_cours"):
         outcome_of(status("en_cours", proposed="GO"))
+
+
+def test_revue_du_jeu_reprise_quand_l_issue_est_l_attendue():
+    """Revue humaine avec l'issue attendue : la décision humaine du jeu est reprise, et
+    `revue_prevue` se lit sur ce résultat. Jamais par identité avec `DemoContract.human`,
+    qui reconstruit son dict à chaque appel : `revue_prevue` était toujours faux depuis le
+    30/09 (série 10)."""
+    contract = BY_ID["st-07-realiste-amenagement"]
+    obtained = outcome_of(status("suspendu", proposed="ESCALADE"))
+    assert planned_review(contract.expected, obtained, contract.human) == contract.human
+
+
+@pytest.mark.parametrize(
+    ("cid", "obtained"),
+    [
+        # revue attendue, mais avec une autre proposition
+        ("st-07-realiste-amenagement", status("suspendu", proposed="GO")),
+        # revue là où une décision automatique était attendue
+        ("demo-01-go-maintenance", status("suspendu", proposed="ESCALADE")),
+    ],
+)
+def test_revue_non_prevue_quand_l_issue_differe(cid, obtained):
+    """Autre issue que l'attendue : aucune décision du jeu ; la série reprend alors sa
+    décision prudente."""
+    contract = BY_ID[cid]
+    assert (
+        planned_review(contract.expected, outcome_of(obtained), contract.human) is None
+    )
 
 
 def test_ecarts_d_extraction_par_clause():
@@ -269,3 +305,57 @@ def test_cadence_sans_attente_avant_la_premiere_consommation():
     assert pace.next_at == 0.0
     pace.consumed(10_000)  # 30 s d'espacement avant l'essai suivant
     assert pace.next_at > 0.0
+
+
+def selected(expression: str) -> list[str]:
+    """Tests de la série réelle choisis par `-k`, avec les options de la commande
+    documentée (`--llm -m llm`), collectés sans rien lancer."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", SERIE, "--llm", "-m", "llm"]
+        + ["-k", expression, "--collect-only", "-q", "-p", "no:cacheprovider"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return [line for line in result.stdout.splitlines() if "::" in line]
+
+
+def series_of(profile: str) -> list[str]:
+    """Essais de la série d'un profil : chaque contrat du jeu de ce profil, cinq fois,
+    essai par essai dans l'ordre de `attendus.yaml` (l'ordre de la série du J5)."""
+    return [
+        f"{SERIE}::test_jeu_reel[{run}-{profile}-{c.id}]"
+        for run in range(1, 6)
+        for c in CONTRACTS
+        if c.profile == profile
+    ]
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        (
+            "fournisseur and prealable",
+            [f"{SERIE}::test_essai_prealable_non_compte[fournisseur]"],
+        ),
+        ("fournisseur and not prealable", series_of("fournisseur")),
+        (
+            "sous_traitance and prealable",
+            [f"{SERIE}::test_essai_prealable_non_compte[sous_traitance]"],
+        ),
+        ("sous_traitance and not prealable", series_of("sous_traitance")),
+    ],
+)
+def test_serie_reelle_choisie_par_profil(expression, expected):
+    """PR 4 des profils : `-k` choisit la série d'un profil, et l'essai préalable de ce
+    profil à part ; la série fournisseur reste celle des 13 contrats, cinq essais chacun,
+    dans le même ordre, sans contrat de l'autre profil (même coût)."""
+    assert selected(expression) == expected
+
+
+def test_series_des_deux_profils_au_complet():
+    assert len(series_of("fournisseur")) == 13 * 5
+    assert len(series_of("sous_traitance")) == 7 * 5

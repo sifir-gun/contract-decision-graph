@@ -1,16 +1,20 @@
 """Série réelle sur le jeu de démonstration (J5), avec le vrai modèle. Payant.
 
-Extraction, CRAG et explication réels, sur les 13 contrats du jeu du profil fournisseur,
-5 essais chacun. Quand un contrat part en revue avec l'issue attendue, la décision humaine
-du jeu est reprise ; avec une autre issue, un NO_GO prudent. Chaque contrat est scellé dans
-un journal jetable, puis rejoué à l'identique.
+Extraction, CRAG et explication réels, 5 essais par contrat, chaque contrat sous son
+profil : une série par profil (PR 4 des profils), 13 contrats `fournisseur`, 7
+`sous_traitance`. Quand un contrat part en revue avec l'issue attendue, la décision
+humaine du jeu est reprise ; avec une autre issue, un NO_GO prudent. Chaque contrat est
+scellé dans un journal jetable, sous son profil, puis rejoué à l'identique.
 
 Invariant exigé à chaque essai : jamais de décision automatique plus favorable que la
 décision attendue. Concordance, stabilité, coût et latences sont mesurés sans seuil : une
-ligne `LLM-RESULT` par essai, une ligne `LLM-SERIE` pour la série, reportées au journal.
+ligne `LLM-RESULT` par essai, une ligne `LLM-SERIE` par profil, reportées au journal.
 
-Essai préalable, consigné et non compté : `uv run pytest --llm -m llm
-tests/test_llm_jeu.py -s -k prealable`. Série : `-k "not prealable"`.
+Le profil se choisit par `-k`, chaque série précédée de son essai préalable, consigné et
+non compté, qui exige l'issue attendue (banc défaillant : arrêt avant la dépense) :
+`uv run pytest --llm -m llm tests/test_llm_jeu.py -s -k "fournisseur and prealable"`,
+puis `-k "fournisseur and not prealable"` ; de même avec `sous_traitance`. Sans profil
+dans `-k`, les deux séries tournent.
 """
 
 import json
@@ -31,6 +35,7 @@ from serie import (
     expected_outcome,
     extraction_refusals,
     outcome_of,
+    planned_review,
     step_latencies,
     summarize,
     tokens_by_model,
@@ -50,12 +55,18 @@ from cdg.domain.config import load_config
 pytestmark = [pytest.mark.llm, pytest.mark.pg]
 
 CONFIG = load_config()
-ANALYSIS_DATE, JEU = load()
-# contrats du profil fournisseur seulement, analysés sous ce profil : la série réelle du
-# profil sous-traitance (sept contrats, filtre par profil) vient avec la PR 4 des profils
-CONTRACTS = [c for c in JEU if c.profile == "fournisseur"]
+ANALYSIS_DATE, CONTRACTS = load()
 BY_ID = {c.id: c for c in CONTRACTS}
+# profil dans l'identifiant de chaque essai : `-k` choisit la série d'un profil
+IDS = [f"{c.profile}-{c.id}" for c in CONTRACTS]
 RUNS = range(1, 6)
+# essai préalable de chaque profil. Le CRAG ne tourne que sur les clauses à constat : pour
+# la sous-traitance, un contrat à constats dans les quatre domaines, pour que le banc
+# interroge le corpus du profil ; un contrat sans constat n'y toucherait pas.
+PREALABLES = {
+    "fournisseur": "demo-01-go-maintenance",
+    "sous_traitance": "st-05-reserves-revetements",
+}
 # revue non prévue par le jeu (une autre issue que l'attendue) : décision prudente
 UNPLANNED_REVIEW = {
     "decision": "NO_GO",
@@ -89,10 +100,15 @@ def pace():
 
 @pytest.fixture(scope="module")
 def series():
-    lines: list[dict] = []
+    """Essais de la série, par profil : une ligne `LLM-SERIE` par profil lancé."""
+    lines: dict[str, list[dict]] = {}
     yield lines
-    if lines:
-        summary = {"serie": "jeu de démonstration", **summarize(lines)}
+    for profile, runs in lines.items():
+        summary = {
+            "serie": "jeu de démonstration",
+            "profil": profile,
+            **summarize(runs),
+        }
         print("\nLLM-SERIE " + json.dumps(summary, ensure_ascii=False))
 
 
@@ -112,12 +128,12 @@ def analyse(llm, crag, store, contract, thread):
         config=CONFIG,
         actor=ACTEUR_ANALYSTE,
         code=CODE,
-        profile="fournisseur",
+        profile=contract.profile,
     )
-    outcome, human = outcome_of(status), None
+    outcome, human, planned = outcome_of(status), None, None
     if status["statut"] == "suspendu":
-        planned = classify(contract.expected, outcome) == "conforme"
-        human = contract.human if planned and contract.human else UNPLANNED_REVIEW
+        planned = planned_review(contract.expected, outcome, contract.human)
+        human = UNPLANNED_REVIEW if planned is None else planned
         status = orchestrator.resume_thread(graph, thread, human, config=CONFIG)
     duration_ms = round((time.monotonic() - start) * 1000)
     config = {"configurable": {"thread_id": thread}}
@@ -125,13 +141,13 @@ def analyse(llm, crag, store, contract, thread):
     history = list(reversed(list(graph.get_state_history(config))))
     steps = [(s.created_at, s.next) for s in history]
     feedback = [(s.next, s.values.get("extraction_feedback")) for s in history]
-    return outcome, human, status, values, steps, feedback, duration_ms
+    return outcome, human, planned, status, values, steps, feedback, duration_ms
 
 
 def measure(llm, crag, pace, store, contract, run) -> dict:
     pace.wait()
     thread = f"llm-jeu-{contract.id}-{run}"
-    outcome, human, status, values, steps, feedback, duration_ms = analyse(
+    outcome, human, planned, status, values, steps, feedback, duration_ms = analyse(
         llm, crag, store, contract, thread
     )
     usage = values.get("usage", [])
@@ -140,13 +156,14 @@ def measure(llm, crag, pace, store, contract, run) -> dict:
     tokens = tokens_by_model(usage)
     line = {
         "contrat": contract.id,
+        "profil": contract.profile,
         "essai": run,
         "realiste": contract.realistic,
         "attendu": describe(expected_outcome(contract.expected)),
         "issue": describe(outcome),
         "classement": classify(contract.expected, outcome),
         "revue": None if human is None else human["decision"],
-        "revue_prevue": human is not None and human is contract.human,
+        "revue_prevue": planned is not None,
         "finale": status["final_decision"],
         "essais_extraction": values.get("extraction_attempts", 0),
         "echec": report.get("stage"),
@@ -181,24 +198,30 @@ def measure(llm, crag, pace, store, contract, run) -> dict:
     assert status["statut"] == "termine", line
     [entry] = store.entries()
     assert entry.contract_id == thread
+    assert entry.record["decision"]["profile"] == contract.profile, line
     assert audit.replay(entry.record, CONFIG.model_dump(mode="json")).identical
     return line
 
 
-def test_essai_prealable_non_compte(llm, real_crag, pace, audit_journal):
-    """Un contrat, une fois : vérifie le banc (clé, base, corpus indexé, modèles) avant la
-    série. Consigné au journal, jamais compté."""
-    measure(
+@pytest.mark.parametrize("profile", PREALABLES)
+def test_essai_prealable_non_compte(llm, real_crag, pace, audit_journal, profile):
+    """Un contrat du profil, une fois : vérifie le banc (clé, base, corpus indexé,
+    modèles) avant la série. Consigné au journal, jamais compté. L'issue attendue est
+    exigée : le 01/10, un préalable qui ne vérifiait que l'invariant passait alors que
+    tout le jeu escaladait (CRAG en échec)."""
+    line = measure(
         llm,
         real_crag,
         pace,
         audit_journal,
-        BY_ID["demo-01-go-maintenance"],
+        BY_ID[PREALABLES[profile]],
         "prealable",
     )
+    assert line["classement"] == "conforme", line
 
 
-@pytest.mark.parametrize("contract", CONTRACTS, ids=[c.id for c in CONTRACTS])
+@pytest.mark.parametrize("contract", CONTRACTS, ids=IDS)
 @pytest.mark.parametrize("run", RUNS)
 def test_jeu_reel(llm, real_crag, pace, series, audit_journal, run, contract):
-    series.append(measure(llm, real_crag, pace, audit_journal, contract, run))
+    line = measure(llm, real_crag, pace, audit_journal, contract, run)
+    series.setdefault(contract.profile, []).append(line)
