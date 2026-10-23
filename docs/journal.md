@@ -3794,3 +3794,10 @@ Correction, à la demande du propriétaire (22/10), dans cette PR : la série ne
 ### Suite
 
 - **À décider par le propriétaire** : le README, qui annonce « les neuf séries » ; la présentation au cabinet, avec ce que la série montre de l'obligation de certification.
+
+### CI de la PR #69 (22 et 23/10)
+
+- **Premier passage (3b3acf6)** : deux échecs extérieurs au code de la PR.
+  - `tests` : `test_cli_traces.py::test_destination_par_variable_d_environnement` exigeait une seule requête OTLP. Les spans partent par lots (`delai_lot_ms`, une seconde) : sur le runner, plus lent, l'analyse en a envoyé deux. Reproduit en local avec `delai_lot_ms` ramené à 1 ms (trois requêtes, échec) ; code de production conforme à l'ADR 008. Corrigé ici (6c24ebc : la destination, plus le nombre de requêtes), et en parallèle par la PR #70 (54d5e98), qui vérifie en plus que la trace `cdg.analyse` arrive une fois : à l'intégration de `main`, sa version est gardée ; elle passe aussi la reproduction à 1 ms.
+  - `cluster` : refusé avant les scénarios par le scan des images de test de Langfuse 4.58.0 (`next` 16.4.0 et `@sentry/nextjs` 10.64.0, avis du 22/10 vers 15 h 50 UTC) ; levé par la PR #70 (Langfuse 4.68.0).
+- **`main` intégré deux fois** : à 04a40b7 (PR #68, OpenTelemetry 1.45.1, et #60, langgraph 1.2.15), puis à 12ce46f (PR #70) ; conflits limités au journal (entrées gardées des deux côtés) et, la seconde fois, au test des traces.
