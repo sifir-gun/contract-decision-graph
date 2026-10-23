@@ -151,7 +151,7 @@ def test_analyse_sans_profil_refusee():
     assert service.contracts() == []
 
 
-@pytest.mark.parametrize("profile", ["sous_traitance", "", None])
+@pytest.mark.parametrize("profile", ["inexistant", "", None])
 def test_analyse_refuse_un_profil_inconnu_sans_rien_creer(profile):
     service = make_service()
     with pytest.raises(ValueError, match="profil inconnu"):
@@ -239,6 +239,17 @@ def test_relance_reprend_le_profil_d_origine():
     assert engine.ran == [("c-coupe-relance", "fournisseur", "c-coupe")]
 
 
+def test_relance_garde_le_profil_sous_traitance():
+    """Critère 20 : la relance d'un contrat de sous-traitance garde son profil, lu dans
+    son état, jamais le profil par défaut des états d'avant les profils."""
+    service, engine = escalated_service(profile="sous_traitance")
+    telemetry = RecordingTelemetry()
+    service = replace(service, telemetry=telemetry)
+    service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
+    assert engine.ran == [("c-coupe-relance", "sous_traitance", "c-coupe")]
+    assert telemetry.operations == [("relance", "sous_traitance")]
+
+
 def test_relance_d_un_etat_sans_profil_en_fournisseur():
     """Contrat analysé avant les profils : son état n'a pas la clé `profile`, le seul
     profil possible alors était `fournisseur`, que la relance scelle explicitement."""
@@ -281,7 +292,7 @@ def test_trace_de_la_relance_porte_le_profil_d_origine(values):
 
 
 def test_relance_d_un_profil_inconnu_refusee_sans_trace():
-    service, _ = escalated_service(profile="sous_traitance")
+    service, _ = escalated_service(profile="inexistant")
     telemetry = RecordingTelemetry()
     service = replace(service, telemetry=telemetry)
     with pytest.raises(ValueError, match="profil inconnu"):
@@ -290,7 +301,7 @@ def test_relance_d_un_profil_inconnu_refusee_sans_trace():
 
 
 def test_relance_d_un_profil_inconnu_refusee_sans_rien_lancer():
-    service, engine = escalated_service(profile="sous_traitance")
+    service, engine = escalated_service(profile="inexistant")
     with pytest.raises(ValueError, match="profil inconnu"):
         service.relaunch("c-coupe", actor=ACTEUR_RELECTEUR)
     assert engine.ran == []

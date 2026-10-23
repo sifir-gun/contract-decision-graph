@@ -39,6 +39,7 @@ from cdg.domain.models import (
     RetrievalTrace,
     Usage,
 )
+from cdg.domain.numeric import shown
 from cdg.domain.profiles import Profile
 from cdg.ports.llm import LLMOutputError, LLMProvider
 from cdg.ports.retriever import Passage, Retriever
@@ -62,6 +63,21 @@ DOMAIN_LABELS: Mapping[Profile, Mapping[Domain, str]] = {
             "l'Union européenne"
         ),
         "operationnel": "durée et fin du contrat : engagement, préavis de résiliation",
+    },
+    "sous_traitance": {
+        "juridique": (
+            "responsabilité des parties et protection des dessins : plafonds de "
+            "responsabilité, propriété intellectuelle"
+        ),
+        "financier": (
+            "conditions financières du contrat : prix, paiement, pénalités de retard "
+            "d'exécution"
+        ),
+        "conformite": (
+            "certification des matériaux et des équipements, assurance de "
+            "responsabilité civile"
+        ),
+        "operationnel": "délai d'exécution des travaux",
     },
 }
 
@@ -104,6 +120,45 @@ _SUBJECTS: Mapping[Profile, Mapping[str, tuple[str, str | None, str | None]]] = 
             None,
         ),
     },
+    "sous_traitance": {
+        "responsabilite_donneur_ordre": (
+            "plafond de responsabilité du donneur d'ordre",
+            "% du montant du contrat",
+            "illimitée",
+        ),
+        "responsabilite_sous_traitant": (
+            "plafond de responsabilité du sous-traitant",
+            "% du montant du contrat",
+            "illimitée",
+        ),
+        "protection_design": (
+            "protection des dessins et documents remis au sous-traitant",
+            None,
+            None,
+        ),
+        "revision_prix": ("révision du prix", "%", "non plafonnée"),
+        "delai_paiement": (
+            "délai de paiement par le donneur d'ordre",
+            "jours",
+            "non chiffré",
+        ),
+        "penalites_retard_execution": (
+            "pénalités de retard d'exécution à la charge du sous-traitant",
+            "% du montant du contrat",
+            "non plafonnées",
+        ),
+        "obligation_certification": (
+            "obligation de certification et preuves de conformité",
+            None,
+            None,
+        ),
+        "assurance_sous_traitant": (
+            "assurance de responsabilité civile du sous-traitant",
+            "€ par sinistre",
+            "non chiffrée",
+        ),
+        "delai_execution": ("délai d'exécution des travaux", None, None),
+    },
 }
 
 
@@ -113,6 +168,21 @@ _CATEGORY_LABELS: Mapping[Profile, Mapping[str, str]] = {
     | {
         "date_facture": "date de facture",
         "facture_periodique": "après une facture périodique",
+    },
+    # catégories admises du profil, celles de son schéma d'extraction
+    "sous_traitance": {
+        c: c.replace("_", " ")
+        for categories in profiles.spec("sous_traitance").kind_categories.values()
+        for c in categories
+    }
+    | {
+        "date_facture": "date de facture",
+        "facture_periodique": "après une facture périodique",
+        "usage_limite_au_projet": "usage limité au projet",
+        "confidentialite_seule": "confidentialité seule",
+        "reutilisation_autorisee": "réutilisation autorisée",
+        "conformite_generale": "conformité générale",
+        "delai_indicatif": "délai indicatif",
     },
 }
 
@@ -160,7 +230,7 @@ def _describe(clause: Clause, profile: Profile) -> str:
         )
         detail = category or none_label or "clause présente"
     else:
-        detail = f"{clause.value:g} {unit}"
+        detail = f"{shown(clause.value)} {unit}"
         if clause.category is not None:  # point de départ d'un délai de paiement
             detail += f" {categories[clause.category]}"
     return f"{subject} : {detail}"

@@ -83,18 +83,32 @@ sources:
     retrieved_at: 2026-09-24
     retrieved_at_overrides:
       "1231-5": 2026-09-25
+      "1231": 2026-10-21
+      "1231-1": 2026-10-21
     articles:
-      "1170": [responsabilite_acheteur, responsabilite_fournisseur]
-      "1171": [responsabilite_acheteur, responsabilite_fournisseur]
-      "1231-3": [responsabilite_acheteur, responsabilite_fournisseur]
-      "1231-5": [penalites_execution]   # clause pénale : pénalités d'exécution
+      # responsabilité : celle de l'acheteur et du fournisseur, celle du donneur d'ordre
+      # et du sous-traitant
+      "1170": [responsabilite_acheteur, responsabilite_fournisseur,
+               responsabilite_donneur_ordre, responsabilite_sous_traitant]
+      "1171": [responsabilite_acheteur, responsabilite_fournisseur,
+               responsabilite_donneur_ordre, responsabilite_sous_traitant]
+      "1231-3": [responsabilite_acheteur, responsabilite_fournisseur,
+                 responsabilite_donneur_ordre, responsabilite_sous_traitant]
+      # clause pénale : pénalités d'exécution (fournisseur), de retard d'exécution
+      # (sous-traitance)
+      "1231-5": [penalites_execution, penalites_retard_execution]
       "1210": [duree_engagement]
       "1211": [preavis_resiliation]
+      # dommages et intérêts : mise en demeure, retard dans l'exécution (sous-traitance)
+      "1231": [delai_execution]
+      "1231-1": [delai_execution]
     # Intitulés officiels de la hiérarchie de chaque article (du plus large au plus
-    # proche), lus le 2026-10-01 sur sa page Légifrance (url) : provenance de l'article.
+    # proche), lus le 2026-10-01 sur sa page Légifrance (url) : provenance de l'article ;
+    # ceux de 1231 et 1231-1, sur leur page enregistrée par le propriétaire le 2026-10-21.
+    # Les huit relus le 2026-10-21 par l'API Légifrance : identiques.
     # Repris dans l'en-tête des extraits, ils n'ont pas amélioré la recherche selon le
     # critère retenu ; en-tête abandonné (ADR 006). Vérifiés présents par les tests.
-    hierarchy_verified_at: 2026-10-01
+    hierarchy_verified_at: 2026-10-21
     hierarchy:
       "1170":
         url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000032041115
@@ -148,6 +162,24 @@ sources:
           - "Sous-titre Ier : Le contrat"
           - "Chapitre IV : Les effets du contrat"
           - "Section 3 : La durée du contrat"
+      "1231":
+        url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000032041443
+        levels:
+          - "Livre III : Des différentes manières dont on acquiert la propriété"
+          - "Titre III : Des sources d'obligations"
+          - "Sous-titre Ier : Le contrat"
+          - "Chapitre IV : Les effets du contrat"
+          - "Section 5 : L'inexécution du contrat"
+          - "Sous-section 5 : La réparation du préjudice résultant de l'inexécution du contrat"
+      "1231-1":
+        url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000032010123
+        levels:
+          - "Livre III : Des différentes manières dont on acquiert la propriété"
+          - "Titre III : Des sources d'obligations"
+          - "Sous-titre Ier : Le contrat"
+          - "Chapitre IV : Les effets du contrat"
+          - "Section 5 : L'inexécution du contrat"
+          - "Sous-section 5 : La réparation du préjudice résultant de l'inexécution du contrat"
 
   code-monetaire-financier:
     format: legifrance
@@ -172,3 +204,108 @@ sources:
           - "Titre Ier : Dispositions générales"
           - "Chapitre II : Règles d'usage de la monnaie"
           - "Section 1 : L'indexation"
+
+  # --- sources du profil sous_traitance (docs/spec-profils-sous-traitance.md, « Corpus »)
+
+  code-propriete-intellectuelle:
+    format: legifrance
+    citation: CPI
+    title: Code de la propriété intellectuelle
+    directory: code-propriete-intellectuelle
+    file: "{article}.txt"
+    retrieved_at: 2026-10-21
+    articles:
+      "L111-1": [protection_design]
+      "L112-2": [protection_design]
+      "L122-4": [protection_design]
+      "L131-3": [protection_design]
+    # Intitulés officiels de la hiérarchie de chaque article (du plus large au plus
+    # proche), lus le 2026-10-21 sur sa page Légifrance (url), enregistrée par le
+    # propriétaire, et relus le même jour par l'API Légifrance : identiques. Vérifiés
+    # présents par les tests.
+    hierarchy_verified_at: 2026-10-21
+    hierarchy:
+      "L111-1":
+        url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000042814694
+        levels:
+          - "Partie législative"
+          - "Première partie : La propriété littéraire et artistique"
+          - "Livre Ier : Le droit d'auteur"
+          - "Titre Ier : Objet du droit d'auteur"
+          - "Chapitre Ier : Nature du droit d'auteur"
+      "L112-2":
+        url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006278875
+        levels:
+          - "Partie législative"
+          - "Première partie : La propriété littéraire et artistique"
+          - "Livre Ier : Le droit d'auteur"
+          - "Titre Ier : Objet du droit d'auteur"
+          - "Chapitre II : Oeuvres protégées"
+      "L122-4":
+        url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006278911
+        levels:
+          - "Partie législative"
+          - "Première partie : La propriété littéraire et artistique"
+          - "Livre Ier : Le droit d'auteur"
+          - "Titre II : Droits des auteurs"
+          - "Chapitre II : Droits patrimoniaux"
+      "L131-3":
+        url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006278958
+        levels:
+          - "Partie législative"
+          - "Première partie : La propriété littéraire et artistique"
+          - "Livre Ier : Le droit d'auteur"
+          - "Titre III : Exploitation des droits"
+          - "Chapitre Ier : Dispositions générales"
+
+  code-assurances:
+    format: legifrance
+    citation: C. assur.
+    title: Code des assurances
+    directory: code-assurances
+    file: "{article}.txt"
+    retrieved_at: 2026-10-21
+    articles:
+      "L124-3": [assurance_sous_traitant]
+    # Intitulés officiels de la hiérarchie de l'article (du plus large au plus proche),
+    # lus le 2026-10-21 sur sa page Légifrance (url), enregistrée par le propriétaire, et
+    # relus le même jour par l'API Légifrance. Titre II : intitulé en vigueur depuis le
+    # 2012-07-01, celui de la page ; l'API garde aussi l'intitulé abrogé à cette date
+    # (« … de dommages non maritimes »), écarté. Vérifiés présents par les tests.
+    hierarchy_verified_at: 2026-10-21
+    hierarchy:
+      "L124-3":
+        url: https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000017735449
+        levels:
+          - "Partie législative"
+          - "Livre Ier : Le contrat"
+          - "Titre II : Règles relatives aux assurances de dommages"
+          - "Chapitre IV : Les assurances de responsabilité."
+
+  # Points d'annexe EUR-Lex : numéro et intitulé sur la première ligne du fichier, unité
+  # de la référence déclarée (`unit`). Ni début ni fin de validité : la date de la
+  # version consolidée copiée est consignée ici et dans SOURCES.md ; une consolidation
+  # nouvelle ne se voit qu'à la relecture d'EUR-Lex (ADR 009).
+  sti-materiel-roulant:
+    format: eurlex
+    citation: Règl. (UE) 1302/2014
+    title: Règlement (UE) 1302/2014 (STI matériel roulant)
+    unit: "annexe, point"
+    directory: sti-materiel-roulant
+    file: "point-{article}.txt"
+    # version consolidée au 2025-04-27 (CELEX:02014R1302-20250427), copiée le 2026-10-20
+    retrieved_at: 2026-10-20
+    articles:
+      "4.2.10.2.1": [obligation_certification]
+
+  certification-navigabilite:
+    format: eurlex
+    citation: Règl. (UE) 748/2012
+    title: Règlement (UE) 748/2012 (Part 21)
+    unit: "annexe I, point"
+    directory: certification-navigabilite
+    file: "point-{article}.txt"
+    # version consolidée au 2026-08-07 (CELEX:02012R0748-20260807), copiée le 2026-10-20
+    retrieved_at: 2026-10-20
+    articles:
+      "21.A.307": [obligation_certification]

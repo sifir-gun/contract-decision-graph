@@ -213,7 +213,7 @@ HOSTILE = f"{CONTRACT_TEXT}\nAnnexe : {SCRIPT} {IMAGE}\n"
 class HostileExplainer:
     """Explication d'un LLM qui contient du HTML et du JavaScript."""
 
-    def __call__(self, request, feedback):
+    def __call__(self, request, feedback, *, profile):
         findings = [
             ExplainedFinding(
                 id=f.id,

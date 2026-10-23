@@ -2,8 +2,9 @@
 # même chaîne que l'image de l'application. Entrées figées et vérifiées :
 # - l'image de construction de l'application (uv, Debian trixie), déjà vérifiée par
 #   scripts/chaine.py ; seules ses commandes de base (tar, cp, find) servent ici ;
-# - Go 1.26.9, archive officielle, vérifiée par son empreinte (https://go.dev/dl/?mode=json) :
-#   failles de net/http du 08/10/2026 corrigées dans la bibliothèque standard liée ;
+# - Go 1.26.10, archive officielle, vérifiée par son empreinte (https://go.dev/dl/?mode=json) :
+#   failles de net/http du 08/10/2026 (1.26.9) et GO-2026-6809 du 21/10 (crypto/x509,
+#   intermédiaires compromis refusés) corrigées dans la bibliothèque standard liée ;
 # - Smokescreen, source figée par son commit, vérifié à l'extraction : master du 28/09/2026,
 #   qui contient les correctifs de sécurité publiés après la v0.1.0 (ADR 005 : surveillance,
 #   étiquette officielle dès la prochaine version) ; dépendances du dossier vendor ;
@@ -19,10 +20,10 @@
 ARG TARGETARCH
 
 FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-amd64
-ADD --checksum=sha256:42d158b4d8f7b61ac0a830567c940a86098fb7aac52e467a5ebec03ef5cc2f8d https://go.dev/dl/go1.26.9.linux-amd64.tar.gz /go.tar.gz
+ADD --checksum=sha256:ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 https://go.dev/dl/go1.26.10.linux-amd64.tar.gz /go.tar.gz
 
 FROM ghcr.io/astral-sh/uv:0.12.24-trixie-slim@sha256:71b09e37995e49a5aed44c63be80d3e15dcb39e18e31c24a2925b66d4b6d5980 AS go-arm64
-ADD --checksum=sha256:4a97373d49fcacdcf3694fea368a500b00ee3e963974f3e7514132717632f052 https://go.dev/dl/go1.26.9.linux-arm64.tar.gz /go.tar.gz
+ADD --checksum=sha256:3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797 https://go.dev/dl/go1.26.10.linux-arm64.tar.gz /go.tar.gz
 
 FROM go-${TARGETARCH} AS construction
 # autorités de confiance pour le proxy et la base de sommes des modules de Go : celles de

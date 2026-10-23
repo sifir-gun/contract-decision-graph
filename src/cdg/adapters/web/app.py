@@ -43,7 +43,7 @@ from cdg.application.service import ContractService, FourEyesRefused
 from cdg.domain import audit, authorization
 from cdg.domain.authorization import Actor
 from cdg.domain.identifiers import ContractIdError
-from cdg.domain.profiles import PROFILES
+from cdg.domain.profiles import PROFILES, Profile
 from cdg.ports.connections import ConnectionsExhausted
 from cdg.ports.engine import ThreadError
 from cdg.ports.identity import IdentityRejected, IdentityVerifier, ProviderUnavailable
@@ -498,7 +498,7 @@ def create_app(
     def analyse(request: Request, form: CheckedForm) -> Response:
         try:
             profile = saisie.profile(_text(form, "profil"))
-            entry = _contract_input(form, demo)
+            entry = _contract_input(form, demo, profile)
             contract_id = saisie.contract_id(
                 _text(form, "identifiant"), entry.base, service.now()
             )
@@ -711,13 +711,18 @@ def _text(form: FormData, name: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _contract_input(form: FormData, demo: bool) -> saisie.ContractInput:
+def _contract_input(
+    form: FormData, demo: bool, profile: Profile
+) -> saisie.ContractInput:
     """Texte du contrat, parties à masquer, base de l'identifiant par défaut : la saisie
-    commune avec le serveur MCP (`application/saisie.py`)."""
+    commune avec le serveur MCP (`application/saisie.py`). `profile` : le profil choisi,
+    déjà vérifié ; en démonstration, un contrat du jeu n'est admis que sous le sien."""
     parties = _text(form, "parties").splitlines()
     source = _text(form, "source")
     if source == "jeu":
-        return saisie.from_demo_set(_text(form, "contrat"), parties, demo=demo)
+        return saisie.from_demo_set(
+            _text(form, "contrat"), parties, demo=demo, profile=profile
+        )
     if source == "texte":
         return saisie.from_text(lambda: _text(form, "texte"), parties, demo=demo)
     if source == "fichier":

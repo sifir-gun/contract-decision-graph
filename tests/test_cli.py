@@ -11,10 +11,12 @@ from cli_helpers import INSUFFICIENT, run_cli
 from doubles import (
     CODE,
     CONTRACT_TEXT,
+    CONTRACT_TEXT_SOUS_TRAITANCE,
     FakeLLM,
     FixedExtractor,
     HashEmbedder,
     clauses,
+    clauses_sous_traitance,
     faithful_explanation,
 )
 from web_helpers import memory_service
@@ -87,7 +89,7 @@ def test_run_sans_profil_refuse(capsys, contract):
     assert "--profil" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("profil", ["sous_traitance", "", "Fournisseur"])
+@pytest.mark.parametrize("profil", ["inexistant", "", "Fournisseur"])
 def test_run_profil_inconnu_refuse(capsys, contract, profil):
     with pytest.raises(SystemExit) as exit_:
         cli.main(["run", contract, "--profil", profil, "--operateur", "lot-profil"])
@@ -157,6 +159,40 @@ def test_run_profil_scelle_et_rejoue(monkeypatch, capsys, contract):
     assert entry.record["version"] == 3
     assert entry.record["decision"]["profile"] == "fournisseur"
     code, replay = run_cli(capsys, "replay", "c-profil")
+    assert code == 0
+    assert (replay["identique"], replay["sens"], replay["anomalie"]) == (
+        True,
+        "fidele",
+        False,
+    )
+
+
+def test_run_scelle_le_profil_sous_traitance(monkeypatch, capsys, tmp_path):
+    """Critère 20 : sous doublures, `run --profil sous_traitance` analyse sous ce profil
+    et scelle un enregistrement v3 qui le porte ; le rejeu fidèle le relit à
+    l'identique."""
+    extractor = FixedExtractor(clauses_sous_traitance())
+    service = memory_service(extractor=extractor)
+    monkeypatch.setattr(cli, "build_service", lambda config: service)
+    contract = tmp_path / "c-st.txt"
+    contract.write_text(CONTRACT_TEXT_SOUS_TRAITANCE, encoding="utf-8")
+    code, run = run_cli(
+        capsys,
+        "run",
+        str(contract),
+        "--profil",
+        "sous_traitance",
+        "--operateur",
+        "lot-profil",
+    )
+    assert (code, run["profil"], run["statut"]) == (0, "sous_traitance", "termine")
+    assert extractor.profiles == ["sous_traitance"]
+    assert service.engine.values("c-st")["profile"] == "sous_traitance"
+    [entry] = service.audit_store().entries()
+    assert entry.record["version"] == 3
+    assert entry.record["decision"]["profile"] == "sous_traitance"
+    assert entry.record["decision"]["final_decision"] == "GO"
+    code, replay = run_cli(capsys, "replay", "c-st")
     assert code == 0
     assert (replay["identique"], replay["sens"], replay["anomalie"]) == (
         True,

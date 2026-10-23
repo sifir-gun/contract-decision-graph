@@ -2,10 +2,11 @@
 trace par opération, la garde de chaque nœud une étape, le fournisseur LLM observé un
 appel par requête au modèle ; rien d'autre.
 
-Confidentialité (point 4 de la spec) : les 13 contrats du jeu passent par l'extraction et
-l'explication réelles (LLM en doublure), puis par la revue humaine ; aucune trace ni
-métrique ne contient une fenêtre de six mots de leur texte, brut ou masqué, des prompts
-envoyés au modèle ni de ses réponses, ni le nom d'une partie.
+Confidentialité (point 4 de la spec) : les 20 contrats du jeu (13 du profil fournisseur,
+7 de la sous-traitance), chacun sous son profil, passent par l'extraction et l'explication
+réelles (LLM en doublure), puis par la revue humaine ; aucune trace ni métrique ne contient
+une fenêtre de six mots de leur texte, brut ou masqué, des prompts envoyés au modèle ni de
+ses réponses, ni le nom d'une partie.
 """
 
 import json
@@ -131,6 +132,10 @@ def test_revue_et_expiration_ont_leur_trace_de_meme_session(otel):
         "termine",
         "NO_GO",
     )
+    # la revue porte le profil du contrat (lu dans le statut final) ; l'expiration, une
+    # trace pour plusieurs contrats, n'en porte aucun
+    assert revue.attributes["cdg.profil"] == "fournisseur"
+    assert "cdg.profil" not in roots[3].attributes
 
 
 def test_acteur_de_la_revue_sur_sa_trace():
@@ -214,8 +219,8 @@ def test_une_trace_par_analyse_reprise(otel):
         (r.name, r.attributes["langfuse.session.id"], r.attributes["cdg.etat"])
         for r in roots
     ] == [("cdg.reprise", "c-a", "termine"), ("cdg.reprise", "c-b", "termine")]
-    # le profil n'est lu qu'une fois la trace ouverte : la reprise n'en porte pas
-    assert all("cdg.profil" not in r.attributes for r in roots)
+    # le profil n'est connu qu'une fois la reprise faite : lu dans le statut final
+    assert [r.attributes["cdg.profil"] for r in roots] == ["fournisseur", "fournisseur"]
     # chaque contrat compte ses propres tentatives
     assert [
         s.attributes["cdg.tentative"]
@@ -299,7 +304,7 @@ def test_revue_refusee_type_seulement(otel):
     assert "jamais" not in json.dumps(dict(revue.attributes))
 
 
-# --- confidentialité : les 13 contrats du jeu ------------------------------------------------
+# --- confidentialité : les contrats du jeu ---------------------------------------------------
 
 
 def dumped(exporter, reader) -> str:
@@ -307,7 +312,7 @@ def dumped(exporter, reader) -> str:
     return json.dumps(spans, ensure_ascii=False) + reader.get_metrics_data().to_json()
 
 
-def test_aucun_texte_des_13_contrats_dans_les_traces(otel):
+def test_aucun_texte_des_contrats_du_jeu_dans_les_traces(otel):
     telemetry, exporter, reader = otel
     expected_on, contracts = demo_set.load()
     sources: list[str] = [p.read_text(encoding="utf-8") for p in PROMPTS.glob("*.md")]
@@ -325,8 +330,12 @@ def test_aucun_texte_des_13_contrats_dans_les_traces(otel):
             contract_id=contract.id,
             actor=ANALYSTE,
             parties=list(contract.parties),
-            profile="fournisseur",
+            profile=contract.profile,
         )
+        # sous le profil du contrat, la voie de succès : aucun échec, d'extraction ou de
+        # nœud, qui raccourcirait l'analyse et laisserait des étapes sans trace
+        status = svc.dossier(contract.id)["status"]
+        assert (status["failure_report"], status["failures"]) == (None, []), contract.id
         if svc.dossier(contract.id)["etat"] == "en_attente":
             svc.decide(contract.id, answer(CLI))
         sources += [contract.text(), svc.dossier(contract.id)["texte_masque"]]
@@ -343,6 +352,14 @@ def test_aucun_texte_des_13_contrats_dans_les_traces(otel):
         if call["node"] == "explain"
         for finding in faithful_explanation(call["user"])["findings"]
     ]
+    # chaque revue porte le profil de son contrat, la sous-traitance comprise
+    revues = {
+        s.attributes["langfuse.session.id"]: s.attributes.get("cdg.profil")
+        for s in exporter.get_finished_spans()
+        if s.name == "cdg.revue"
+    }
+    assert {contracts[i].profile for i in revues} == {"fournisseur", "sous_traitance"}
+    assert {i: contracts[i].profile for i in revues} == revues
     out = dumped(exporter, reader)
     assert exporter.get_finished_spans(), "aucune trace : le test passerait à vide"
     found = {window for source in sources for window in leaks(source, out)}

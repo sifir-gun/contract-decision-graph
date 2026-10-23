@@ -59,10 +59,12 @@ class Crag(Protocol):
 
 
 class Explainer(Protocol):
-    """Rédige l'explication du verdict figé ; `feedback` : motifs du refus précédent."""
+    """Rédige l'explication du verdict figé ; `feedback` : motifs du refus précédent.
+    `profile`, en argument nommé, est celui de l'analyse : il choisit le prompt (le schéma
+    `Draft` et les contrôles du domaine sont communs à tous les profils)."""
 
     def __call__(
-        self, request: ExplanationRequest, feedback: list[str]
+        self, request: ExplanationRequest, feedback: list[str], *, profile: Profile
     ) -> tuple[Draft, Usage]: ...
 
 

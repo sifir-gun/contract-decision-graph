@@ -512,7 +512,9 @@ def test_9_version_propre_no_go(series_9):
 
 # --- Explication réelle sur le jeu de démonstration : mesure, sans seuil ------------------
 
-EXPLAINED = [c for c in DEMO if not c.rejected]
+# contrats du profil fournisseur seulement, analysés sous ce profil : la série réelle du
+# profil sous-traitance vient avec la PR 4 des profils
+EXPLAINED = [c for c in DEMO if not c.rejected and c.profile == "fournisseur"]
 
 
 @pytest.fixture(scope="module")

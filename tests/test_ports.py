@@ -9,6 +9,7 @@ import inspect
 
 import pytest
 from doubles import (
+    FaithfulExplainer,
     FakeCrag,
     FakeLLM,
     FakeRetriever,
@@ -34,7 +35,8 @@ from cdg.adapters.postgres.audit_store import PostgresAuditStore
 from cdg.adapters.postgres.locks import PostgresContractLocks
 from cdg.adapters.postgres.rag_store import PgvectorRetriever
 from cdg.adapters.postgres.resumes import PostgresResumeCounter
-from cdg.application.deps import Crag, Extractor
+from cdg.application.deps import Crag, Explainer, Extractor
+from cdg.application.explanation import LLMExplainer
 from cdg.application.extraction import LLMExtractor
 from cdg.application.observation import (
     NoTelemetry,
@@ -74,6 +76,8 @@ IMPLEMENTATIONS = [
     (Crag, FakeCrag),
     (Crag, lambda: orchestrator.crag_runner(FakeRetriever(), FakeLLM(), CONFIG)),
     (Crag, lambda: DeclaredCrag(CONFIG.corpus.chunk_max_words)),  # démonstration
+    (Explainer, lambda: LLMExplainer(FakeLLM())),
+    (Explainer, FaithfulExplainer),
     (AuditStore, lambda: PostgresAuditStore("")),
     (AuditStore, MemoryAuditStore),
     (
@@ -155,6 +159,14 @@ def test_detection_signature_differente():
     assert _shape(Wrong.structured) != _shape(LLMProvider.structured)
 
 
+def test_explicateur_recoit_le_profil_en_argument_nomme():
+    """Le profil de l'analyse choisit le prompt d'explication : il n'est jamais omis, et
+    jamais passé par position."""
+    profile = inspect.signature(Explainer.__call__).parameters["profile"]
+    assert profile.kind is inspect.Parameter.KEYWORD_ONLY
+    assert profile.default is inspect.Parameter.empty
+
+
 def test_chaque_port_a_ses_methodes():
     assert _methods(LLMProvider) == ["structured"]
     assert _methods(Embedder) == ["embed_passages", "embed_query"]
@@ -162,6 +174,7 @@ def test_chaque_port_a_ses_methodes():
     assert _methods(IdentityVerifier) == ["verify", "end_session_endpoint"]
     assert _methods(Extractor) == ["__call__"]
     assert _methods(Crag) == ["__call__"]
+    assert _methods(Explainer) == ["__call__"]
     assert _methods(ContractLocks) == ["hold"]
     assert _methods(ResumeCounter) == ["record"]
     assert _methods(ContractEngine) == [

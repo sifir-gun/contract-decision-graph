@@ -19,14 +19,16 @@ def verify_extraction(
     failures = state.get("failures", [])
     if failures:  # extraction en échec (garde de l'orchestrateur) : rien à vérifier
         return escalate(failures)
+    profile = profiles.of_state(state)
+    terms = decision_config.terms(profile)  # termes du profil de l'analyse
     check = check_extraction(
         state["raw_text"],
         state["clauses"],
         state["extraction_attempts"],  # incrémenté par extract_clauses
         decision_config.extraction.max_attempts,
-        profile=profiles.of_state(state),
-        absence_terms=decision_config.extraction.absence_terms,
-        category_terms=decision_config.extraction.category_terms,
+        profile=profile,
+        absence_terms=terms.absence_terms,
+        category_terms=terms.category_terms,
         instruction_patterns=decision_config.input.instruction_patterns,
     )
     if check.outcome == "verified":

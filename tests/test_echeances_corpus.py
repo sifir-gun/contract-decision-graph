@@ -62,7 +62,9 @@ def test_fins_de_validite_des_sources_du_corpus():
     # L441-10 : la fin de sa dernière version (ouverte) ; sa fiche, relue contre ses
     # deux versions, sans fin
     assert {ref for ref, end in validities.items() if end is not None} == set()
-    assert len(validities) == 22 + 7  # références des articles et fiches
+    # références des articles et points (22 du fournisseur, 9 de la sous-traitance) et
+    # des fiches (7 et 6)
+    assert len(validities) == 31 + 13
 
 
 # --- script lancé par la CI -------------------------------------------------------------------

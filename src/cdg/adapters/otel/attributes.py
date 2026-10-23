@@ -26,7 +26,7 @@ ALLOWED: dict[str, frozenset[str]] = {
             "langfuse.user.id",  # le `sub`, sur réglage seulement
             "cdg.operation",
             "cdg.canal",
-            "cdg.profil",  # nom du profil de l'analyse (analyse et relance)
+            "cdg.profil",  # nom du profil de l'analyse (toutes les opérations sauf l'expiration)
             "cdg.etat",
             "cdg.decision.proposee",
             "cdg.decision.finale",

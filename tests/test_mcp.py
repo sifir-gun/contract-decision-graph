@@ -117,6 +117,9 @@ def test_quatre_outils_et_leurs_annotations(mode, request):
     }
     assert all(tool.title and tool.description for tool in found.values())
     assert all(tool.output_schema for tool in found.values())
+    # en démonstration seulement, un contrat du jeu n'est admis que sous son profil
+    description = found["analyser_contrat"].description
+    assert ("sous son propre profil" in description) == (mode == "demo")
 
 
 def test_aucun_outil_de_decision(real):
@@ -186,6 +189,8 @@ def test_instructions_du_serveur(real, demo):
         assert "aucun outil de décision" in text
         assert "non fiable" in text
         assert "ni par la CLI" in text  # ni par un autre chemin de l'assistant
+        # les contrats de chaque profil, pas les seuls contrats fournisseurs
+        assert all(profile in text for profile in profiles.PROFILES)
     assert "démonstration" in demo[0].instructions
     assert "démonstration" not in real[0].instructions
 
@@ -206,7 +211,7 @@ def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
         server,
         "analyser_contrat",
         {
-            "profil": "fournisseur",
+            "profil": contract.profile,
             "contrat_du_jeu": contract_id,
             "identifiant": contract_id,
         },
@@ -227,6 +232,37 @@ def test_demo_chaque_contrat_du_jeu_rend_l_issue_attendue(demo, contract_id):
         assert (fiche["etat"], fiche["decision_finale"]) == ("en_attente", None)
         assert fiche["revue_humaine_en_attente"]
     assert fiche["analyse_par"] == MCP_ACTOR.model_dump(mode="json")
+
+
+@pytest.mark.parametrize(
+    ("contract_id", "chosen"),
+    [
+        ("demo-01-go-maintenance", "sous_traitance"),
+        ("st-01-go-cabine", "fournisseur"),
+    ],
+)
+def test_contrat_du_jeu_sous_un_autre_profil_refuse_a_la_saisie(
+    demo, contract_id, chosen
+):
+    """Un contrat du jeu choisi sous un profil qui n'est pas le sien : erreur de l'outil,
+    avant toute analyse. Le message est celui de la saisie commune, écrit par le code : il
+    nomme le profil du contrat, jamais celui qui a été reçu, ni le texte du contrat."""
+    server, service = demo
+    declared = EXPECTED[contract_id].profile
+    result = call(
+        server,
+        "analyser_contrat",
+        {"profil": chosen, "contrat_du_jeu": contract_id, "identifiant": "refuse"},
+    )
+    message = error_text(result)
+    assert (
+        f"démonstration : ce contrat du jeu est du profil {declared} ; "
+        "choisissez ce profil"
+    ) in message
+    assert chosen not in message  # jamais la valeur reçue
+    assert result.structured_content is None
+    assert leaks(EXPECTED[contract_id].text, seen(result)) == []
+    assert service.contracts() == []
 
 
 def test_demo_texte_libre_refuse(demo):
@@ -449,8 +485,9 @@ def test_contrat_piege_citations_enveloppees(demo):
 
 @pytest.mark.parametrize("citations", [False, True])
 def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
-    """Les 13 contrats du jeu, analysés puis consultés : aucune fenêtre de six mots de
-    leur texte hors d'une enveloppe, hors des textes écrits par le code."""
+    """Les 20 contrats du jeu, chacun sous son profil, analysés puis consultés : aucune
+    fenêtre de six mots de leur texte hors d'une enveloppe, hors des textes écrits par le
+    code."""
     server, service = demo
     found = {}
     for contract_id in sorted(EXPECTED):
@@ -458,7 +495,7 @@ def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
             server,
             "analyser_contrat",
             {
-                "profil": "fournisseur",
+                "profil": EXPECTED[contract_id].profile,
                 "contrat_du_jeu": contract_id,
                 "identifiant": contract_id,
             },
@@ -469,6 +506,10 @@ def test_aucun_contrat_du_jeu_ne_fuit_hors_enveloppe(demo, citations):
             {"thread_id": contract_id, "citations": citations},
         )
         assert not analysed.is_error and not consulted.is_error, seen(analysed)
+        # analysé jusqu'à son issue attendue, pas raccourci par un échec d'extraction
+        assert analysed.structured_content["decision_proposee"] == (
+            EXPECTED[contract_id].expected.get("proposed_decision")
+        ), contract_id
         found[contract_id] = [
             *leaked(service, contract_id, analysed),
             *leaked(service, contract_id, consulted),
@@ -555,7 +596,7 @@ def test_analyser_contrat_sans_profil_refuse(real, given):
     assert service.contracts() == []
 
 
-PROFIL_REFUSE = "profil absent ou inconnu ; profils : fournisseur"
+PROFIL_REFUSE = "profil absent ou inconnu ; profils : fournisseur, sous_traitance"
 PYDANTIC_TEXTS = ("validation error", "errors.pydantic.dev", "input_value")
 
 
@@ -567,7 +608,7 @@ def test_message_du_profil_refuse_est_celui_de_la_saisie():
 
 
 @pytest.mark.parametrize(
-    "profil", ["", "Fournisseur", "sous_traitance", None, 3, ["fournisseur"]]
+    "profil", ["", "Fournisseur", "inexistant", None, 3, ["fournisseur"]]
 )
 def test_analyser_contrat_profil_inconnu_refuse(real, profil):
     """Profil présent mais invalide (inconnu, vide, d'une autre casse, `None`, d'un autre

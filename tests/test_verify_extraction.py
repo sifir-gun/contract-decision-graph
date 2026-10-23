@@ -2,11 +2,17 @@
 
 import pytest
 import yaml
-from doubles import ABSENT, CONTRACT_TEXT, clauses
+from doubles import (
+    ABSENT,
+    CONTRACT_TEXT,
+    CONTRACT_TEXT_SOUS_TRAITANCE,
+    clauses,
+    clauses_sous_traitance,
+)
 from pydantic import ValidationError
 
 from cdg.application.nodes.verify_extraction import verify_extraction
-from cdg.domain import verification
+from cdg.domain import profiles, verification
 from cdg.domain.config import DEFAULT_CONFIG_PATH, DecisionConfig, load_config
 from cdg.domain.models import Clause, NodeFailure
 from cdg.domain.verification import check_extraction, normalize
@@ -80,7 +86,7 @@ def test_profil_inconnu_de_l_etat_refuse_sans_repli():
         "raw_text": CONTRACT_TEXT,
         "clauses": clauses(),
         "extraction_attempts": 1,
-        "profile": "sous_traitance",
+        "profile": "inexistant",
     }
     with pytest.raises(ValueError, match="profil inconnu"):
         verify_extraction(state, decision_config=CONFIG)
@@ -91,11 +97,141 @@ def test_verification_exige_un_profil_connu():
         verification.problems_of(
             CONTRACT_TEXT,
             clauses(),
-            profile="sous_traitance",
+            profile="inexistant",
             absence_terms=CONFIG.extraction.absence_terms,
             category_terms=CONFIG.extraction.category_terms,
             instruction_patterns=CONFIG.input.instruction_patterns,
         )
+
+
+# --- profil sous_traitance : types, catégories et termes du profil de l'analyse ----------
+
+
+def verify_st(items, attempts=1, text=CONTRACT_TEXT_SOUS_TRAITANCE):
+    state = {
+        "raw_text": text,
+        "clauses": items,
+        "extraction_attempts": attempts,
+        "profile": "sous_traitance",
+    }
+    return verify_extraction(state, decision_config=CONFIG)
+
+
+def problems_under(profile, items, text):
+    return verification.problems_of(
+        text,
+        items,
+        profile=profile,
+        **CONFIG.terms(profile)._asdict(),
+        instruction_patterns=CONFIG.input.instruction_patterns,
+    )
+
+
+def test_extraction_sous_traitance_conforme_route_vers_les_analystes():
+    assert verify_st(clauses_sous_traitance()) == {"route": "analysts"}
+
+
+@pytest.mark.parametrize(
+    ("profile", "text", "other"),
+    [
+        ("sous_traitance", CONTRACT_TEXT_SOUS_TRAITANCE, clauses),
+        ("fournisseur", CONTRACT_TEXT, clauses_sous_traitance),
+    ],
+    ids=["sous_traitance", "fournisseur"],
+)
+def test_extraction_verifiee_exige_les_types_du_profil(profile, text, other):
+    """Critère 6 : sous chaque profil, l'extraction d'un autre profil manque chacun des
+    types propres au profil de l'analyse, et chacun des siens y est inconnu ; un type
+    commun aux deux (`revision_prix`, `delai_paiement`) n'est ni l'un ni l'autre."""
+    items = other()
+    own, theirs = set(profiles.spec(profile).kinds), {c.kind for c in items}
+    problems = problems_under(profile, items, text)
+    missing = {
+        p.split(": ", 1)[1] for p in problems if p.startswith("clause manquante")
+    }
+    unknown = {
+        p.split(": ", 1)[1] for p in problems if p.startswith("type de clause inconnu")
+    }
+    assert missing == own - theirs and unknown == theirs - own
+    assert {"revision_prix", "delai_paiement"} <= own & theirs
+
+
+def test_extraction_fournisseur_sous_le_profil_sous_traitance_redemandee():
+    """Le nœud lit le profil de l'état : sous `sous_traitance`, une extraction du
+    fournisseur est redemandée avec les types manquants et inconnus."""
+    out = verify_st(clauses())
+    assert out["route"] == "extract_clauses"
+    feedback = out["extraction_feedback"]
+    assert "clause manquante: protection_design" in feedback
+    assert "type de clause inconnu: penalites_execution" in feedback
+    assert "clause manquante: revision_prix" not in feedback
+
+
+@pytest.mark.parametrize(
+    "kind", ["protection_design", "obligation_certification", "delai_execution"]
+)
+def test_categorie_exigee_pour_chaque_type_a_categorie_du_profil(kind):
+    """Les trois types à catégorie sans valeur du profil exigent leur catégorie dès
+    qu'ils sont présents (`models.category_required`)."""
+    out = verify_st(clauses_sous_traitance(categories={kind: None}))
+    assert out == {
+        "route": "extract_clauses",
+        "extraction_feedback": [f"catégorie manquante: {kind}"],
+    }
+
+
+def test_delai_de_paiement_sous_traitance_categorie_exigee_s_il_est_chiffre():
+    unpriced = clauses_sous_traitance(
+        delai_paiement=None, categories={"delai_paiement": None}
+    )
+    assert verify_st(unpriced) == {"route": "analysts"}  # non chiffré : sans catégorie
+    priced = clauses_sous_traitance(categories={"delai_paiement": None})
+    assert verify_st(priced)["extraction_feedback"] == [
+        "catégorie manquante: delai_paiement"
+    ]
+
+
+def test_categorie_d_un_autre_type_du_profil_invalide():
+    """Une catégorie admise par le schéma du profil, mais propre à un autre de ses types,
+    est refusée par la vérification."""
+    items = clauses_sous_traitance(categories={"protection_design": "date_facture"})
+    assert verify_st(items)["extraction_feedback"] == [
+        "catégorie invalide: protection_design"
+    ]
+
+
+def test_absence_sous_traitance_contredite_par_les_termes_du_profil():
+    """Sous `sous_traitance`, la vérification lit les termes d'absence de sa section :
+    « dessins » interdit de déclarer absente la protection des dessins."""
+    text = CONTRACT_TEXT_SOUS_TRAITANCE + "Les dessins remis restent confidentiels.\n"
+    items = clauses_sous_traitance(protection_design=ABSENT)
+    assert verify_st(items, text=text) == {
+        "route": "extract_clauses",
+        "extraction_feedback": [
+            (
+                "clause déclarée absente, mais le contrat contient « dessins »: "
+                "protection_design"
+            )
+        ],
+    }
+    # sous les termes du fournisseur, la même absence passerait sans être redemandée
+    fournisseur_terms = verification.mentioned_absences(
+        text, items, CONFIG.terms("fournisseur").absence_terms
+    )
+    assert fournisseur_terms == []
+
+
+def test_categorie_sous_traitance_contredite_par_les_termes_du_profil():
+    """Les termes de catégorie lus sont ceux du profil de l'analyse."""
+    quote = "Le sous-traitant peut réutiliser les dessins pour d'autres clients."
+    text = CONTRACT_TEXT_SOUS_TRAITANCE + quote + "\n"
+    items = [
+        c.model_copy(update={"quote": quote}) if c.kind == "protection_design" else c
+        for c in clauses_sous_traitance()  # usage_limite_au_projet
+    ]
+    [problem] = verify_st(items, text=text)["extraction_feedback"]
+    assert problem.startswith("catégorie contredite par la citation (« ")
+    assert problem.endswith(" : reutilisation_autorisee): protection_design")
 
 
 def test_unites_de_valeur_fournies_par_l_appelant():
@@ -450,6 +586,129 @@ def test_quantites_en_chiffres_ou_en_lettres(quote, expected):
 )
 def test_nombre_en_lettres_dans_un_autre_mot_ou_une_autre_expression_non_lu(quote):
     assert verification.quantities(quote) == set()
+
+
+# --- Montants en euros (profil sous-traitance, PR 2) ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "2 000 000 €",
+        "2.000.000 euros",
+        "2 000 000 EUR",
+        "2\xa0000\xa0000\xa0€",  # espace insécable
+        "2000000 €",  # chiffres seuls
+        "2 000 000€",  # sans espace avant le symbole
+        "2 000 000 Euros",  # casse
+    ],
+)
+def test_montant_en_euros_lu(quote):
+    found = verification.quantities(f"Le plafond garanti est de {quote} par sinistre.")
+    assert (2000000.0, "€") in found
+
+
+def test_montant_espace_fine_insecable_lu():
+    # U+202F (espace fine insécable, usage typographique français) : ramenée à une
+    # espace par la normalisation NFKC
+    quote = "Le plafond est de 2\u202f000\u202f000\u202f€ par sinistre."
+    assert "\u202f" in quote
+    assert (2000000.0, "€") in verification.quantities(quote)
+
+
+def test_montant_avec_centimes_non_lu():
+    assert not {
+        q for q in verification.quantities("2 000 000,00 € par sinistre") if q[1] == "€"
+    }
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "2 M€",  # multiple
+        "deux millions d'euros",  # en lettres
+        "1.50 €",  # centimes avec un point
+        "1,50 €",  # centimes avec une virgule
+        "2 000 000,5 €",
+        "2.000.000,00 euros",
+        "2 000 000",  # sans monnaie
+        "2 000 000 eurosystème",  # autre mot
+    ],
+)
+def test_formes_de_montant_non_lues(quote):
+    assert not {q for q in verification.quantities(quote) if q[1] == "€"}
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "1234 000 €",  # premier groupe de quatre chiffres
+        "1 000000 €",  # dernier groupe de six chiffres
+        "2 0000 €",  # dernier groupe de quatre chiffres
+        "1.0000 €",  # idem, avec le point
+        "Le plafond est de 1234 000 € par sinistre.",  # au milieu d'une phrase
+    ],
+)
+def test_montant_mal_groupe_jamais_lu_en_partie(quote):
+    # le dernier groupe d'un nombre mal groupé n'est pas un montant : jamais (0.0, "€")
+    found = verification.quantities(quote)
+    assert (0.0, "€") not in found
+    assert not {q for q in found if q[1] == "€"}
+
+
+def test_montant_et_pourcentage_jamais_confondus():
+    found = verification.quantities("5 % du montant, soit 2 000 000 €")
+    assert (5.0, "%") in found and (2000000.0, "€") in found
+    assert (2000000.0, "%") not in found and (5.0, "€") not in found
+    assert verification.quantities("1.500 €") == {(1500.0, "€")}
+    assert verification.quantities("1.5 %") == {(1.5, "%")}
+
+
+def test_montant_n_ajoute_rien_aux_quantites_existantes():
+    # un montant seul ne produit ni pourcentage, ni durée
+    assert verification.quantities("assurance de 2 000 000 € par sinistre") == {
+        (2000000.0, "€")
+    }
+    # et une durée ou un pourcentage seuls ne produisent aucun montant
+    assert verification.quantities("45 jours, 5 %, deux ans") == {
+        (45.0, "jours"),
+        (5.0, "%"),
+        (24.0, "mois"),
+    }
+
+
+def test_assurance_en_pourcentage_refusee():
+    c = Clause(
+        kind="assurance_sous_traitant",
+        present=True,
+        quote="5 % du montant du contrat",
+        value=5.0,
+    )
+    assert verification.value_mismatches([c], {"assurance_sous_traitant": "€"}) == [
+        "valeur absente de la citation (5 €): assurance_sous_traitant"
+    ]
+
+
+def test_assurance_en_euros_acceptee():
+    c = Clause(
+        kind="assurance_sous_traitant",
+        present=True,
+        quote="une assurance de 2 000 000 € par sinistre",
+        value=2000000.0,
+    )
+    assert verification.value_mismatches([c], {"assurance_sous_traitant": "€"}) == []
+
+
+def test_message_de_valeur_absente_affiche_le_grand_nombre_groupe():
+    c = Clause(
+        kind="assurance_sous_traitant",
+        present=True,
+        quote="une assurance de 1 000 000 € par sinistre",
+        value=2000000.0,
+    )
+    assert verification.value_mismatches([c], {"assurance_sous_traitant": "€"}) == [
+        "valeur absente de la citation (2 000 000 €): assurance_sous_traitant"
+    ]
 
 
 def test_clause_sans_valeur_non_controlee():

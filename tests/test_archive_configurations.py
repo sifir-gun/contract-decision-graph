@@ -17,6 +17,7 @@ configuration (cause du non-rejeu du vrai journal, 30/09).
 import dataclasses
 import html
 import json
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -306,6 +307,38 @@ def test_configuration_archivee_d_avant_les_reglages_de_recherche_rejouable():
     state = reviewed() | {"config_hash": audit.configuration_hash(old)}
     del state["analysis_config"]
     assert audit.replay(record(state).model_dump(mode="json"), old).identical
+
+
+def test_configuration_archivee_d_avant_la_sous_traitance_rejouable():
+    """PR 2 : la section `sous_traitance` est apparue après l'archive. Une configuration
+    archivée sans elle se relit sans ce profil (aucune analyse sous-traitance n'existait),
+    et le rejeu repart des références scellées : décision identique."""
+    old = json.loads(json.dumps(JSON))
+    del old["sous_traitance"]
+    assert DecisionConfig.model_validate(old).sous_traitance is None
+    state = reviewed() | {"config_hash": audit.configuration_hash(old)}
+    del state["analysis_config"]
+    assert audit.replay(record(state).model_dump(mode="json"), old).identical
+
+
+def test_configuration_archivee_du_journal_de_reference_relue_sans_la_section():
+    """Les configurations archivées du v2 de référence (commit 5e5a8f6, d'avant les
+    profils) n'ont pas la section : le modèle courant les relit, sans la sous-traitance."""
+    path = Path(__file__).parent / "fixtures" / "journal-v2-reference.json"
+    archived = json.loads(path.read_text(encoding="utf-8"))["configurations"]
+    assert archived
+    for configuration in archived.values():
+        assert "sous_traitance" not in configuration
+        assert DecisionConfig.model_validate(configuration).sous_traitance is None
+
+
+def test_configuration_du_projet_relue_avec_sa_section():
+    # la forme archivée au scellement porte la section : elle se relit à l'identique
+    assert CONFIG.sous_traitance is not None
+    assert DecisionConfig.model_validate(JSON) == CONFIG
+    assert audit.config_hash(DecisionConfig.model_validate(JSON)) == audit.config_hash(
+        CONFIG
+    )
 
 
 @pytest.mark.parametrize("distinct", [False, True])

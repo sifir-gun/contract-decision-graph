@@ -19,10 +19,10 @@ from test_chart import IGNORE, UniqueKeys, chart_script, named, of_kind
 
 ROOT = Path(__file__).resolve().parents[1]
 CHART = ROOT / "chart" / "cdg-proxy"
-# index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; Smokescreen compilé avec
-# Go 1.26.9 et x/net 0.60.0), signature cosign et provenance vérifiées le 13/10/2026
+# index publié par la CI à la fusion de la PR #65 (sha-3426bd6 ; Smokescreen compilé avec
+# Go 1.26.10 et x/net 0.60.0), signature cosign et provenance vérifiées le 22/10/2026
 # (docs/exploitation.md, « Image publiée »)
-PROXY_INDEX = "sha256:c1c2edbc14dbb83f923ebb2b0b94a3aed016199d84b01889b5ea5228a49db14c"
+PROXY_INDEX = "sha256:42322f2a44427b624f83cafb85a981f4de65162b1decbc376393adc1d344ed09"
 PRIVATE = [
     "10.0.0.0/8",
     "172.16.0.0/12",

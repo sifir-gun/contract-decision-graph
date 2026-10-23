@@ -5,10 +5,10 @@
 # publication), jamais une étiquette.
 image:
   repository: ghcr.io/sifir-gun/contract-decision-graph/proxy-sortie
-  # index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; Smokescreen compilé
-  # avec Go 1.26.9 et x/net 0.60.0, amendement du 12/10 à l'ADR 005) ; signature cosign
-  # et provenance vérifiées le 13/10/2026
-  digest: sha256:c1c2edbc14dbb83f923ebb2b0b94a3aed016199d84b01889b5ea5228a49db14c
+  # index publié par la CI à la fusion de la PR #65 (sha-3426bd6 ; Smokescreen compilé
+  # avec Go 1.26.10 et x/net 0.60.0, amendement du 12/10 à l'ADR 005) ; signature cosign
+  # et provenance vérifiées le 22/10/2026
+  digest: sha256:42322f2a44427b624f83cafb85a981f4de65162b1decbc376393adc1d344ed09
   pullPolicy: IfNotPresent
 
 replicas: 2

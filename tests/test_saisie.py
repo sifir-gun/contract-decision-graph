@@ -27,7 +27,7 @@ def never() -> str:
 
 
 def test_contrat_du_jeu_texte_et_identifiant():
-    entry = saisie.from_demo_set(PIEGE, [], demo=False)
+    entry = saisie.from_demo_set(PIEGE, [], demo=False, profile="fournisseur")
     _, contracts = demo_set.load()
     assert entry.text == contracts[PIEGE].text()
     assert entry.base == PIEGE
@@ -36,19 +36,85 @@ def test_contrat_du_jeu_texte_et_identifiant():
 def test_contrat_du_jeu_parties_declarees_en_demonstration():
     """L'extraction simulée dépend des parties déclarées : en démonstration, elles
     l'emportent sur celles saisies."""
-    assert saisie.from_demo_set(PIEGE, ["X"], demo=True).parties == DECLAREES
+    entry = saisie.from_demo_set(PIEGE, ["X"], demo=True, profile="fournisseur")
+    assert entry.parties == DECLAREES
 
 
 def test_contrat_du_jeu_parties_saisies_sinon_declarees_en_mode_reel():
-    assert saisie.from_demo_set(PIEGE, ["X"], demo=False).parties == ["X"]
-    assert saisie.from_demo_set(PIEGE, [], demo=False).parties == DECLAREES
-    assert saisie.from_demo_set(PIEGE, ["  ", ""], demo=False).parties == DECLAREES
+    def parties(given: list[str]) -> list[str]:
+        return saisie.from_demo_set(
+            PIEGE, given, demo=False, profile="fournisseur"
+        ).parties
+
+    assert parties(["X"]) == ["X"]
+    assert parties([]) == DECLAREES
+    assert parties(["  ", ""]) == DECLAREES
 
 
 @pytest.mark.parametrize("demo", [True, False])
 def test_contrat_du_jeu_inconnu_refuse(demo):
     with pytest.raises(InputError, match="^contrat inconnu du jeu de démonstration$"):
-        saisie.from_demo_set("demo-99-inconnu", [], demo=demo)
+        saisie.from_demo_set("demo-99-inconnu", [], demo=demo, profile="fournisseur")
+
+
+def refusal(declared: str) -> str:
+    return (
+        f"démonstration : ce contrat du jeu est du profil {declared} ; "
+        "choisissez ce profil"
+    )
+
+
+OTHER_PROFILES = [
+    (cid, other)
+    for cid, contract in sorted(demo_set.load()[1].items())
+    for other in profiles.PROFILES
+    if other != contract.profile
+]
+
+
+def test_le_jeu_couvre_les_deux_profils():
+    """Garde des tests qui suivent : sans contrat de chaque profil, le refus ne serait
+    éprouvé que dans un sens."""
+    declared = {contract.profile for contract in demo_set.load()[1].values()}
+    assert declared == set(profiles.PROFILES)
+
+
+@pytest.mark.parametrize(("cid", "other"), OTHER_PROFILES)
+def test_contrat_du_jeu_sous_un_autre_profil_refuse_a_la_saisie(cid, other):
+    """En démonstration, l'extraction simulée ne rend que les clauses du profil du
+    contrat : choisi sous un autre, il est refusé ici, avant toute analyse. Le message
+    nomme le profil du contrat, jamais celui qui a été reçu."""
+    declared = demo_set.load()[1][cid].profile
+    with pytest.raises(InputError) as raised:
+        saisie.from_demo_set(cid, [], demo=True, profile=other)
+    assert str(raised.value) == refusal(declared)
+    assert other not in str(raised.value)
+
+
+@pytest.mark.parametrize("cid", sorted(demo_set.load()[1]))
+def test_contrat_du_jeu_sous_son_profil_admis_en_demonstration(cid):
+    contract = demo_set.load()[1][cid]
+    entry = saisie.from_demo_set(cid, ["X"], demo=True, profile=contract.profile)
+    assert (entry.text, entry.base) == (contract.text(), cid)
+    assert entry.parties == list(contract.parties)
+
+
+@pytest.mark.parametrize("profile", profiles.PROFILES)
+@pytest.mark.parametrize("cid", sorted(demo_set.load()[1]))
+def test_contrat_du_jeu_hors_demonstration_admis_sous_tout_profil(cid, profile):
+    """En mode réel, rien ne change : analyser un contrat du jeu sous un autre profil que
+    le sien reste un choix légitime."""
+    contract = demo_set.load()[1][cid]
+    entry = saisie.from_demo_set(cid, [], demo=False, profile=profile)
+    assert (entry.text, entry.base) == (contract.text(), cid)
+    assert entry.parties == list(contract.parties)
+
+
+def test_contrat_inconnu_refuse_avant_le_controle_du_profil():
+    """Un contrat inconnu n'a pas de profil à comparer : le refus reste celui d'avant."""
+    for profile in profiles.PROFILES:
+        with pytest.raises(InputError, match="^contrat inconnu du jeu"):
+            saisie.from_demo_set("demo-99-inconnu", [], demo=True, profile=profile)
 
 
 # --- texte fourni ------------------------------------------------------------------------
@@ -124,11 +190,11 @@ def test_profil_connu_admis(profile):
     assert saisie.profile(profile) == profile
 
 
-@pytest.mark.parametrize("raw", ["", "Fournisseur", "sous_traitance", " fournisseur"])
+@pytest.mark.parametrize("raw", ["", "Fournisseur", "inexistant", " fournisseur"])
 def test_profil_absent_ou_inconnu_refuse(raw):
     """Jamais de profil par défaut ni de correction silencieuse (casse, espaces) ; le
     message cite les profils admis, pas la valeur reçue."""
     message = f"profil absent ou inconnu ; profils : {', '.join(profiles.PROFILES)}"
-    assert message == "profil absent ou inconnu ; profils : fournisseur"
+    assert message == "profil absent ou inconnu ; profils : fournisseur, sous_traitance"
     with pytest.raises(InputError, match=f"^{re.escape(message)}$"):
         saisie.profile(raw)

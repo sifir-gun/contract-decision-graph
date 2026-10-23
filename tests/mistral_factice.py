@@ -4,9 +4,12 @@ tests/test_image.py vérifie son absence de l'image publiée.
 
 `POST /v1/chat/completions`, comme l'appelle le SDK mistralai (`chat.parse`), répond selon
 le schéma demandé (`response_format.json_schema.name`) :
-- `ExtractionOutput` : les clauses d'une extraction correcte du contrat du jeu reconnu à son
-  texte masqué (data/contracts/attendus.yaml), comme l'extraction simulée de la
-  démonstration ; un texte hors du jeu est refusé (422), explicitement ;
+- le schéma d'extraction d'un profil (`ExtractionOutput` pour `fournisseur`,
+  `ExtractionOutputSousTraitance` pour `sous_traitance` : la table vient de
+  `extraction.SCHEMAS`, sans liste à tenir ici) : les clauses d'une extraction correcte du
+  contrat du jeu reconnu à son profil et à son texte masqué (data/contracts/attendus.yaml),
+  comme l'extraction simulée de la démonstration ; refus explicites (422) d'un texte hors du
+  jeu, et d'un contrat du jeu reçu sous le schéma d'un autre profil ;
 - `GradeOutput` : tous les extraits proposés, jugés pertinents ;
 - `RewriteOutput` : la dernière requête essayée ;
 - `Draft` : chaque constat reçu, sous son identifiant, sa clause et ses références, avec un
@@ -15,7 +18,8 @@ le schéma demandé (`response_format.json_schema.name`) :
 Pour les scénarios : `POST /controle` règle un délai avant chaque réponse
 (`{"delai": secondes}`), `GET /controle` rend le délai, les requêtes reçues (comptées à l'arrivée), les appels
 réussis par schéma et les refus.
-Bibliothèque standard seulement.
+Bibliothèque standard seulement, et le paquet `cdg` (l'image de test part de celle de
+l'application : `PYTHONPATH=/app/src`).
 """
 
 import argparse
@@ -27,14 +31,18 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from cdg.application import demo_set
+from cdg.application import demo_set, extraction
 from cdg.domain import masking
+from cdg.domain.models import Clause
 
 OPEN, HEAD_END, CLOSE = "<<<CONTRAT-", ">>>\n", "\n<<<FIN-CONTRAT-"
 EXCERPT = re.compile(r"^<<<EXTRAIT (\d+)>>>$", re.MULTILINE)
 TRIED = "Requêtes déjà essayées :\n"
 NEUTRAL = "Explication du serveur factice pour ce constat, rédigée pour les tests."
 CLAUSE_FIELDS = ("kind", "present", "quote", "value", "category")
+# nom du schéma d'extraction (`response_format.json_schema.name`, que le SDK mistralai forme du
+# `__name__` du modèle) -> profil : un schéma de profil ajouté à `SCHEMAS` y est reconnu
+PROFILE_OF_SCHEMA = {schema.__name__: p for p, schema in extraction.SCHEMAS.items()}
 
 
 class Refused(Exception):
@@ -49,11 +57,17 @@ class State:
         self.received = 0  # à l'arrivée, avant le délai : une analyse en cours se voit
         self.refused = 0
         _, contracts = demo_set.load()
-        self.by_text = {
-            masking.mask(c.text(), c.parties).text: c.clauses
+        # (profil, texte masqué) -> clauses attendues, comme l'extraction simulée de la
+        # démonstration ; un contrat rejeté à l'entrée, sans clause, n'y figure pas
+        self.by_text: dict[tuple[str, str], list[Clause]] = {
+            (c.profile, masking.mask(c.text(), c.parties).text): list(c.clauses)
             for c in contracts.values()
             if c.clauses
         }
+
+    def declared(self, text: str) -> list[str]:
+        """Profils sous lesquels ce texte masqué est un contrat du jeu."""
+        return sorted(profile for profile, known in self.by_text if known == text)
 
 
 def _contract(user: str) -> str | None:
@@ -72,11 +86,21 @@ def _contract(user: str) -> str | None:
     return user[body:end] if end >= 0 else None
 
 
-def _extraction(state: State, user: str) -> dict[str, Any]:
+def _extraction(state: State, profile: str, user: str) -> dict[str, Any]:
     text = _contract(user)
-    clauses = state.by_text.get(text) if text is not None else None
-    if clauses is None:
+    if text is None:
         raise Refused("texte hors du jeu de démonstration")
+    clauses = state.by_text.get((profile, text))
+    if clauses is None:
+        declared = state.declared(text)
+        if not declared:
+            raise Refused("texte hors du jeu de démonstration")
+        # jamais les clauses d'un autre genre de contrat : refus qui nomme les profils,
+        # tous deux connus du jeu et des schémas
+        raise Refused(
+            f"contrat du jeu du profil {', '.join(declared)}, reçu sous le schéma du "
+            f"profil {profile}"
+        )
     return {
         "clauses": [
             {k: v for k, v in c.model_dump(mode="json").items() if k in CLAUSE_FIELDS}
@@ -116,8 +140,8 @@ def _draft(user: str) -> dict[str, Any]:
 
 
 def answer(state: State, schema: str, user: str) -> dict[str, Any]:
-    if schema == "ExtractionOutput":
-        return _extraction(state, user)
+    if schema in PROFILE_OF_SCHEMA:
+        return _extraction(state, PROFILE_OF_SCHEMA[schema], user)
     if schema == "GradeOutput":
         return _grade(user)
     if schema == "RewriteOutput":

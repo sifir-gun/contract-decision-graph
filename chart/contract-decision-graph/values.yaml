@@ -10,9 +10,9 @@ mode: reel
 # run de publication), jamais une étiquette.
 image:
   repository: ghcr.io/sifir-gun/contract-decision-graph
-  # index publié par la CI à la fusion de la PR #53 (sha-7a24bfb) ; signature cosign et
-  # provenance vérifiées le 13/10/2026
-  digest: sha256:54510fb02304ab276d65dd018e86cf44cf2fa862caccfbdfbaa628936d3a03ab
+  # index publié par la CI à la fusion de la PR #65 (sha-3426bd6) ; signature cosign et
+  # provenance vérifiées le 22/10/2026
+  digest: sha256:d0353e8419c13b5e9b409a8392f11061c9d7f48201778e9d245ed914ff2b016f
   pullPolicy: IfNotPresent
 
 # Poids du modèle d'embedding : image dédiée, montée en lecture seule (mode réel).
@@ -155,10 +155,10 @@ authentification:
     revalidation: 5m  # cookie-refresh : un compte retiré perd l'accès dans ce délai
   image:
     repository: ghcr.io/sifir-gun/contract-decision-graph/oauth2-proxy
-    # index publié par la CI à la fusion de la PR #53 (sha-7a24bfb ; oauth2-proxy v7.15.5,
-    # compilé avec Go 1.26.9, amendement du 12/10 à l'ADR 005) ; signature cosign et
-    # provenance vérifiées le 13/10/2026
-    digest: sha256:63370d5ff5944f657e99783644429419c35f7ab0535caf61c8c1e67361a4ebe1
+    # index publié par la CI à la fusion de la PR #65 (sha-3426bd6 ; oauth2-proxy v7.15.5,
+    # compilé avec Go 1.26.10, amendement du 12/10 à l'ADR 005) ; signature cosign et
+    # provenance vérifiées le 22/10/2026
+    digest: sha256:4652be29bdb0bc33e9eb17b804cd2468bb9cc6beb184d8acc32cf3e30d15698e
     pullPolicy: IfNotPresent
   port: 4180
   ressources:
@@ -208,7 +208,8 @@ taches:
 
 # Traces OpenTelemetry (ADR 008) : aucune destination par défaut, rien n'est envoyé.
 # Destination : un service du cluster seulement (Langfuse auto-hébergé), en mode réel ;
-# l'export OTLP ne passe pas par le proxy de sortie (urllib3 ignore HTTPS_PROXY) : une règle
+# l'export OTLP ne passe pas par le proxy de sortie (exportateur 1.45.0 : urllib3 ignore
+# HTTPS_PROXY et HTTP_PROXY) : une règle
 # réseau ouvre la seule cible. Clés dans un Secret existant, montées en fichiers pour
 # l'interface seule. Identité : aucune par défaut ; « sub » émettrait le sub pseudonyme,
 # que Langfuse sans sa partie commerciale ne supprime jamais (conservation, RGPD).

@@ -207,6 +207,263 @@ rules:
     notice_max_months: 6
     notice_score_penalty: 0.3
 
+# Profil sous_traitance (ADR 010, PR 2) : ses réglages, validés contre ses neuf types de
+# clauses. Les sections `extraction` et `rules` ci-dessus sont celles du profil fournisseur ;
+# tout le reste (poids, seuils, marge, écart de conflit, budget, politique d'arbitrage,
+# contrôle de l'entrée, LLM, CRAG, explication, reprises) est commun aux deux profils.
+# Valeurs de démonstration, à valider avec le cabinet (spec des profils, « Questions »).
+sous_traitance:
+  # Règles par domaine : seuils et pénalités de score (retirées de 1,0).
+  rules:
+    juridique:
+      subcontractor_cap_min_pct: 100          # plafond du sous-traitant, % du montant du contrat
+      subcontractor_cap_score_penalty: 0.5
+      # protection des dessins et documents remis : chaque catégorie dans une seule liste
+      design_accepted: [usage_limite_au_projet]
+      design_penalized: [confidentialite_seule]
+      design_blocking: [reutilisation_autorisee]
+      design_score_penalty: 0.3               # confidentialité seule, ou clause absente
+    financier:
+      # pénalités de retard d'exécution dues par le sous-traitant (C. civ., art. 1231-5)
+      execution_delay_penalties_min_cap_pct: 5        # plafond minimal, % du montant du contrat
+      execution_delay_penalties_score_penalty: 0.4    # sous le minimum, ou clause absente
+      # délai de paiement par le donneur d'ordre (C. com., art. L441-10)
+      payment_delay_max_days_invoice: 60              # jours à compter de la date de facture
+      payment_delay_max_days_end_of_month: 45         # jours fin de mois
+      payment_delay_max_days_periodic_invoice: 45     # jours après une facture périodique
+      payment_delay_score_penalty: 0.2                # au-delà, ou délai présent mais non chiffré
+    conformite:
+      # obligation de certification : la clause absente est un blocage, sans réglage
+      certification_accepted: [norme_et_preuves]
+      certification_penalized: [norme_sans_preuves, conformite_generale]
+      certification_score_penalty: 0.3
+      # assurance du sous-traitant
+      insurance_min_eur: 2000000              # montant garanti par sinistre, en euros
+      insurance_score_penalty: 0.3            # sous le minimum, non chiffrée, ou absente
+    operationnel:
+      # délai d'exécution : la clause absente est pénalisée comme un délai indicatif
+      schedule_accepted: [date_contractuelle]
+      schedule_penalized: [delai_indicatif]
+      schedule_score_penalty: 0.4
+  # Vérification des absences (comme `extraction.absence_terms`) : un terme qui évoque la
+  # clause, dans le texte masqué, interdit de la déclarer absente. Termes ancrés, pour ne
+  # pas redemander une clause bien extraite : ni « pénalités de retard » seul, ni « donne
+  # lieu à des pénalités » (en droit commercial, les pénalités de retard de paiement,
+  # C. com., art. L441-10, II, ne sont pas celles du sous-traitant) ; ni « assurance »
+  # seul (assurance qualité) ; ni « certificat » ou « procès-verbal » seuls (certificat
+  # d'assurance, procès-verbal de réception) ; ni « par sinistre » (plafond de
+  # responsabilité). Listes imparfaites : une couche de défense parmi d'autres.
+  absence_terms:
+    responsabilite_donneur_ordre:
+      - responsabilité du donneur d'ordre
+      - responsabilité de l'entrepreneur principal
+      - le donneur d'ordre répond de
+      - le donneur d'ordre répond du
+      - le donneur d'ordre ne répond
+      - l'entrepreneur principal répond de
+      - l'entrepreneur principal ne répond
+    responsabilite_sous_traitant:
+      - responsabilité du sous-traitant
+      - le sous-traitant répond de
+      - le sous-traitant répond du
+      - le sous-traitant ne répond
+    protection_design:
+      - dessins
+      - plans
+      - propriété intellectuelle
+      - documents remis
+    revision_prix:
+      # termes du fournisseur ; « peut être révisé » attrape aussi « le planning peut être
+      # révisé » : une révision de prix déclarée absente y est redemandée, puis escaladée
+      # (sens prudent)
+      - révision des prix
+      - révision du prix
+      - révision des tarifs
+      - prix sont révisés
+      - prix peuvent être révisés
+      - peut être révisé
+      - peuvent être révisés
+      - indexation
+      - prix sont indexés
+      - tarifs sont indexés
+      - prix indexés
+    delai_paiement:
+      - payables à
+      - payable à
+      - payables dans
+      - payable dans
+      - délai de paiement
+      - délai de règlement
+    penalites_retard_execution:
+      - pénalités de retard d'exécution
+      - pénalité de retard d'exécution
+      - pénalités de retard de livraison
+      - pénalité de retard de livraison
+      - pénalités d'exécution
+      - pénalités de retard dans l'exécution
+      - pénalités pour retard d'exécution
+      - clause pénale
+    obligation_certification:
+      - certificat de conformité
+      - certificats de conformité
+      - certification
+      - procès-verbal d'essai
+      - procès-verbaux d'essai
+      - rapport d'essai
+      - rapports d'essais
+      - norme
+    assurance_sous_traitant:
+      - attestation d'assurance
+      - certificat d'assurance
+      - police d'assurance
+      - assurance responsabilité civile
+      - assurance couvrant
+      - souscrit une assurance
+      - souscrire une assurance
+      - assuré auprès
+      - assurée auprès
+    delai_execution:
+      - délai d'exécution
+      - délais d'exécution
+      - délai de livraison
+      - délais de livraison
+      - date de livraison
+      - planning
+  # Cohérence entre catégorie et citation (comme `extraction.category_terms`) : parmi les
+  # catégories dont un terme figure dans la citation, la première l'emporte, d'où l'ordre,
+  # du plus spécifique au moins spécifique. « confidentiel » vient après les termes de
+  # limite d'usage : une citation qui limite l'usage dit aussi la confidentialité. Les
+  # termes de réutilisation sont larges (la racine « réutilis » couvre réutiliser,
+  # « peut les réutiliser », réutilise, réutilisation, réutilisable ; « reutilis », la
+  # même sans accent, que la comparaison ne retire pas ; « librement », « usage
+  # libre »), dans le sens prudent : c'est la catégorie qui bloque, et une citation qui
+  # l'évoque n'est jamais lue autrement. Une négation (« n'est autorisé à réutiliser …
+  # que pour … ») est donc redemandée, puis revue par un humain : voulu. Les autres
+  # types sont ancrés (« certificat » seul est dans « certification » ; « conformes aux
+  # normes » seul dit « sans norme nommée », ce qui est la conformité générale, non
+  # « norme sans preuves »). La conformité générale vient avant les preuves : des
+  # procès-verbaux remis ne nomment pas de norme, et une citation qui renvoie aux normes
+  # en vigueur n'est jamais lue `norme_et_preuves` (acceptée). Les termes de la
+  # catégorie acceptée sont des formes verbales actives suivies d'un article défini
+  # (« remet les procès-verbaux d'essai ») : une négation du verbe s'insère entre le
+  # verbe et son objet (« ne remet pas les », « ne remet aucun », « sans remettre les »,
+  # « n'est pas tenu de remettre les »), et n'en contient donc aucun. Limite, les termes
+  # étant cherchés comme sous-chaînes de la citation : une négation portée par le sujet
+  # (« aucun sous-traitant ne remet les procès-verbaux d'essai ») ou une restriction
+  # (« ne remet les … que sur demande », « … s'il le juge utile ») contient le terme, et
+  # une extraction `norme_et_preuves` n'y est pas contredite (sens favorable). Ceux des
+  # catégories pénalisées restent larges. Une forme positive qui manque pousse le modèle
+  # vers une pénalité si la citation contient un terme d'une catégorie pénalisée
+  # (« conforme à la norme »…), sens prudent ; sinon, la citation n'est pas contrôlée.
+  # Une forme qu'une négation contient, au contraire, y pousserait la négation : ni nom
+  # de preuve seul (« aucun procès-verbal d'essai n'est exigé »), ni participe (« aucun
+  # certificat de conformité remis », « sans rapport d'essai à remettre »), ni
+  # « accompagné(e)(s) des … » (« ne sont pas accompagnées des … »), ni « livré avec
+  # un … » (« n'est pas livré avec un … »). Chaque preuve est nommée avec son
+  # complément : un procès-verbal de réception n'est pas une preuve d'essai.
+  category_terms:
+    protection_design:
+      reutilisation_autorisee:
+        - réutilis   # racine : réutiliser, réutilise, réutilisation, réutilisable
+        - reutilis   # même racine sans accent : la comparaison garde les accents
+        - librement
+        - usage libre
+      usage_limite_au_projet:
+        - seules fins
+        - seule fin
+        - exclusivement pour
+        - uniquement pour
+        - seul projet
+        - que pour le présent projet
+        - que pour le projet
+        - utilisé que pour
+        - utilisée que pour
+        - utilisés que pour
+        - utilisées que pour
+      confidentialite_seule:
+        - confidentiel
+        - confidentialité
+    obligation_certification:
+      conformite_generale:
+        - normes en vigueur
+        - normes applicables
+      norme_et_preuves:
+        # formes verbales actives suivies d'un article défini, où une négation s'insère
+        # entre le verbe et son objet ; « d'essai » couvre aussi « d'essais » (sous-chaîne)
+        # procès-verbaux d'essais
+        - remet les procès-verbaux d'essai
+        - remettra les procès-verbaux d'essai
+        - fournit les procès-verbaux d'essai
+        - fournira les procès-verbaux d'essai
+        - joint les procès-verbaux d'essai
+        - remet le procès-verbal d'essai
+        - remettra le procès-verbal d'essai
+        - fournit le procès-verbal d'essai
+        - fournira le procès-verbal d'essai
+        - joint le procès-verbal d'essai
+        # certificats de conformité
+        - remet les certificats de conformité
+        - remettra les certificats de conformité
+        - fournit les certificats de conformité
+        - fournira les certificats de conformité
+        - joint les certificats de conformité
+        - remet le certificat de conformité
+        - remettra le certificat de conformité
+        - fournit le certificat de conformité
+        - fournira le certificat de conformité
+        - joint le certificat de conformité
+        # certificats d'essai
+        - remet les certificats d'essai
+        - remettra les certificats d'essai
+        - fournit les certificats d'essai
+        - fournira les certificats d'essai
+        - joint les certificats d'essai
+        - remet le certificat d'essai
+        - remettra le certificat d'essai
+        - fournit le certificat d'essai
+        - fournira le certificat d'essai
+        - joint le certificat d'essai
+        # rapports d'essais
+        - remet les rapports d'essai
+        - remettra les rapports d'essai
+        - fournit les rapports d'essai
+        - fournira les rapports d'essai
+        - joint les rapports d'essai
+        - remet le rapport d'essai
+        - remettra le rapport d'essai
+        - fournit le rapport d'essai
+        - fournira le rapport d'essai
+        - joint le rapport d'essai
+      norme_sans_preuves:
+        - conforme à la norme
+        - conformes à la norme
+        - conformément à la norme
+    delai_execution:
+      delai_indicatif:
+        - indicatif   # couvre « à titre indicatif »
+        - indicative
+      date_contractuelle:
+        - au plus tard le
+        - planning contractuel
+        - calendrier contractuel
+        - date contractuelle
+    # même type que dans le profil fournisseur, mêmes termes
+    delai_paiement:
+      facture_periodique:
+        - factures périodiques
+        - facture périodique
+        - factures récapitulatives
+        - facture récapitulative
+        - facturation périodique
+      fin_de_mois:
+        - jours fin de mois
+        - jours fin du mois
+      date_facture:
+        - date d'émission
+        - date de facture
+        - date de la facture
+        - date de facturation
+
 # Politique d'arbitrage humain, appliquée par cdg.policy à chaque reprise.
 # Relecteur et motif sont toujours exigés ; une réponse refusée est redemandée.
 human_policy:

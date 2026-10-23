@@ -42,6 +42,36 @@ PAYMENT_BASES: tuple[str, ...] = get_args(PaymentBasis)
 ClauseCategory = Literal[TransferCategory, PaymentBasis]
 CLAUSE_CATEGORIES: tuple[str, ...] = get_args(ClauseCategory)
 
+# Catégories du profil `sous_traitance` (`docs/spec-profils-sous-traitance.md`) : ce que dit
+# le contrat.
+
+# Protection des dessins et documents remis au sous-traitant (`protection_design`).
+DesignProtection = Literal[
+    "usage_limite_au_projet",  # usage limité au projet, confidentialité stipulée ou non
+    "confidentialite_seule",  # confidentialité, sans limite d'usage
+    "reutilisation_autorisee",  # le sous-traitant peut les réutiliser
+]
+DESIGN_PROTECTIONS: tuple[str, ...] = get_args(DesignProtection)
+
+# Obligation de certification (`obligation_certification`).
+CertificationRequirement = Literal[
+    "norme_et_preuves",  # normes nommées et preuves à remettre (essais, certificats)
+    "norme_sans_preuves",  # normes nommées, aucune preuve exigée
+    "conformite_generale",  # « conforme aux normes en vigueur », aucune norme nommée
+]
+CERTIFICATION_REQUIREMENTS: tuple[str, ...] = get_args(CertificationRequirement)
+
+# Délai d'exécution (`delai_execution`).
+ExecutionSchedule = Literal[
+    "date_contractuelle",  # date, planning ou délai ferme qui engage le sous-traitant
+    "delai_indicatif",
+]
+EXECUTION_SCHEDULES: tuple[str, ...] = get_args(ExecutionSchedule)
+
+SubcontractCategory = Literal[
+    DesignProtection, CertificationRequirement, ExecutionSchedule, PaymentBasis
+]
+
 
 class Clause(BaseModel):
     kind: str  # un des types du profil (`domain/profiles.py`)
@@ -62,9 +92,12 @@ class Clause(BaseModel):
 
 
 def category_required(clause: Clause, category_kinds: Collection[str]) -> bool:
-    """Catégorie exigée : transfert présent ; délai de paiement présent et chiffré (un délai
-    non chiffré peut ne pas dire son point de départ). `category_kinds` : les types à
-    catégorie du profil (`ProfileSpec.category_kinds`)."""
+    """Catégorie exigée : clause présente d'un type à catégorie du profil, sauf le délai de
+    paiement non chiffré (un délai non chiffré peut ne pas dire son point de départ ; même
+    sens dans les deux profils). Les types à catégorie sans valeur l'exigent donc dès
+    qu'ils sont présents : transfert hors de l'UE (fournisseur), protection des dessins,
+    obligation de certification et délai d'exécution (sous-traitance). `category_kinds` :
+    les types à catégorie du profil (`ProfileSpec.category_kinds`)."""
     if clause.kind not in category_kinds or not clause.present:
         return False
     return clause.kind != "delai_paiement" or clause.value is not None

@@ -21,7 +21,8 @@ from cdg.domain.profiles import Profile
 
 Operation = Literal["analyse", "revue", "expiration", "relance", "reprise"]
 # rappel de fin d'une opération : le statut du moteur (seuls `statut`,
-# `proposed_decision`, `final_decision` et la présence de `reject_reason` sont lus)
+# `proposed_decision`, `final_decision`, la présence de `reject_reason` et, pour la revue
+# et la reprise, `profil` sont lus)
 Finish = Callable[[Mapping[str, Any]], None]
 
 
@@ -42,7 +43,10 @@ class Telemetry(Protocol):
     ) -> AbstractContextManager[Finish]:
         """Une trace par opération ; le rappel rendu reçoit le statut final. `profile` :
         profil de l'analyse, pour les opérations qui le connaissent à l'ouverture
-        (analyse, relance) ; `None`, la trace n'en porte pas."""
+        (analyse, relance). `None` : la revue et la reprise le lisent dans la clé `profil`
+        du statut final (clé absente : avertissement, sans attribut ; profil inconnu :
+        remplacé, avertissement) ; l'expiration, une trace pour plusieurs contrats de
+        profils peut-être différents, n'en porte aucun, même si un statut lui est rendu."""
         ...
 
     def step(

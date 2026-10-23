@@ -21,6 +21,7 @@ from web_helpers import (
 
 from cdg import cli
 from cdg.adapters.mcp.server import create_server
+from cdg.domain import profiles
 
 METHODS = {
     "analyse",
@@ -257,14 +258,18 @@ def portes(tmp_path, monkeypatch):
     return recorder, {"cli": by_cli, "web": by_web, "mcp": by_mcp}
 
 
-def test_meme_profil_aux_trois_portes(portes):
+@pytest.mark.parametrize("profil", profiles.PROFILES)
+def test_meme_profil_aux_trois_portes(portes, profil):
+    """Chaque profil choisi à une porte arrive tel quel à la même méthode du service, et
+    l'analyse est faite sous lui."""
     recorder, doors = portes
     for door in doors.values():
-        assert door("fournisseur")
-    assert [k["profile"] for k in recorder.keywords["analyse"]] == ["fournisseur"] * 3
+        assert door(profil)
+    assert [k["profile"] for k in recorder.keywords["analyse"]] == [profil] * 3
+    assert {row["profil"] for row in recorder.contracts()} == {profil}
 
 
-@pytest.mark.parametrize("profil", [None, "", "Fournisseur", "sous_traitance"])
+@pytest.mark.parametrize("profil", [None, "", "Fournisseur", "inexistant"])
 @pytest.mark.parametrize("door", ["cli", "web", "mcp"])
 def test_profil_absent_refuse_aux_trois_portes(portes, door, profil):
     """Profil absent, vide ou inconnu : refusé à chaque porte, avant tout appel au

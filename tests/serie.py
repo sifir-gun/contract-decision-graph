@@ -105,6 +105,14 @@ def classify(expected: dict[str, Any], obtained: Outcome) -> str:
     return "ecart"
 
 
+def planned_review(
+    expected: dict[str, Any], obtained: Outcome, human: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Décision humaine du jeu (`human`) à reprendre pour une analyse suspendue, si l'issue
+    est l'attendue ; None sinon (revue non prévue : la série décide prudemment)."""
+    return human if classify(expected, obtained) == "conforme" else None
+
+
 def describe(outcome: Outcome) -> str:
     if outcome.rejected:
         return "rejet"

@@ -12,11 +12,12 @@ exceptions:
     paquet: {nom: deepmerge-ts, type: npm, version: 7.1.5}
     motif: >-
       CVE-2026-40345, épuisement de pile en fusionnant des graphes d'objets récursifs
-      (déni de service), corrigé en 8.0.0. Dans Langfuse web et worker 4.58.0 (revue du
-      13/10 : la 7.1.5 y reste, à côté de la 8.0.2, tirée par @prisma/config 6.19.3, le
-      chargeur de configuration de Prisma), que le projet ne construit pas ; images de test
-      seulement, joignables depuis l'application seule (cluster) ou le poste (127.0.0.1), et
-      du JSON ne peut pas exprimer de cycle. À revoir à la version suivante de Langfuse.
+      (déni de service), corrigé en 8.0.0. Dans Langfuse web et worker 4.68.0 (revues du
+      13/10 et du 22/10 : la 7.1.5 y reste, à côté de la 8.0.2, tirée par @prisma/config
+      6.19.3, le chargeur de configuration de Prisma), que le projet ne construit pas ;
+      images de test seulement, joignables depuis l'application seule (cluster) ou le poste
+      (127.0.0.1), et du JSON ne peut pas exprimer de cycle. À revoir à la version suivante
+      de Langfuse.
     decidee: 2026-10-13
     expire: 2026-12-31
   - vulnerabilite: CVE-2026-5450
@@ -50,3 +51,19 @@ exceptions:
       de l'image de Valkey ; 30 jours au plus (décision du 13/10).
     decidee: 2026-10-13
     expire: 2026-11-12
+  - vulnerabilite: GHSA-mchm-gjx6-7h55
+    paquet: {nom: '@sentry/nextjs', type: npm, version: 10.64.0}
+    motif: >-
+      CVE-2026-114139, publiée le 22/10 : avec l'option tunnelRoute, le SDK saute le
+      middleware de Next.js sur tout le chemin du tunnel, plus largement que la réécriture
+      vers Sentry ; corrigé en 10.75.2. Dans Langfuse web 4.68.0 (absent du worker), que
+      le projet ne construit pas ; la 4.68.0, dernière version au 22/10, et la branche
+      principale amont gardent la 10.64.0. L'avis exige quatre conditions réunies ; trois
+      manquent dans l'image, et une seule suffit : tunnelRoute non posé (commenté dans
+      next.config.mjs, aucune réécriture de tunnel compilée), construction Turbopack et non
+      webpack, aucun middleware (middleware-manifest.json vide). Images de test seulement,
+      joignables depuis l'application seule (cluster) ou le poste (127.0.0.1). Sortie : la
+      première version de Langfuse avec @sentry/nextjs 10.75.2 ; 30 jours au plus
+      (décision du 22/10).
+    decidee: 2026-10-22
+    expire: 2026-11-21

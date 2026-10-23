@@ -16,7 +16,7 @@ from test_chaine_approvisionnement import chaine
 from test_ci import ci_commands
 
 ROOT = Path(__file__).resolve().parents[1]
-TODAY = date(2026, 10, 13)
+TODAY = date(2026, 10, 22)
 COMMAND = 'uv run --no-sync python scripts/chaine.py images-de-test --dossier "$RUNNER_TEMP/images-de-test"'
 
 
@@ -97,9 +97,11 @@ def test_tirage_impossible_n_arrete_pas_les_autres_images(tmp_path, capsys):
 
 def test_exceptions_des_tests_a_part_justifiees_datees():
     """Les failles relevées le 04/10, revues le 13/10 avec Langfuse 4.58.0 (celle de
-    source-map-js, du 06/10, sortie avec la mise à jour), et celle de zlib dans Valkey
-    (13/10), chacune justifiée et datée (90 jours au plus) ; lues par la même règle que
-    celles du produit."""
+    source-map-js, du 06/10, sortie avec la mise à jour), celle de zlib dans Valkey
+    (13/10), puis celle de @sentry/nextjs dans Langfuse 4.68.0 (22/10), chacune justifiée
+    et datée (90 jours au plus) ; lues par la même règle que celles du produit. Celles
+    de follow-redirects et du SDK MCP (21/10) sont sorties avec la 4.68.0, qui embarque
+    leurs correctifs, comme next 16.4.2."""
     module = chaine()
     path = module.TEST_EXCEPTIONS
     rules = module.grype_config(path, TODAY)["ignore"]
@@ -108,6 +110,7 @@ def test_exceptions_des_tests_a_part_justifiees_datees():
         ("CVE-2026-5928", "libc6"),
         ("CVE-2026-85091", "zlib"),
         ("GHSA-ggr8-5vv4-36mx", "deepmerge-ts"),
+        ("GHSA-mchm-gjx6-7h55", "@sentry/nextjs"),
     ]
     assert path != module.EXCEPTIONS
 
@@ -125,6 +128,32 @@ def test_zlib_de_valkey_trente_jours_au_plus_jusqu_a_la_prochaine_image():
     assert entry["paquet"] == {"nom": "zlib", "type": "apk", "version": "1.3.2-r0"}
     assert (entry["expire"] - entry["decidee"]).days <= 30
     assert "prochaine publication" in " ".join(entry["motif"].split())
+
+
+def test_sentry_de_langfuse_trente_jours_au_plus():
+    """Décision du 22/10 : GHSA-mchm-gjx6-7h55 (critique, publiée le jour même :
+    contournement du middleware par la route tunnel de @sentry/nextjs, corrigé en
+    10.75.2), que garde Langfuse web 4.68.0, admise 30 jours au plus. Le motif tient aux
+    trois conditions de l'avis absentes de l'image (tunnelRoute non posé, construction
+    Turbopack, aucun middleware) ; elle sort avec la première version de Langfuse qui
+    embarque le correctif."""
+    text = chaine().TEST_EXCEPTIONS.read_text(encoding="utf-8")
+    [entry] = [
+        e
+        for e in yaml.safe_load(text)["exceptions"]
+        if e["vulnerabilite"] == "GHSA-mchm-gjx6-7h55"
+    ]
+    assert entry["paquet"] == {
+        "nom": "@sentry/nextjs",
+        "type": "npm",
+        "version": "10.64.0",
+    }
+    assert entry["decidee"] == date(2026, 10, 22)
+    assert (entry["expire"] - entry["decidee"]).days <= 30
+    motif = " ".join(entry["motif"].split())
+    for condition in ("tunnelRoute", "Turbopack", "middleware"):
+        assert condition in motif, condition
+    assert "première version de Langfuse avec @sentry/nextjs 10.75.2" in motif
 
 
 def test_jamais_pour_le_produit_scanne_par_la_ci_avant_le_cluster():

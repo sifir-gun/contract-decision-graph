@@ -1,0 +1,57 @@
+21.A.307    Conditions d’admissibilité pour l’installation applicables aux pièces et équipements
+
+a) 
+
+Une pièce ou un équipement peut être installé dans un produit possédant une certification de type lorsqu’il est en état de fonctionner en toute sécurité, qu’il est marqué conformément à la sous-partie Q et qu’il est accompagné d’un certificat d’autorisation de mise en service (formulaire 1 de l’AESA), certifiant que l’élément a été fabriqué conformément aux données de définition approuvées.
+
+b) 
+
+Par dérogation au point a) et pour autant que les conditions visées au point c) soient remplies, les pièces ou équipements suivants ne nécessitent pas de formulaire 1 de l’AESA pour pouvoir être installés dans un produit possédant un certificat de type:
+
+1) 
+
+une pièce standard;
+
+2) 
+
+dans le cas d’un ELA1 ou ELA2, une pièce ou un équipement:
+
+i) 
+
+dont la durée de vie n’est pas limitée, et qui n’est ni une pièce de la structure primaire, ni une pièce des commandes de vol;
+
+ii) 
+
+identifié pour son installation dans l’aéronef spécifique;
+
+iii) 
+
+à installer dans un aéronef dont le propriétaire a vérifié la conformité aux conditions applicables des points i) et ii) et assume la responsabilité de cette conformité;
+
+3) 
+
+une pièce ou un équipement pour lequel les conséquences d’une non-conformité avec ses données de définition approuvées ont un effet négligeable sur la sécurité du produit et qui est identifié comme tel par le titulaire de l’agrément de conception dans les instructions pour le maintien de la navigabilité. Afin de déterminer les effets sur la sécurité d’une pièce ou d’un équipement non conforme, le titulaire de l’agrément de conception peut établir, dans les instructions pour le maintien de la navigabilité, des vérifications spécifiques à effectuer par l’installateur de la pièce ou de l’équipement sur le produit;
+
+4) 
+
+dans le cas de l’avionnage d’une modification standard conformément au point 21.A.90B ou d’une réparation standard conformément au point 21.A.431B, une pièce ou un équipement pour lequel les conséquences d’une non-conformité avec ses données de définition ont un effet négligeable sur la sécurité du produit, et qui est identifié comme tel dans les spécifications de certification pour les modifications standard et les réparations standard émises conformément au point a)2) du point 21.A.90B et au point a)2) du point 21.A.431B. Afin de déterminer les effets sur la sécurité d’une pièce ou d’un équipement non conforme, des vérifications spécifiques à effectuer par l’installateur de la pièce ou de l’équipement sur le produit peuvent être établies dans les spécifications de certification susmentionnées;
+
+5) 
+
+une pièce ou un équipement qui est exempté d’agrément de navigabilité conformément au règlement (UE) no 965/2012 de la Commission ( 9 ); et
+
+6) 
+
+une pièce ou un équipement qui est un élément d’un assemblage supérieur identifié aux points b)1) à b)5); et
+
+▼M12
+
+7) 
+
+une pièce ou un équipement fabriqué par une personne ou un organisme visé à l’article 9, paragraphe 4, du présent règlement.
+
+▼M7
+
+c) 
+
+Les pièces et équipements énumérés au point b) peuvent être installés sur un produit possédant un certificat de type sans être accompagnés d’un formulaire 1 de l’EASA, si l’installateur détient un document délivré par la personne ou l’organisme qui a fabriqué la pièce ou l’équipement, qui contient le nom de la pièce ou de l’équipement, le numéro de référence et la date de délivrance et qui démontre la conformité de la pièce ou de l’équipement avec les données de définition concernées.

@@ -1,15 +1,28 @@
 """Chargement et validation de config/decision.yaml. Invalide : ConfigError, arrêt au démarrage."""
 
 import re
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal, NamedTuple, assert_never, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cdg.domain import profiles
-from cdg.domain.models import Decision, Domain, TransferCategory
+from cdg.domain.models import (
+    CERTIFICATION_REQUIREMENTS,
+    DESIGN_PROTECTIONS,
+    EXECUTION_SCHEDULES,
+    CertificationRequirement,
+    Decision,
+    DesignProtection,
+    Domain,
+    ExecutionSchedule,
+    TransferCategory,
+)
 from cdg.domain.numeric import rounded
+from cdg.domain.profiles import Profile
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "decision.yaml"
 
@@ -59,51 +72,67 @@ class Budget(_Strict):
 
 
 Term = Annotated[str, Field(min_length=1)]
+# types de clauses -> termes qui évoquent la clause (une liste non vide par type)
+AbsenceTerms = dict[str, Annotated[list[Term], Field(min_length=1)]]
+# types à catégorie -> catégorie -> termes qui l'évoquent, de la plus spécifique à la moins
+# spécifique (l'ordre fait foi)
+CategoryTerms = dict[str, dict[str, Annotated[list[Term], Field(min_length=1)]]]
+
+
+def _check_terms(
+    absence_terms: Mapping[str, Sequence[str]],
+    category_terms: Mapping[str, Mapping[str, Sequence[str]]],
+    spec: profiles.ProfileSpec,
+) -> None:
+    """Termes d'absence et de catégorie d'un profil, contre les types et les catégories de
+    ce profil : un jeu par type, aucun type inconnu, aucune catégorie inconnue, aucun
+    terme répété dans un type (casse ignorée). Partagée par la section du fournisseur
+    (`extraction`) et par celle de la sous-traitance."""
+    profile_kinds = set(spec.kinds)
+    kinds = set(absence_terms)
+    if kinds != profile_kinds:
+        missing = sorted(profile_kinds - kinds)
+        unknown = sorted(kinds - profile_kinds)
+        raise ValueError(
+            f"absence_terms : types manquants {missing}, types inconnus {unknown}"
+        )
+    for kind, terms in absence_terms.items():
+        if len({t.casefold() for t in terms}) != len(terms):
+            raise ValueError(f"absence_terms : terme répété pour {kind}")
+    kind_categories = spec.kind_categories
+    kinds = set(category_terms)
+    if kinds != set(kind_categories):
+        missing = sorted(set(kind_categories) - kinds)
+        unknown = sorted(kinds - set(kind_categories))
+        raise ValueError(
+            f"category_terms : types manquants {missing}, types inconnus {unknown}"
+        )
+    for kind, by_category in category_terms.items():
+        for category in by_category:
+            if category not in kind_categories[kind]:
+                raise ValueError(
+                    f"category_terms : catégorie inconnue pour {kind} : {category}"
+                )
+        folded = [t.casefold() for ts in by_category.values() for t in ts]
+        if len(set(folded)) != len(folded):
+            raise ValueError(f"category_terms : terme répété pour {kind}")
 
 
 class Extraction(_Strict):
     max_attempts: Annotated[int, Field(ge=1)]
     # vérification des absences : termes qui évoquent chaque type de clause
-    absence_terms: dict[str, Annotated[list[Term], Field(min_length=1)]]
+    absence_terms: AbsenceTerms
     # cohérence entre catégorie et citation (J5) : pour chaque type à catégorie, des termes
     # par catégorie, de la plus spécifique à la moins spécifique (l'ordre fait foi)
-    category_terms: dict[str, dict[str, Annotated[list[Term], Field(min_length=1)]]]
+    category_terms: CategoryTerms
 
     @model_validator(mode="after")
-    def _un_jeu_de_termes_par_type(self) -> "Extraction":
-        # ces sections sont celles du profil fournisseur, le seul profil (ADR 010)
-        profile_kinds = set(profiles.spec("fournisseur").kinds)
-        kinds = set(self.absence_terms)
-        if kinds != profile_kinds:
-            missing = sorted(profile_kinds - kinds)
-            unknown = sorted(kinds - profile_kinds)
-            raise ValueError(
-                f"absence_terms : types manquants {missing}, types inconnus {unknown}"
-            )
-        for kind, terms in self.absence_terms.items():
-            if len({t.casefold() for t in terms}) != len(terms):
-                raise ValueError(f"absence_terms : terme répété pour {kind}")
-        return self
-
-    @model_validator(mode="after")
-    def _termes_par_categorie(self) -> "Extraction":
-        kind_categories = profiles.spec("fournisseur").kind_categories
-        kinds = set(self.category_terms)
-        if kinds != set(kind_categories):
-            missing = sorted(set(kind_categories) - kinds)
-            unknown = sorted(kinds - set(kind_categories))
-            raise ValueError(
-                f"category_terms : types manquants {missing}, types inconnus {unknown}"
-            )
-        for kind, by_category in self.category_terms.items():
-            for category in by_category:
-                if category not in kind_categories[kind]:
-                    raise ValueError(
-                        f"category_terms : catégorie inconnue pour {kind} : {category}"
-                    )
-            terms = [t.casefold() for ts in by_category.values() for t in ts]
-            if len(set(terms)) != len(terms):
-                raise ValueError(f"category_terms : terme répété pour {kind}")
+    def _termes_du_profil_fournisseur(self) -> "Extraction":
+        # ces sections sont celles du profil fournisseur (ADR 010) ; celles de la
+        # sous-traitance sont dans la section `sous_traitance`
+        _check_terms(
+            self.absence_terms, self.category_terms, profiles.spec("fournisseur")
+        )
         return self
 
 
@@ -168,6 +197,130 @@ class RulesConfig(_Strict):
     financier: FinancierRules
     conformite: ConformiteRules
     operationnel: OperationnelRules
+
+
+def _check_partition(
+    kind: str, categories: Iterable[str], lists: Mapping[str, Sequence[str]]
+) -> None:
+    """Chaque catégorie du type `kind` figure dans exactement une des listes réglées (les
+    valeurs hors catégories sont déjà refusées par le type `Literal` des listes)."""
+    placed = Counter(category for values in lists.values() for category in values)
+    twice = sorted(category for category, n in placed.items() if n > 1)
+    if twice:
+        raise ValueError(
+            f"{kind} : catégories classées plus d'une fois dans "
+            f"{', '.join(lists)} : {twice}"
+        )
+    missing = sorted(set(categories) - set(placed))
+    if missing:
+        raise ValueError(
+            f"{kind} : catégories dans aucune liste de {', '.join(lists)} : {missing}"
+        )
+
+
+class SousTraitanceJuridique(_Strict):
+    # plafond de responsabilité du sous-traitant, % du montant du contrat
+    subcontractor_cap_min_pct: Quantity
+    subcontractor_cap_score_penalty: Penalty
+    # protection des dessins et documents remis : chaque catégorie dans une seule liste.
+    # Acceptée : rien ; pénalisée : pénalité ; bloquante : blocage dur
+    design_accepted: list[DesignProtection]
+    design_penalized: list[DesignProtection]
+    design_blocking: list[DesignProtection]
+    design_score_penalty: Penalty  # catégorie pénalisée, ou clause absente
+
+    @model_validator(mode="after")
+    def _protection_des_dessins(self) -> "SousTraitanceJuridique":
+        _check_partition(
+            "protection_design",
+            DESIGN_PROTECTIONS,
+            {
+                "design_accepted": self.design_accepted,
+                "design_penalized": self.design_penalized,
+                "design_blocking": self.design_blocking,
+            },
+        )
+        return self
+
+
+class SousTraitanceFinancier(_Strict):
+    # pénalités de retard d'exécution dues par le sous-traitant (C. civ., art. 1231-5)
+    execution_delay_penalties_min_cap_pct: Quantity
+    execution_delay_penalties_score_penalty: Penalty  # aussi si la clause est absente
+    # délai de paiement par le donneur d'ordre (C. com., art. L441-10)
+    payment_delay_max_days_invoice: Quantity  # à compter de la date de facture
+    payment_delay_max_days_end_of_month: Quantity  # jours fin de mois
+    payment_delay_max_days_periodic_invoice: Quantity  # après une facture périodique
+    payment_delay_score_penalty: Penalty
+
+
+class SousTraitanceConformite(_Strict):
+    # obligation de certification : chaque catégorie dans une seule liste, acceptée ou
+    # pénalisée ; la clause absente bloque (spec), sans réglage
+    certification_accepted: list[CertificationRequirement]
+    certification_penalized: list[CertificationRequirement]
+    certification_score_penalty: Penalty
+    # assurance du sous-traitant : montant minimal garanti, € par sinistre
+    insurance_min_eur: Quantity
+    insurance_score_penalty: Penalty  # sous le minimum, non chiffrée ou absente
+
+    @model_validator(mode="after")
+    def _obligation_de_certification(self) -> "SousTraitanceConformite":
+        _check_partition(
+            "obligation_certification",
+            CERTIFICATION_REQUIREMENTS,
+            {
+                "certification_accepted": self.certification_accepted,
+                "certification_penalized": self.certification_penalized,
+            },
+        )
+        return self
+
+
+class SousTraitanceOperationnel(_Strict):
+    # délai d'exécution : chaque catégorie dans une seule liste
+    schedule_accepted: list[ExecutionSchedule]
+    schedule_penalized: list[ExecutionSchedule]
+    schedule_score_penalty: Penalty  # catégorie pénalisée, ou clause absente
+
+    @model_validator(mode="after")
+    def _delai_d_execution(self) -> "SousTraitanceOperationnel":
+        _check_partition(
+            "delai_execution",
+            EXECUTION_SCHEDULES,
+            {
+                "schedule_accepted": self.schedule_accepted,
+                "schedule_penalized": self.schedule_penalized,
+            },
+        )
+        return self
+
+
+class SousTraitanceRules(_Strict):
+    juridique: SousTraitanceJuridique
+    financier: SousTraitanceFinancier
+    conformite: SousTraitanceConformite
+    operationnel: SousTraitanceOperationnel
+
+
+class SousTraitanceConfig(_Strict):
+    """Réglages du profil `sous_traitance` (spec, « Configuration »). Les sections
+    `rules` et `extraction` du fichier restent celles du profil fournisseur.
+
+    Section apparue en PR 2, après l'archive des configurations : absente par défaut du
+    modèle (`DecisionConfig.sous_traitance`), pour relire une configuration archivée,
+    mais exigée du fichier du projet (`load_config`, ADR 006)."""
+
+    rules: SousTraitanceRules
+    # termes qui évoquent chaque type de clause du profil, et chaque catégorie (voir
+    # `Extraction`) ; validés contre les types du profil sous_traitance
+    absence_terms: AbsenceTerms
+    category_terms: CategoryTerms
+
+    @model_validator(mode="after")
+    def _termes_du_profil_sous_traitance(self) -> "SousTraitanceConfig":
+        _check_terms(self.absence_terms, self.category_terms, profiles.SOUS_TRAITANCE)
+        return self
 
 
 class HumanPolicy(_Strict):
@@ -295,6 +448,14 @@ class LLMConfig(_Strict):
         return models.main if tier == "main" else models.light
 
 
+class ProfileTerms(NamedTuple):
+    """Termes de la vérification de l'extraction pour un profil : ceux qui évoquent
+    chaque type de clause (absences), et chaque catégorie (`verification.problems_of`)."""
+
+    absence_terms: Mapping[str, Sequence[str]]
+    category_terms: Mapping[str, Mapping[str, Sequence[str]]]
+
+
 class DecisionConfig(_Strict):
     weights: Weights
     thresholds: Thresholds
@@ -303,6 +464,9 @@ class DecisionConfig(_Strict):
     budget: Budget
     extraction: Extraction
     rules: RulesConfig
+    # profil sous_traitance (PR 2) : None seulement pour relire une configuration archivée
+    # d'avant ; le fichier du projet la règle (`load_config`)
+    sous_traitance: SousTraitanceConfig | None = None
     human_policy: HumanPolicy
     input: InputConfig
     llm: LLMConfig
@@ -318,6 +482,25 @@ class DecisionConfig(_Strict):
     def weight(self, domain: Domain) -> float:
         weight: float = getattr(self.weights, domain)
         return weight
+
+    def terms(self, profile: Profile) -> ProfileTerms:
+        """Termes d'absence et de catégorie du profil : la section `extraction` pour le
+        fournisseur (celle d'avant les profils), la section `sous_traitance` pour la
+        sous-traitance. Sans cette section (configuration archivée d'avant elle), erreur
+        qui la nomme : jamais les termes d'un autre profil."""
+        profile = profiles.parse(profile)
+        if profile == "fournisseur":
+            section = self.extraction
+            return ProfileTerms(section.absence_terms, section.category_terms)
+        if profile == "sous_traitance":
+            if self.sous_traitance is None:
+                raise ValueError(
+                    "configuration sans section sous_traitance : profil sous_traitance "
+                    "non analysable"
+                )
+            st = self.sous_traitance
+            return ProfileTerms(st.absence_terms, st.category_terms)
+        assert_never(profile)
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> DecisionConfig:
@@ -347,7 +530,8 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> DecisionConfig:
 
 
 def _unset(model: BaseModel, prefix: str = "") -> list[str]:
-    """Champs du modèle, à toute profondeur, que le fichier ne règle pas lui-même."""
+    """Champs du modèle, à toute profondeur, que le fichier ne règle pas lui-même : absents,
+    ou nuls (la valeur `None` n'existe que par défaut du modèle, pour les archives)."""
     missing = []
     for name in type(model).model_fields:
         path = f"{prefix}{name}"
@@ -355,6 +539,9 @@ def _unset(model: BaseModel, prefix: str = "") -> list[str]:
             missing.append(path)
             continue
         value = getattr(model, name)
+        if value is None:
+            missing.append(path)
+            continue
         nested = value.items() if isinstance(value, dict) else [("", value)]
         for key, item in nested:
             if isinstance(item, BaseModel):

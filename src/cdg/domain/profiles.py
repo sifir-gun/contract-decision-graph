@@ -2,9 +2,10 @@
 
 Un profil nomme un genre de contrat analysable. Il porte les constantes du domaine qui
 dépendent du genre : ses types de clauses, leur partition entre les quatre domaines, l'unité
-de la valeur de chaque type chiffré et les catégories admises de chaque type catégoriel.
-Seul le profil `fournisseur` existe : il reprend à l'identique les constantes qui étaient
-globales, sans changer aucun comportement.
+de la valeur de chaque type chiffré, les catégories admises de chaque type catégoriel et les
+noms des parties dans les constats. Deux profils sont enregistrés : `fournisseur`, qui reprend
+à l'identique les constantes qui étaient globales, sans changer aucun comportement, et
+`sous_traitance` (`SOUS_TRAITANCE`, spec-profils-sous-traitance.md).
 
 Ce module n'importe que `domain/models.py` (ni `domain/config.py`, ni `domain/rules/` :
 pas de cycle configuration -> profils -> règles -> configuration).
@@ -19,13 +20,30 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal, get_args
 
-from cdg.domain.models import PAYMENT_BASES, TRANSFER_CATEGORIES, Domain
+from cdg.domain.models import (
+    CERTIFICATION_REQUIREMENTS,
+    DESIGN_PROTECTIONS,
+    EXECUTION_SCHEDULES,
+    PAYMENT_BASES,
+    TRANSFER_CATEGORIES,
+    Domain,
+)
 
-Profile = Literal["fournisseur"]
+Profile = Literal["fournisseur", "sous_traitance"]
 PROFILES: tuple[Profile, ...] = get_args(Profile)
 
 # profil des états d'avant les profils : le seul possible alors (`of_state`)
 LEGACY_PROFILE: Profile = "fournisseur"
+
+
+@dataclass(frozen=True)
+class Parties:
+    """Noms des deux parties dans les constats du profil, avec leur forme au génitif."""
+
+    client: str  # celle qui commande et paie
+    client_of: str
+    contractor: str  # celle qui exécute
+    contractor_of: str
 
 
 @dataclass(frozen=True)
@@ -38,6 +56,8 @@ class ProfileSpec:
     value_units: Mapping[str, str]
     # types qui portent une catégorie, et catégories admises pour chacun
     kind_categories: Mapping[str, tuple[str, ...]]
+    # noms des parties dans les constats : sans valeur par défaut, un profil les nomme
+    parties: Parties
 
     def __post_init__(self) -> None:
         # copies en lecture seule : un profil ne change pas après sa construction
@@ -47,6 +67,51 @@ class ProfileSpec:
     @property
     def category_kinds(self) -> frozenset[str]:
         return frozenset(self.kind_categories)
+
+
+# Profil de la sous-traitance industrielle (spec-profils-sous-traitance.md), enregistré dans
+# `SPECS` sous ce nom : la configuration valide ses termes contre lui. Les types qu'il
+# partage avec `fournisseur` y ont le même domaine.
+SOUS_TRAITANCE = ProfileSpec(
+    kinds=(
+        "responsabilite_donneur_ordre",
+        "responsabilite_sous_traitant",
+        "protection_design",
+        "revision_prix",
+        "delai_paiement",
+        "penalites_retard_execution",
+        "obligation_certification",
+        "assurance_sous_traitant",
+        "delai_execution",
+    ),
+    domain_kinds={
+        "juridique": (
+            "responsabilite_donneur_ordre",
+            "responsabilite_sous_traitant",
+            "protection_design",
+        ),
+        "financier": ("revision_prix", "delai_paiement", "penalites_retard_execution"),
+        "conformite": ("obligation_certification", "assurance_sous_traitant"),
+        "operationnel": ("delai_execution",),
+    },
+    value_units={
+        "responsabilite_donneur_ordre": "%",
+        "responsabilite_sous_traitant": "%",
+        "revision_prix": "%",
+        "delai_paiement": "jours",
+        "penalites_retard_execution": "%",
+        "assurance_sous_traitant": "€",
+    },
+    kind_categories={
+        "protection_design": DESIGN_PROTECTIONS,
+        "obligation_certification": CERTIFICATION_REQUIREMENTS,
+        "delai_execution": EXECUTION_SCHEDULES,
+        "delai_paiement": PAYMENT_BASES,
+    },
+    parties=Parties(
+        "donneur d'ordre", "du donneur d'ordre", "sous-traitant", "du sous-traitant"
+    ),
+)
 
 
 SPECS: Mapping[Profile, ProfileSpec] = MappingProxyType(
@@ -87,7 +152,11 @@ SPECS: Mapping[Profile, ProfileSpec] = MappingProxyType(
                 "transfert_hors_ue": TRANSFER_CATEGORIES,
                 "delai_paiement": PAYMENT_BASES,
             },
+            parties=Parties(
+                "acheteur", "de l'acheteur", "fournisseur", "du fournisseur"
+            ),
         ),
+        "sous_traitance": SOUS_TRAITANCE,
     }
 )
 

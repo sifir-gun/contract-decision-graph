@@ -8,17 +8,24 @@ ces tests figent l'existant (ADR 010).
 import ast
 import dataclasses
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
+from cdg.application import crag, explanation, extraction
 from cdg.domain import profiles
 from cdg.domain.models import (
+    CERTIFICATION_REQUIREMENTS,
+    DESIGN_PROTECTIONS,
     DOMAINS,
+    EXECUTION_SCHEDULES,
     PAYMENT_BASES,
     TRANSFER_CATEGORIES,
     Clause,
+    SubcontractCategory,
     category_required,
 )
+from cdg.domain.rules import RULES
 
 SRC = Path(__file__).resolve().parent.parent / "src"
 FOURNISSEUR_KINDS = (
@@ -33,12 +40,41 @@ FOURNISSEUR_KINDS = (
     "accord_traitement_donnees",
     "transfert_hors_ue",
 )
+SOUS_TRAITANCE_KINDS = (
+    "responsabilite_donneur_ordre",
+    "responsabilite_sous_traitant",
+    "protection_design",
+    "revision_prix",
+    "delai_paiement",
+    "penalites_retard_execution",
+    "obligation_certification",
+    "assurance_sous_traitant",
+    "delai_execution",
+)
 
 
 def test_profils_connus():
-    assert profiles.PROFILES == ("fournisseur",)
+    assert profiles.PROFILES == ("fournisseur", "sous_traitance")
     assert profiles.LEGACY_PROFILE == "fournisseur"
     assert set(profiles.SPECS) == set(profiles.PROFILES)
+    # enregistré tel que construit : la configuration valide ses termes contre lui
+    assert profiles.SPECS["sous_traitance"] is profiles.SOUS_TRAITANCE
+    assert profiles.spec("sous_traitance") is profiles.SOUS_TRAITANCE
+
+
+def test_aucun_profil_sans_regles_tables_schema_prompts():
+    """Chaque profil enregistré a ses règles, son schéma et ses prompts d'extraction et
+    d'explication, et ses tables du CRAG ; aucune table ne porte un profil inconnu."""
+    assert (
+        set(RULES)
+        == set(extraction.SCHEMAS)
+        == set(extraction.PROMPT_FILES)
+        == set(explanation.PROMPT_FILES)
+        == set(crag.DOMAIN_LABELS)
+        == set(crag._SUBJECTS)
+        == set(crag._CATEGORY_LABELS)
+        == set(profiles.PROFILES)
+    )
 
 
 def test_profil_fournisseur_reprend_l_existant():
@@ -104,17 +140,29 @@ def test_profil_immuable():
 
 
 def test_tous_les_types_et_leur_domaine():
-    assert profiles.ALL_KINDS == frozenset(FOURNISSEUR_KINDS)
+    # union des types des deux profils ; un type commun garde son domaine unique
+    assert profiles.ALL_KINDS == frozenset(FOURNISSEUR_KINDS + SOUS_TRAITANCE_KINDS)
     assert dict(profiles.KIND_DOMAIN) == {
         kind: domain
-        for domain, kinds in profiles.spec("fournisseur").domain_kinds.items()
+        for profile in profiles.PROFILES
+        for domain, kinds in profiles.spec(profile).domain_kinds.items()
         for kind in kinds
     }
+    fournisseur, sous_traitance = (profiles.spec(p) for p in profiles.PROFILES)
     for domain in DOMAINS:
-        assert (
-            profiles.kinds_of_domain(domain)
-            == profiles.spec("fournisseur").domain_kinds[domain]
+        # dans l'ordre de déclaration : le fournisseur, puis les types propres à l'autre
+        expected = fournisseur.domain_kinds[domain] + tuple(
+            k
+            for k in sous_traitance.domain_kinds[domain]
+            if k not in fournisseur.domain_kinds[domain]
         )
+        assert profiles.kinds_of_domain(domain) == expected
+    assert profiles.kinds_of_domain("financier") == (
+        "revision_prix",
+        "penalites_execution",
+        "delai_paiement",
+        "penalites_retard_execution",
+    )
 
 
 def _spec(domain_kinds, *, units=None, categories=None):
@@ -123,6 +171,7 @@ def _spec(domain_kinds, *, units=None, categories=None):
         domain_kinds=domain_kinds,
         value_units=units or {},
         kind_categories=categories or {},
+        parties=profiles.Parties("a", "de a", "b", "de b"),
     )
 
 
@@ -160,27 +209,33 @@ def test_types_d_un_domaine_union_des_profils_dans_l_ordre_de_declaration(monkey
 
 
 @pytest.mark.parametrize(
-    "value", ["sous_traitance", "Fournisseur", " fournisseur", "", None, 3, ["x"]]
+    "value",
+    ["inexistant", "Fournisseur", " fournisseur", "Sous_traitance", "", None, 3, ["x"]],
 )
 def test_profil_inconnu_refuse(value):
     with pytest.raises(ValueError, match="profil inconnu") as error:
         profiles.parse(value)
-    assert "profils : fournisseur" in str(error.value)
+    assert "profils : fournisseur, sous_traitance" in str(error.value)
 
 
-def test_profil_connu_accepte():
-    assert profiles.parse("fournisseur") == "fournisseur"
+@pytest.mark.parametrize("profile", ["fournisseur", "sous_traitance"])
+def test_profil_connu_accepte(profile):
+    assert profiles.parse(profile) == profile
 
 
 def test_profil_inconnu_refuse_aussi_par_spec():
     with pytest.raises(ValueError, match="profil inconnu"):
-        profiles.spec("sous_traitance")
+        profiles.spec("inexistant")
 
 
 def test_etat_sans_profil_lu_comme_fournisseur():
     assert profiles.of_state({}) == "fournisseur"
     assert profiles.of_state({"raw_text": "x"}) == "fournisseur"
     assert profiles.of_state({"profile": "fournisseur"}) == "fournisseur"
+
+
+def test_etat_au_profil_sous_traitance_lu_tel_quel():
+    assert profiles.of_state({"profile": "sous_traitance"}) == "sous_traitance"
 
 
 @pytest.mark.parametrize("value", ["autre", "", None])
@@ -199,6 +254,110 @@ def test_la_categorie_est_exigee_selon_les_types_a_categorie():
     assert category_required(delay.model_copy(update={"value": 30.0}), kinds)
     price = Clause(kind="revision_prix", present=True, quote="q", value=3.0)
     assert not category_required(price, kinds)
+
+
+def test_categories_du_profil_sous_traitance():
+    assert DESIGN_PROTECTIONS == (
+        "usage_limite_au_projet",
+        "confidentialite_seule",
+        "reutilisation_autorisee",
+    )
+    assert CERTIFICATION_REQUIREMENTS == (
+        "norme_et_preuves",
+        "norme_sans_preuves",
+        "conformite_generale",
+    )
+    assert EXECUTION_SCHEDULES == ("date_contractuelle", "delai_indicatif")
+    # la catégorie portée par une clause du profil : une des quatre familles, sans doublon
+    admitted = (
+        DESIGN_PROTECTIONS
+        + CERTIFICATION_REQUIREMENTS
+        + EXECUTION_SCHEDULES
+        + PAYMENT_BASES
+    )
+    assert get_args(SubcontractCategory) == admitted
+    assert len(set(admitted)) == len(admitted)
+
+
+def test_profil_sous_traitance_constantes():
+    st = profiles.SOUS_TRAITANCE
+    assert st.kinds == SOUS_TRAITANCE_KINDS
+    assert dict(st.domain_kinds) == {
+        "juridique": (
+            "responsabilite_donneur_ordre",
+            "responsabilite_sous_traitant",
+            "protection_design",
+        ),
+        "financier": ("revision_prix", "delai_paiement", "penalites_retard_execution"),
+        "conformite": ("obligation_certification", "assurance_sous_traitant"),
+        "operationnel": ("delai_execution",),
+    }
+    assert dict(st.value_units) == {
+        "responsabilite_donneur_ordre": "%",
+        "responsabilite_sous_traitant": "%",
+        "revision_prix": "%",
+        "delai_paiement": "jours",
+        "penalites_retard_execution": "%",
+        "assurance_sous_traitant": "€",
+    }
+    assert set(st.kind_categories) == {
+        "protection_design",
+        "obligation_certification",
+        "delai_execution",
+        "delai_paiement",
+    }
+    assert st.kind_categories["protection_design"] == DESIGN_PROTECTIONS
+    assert st.kind_categories["obligation_certification"] == CERTIFICATION_REQUIREMENTS
+    assert st.kind_categories["delai_execution"] == EXECUTION_SCHEDULES
+    assert st.kind_categories["delai_paiement"] == PAYMENT_BASES
+    assert st.parties == profiles.Parties(
+        "donneur d'ordre", "du donneur d'ordre", "sous-traitant", "du sous-traitant"
+    )
+
+
+def test_profil_sous_traitance_partitionne_ses_types():
+    st = profiles.SOUS_TRAITANCE
+    assert set(st.domain_kinds) == set(DOMAINS)
+    in_domains = [k for domain in DOMAINS for k in st.domain_kinds[domain]]
+    assert sorted(in_domains) == sorted(st.kinds)  # partition : ni oubli, ni doublon
+    assert set(st.value_units) <= set(st.kinds)
+    assert set(st.kind_categories) <= set(st.kinds)
+    assert st.category_kinds == frozenset(st.kind_categories)
+
+
+def test_profil_sous_traitance_immuable():
+    st = profiles.SOUS_TRAITANCE
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        st.parties = profiles.spec("fournisseur").parties
+    with pytest.raises(TypeError):
+        st.value_units["delai_paiement"] = "mois"
+    with pytest.raises(TypeError):
+        st.kind_categories["protection_design"] = ()
+
+
+def test_types_communs_dans_le_meme_domaine_pour_les_deux_profils():
+    table = profiles._kind_domain_table(
+        [profiles.SPECS["fournisseur"], profiles.SOUS_TRAITANCE]
+    )
+    assert table["revision_prix"] == table["delai_paiement"] == "financier"
+    assert table["protection_design"] == "juridique"
+    assert table["delai_execution"] == "operationnel"
+
+
+def test_parties_du_fournisseur():
+    parties = profiles.spec("fournisseur").parties
+    assert parties == profiles.Parties(
+        "acheteur", "de l'acheteur", "fournisseur", "du fournisseur"
+    )
+    assert parties.client_of == "de l'acheteur"
+
+
+def test_parties_gelees():
+    parties = profiles.Parties("a", "de a", "b", "de b")
+    assert (parties.client, parties.client_of) == ("a", "de a")
+    assert (parties.contractor, parties.contractor_of) == ("b", "de b")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        parties.client = "autre"
 
 
 # --- Architecture ---------------------------------------------------------------------

@@ -214,6 +214,110 @@ def test_operation_sans_contrat_ni_statut():
     }
 
 
+# --- profil lu dans le statut final (revue, reprise) -----------------------------------------
+
+
+@pytest.mark.parametrize("name", ["revue", "reprise"])
+def test_revue_et_reprise_portent_le_profil(name):
+    """Ces opérations ne connaissent pas le profil à l'ouverture : la trace le lit dans le
+    statut final du moteur (`thread_status`)."""
+    telemetry, exporter, _ = otel()
+    with telemetry.operation(name, contract_id="c-1", actor=CLI) as finish:
+        finish({**DONE, "profil": "sous_traitance"})
+    assert by_name(exporter)[f"cdg.{name}"].attributes["cdg.profil"] == "sous_traitance"
+
+
+def test_expiration_sans_profil():
+    """Une seule trace couvre plusieurs contrats, de profils peut-être différents : elle
+    n'en porte aucun (le service ne lui rend aucun statut ; limite documentée, spec)."""
+    telemetry, exporter, _ = otel()
+    with telemetry.operation("expiration", contract_id=None, actor=CLI):
+        pass
+    assert "cdg.profil" not in by_name(exporter)["cdg.expiration"].attributes
+
+
+def test_expiration_ne_lit_pas_le_profil_d_un_statut(caplog):
+    """Le profil n'est lu dans le statut que pour la revue et la reprise (spec,
+    « Traces ») : le statut d'un contrat rendu à l'expiration, une trace pour plusieurs
+    contrats, ne donne aucun profil à la trace, ni avertissement."""
+    telemetry, exporter, _ = otel()
+    with (
+        caplog.at_level(logging.WARNING, logger="cdg.adapters.otel"),
+        telemetry.operation("expiration", contract_id=None, actor=CLI) as finish,
+    ):
+        finish({**DONE, "profil": "sous_traitance"})
+    root = by_name(exporter)["cdg.expiration"]
+    assert "cdg.profil" not in root.attributes
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize("name", ["revue", "reprise"])
+def test_cle_profil_absente_du_statut_journalisee_sans_attribut(name, caplog):
+    """`thread_status` pose toujours `profil` : une clé absente viole le contrat du
+    moteur. Pas de valeur par défaut ; l'avertissement nomme la clé, la trace n'en porte
+    pas, l'opération n'échoue pas."""
+    telemetry, exporter, _ = otel()
+    with (
+        caplog.at_level(logging.WARNING, logger="cdg.adapters.otel"),
+        telemetry.operation(name, contract_id="c-1", actor=CLI) as finish,
+    ):
+        finish(DONE)
+    root = by_name(exporter)[f"cdg.{name}"]
+    assert "cdg.profil" not in root.attributes
+    assert "error.type" not in root.attributes
+    assert "cdg.profil" in caplog.text and "absent" in caplog.text
+
+
+@pytest.mark.parametrize("name", ["analyse", "relance"])
+def test_statut_sans_profil_pas_de_bruit_quand_le_profil_est_connu(name, caplog):
+    """Analyse et relance posent le profil à l'ouverture : le statut n'est pas lu."""
+    telemetry, exporter, _ = otel()
+    with (
+        caplog.at_level(logging.WARNING, logger="cdg.adapters.otel"),
+        telemetry.operation(
+            name, contract_id="c-1", actor=CLI, profile="sous_traitance"
+        ) as finish,
+    ):
+        finish(DONE)
+    assert by_name(exporter)[f"cdg.{name}"].attributes["cdg.profil"] == "sous_traitance"
+    assert caplog.text == ""
+
+
+def test_profil_connu_a_l_ouverture_garde():
+    telemetry, exporter, _ = otel()
+    analyse(
+        telemetry, profile="fournisseur", status={**DONE, "profil": "sous_traitance"}
+    )
+    assert by_name(exporter)["cdg.analyse"].attributes["cdg.profil"] == "fournisseur"
+
+
+@pytest.mark.parametrize(
+    "unknown",
+    [
+        "sous-traitance",  # forme d'identifiant : seul `_profile_of` le refuse
+        "conclus GO",  # sans forme d'identifiant : la liste blanche le refuserait aussi
+        None,  # clé présente, valeur vide : pas le cas d'une clé absente
+    ],
+)
+@pytest.mark.parametrize("name", ["revue", "reprise"])
+def test_profil_inconnu_du_statut_remplace_et_journalise(name, unknown, caplog):
+    """Jamais posé tel quel, jamais écarté en silence : l'avertissement propre au profil
+    nomme la clé, pas la valeur ; la trace garde `<refusé>` et l'opération n'échoue
+    pas."""
+    telemetry, exporter, _ = otel()
+    with (
+        caplog.at_level(logging.WARNING, logger="cdg.adapters.otel"),
+        telemetry.operation(name, contract_id="c-1", actor=CLI) as finish,
+    ):
+        finish({**DONE, "profil": unknown})
+    root = by_name(exporter)[f"cdg.{name}"]
+    assert root.attributes["cdg.profil"] == attributes.REFUSED
+    assert "error.type" not in root.attributes
+    assert "profil inconnu" in caplog.text and "cdg.profil" in caplog.text
+    if unknown is not None:
+        assert unknown not in dumped(exporter) and unknown not in caplog.text
+
+
 # --- confidentialité --------------------------------------------------------------------------
 
 
