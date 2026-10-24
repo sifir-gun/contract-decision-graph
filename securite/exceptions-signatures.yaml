@@ -10,22 +10,23 @@
 # dates ; 90 jours au plus entre décision et expiration. Une exception expirée fait échouer
 # l'installation du cluster de test : la revoir (nouvelle version, signature publiée).
 exceptions:
-  - image: docker.io/langfuse/langfuse:4.68.0@sha256:b29c245d72ab49b2b109190618829f9d5fbba229b11468d501cfe4f493885bf0
+  - image: docker.io/langfuse/langfuse:4.70.0@sha256:932a46dfab770f89ecb2ec35258b6b80d3be8773403981a64d271ff0a408deef
     portee: tests
     motif: >-
       Langfuse ne publie ni signature cosign ni attestation pour ses images (vérifié sur
       Docker Hub le 02/10 et le 03/10/2026 : aucune étiquette sha256-….sig ni .att ; de
-      même pour la 4.58.0 le 13/10 et pour la 4.68.0 le 22/10, ni attestation GitHub).
-      Figée par empreinte, tirée de Docker Hub.
-    decidee: 2026-10-22
+      même pour la 4.58.0 le 13/10, la 4.68.0 le 22/10 et la 4.70.0 le 24/10, ni
+      attestation GitHub). Figée par empreinte, tirée de Docker Hub.
+    decidee: 2026-10-24
     expire: 2026-12-31
-  - image: docker.io/langfuse/langfuse-worker:4.68.0@sha256:f3afef571845b2365a3b991aab4977a53d75862077e3c9e9e4d1e32949ab15f7
+  - image: docker.io/langfuse/langfuse-worker:4.70.0@sha256:3b3b204fa72fd02d010ab90c667d07281e4b9ec3b5b0b1d21470ac2624b8a564
     portee: tests
     motif: >-
       Langfuse ne publie ni signature cosign ni attestation pour ses images (vérifié sur
-      Docker Hub le 02/10 et le 03/10/2026 ; de même pour la 4.58.0 le 13/10 et pour la
-      4.68.0 le 22/10, ni attestation GitHub). Figée par empreinte, tirée de Docker Hub.
-    decidee: 2026-10-22
+      Docker Hub le 02/10 et le 03/10/2026 ; de même pour la 4.58.0 le 13/10, la 4.68.0
+      le 22/10 et la 4.70.0 le 24/10, ni attestation GitHub). Figée par empreinte, tirée
+      de Docker Hub.
+    decidee: 2026-10-24
     expire: 2026-12-31
   - image: docker.io/clickhouse/clickhouse-server:25.12.11.4-distroless@sha256:c77ffab1910984a1443408a1c21668613b33f5add5f493f7b4b34eb2fcd2154c
     portee: tests

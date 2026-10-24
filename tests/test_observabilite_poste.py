@@ -61,9 +61,9 @@ def test_images_figees_et_communes_au_projet():
     )
     seaweedfs = cluster_script().SEAWEEDFS
     assert images["langfuse-seaweedfs"] == images["langfuse-seau"] == seaweedfs
-    assert images["langfuse-web"].startswith("docker.io/langfuse/langfuse:4.68.0@")
+    assert images["langfuse-web"].startswith("docker.io/langfuse/langfuse:4.70.0@")
     assert images["langfuse-worker"].startswith(
-        "docker.io/langfuse/langfuse-worker:4.68.0@"
+        "docker.io/langfuse/langfuse-worker:4.70.0@"
     )
 
 

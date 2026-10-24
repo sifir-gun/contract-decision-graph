@@ -91,12 +91,12 @@ TRACES_URL = (
 )
 LANGFUSE_IMAGES = {
     "LANGFUSE_WEB": (
-        "docker.io/langfuse/langfuse:4.68.0"
-        "@sha256:b29c245d72ab49b2b109190618829f9d5fbba229b11468d501cfe4f493885bf0"
+        "docker.io/langfuse/langfuse:4.70.0"
+        "@sha256:932a46dfab770f89ecb2ec35258b6b80d3be8773403981a64d271ff0a408deef"
     ),
     "LANGFUSE_WORKER": (
-        "docker.io/langfuse/langfuse-worker:4.68.0"
-        "@sha256:f3afef571845b2365a3b991aab4977a53d75862077e3c9e9e4d1e32949ab15f7"
+        "docker.io/langfuse/langfuse-worker:4.70.0"
+        "@sha256:3b3b204fa72fd02d010ab90c667d07281e4b9ec3b5b0b1d21470ac2624b8a564"
     ),
     "CLICKHOUSE": (
         "docker.io/clickhouse/clickhouse-server:25.12.11.4-distroless"
