@@ -19,7 +19,7 @@ import yaml
 from test_cluster_outillage import cluster
 
 SECRET = re.compile(r"(PASSWORD|SECRET|SALT|ENCRYPTION_KEY|REDIS_AUTH|ACCESS_KEY)")
-TODAY = date(2026, 10, 22)
+TODAY = date(2026, 10, 24)
 
 
 def docs() -> list[dict]:

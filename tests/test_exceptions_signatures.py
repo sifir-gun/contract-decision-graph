@@ -15,7 +15,7 @@ from test_chaine_approvisionnement import chaine
 from test_cluster_outillage import cluster
 
 ROOT = Path(__file__).resolve().parents[1]
-TODAY = date(2026, 10, 22)
+TODAY = date(2026, 10, 24)
 LANGFUSE_IMAGES = {"langfuse-web", "langfuse-worker", "langfuse-clickhouse"}
 
 
