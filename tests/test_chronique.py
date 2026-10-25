@@ -549,6 +549,18 @@ def attendre(condition, delai: float = 10):
     raise AssertionError("délai dépassé")
 
 
+# sources des suivis de kubectl (pods, événements, tranche) : à la sortie du `with`, un
+# suivi encore muet est arrêté et dit « aucun objet reçu ». Un test n'en sort qu'après un
+# objet de chacun de ceux dont dépend son verdict : sous la charge, un kubectl factice
+# peut émettre après le signal attendu (16/10 : 2 échecs sur 100). Un relevé de nœud en
+# cours, lui, est mené à son terme par la chronique avant son bilan.
+SUIVIS = {"pod", "evenement", "tranche"}
+
+
+def sources(suivi) -> set[str]:
+    return {e.source for e in suivi.evenements}
+
+
 def test_chronique_releve_pods_evenements_tranche_refus_et_ensembles(tmp_path):
     from chronique import Chronique
 
@@ -588,7 +600,7 @@ def test_chronique_suit_les_journaux_des_pods_choisis_une_fois_prets(tmp_path):
     with Chronique(
         kubectl, "cdg", "sante", docker=docker, intervalle=0.1, journaux=("web",)
     ) as suivi:
-        attendre(lambda: suivi.journaux.get("web-a"))
+        attendre(lambda: suivi.journaux.get("web-a") and SUIVIS <= sources(suivi))
     assert suivi.journaux["web-a"] == [
         '2026-10-04T22:39:31.004061371Z {"msg": "quitting gracefully"}'
     ]
@@ -613,7 +625,7 @@ def test_chronique_dit_quand_un_noeud_ne_peut_etre_releve(tmp_path):
     )
     kubectl, docker = factices(tmp_path, failing)
     with Chronique(kubectl, "cdg", "sante", docker=docker, intervalle=0.1) as suivi:
-        attendre(lambda: suivi.erreurs)
+        attendre(lambda: suivi.erreurs and SUIVIS <= sources(suivi))
     assert "noeud-1 : No such container: noeud-1" in suivi.erreurs
     assert "noeud-1 : aucun relevé" in suivi.erreurs
     # chronique inutilisable : le scénario le dit
@@ -630,7 +642,7 @@ def test_un_releve_manque_n_est_pas_une_lacune(tmp_path):
     )
     kubectl, docker = factices(tmp_path, flaky)
     with Chronique(kubectl, "cdg", "sante", docker=docker, intervalle=0.1) as suivi:
-        attendre(lambda: any(e.source == "refus" for e in suivi.evenements))
+        attendre(lambda: SUIVIS | {"refus"} <= sources(suivi))
     assert suivi.erreurs == ["noeud-1 : code 3"]
     assert suivi.lacunes() == []
 
@@ -659,7 +671,12 @@ def test_objet_inattendu_dans_un_flux_note_et_suivi_poursuivi(tmp_path):
     kubectl, docker = factices(tmp_path, DOCKER)
     (tmp_path / "kubectl.py").write_text(broken, encoding="utf-8")
     with Chronique(kubectl, "cdg", "sante", docker=docker, intervalle=0.1) as suivi:
-        attendre(lambda: any(e.texte == "prêt" for e in suivi.evenements))
+        attendre(
+            lambda: (
+                any(e.texte == "prêt" for e in suivi.evenements)
+                and SUIVIS <= sources(suivi)
+            )
+        )
     assert "suivi des pods : objet illisible (KeyError)" in suivi.erreurs
     assert suivi.lacunes() == []
 
@@ -687,7 +704,8 @@ def test_suivi_sans_aucun_objet_est_une_lacune(tmp_path):
     kubectl, docker = factices(tmp_path, DOCKER)
     (tmp_path / "kubectl.py").write_text(silent, encoding="utf-8")
     with Chronique(kubectl, "cdg", "sante", docker=docker, intervalle=0.1) as suivi:
-        attendre(lambda: any(e.source == "tranche" for e in suivi.evenements))
+        # le suivi des événements, muet par construction, n'est pas attendu
+        attendre(lambda: SUIVIS - {"evenement"} <= sources(suivi))
     assert suivi.lacunes() == ["suivi des événements : aucun objet reçu"]
 
 
