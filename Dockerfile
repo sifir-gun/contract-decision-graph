@@ -54,7 +54,7 @@ COPY src /app/src
 # bytecode du projet, validé par empreinte du source et non par date de modification
 RUN /app/.venv/bin/python -m compileall -q --invalidation-mode checked-hash /app/src
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:3ee00291cf386ec52a552e6a858d555debd74776eb4bfa53fa3df2cd6677515e
 
 # la source relie le paquet ghcr.io au dépôt ; la provenance attestée relie l'image publiée
 # à son commit
