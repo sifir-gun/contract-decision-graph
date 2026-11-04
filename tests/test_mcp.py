@@ -13,14 +13,14 @@ MCP en mémoire (JSON-RPC, poignée de main `initialize`).
 
 import ast
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import anyio
 import pytest
 from demo_set import load as load_expected
-from doubles import CONTRACT_TEXT, FIXED_NOW
+from doubles import CONTRACT_TEXT
 from mcp_helpers import (
     MCP_ACTOR,
     call,
@@ -355,8 +355,11 @@ def test_ni_decision_ni_expiration_par_le_canal_mcp_meme_hors_outils(real):
         service.expire(timedelta(0), MCP_ACTOR)
     assert service.contracts(pending_only=True)[0]["thread_id"] == "c-mcp"
     assert service.journal() == []
-    # second contrôle, dans le graphe : la réponse est refusée et redemandée
-    later = FIXED_NOW + timedelta(days=30)
+    # second contrôle, dans le graphe : la réponse est refusée et redemandée. La date de
+    # l'attente est celle du checkpoint, à l'heure réelle : « plus tard » part de
+    # l'heure réelle, jamais de FIXED_NOW (26/09), qui a cessé d'être postérieure à
+    # l'attente le 26/10 et faisait échouer ce test depuis
+    later = datetime.now(UTC) + timedelta(days=30)
     [expired] = service.engine.expire(timedelta(0), later, MCP_ACTOR)
     resumed = service.engine.resume("c-mcp", answer(MCP_ACTOR))
     for status in (expired, resumed):
