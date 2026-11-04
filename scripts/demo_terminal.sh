@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Enregistrement du terminal du README (docs/images/demo-terminal.gif) : une analyse réelle
-# du contrat 06 du jeu de démonstration, du lancement au verdict scellé, puis la
+# du contrat de sous-traitance st-03 du jeu de démonstration, sous son profil, du lancement
+# au verdict scellé, puis la
 # vérification de la chaîne du journal d'audit. Chaque commande est affichée, puis lancée
 # telle quelle.
 #
@@ -16,7 +17,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CONTRACT=data/contracts/demo-06-no-go-conseil.txt
+CONTRACT=data/contracts/st-03-no-go-ferronnerie.txt
 ID_OPTION=${CONTRACT_ID:+ --contract-id $CONTRACT_ID}
 
 show() {
@@ -26,11 +27,11 @@ show() {
 }
 
 clear
-show "sed -n '/Article 5/,/Article 8/p' $CONTRACT"
+show "sed -n '/Article 4/,/Article 6/p' $CONTRACT"
 TIMEFORMAT=$'\033[2m(durée réelle : %1R s)\033[0m'
 show "time uv run python -m cdg.cli run $CONTRACT$ID_OPTION --operateur demo-terminal \\
-    --profil fournisseur --party 'Lambda Conseil Synthétique' \\
-    --party 'Mu Énergie Synthétique' \\
+    --profil sous_traitance --party 'Pollux Yachting Synthétique' \\
+    --party 'Castor Ferronnerie Synthétique' \\
     | jq -f scripts/demo_terminal.jq"
 show "uv run python -m cdg.cli verify"
 sleep 1
